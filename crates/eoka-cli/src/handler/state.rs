@@ -6,6 +6,12 @@ use eoka_server::{InteractiveElement, ObserveConfig};
 use super::profile::clone_profile_dir;
 use super::proxy_forward::ProxyForwarder;
 
+fn tracked_tab_page(tabs: &HashMap<String, TabState>, tab_id: &str) -> eoka::Result<Page> {
+    tabs.get(tab_id)
+        .map(|tab| tab.page.clone())
+        .ok_or_else(|| eoka::Error::cdp_msg(format!("Tab {tab_id} not found")))
+}
+
 pub struct TabState {
     pub page: Page,
     pub elements: Vec<InteractiveElement>,
@@ -217,10 +223,11 @@ impl BrowserState {
     }
 
     pub async fn close_tab(&mut self, tab_id: &str) -> eoka::Result<()> {
+        let page = tracked_tab_page(&self.tabs, tab_id)?;
         if self.tabs.len() <= 1 {
             return Err(eoka::Error::cdp_msg("Cannot close the last tab"));
         }
-        let release_result = self.tabs[tab_id].page.release_all_inputs().await;
+        let release_result = page.release_all_inputs().await;
         self.browser.close_tab(tab_id).await?;
         self.tabs.remove(tab_id);
         release_result?;
@@ -247,6 +254,22 @@ impl BrowserState {
         match release_error {
             Some(error) => Err(error),
             None => Ok(()),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn close_tab_rejects_unknown_untracked_tab_without_indexing() {
+        let tabs = HashMap::new();
+        let result = tracked_tab_page(&tabs, "unknown-tab");
+
+        match result {
+            Ok(_) => panic!("unknown tab was accepted"),
+            Err(error) => assert!(error.to_string().contains("Tab unknown-tab not found")),
         }
     }
 }
