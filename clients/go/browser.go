@@ -245,7 +245,16 @@ func (b *Browser) Tabs(ctx context.Context) ([]TabInfo, error) {
 }
 
 func (b *Browser) CloseTab(ctx context.Context, pageID string) error {
-	return b.t.call(ctx, "browser.close_tab", map[string]any{"pageId": pageID}, nil)
+	var result struct {
+		CleanupError string `json:"cleanupError"`
+	}
+	if err := b.t.call(ctx, "browser.close_tab", map[string]any{"pageId": pageID}, &result); err != nil {
+		return err
+	}
+	if result.CleanupError != "" {
+		return fmt.Errorf("eoka: browser closed tab but input cleanup failed: %s", result.CleanupError)
+	}
+	return nil
 }
 
 func (b *Browser) Close(ctx context.Context) error {
