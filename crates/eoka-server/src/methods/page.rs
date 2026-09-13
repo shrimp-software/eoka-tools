@@ -551,7 +551,9 @@ async fn captcha_injection_result(page: &eoka::Page, script: &str) -> Result<Val
 
 pub async fn close(state: &mut AppState, params: Value) -> Result<Value, ServerError> {
     let params: PageIdParams = parse_params(params)?;
-    close_tab_impl(state, &params.page_id).await?;
+    if let Some(error) = close_tab_impl(state, &params.page_id).await? {
+        return Err(error.into());
+    }
     Ok(json!({}))
 }
 

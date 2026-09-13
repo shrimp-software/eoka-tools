@@ -12,6 +12,21 @@ fn tracked_tab_page(tabs: &HashMap<String, TabState>, tab_id: &str) -> eoka::Res
         .ok_or_else(|| eoka::Error::cdp_msg(format!("Tab {tab_id} not found")))
 }
 
+fn reconcile_closed_tab<T>(
+    tabs: &mut HashMap<String, T>,
+    current_tab_id: &mut Option<String>,
+    tab_id: &str,
+) -> Option<String> {
+    tabs.remove(tab_id);
+    if current_tab_id.as_deref() == Some(tab_id) {
+        let next_tab_id = tabs.keys().next().cloned();
+        *current_tab_id = next_tab_id.clone();
+        next_tab_id
+    } else {
+        None
+    }
+}
+
 pub struct TabState {
     pub page: Page,
     pub elements: Vec<InteractiveElement>,
@@ -229,17 +244,12 @@ impl BrowserState {
         }
         let release_result = page.release_all_inputs().await;
         self.browser.close_tab(tab_id).await?;
-        self.tabs.remove(tab_id);
-        release_result?;
-        if self.current_tab_id.as_deref() == Some(tab_id) {
-            if let Some(new_id) = self.tabs.keys().next().cloned() {
-                self.browser.activate_tab(&new_id).await?;
-                self.current_tab_id = Some(new_id);
-            } else {
-                self.current_tab_id = None;
-            }
+        if let Some(next_tab_id) =
+            reconcile_closed_tab(&mut self.tabs, &mut self.current_tab_id, tab_id)
+        {
+            self.browser.activate_tab(&next_tab_id).await?;
         }
-        Ok(())
+        release_result
     }
 
     pub async fn close(self) -> eoka::Result<()> {
@@ -271,5 +281,19 @@ mod tests {
             Ok(_) => panic!("unknown tab was accepted"),
             Err(error) => assert!(error.to_string().contains("Tab unknown-tab not found")),
         }
+    }
+
+    #[test]
+    fn close_tab_reconciles_state_before_returning_cleanup_error() {
+        let mut tabs = HashMap::from([("closed".to_string(), ()), ("next".to_string(), ())]);
+        let mut current_tab_id = Some("closed".to_string());
+        let cleanup_result: Result<(), &str> = Err("release failed");
+
+        let next_tab_id = reconcile_closed_tab(&mut tabs, &mut current_tab_id, "closed");
+
+        assert_eq!(next_tab_id.as_deref(), Some("next"));
+        assert_eq!(current_tab_id.as_deref(), Some("next"));
+        assert!(!tabs.contains_key("closed"));
+        assert!(matches!(cleanup_result, Err("release failed")));
     }
 }

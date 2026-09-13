@@ -92,7 +92,7 @@ field. Element handles never cross the wire — everything is
 | `browser.launch` | `{"headless": bool, "userAgent"?: string, "proxy"?: {"server": "socks5://host:port", "username"?: string, "password"?: string}}` | `{}` |
 | `browser.new_page` | `{"url": string \| null}` (navigates if given, else `about:blank`) | `{"pageId": string}` |
 | `browser.tabs` | `{}` | `{"tabs": [{"id": string, "title": string, "url": string}]}` |
-| `browser.close_tab` | `{"pageId": string}` | `{}` |
+| `browser.close_tab` | `{"pageId": string}` | `{}` or `{"cleanupError": string}` when the browser closed the tab but input release failed |
 | `browser.close` | `{}` | `{}` — server exits after responding |
 
 ### page.*

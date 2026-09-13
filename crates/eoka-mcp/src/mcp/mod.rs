@@ -5,13 +5,16 @@ mod types;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use rmcp::{
-    handler::server::wrapper::Parameters, model::*, tool, tool_handler, tool_router, ServerHandler,
+    handler::server::{router::tool::ToolRouter, wrapper::Parameters},
+    model::*,
+    tool, tool_handler, tool_router, ServerHandler,
 };
 use serde_json::Value;
 use std::fmt::Write;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+use eoka_protocol::{input_schema_for_cmd, operation_by_cmd};
 use eoka_server::{annotate, captcha, observe, snapshot, spa, InteractiveElement};
 
 use error::{internal, invalid, is_transport_error_msg, AgentError};
@@ -23,10 +26,51 @@ use helpers::{
 use state::BrowserState;
 use types::*;
 
+const MCP_PROTOCOL_TOOL_ROUTES: &[(&str, &str)] = &[
+    ("snapshot", "snapshot"),
+    ("observe", "observe"),
+    ("click", "click"),
+    ("fill", "fill"),
+    ("select", "select"),
+    ("hover", "hover"),
+    ("type_key", "key"),
+    ("mouse_down", "mouse_down"),
+    ("mouse_move", "mouse_move"),
+    ("mouse_up", "mouse_up"),
+    ("key_down", "key_down"),
+    ("key_up", "key_up"),
+    ("release_all_inputs", "release_all_inputs"),
+    ("scroll", "scroll"),
+    ("find_text", "find"),
+    ("new_tab", "tab_new"),
+    ("switch_tab", "tab_switch"),
+    ("close_tab", "tab_close"),
+    ("spa_navigate", "spa_navigate"),
+    ("save_state", "save_state"),
+];
+
+fn apply_protocol_tool_metadata(router: &mut ToolRouter<EokaServer>) {
+    for (route_name, command) in MCP_PROTOCOL_TOOL_ROUTES {
+        let operation = operation_by_cmd(command).expect("MCP route must use a cataloged command");
+        let route = router
+            .map
+            .get_mut(*route_name)
+            .expect("MCP protocol route must be registered");
+        route.attr.description = Some(operation.description.into());
+        route.attr.input_schema = rmcp::model::object(input_schema_for_cmd(operation.cmd)).into();
+        route.attr.annotations = Some(
+            ToolAnnotations::new()
+                .read_only(operation.read_only)
+                .destructive(operation.destructive),
+        );
+    }
+}
+
 #[derive(Clone)]
 pub struct EokaServer {
     state: Arc<Mutex<Option<BrowserState>>>,
     headless: bool,
+    tool_router: ToolRouter<EokaServer>,
 }
 
 impl EokaServer {
@@ -91,9 +135,12 @@ impl EokaServer {
             .map(|v| v != "false" && v != "0")
             .unwrap_or(true);
 
+        let mut tool_router = Self::tool_router();
+        apply_protocol_tool_metadata(&mut tool_router);
         Self {
             state: Arc::new(Mutex::new(None)),
             headless,
+            tool_router,
         }
     }
 
@@ -325,11 +372,7 @@ impl EokaServer {
         ]))
     }
 
-    #[tool(
-        description = "Get accessibility tree snapshot with refs. Returns structured tree with @e1, @e2... refs you can use as targets in click/fill/etc. \
-        Shows hierarchy, ARIA roles, states (disabled, checked, expanded). Refs are stable until next navigation. \
-        Use instead of observe when you need page structure/hierarchy."
-    )]
+    #[tool]
     async fn snapshot(
         &self,
         req: Parameters<SnapshotRequest>,
@@ -343,7 +386,7 @@ impl EokaServer {
             .current_tab_mut()
             .ok_or_else(|| ErrorData::from(AgentError::NoTab))?;
 
-        let include_all = req.0.include_all.unwrap_or(false);
+        let include_all = req.0.all;
         let result = snapshot::snapshot(&tab.page, include_all)
             .await
             .map_err(internal)?;
@@ -479,9 +522,7 @@ impl EokaServer {
         text_ok(format!("Pressed {}", req.0.key))
     }
 
-    #[tool(
-        description = "Press and hold a mouse button at viewport coordinates. Use mouse_move while it is held, then mouse_up or release_all_inputs."
-    )]
+    #[tool]
     async fn mouse_down(
         &self,
         req: Parameters<MouseButtonRequest>,
@@ -501,7 +542,7 @@ impl EokaServer {
         text_ok("Mouse button held".to_string())
     }
 
-    #[tool(description = "Move the mouse to viewport coordinates while preserving held buttons.")]
+    #[tool]
     async fn mouse_move(
         &self,
         req: Parameters<MouseMoveRequest>,
@@ -521,7 +562,7 @@ impl EokaServer {
         text_ok("Mouse moved".to_string())
     }
 
-    #[tool(description = "Release a held mouse button at viewport coordinates.")]
+    #[tool]
     async fn mouse_up(
         &self,
         req: Parameters<MouseButtonRequest>,
@@ -541,9 +582,7 @@ impl EokaServer {
         text_ok("Mouse button released".to_string())
     }
 
-    #[tool(
-        description = "Press and hold a keyboard key. Use key_up or release_all_inputs to release it."
-    )]
+    #[tool]
     async fn key_down(&self, req: Parameters<TypeKeyRequest>) -> Result<CallToolResult, ErrorData> {
         self.ensure_browser().await?;
         let guard = self.state.lock().await;
@@ -557,7 +596,7 @@ impl EokaServer {
         text_ok(format!("Held {}", req.0.key))
     }
 
-    #[tool(description = "Release a keyboard key previously held with key_down.")]
+    #[tool]
     async fn key_up(&self, req: Parameters<TypeKeyRequest>) -> Result<CallToolResult, ErrorData> {
         self.ensure_browser().await?;
         let guard = self.state.lock().await;
@@ -571,7 +610,7 @@ impl EokaServer {
         text_ok(format!("Released {}", req.0.key))
     }
 
-    #[tool(description = "Release every mouse button and key held on the current tab.")]
+    #[tool]
     async fn release_all_inputs(&self) -> Result<CallToolResult, ErrorData> {
         let guard = self.state.lock().await;
         let state = guard
@@ -1748,7 +1787,7 @@ impl EokaServer {
     }
 }
 
-#[tool_handler]
+#[tool_handler(router = self.tool_router)]
 impl ServerHandler for EokaServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
@@ -1813,4 +1852,27 @@ pub async fn run_server() -> anyhow::Result<()> {
     eprintln!("[eoka-mcp] MCP connection closed, cleaning up.");
     cleanup_browser(&state_handle).await;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mcp_protocol_descriptors_match_catalog() {
+        let server = EokaServer::new();
+
+        for (route_name, command) in MCP_PROTOCOL_TOOL_ROUTES {
+            let operation = operation_by_cmd(command).unwrap();
+            let route = server.tool_router.get(route_name).unwrap();
+            assert_eq!(route.description.as_deref(), Some(operation.description));
+            assert_eq!(
+                serde_json::to_value(&*route.input_schema).unwrap(),
+                input_schema_for_cmd(operation.cmd)
+            );
+            let annotations = route.annotations.as_ref().unwrap();
+            assert_eq!(annotations.read_only_hint, Some(operation.read_only));
+            assert_eq!(annotations.destructive_hint, Some(operation.destructive));
+        }
+    }
 }

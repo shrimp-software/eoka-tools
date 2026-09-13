@@ -23,6 +23,7 @@ run = [
   "cargo test -p eoka-tack default_descriptors_match_protocol_manifest_projection",
   "cargo test -p eoka-mcp shared_mcp_protocol_operations_are_cataloged",
   "cargo test -p eoka-mcp shared_mcp_protocol_request_schemas_match_catalog",
+  "cargo test -p eoka-mcp mcp_protocol_descriptors_match_catalog",
   "! cargo tree -p eoka-cli -e normal --depth 1 | grep -q 'eoka-mcp'",
   "cargo test -p eoka-cli tools_manifest_matches_protocol_catalog",
   "cargo test -p eoka-cli tack_executes_without_browser_tools",

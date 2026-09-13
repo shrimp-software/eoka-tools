@@ -33,6 +33,13 @@ fn default_headless() -> bool {
     true
 }
 
+fn close_tab_response(cleanup_error: Option<eoka::Error>) -> Value {
+    match cleanup_error {
+        Some(error) => json!({ "cleanupError": error.to_string() }),
+        None => json!({}),
+    }
+}
+
 pub async fn launch(state: &mut AppState, params: Value) -> Result<Value, ServerError> {
     if state.is_launched() {
         return Err(ServerError::internal("browser already launched"));
@@ -119,6 +126,16 @@ mod tests {
         assert!(error.message.contains("credentials"));
         assert!(!error.message.contains("supersensitive"));
     }
+
+    #[test]
+    fn close_tab_reports_cleanup_error_after_close() {
+        let response = close_tab_response(Some(eoka::Error::cdp_msg("release failed")));
+
+        assert!(response["cleanupError"]
+            .as_str()
+            .unwrap()
+            .contains("release failed"));
+    }
 }
 
 #[derive(Deserialize)]
@@ -149,19 +166,21 @@ pub async fn tabs(state: &AppState, _params: Value) -> Result<Value, ServerError
     Ok(json!({ "tabs": tabs }))
 }
 
-pub(crate) async fn close_tab_impl(state: &mut AppState, page_id: &str) -> Result<(), ServerError> {
+pub(crate) async fn close_tab_impl(
+    state: &mut AppState,
+    page_id: &str,
+) -> Result<Option<eoka::Error>, ServerError> {
     let release_result = state.page(page_id)?.release_all_inputs().await;
     let browser = state.browser()?;
     browser.close_tab(page_id).await?;
     state.remove_page(page_id);
-    release_result?;
-    Ok(())
+    Ok(release_result.err())
 }
 
 pub async fn close_tab(state: &mut AppState, params: Value) -> Result<Value, ServerError> {
     let params: PageIdParams = parse_params(params)?;
-    close_tab_impl(state, &params.page_id).await?;
-    Ok(json!({}))
+    let cleanup_error = close_tab_impl(state, &params.page_id).await?;
+    Ok(close_tab_response(cleanup_error))
 }
 
 pub async fn close(state: &mut AppState, _params: Value) -> Result<Value, ServerError> {

@@ -13,6 +13,7 @@ pub type NewTabRequest = eoka_protocol::TabNewArgs;
 pub type TabIdRequest = eoka_protocol::TabIdArgs;
 pub type SpaNavigateRequest = eoka_protocol::PathStringArgs;
 pub type ObserveRequest = eoka_protocol::ObserveArgs;
+pub type SnapshotRequest = eoka_protocol::SnapshotArgs;
 pub type SaveStateRequest = eoka_protocol::PathArgs;
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -77,14 +78,6 @@ pub struct SetCookieRequest {
 pub struct HistoryGoRequest {
     #[schemars(description = "History delta: -1 for back, 1 for forward, -2 for back twice, etc.")]
     pub delta: i32,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct SnapshotRequest {
-    #[schemars(
-        description = "Include all nodes (generic, presentation, StaticText). Default false for cleaner output."
-    )]
-    pub include_all: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -247,13 +240,14 @@ mod tests {
 
     use super::{
         FillRequest, MouseButtonRequest, MouseMoveRequest, NewTabRequest, ObserveRequest,
-        SaveStateRequest, SelectRequest, SpaNavigateRequest, TabIdRequest, TargetRequest,
-        TypeKeyRequest,
+        SaveStateRequest, SelectRequest, SnapshotRequest, SpaNavigateRequest, TabIdRequest,
+        TargetRequest, TypeKeyRequest,
     };
 
     #[test]
     fn shared_mcp_protocol_operations_are_cataloged() {
         let shared_commands = [
+            "snapshot",
             "click",
             "fill",
             "select",
@@ -323,6 +317,10 @@ mod tests {
         assert_eq!(
             serde_json::to_value(schemars::schema_for!(ObserveRequest)).unwrap(),
             input_schema_for_cmd("observe")
+        );
+        assert_eq!(
+            serde_json::to_value(schemars::schema_for!(SnapshotRequest)).unwrap(),
+            input_schema_for_cmd("snapshot")
         );
         assert_eq!(
             serde_json::to_value(schemars::schema_for!(SaveStateRequest)).unwrap(),
