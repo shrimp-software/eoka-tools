@@ -75,6 +75,27 @@ func TestLaunchParamsRejectIncompleteViewport(t *testing.T) {
 	}
 }
 
+func TestBrowserCloseTabReturnsCleanupErrorAfterClose(t *testing.T) {
+	b := newFakeBrowser(t, func(id int64, method string, params json.RawMessage) (any, *rpcError) {
+		if method != "browser.close_tab" {
+			return nil, &rpcError{Code: ErrCodeUnknownMethod, Message: method}
+		}
+		var p struct {
+			PageID string `json:"pageId"`
+		}
+		_ = json.Unmarshal(params, &p)
+		if p.PageID != "PAGE1" {
+			return nil, &rpcError{Code: ErrCodeInvalidPage, Message: "unknown pageId"}
+		}
+		return map[string]any{"cleanupError": "CDP error: release failed"}, nil
+	})
+
+	err := b.CloseTab(context.Background(), "PAGE1")
+	if err == nil || !strings.Contains(err.Error(), "browser closed tab") || !strings.Contains(err.Error(), "release failed") {
+		t.Fatalf("CloseTab cleanup error = %v", err)
+	}
+}
+
 func TestBrowserNewPageTabsCloseTab(t *testing.T) {
 	var lastNewPageURL any
 	haveURL := false

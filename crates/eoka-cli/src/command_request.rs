@@ -5,11 +5,20 @@ use crate::cli::{CaptchaAction, Command, JsAction, TabAction, WasmAction};
 use crate::protocol::{
     ClearFlagArgs, CloneFromArgs, ConsoleArgs, DeleteCookieArgs, DomainArgs, EmulateArgs,
     FakeCameraArgs, FetchArgs, FillArgs, HeadersArgs, KeyArgs, LoadStateArgs, ModeArgs,
-    ObserveArgs, OpenArgs, PathArgs, PathStringArgs, Request, ScreenshotArgs, ScriptArgs,
-    SelectArgs, SetCookieArgs, SetStorageArgs, SnapshotArgs, StorageArgs, TabIdArgs, TabNewArgs,
-    TargetArgs, TextArgs, WaitArgs, WasmFindArgs, WasmReadArgs, WasmWriteArgs,
+    MouseButton, MouseButtonArgs, MouseMoveArgs, ObserveArgs, OpenArgs, PathArgs, PathStringArgs,
+    Request, ScreenshotArgs, ScriptArgs, SelectArgs, SetCookieArgs, SetStorageArgs, SnapshotArgs,
+    StorageArgs, TabIdArgs, TabNewArgs, TargetArgs, TextArgs, WaitArgs, WasmFindArgs, WasmReadArgs,
+    WasmWriteArgs,
 };
 use network::network_action_to_request;
+
+fn parse_mouse_button(button: &str) -> MouseButton {
+    serde_json::from_value(serde_json::Value::String(button.to_owned())).unwrap_or_else(|error| {
+        eprintln!("Error: invalid mouse button: {error}");
+        std::process::exit(1);
+    })
+}
+
 fn parse_headers_json(raw: &str) -> serde_json::Value {
     match serde_json::from_str::<serde_json::Value>(raw) {
         Ok(v) => v,
@@ -95,6 +104,20 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
             target: target.clone(),
         }),
         Command::Key { key } => Request::Key(KeyArgs { key: key.clone() }),
+        Command::MouseDown { x, y, button } => Request::MouseDown(MouseButtonArgs {
+            x: *x,
+            y: *y,
+            button: parse_mouse_button(button),
+        }),
+        Command::MouseMove { x, y } => Request::MouseMove(MouseMoveArgs { x: *x, y: *y }),
+        Command::MouseUp { x, y, button } => Request::MouseUp(MouseButtonArgs {
+            x: *x,
+            y: *y,
+            button: parse_mouse_button(button),
+        }),
+        Command::KeyDown { key } => Request::KeyDown(KeyArgs { key: key.clone() }),
+        Command::KeyUp { key } => Request::KeyUp(KeyArgs { key: key.clone() }),
+        Command::ReleaseAllInputs => Request::ReleaseAllInputs,
         Command::Scroll { target } => Request::Scroll(TargetArgs {
             target: target.clone(),
         }),
@@ -501,6 +524,12 @@ mod tests {
             &["eoka", "select", "Country", "CA"],
             &["eoka", "hover", "Menu"],
             &["eoka", "key", "Enter"],
+            &["eoka", "mouse-down", "10", "20"],
+            &["eoka", "mouse-move", "10", "20"],
+            &["eoka", "mouse-up", "10", "20", "--button", "right"],
+            &["eoka", "key-down", "Shift"],
+            &["eoka", "key-up", "Shift"],
+            &["eoka", "release-all-inputs"],
             &["eoka", "scroll", "down"],
             &["eoka", "eval", "1 + 1"],
             &["eoka", "exec", "window.clicked = true"],

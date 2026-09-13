@@ -13,6 +13,16 @@ type Page struct {
 	b  *Browser
 }
 
+type MouseButton string
+
+const (
+	MouseButtonLeft    MouseButton = "left"
+	MouseButtonMiddle  MouseButton = "middle"
+	MouseButtonRight   MouseButton = "right"
+	MouseButtonBack    MouseButton = "back"
+	MouseButtonForward MouseButton = "forward"
+)
+
 // CaptchaOptions describes a CAPTCHA challenge to solve in the current browser
 // session. The API key and resulting token remain inside the local Eoka server
 // process; callers receive only injection metadata.
@@ -295,6 +305,30 @@ func (p *Page) Hover(ctx context.Context, selector string) error {
 
 func (p *Page) PressKey(ctx context.Context, key string) error {
 	return p.call(ctx, "page.press_key", map[string]any{"key": key}, nil)
+}
+
+func (p *Page) MouseDown(ctx context.Context, x, y float64, button MouseButton) error {
+	return p.call(ctx, "page.mouse_down", map[string]any{"x": x, "y": y, "button": button}, nil)
+}
+
+func (p *Page) MouseMove(ctx context.Context, x, y float64) error {
+	return p.call(ctx, "page.mouse_move", map[string]any{"x": x, "y": y}, nil)
+}
+
+func (p *Page) MouseUp(ctx context.Context, x, y float64, button MouseButton) error {
+	return p.call(ctx, "page.mouse_up", map[string]any{"x": x, "y": y, "button": button}, nil)
+}
+
+func (p *Page) KeyDown(ctx context.Context, key string) error {
+	return p.call(ctx, "page.key_down", map[string]any{"key": key}, nil)
+}
+
+func (p *Page) KeyUp(ctx context.Context, key string) error {
+	return p.call(ctx, "page.key_up", map[string]any{"key": key}, nil)
+}
+
+func (p *Page) ReleaseAllInputs(ctx context.Context) error {
+	return p.call(ctx, "page.release_all_inputs", nil, nil)
 }
 
 func (p *Page) Close(ctx context.Context) error {

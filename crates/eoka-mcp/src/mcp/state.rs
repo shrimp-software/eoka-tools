@@ -6,6 +6,21 @@ use eoka_server::{dispatch::dispatch, state::AppState};
 use eoka_server::{InteractiveElement, ObserveConfig};
 use serde_json::json;
 
+fn reconcile_closed_tab<T>(
+    tabs: &mut HashMap<String, T>,
+    current_tab_id: &mut Option<String>,
+    tab_id: &str,
+) -> Option<String> {
+    tabs.remove(tab_id);
+    if current_tab_id.as_deref() == Some(tab_id) {
+        let next_tab_id = tabs.keys().next().cloned();
+        *current_tab_id = next_tab_id.clone();
+        next_tab_id
+    } else {
+        None
+    }
+}
+
 pub(crate) struct TabState {
     pub page: Page,
     pub elements: Vec<InteractiveElement>,
@@ -174,22 +189,21 @@ impl BrowserState {
             )));
         }
 
-        dispatch(
+        let close_result = dispatch(
             &mut self.server,
             "browser.close_tab",
             json!({ "pageId": tab_id }),
         )
         .await
         .map_err(|error| eoka_server::eoka::Error::cdp_msg(error.message))?;
-        self.tabs.remove(tab_id);
-
-        if self.current_tab_id.as_deref() == Some(tab_id) {
-            if let Some(new_id) = self.tabs.keys().next().cloned() {
-                self.current_tab_id = Some(new_id.clone());
-                self.browser.activate_tab(&new_id).await?;
-            } else {
-                self.current_tab_id = None;
-            }
+        let cleanup_error = close_result["cleanupError"].as_str().map(str::to_owned);
+        if let Some(next_tab_id) =
+            reconcile_closed_tab(&mut self.tabs, &mut self.current_tab_id, tab_id)
+        {
+            self.browser.activate_tab(&next_tab_id).await?;
+        }
+        if let Some(error) = cleanup_error {
+            return Err(eoka_server::eoka::Error::cdp_msg(error));
         }
         Ok(())
     }
@@ -233,5 +247,24 @@ fn parse_proxy_env() -> eoka_server::eoka::Result<Option<String>> {
         Ok(Some(lines[index].to_owned()))
     } else {
         Ok(std::env::var("EOKA_PROXY").ok())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn close_tab_reconciles_state_before_returning_cleanup_error() {
+        let mut tabs = HashMap::from([("closed".to_string(), ()), ("next".to_string(), ())]);
+        let mut current_tab_id = Some("closed".to_string());
+        let cleanup_result: Result<(), &str> = Err("release failed");
+
+        let next_tab_id = reconcile_closed_tab(&mut tabs, &mut current_tab_id, "closed");
+
+        assert_eq!(next_tab_id.as_deref(), Some("next"));
+        assert_eq!(current_tab_id.as_deref(), Some("next"));
+        assert!(!tabs.contains_key("closed"));
+        assert!(matches!(cleanup_result, Err("release failed")));
     }
 }

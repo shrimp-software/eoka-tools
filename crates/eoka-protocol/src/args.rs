@@ -104,6 +104,34 @@ pub struct KeyArgs {
     pub key: String,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum MouseButton {
+    Left,
+    Middle,
+    Right,
+    Back,
+    Forward,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct MouseButtonArgs {
+    #[schemars(description = "Viewport horizontal coordinate in CSS pixels.")]
+    pub x: f64,
+    #[schemars(description = "Viewport vertical coordinate in CSS pixels.")]
+    pub y: f64,
+    #[schemars(description = "Mouse button to hold or release.")]
+    pub button: MouseButton,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct MouseMoveArgs {
+    #[schemars(description = "Viewport horizontal coordinate in CSS pixels.")]
+    pub x: f64,
+    #[schemars(description = "Viewport vertical coordinate in CSS pixels.")]
+    pub y: f64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
 pub struct ScriptArgs {
     pub code: Option<String>,

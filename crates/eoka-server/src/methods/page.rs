@@ -9,6 +9,16 @@ use super::{parse_params, PageIdParams};
 use crate::protocol::ServerError;
 use crate::state::AppState;
 
+fn core_mouse_button(button: eoka_protocol::MouseButton) -> eoka::MouseButton {
+    match button {
+        eoka_protocol::MouseButton::Left => eoka::MouseButton::Left,
+        eoka_protocol::MouseButton::Middle => eoka::MouseButton::Middle,
+        eoka_protocol::MouseButton::Right => eoka::MouseButton::Right,
+        eoka_protocol::MouseButton::Back => eoka::MouseButton::Back,
+        eoka_protocol::MouseButton::Forward => eoka::MouseButton::Forward,
+    }
+}
+
 fn single(key: &'static str, value: impl Into<Value>) -> Value {
     let mut map = Map::with_capacity(1);
     map.insert(key.to_string(), value.into());
@@ -111,6 +121,30 @@ fn default_fetch_redirect() -> String {
 struct PressKeyParams {
     page_id: String,
     key: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MouseButtonParams {
+    page_id: String,
+    #[serde(flatten)]
+    mouse: eoka_protocol::MouseButtonArgs,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MouseMoveParams {
+    page_id: String,
+    #[serde(flatten)]
+    mouse: eoka_protocol::MouseMoveArgs,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HeldKeyParams {
+    page_id: String,
+    #[serde(flatten)]
+    key: eoka_protocol::KeyArgs,
 }
 
 #[derive(Deserialize)]
@@ -385,6 +419,62 @@ pub async fn press_key(state: &AppState, params: Value) -> Result<Value, ServerE
     Ok(json!({}))
 }
 
+pub async fn mouse_down(state: &AppState, params: Value) -> Result<Value, ServerError> {
+    let params: MouseButtonParams = parse_params(params)?;
+    state
+        .page(&params.page_id)?
+        .mouse_down(
+            params.mouse.x,
+            params.mouse.y,
+            core_mouse_button(params.mouse.button),
+        )
+        .await?;
+    Ok(json!({}))
+}
+
+pub async fn mouse_move(state: &AppState, params: Value) -> Result<Value, ServerError> {
+    let params: MouseMoveParams = parse_params(params)?;
+    state
+        .page(&params.page_id)?
+        .mouse_move(params.mouse.x, params.mouse.y)
+        .await?;
+    Ok(json!({}))
+}
+
+pub async fn mouse_up(state: &AppState, params: Value) -> Result<Value, ServerError> {
+    let params: MouseButtonParams = parse_params(params)?;
+    state
+        .page(&params.page_id)?
+        .mouse_up(
+            params.mouse.x,
+            params.mouse.y,
+            core_mouse_button(params.mouse.button),
+        )
+        .await?;
+    Ok(json!({}))
+}
+
+pub async fn key_down(state: &AppState, params: Value) -> Result<Value, ServerError> {
+    let params: HeldKeyParams = parse_params(params)?;
+    state
+        .page(&params.page_id)?
+        .key_down(&params.key.key)
+        .await?;
+    Ok(json!({}))
+}
+
+pub async fn key_up(state: &AppState, params: Value) -> Result<Value, ServerError> {
+    let params: HeldKeyParams = parse_params(params)?;
+    state.page(&params.page_id)?.key_up(&params.key.key).await?;
+    Ok(json!({}))
+}
+
+pub async fn release_all_inputs(state: &AppState, params: Value) -> Result<Value, ServerError> {
+    let params: PageIdParams = parse_params(params)?;
+    state.page(&params.page_id)?.release_all_inputs().await?;
+    Ok(json!({}))
+}
+
 /// Solve a supported CAPTCHA and apply its token inside the current page.
 ///
 /// The token intentionally never crosses the server protocol boundary. It is
@@ -461,7 +551,9 @@ async fn captcha_injection_result(page: &eoka::Page, script: &str) -> Result<Val
 
 pub async fn close(state: &mut AppState, params: Value) -> Result<Value, ServerError> {
     let params: PageIdParams = parse_params(params)?;
-    close_tab_impl(state, &params.page_id).await?;
+    if let Some(error) = close_tab_impl(state, &params.page_id).await? {
+        return Err(error.into());
+    }
     Ok(json!({}))
 }
 

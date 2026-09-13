@@ -824,6 +824,48 @@ async fn test_session_press_key() {
 
 #[tokio::test]
 #[ignore = "requires Chrome"]
+async fn test_session_held_input_drag_and_overlapping_keys() {
+    if !chrome_available() {
+        return;
+    }
+
+    let mut agent = Session::launch().await.unwrap();
+    agent
+        .goto(
+            r#"data:text/html,<style>body{margin:0}div{width:120px;height:80px}</style><div id=drag></div><script>window.events=[];const drag=document.getElementById('drag');drag.addEventListener('pointerdown',e=>{drag.setPointerCapture(e.pointerId);events.push('down')});drag.addEventListener('pointermove',e=>events.push('move'));drag.addEventListener('pointerup',e=>events.push('up'));document.addEventListener('keydown',e=>events.push(`key-down:${e.key}:${e.ctrlKey}`));document.addEventListener('keyup',e=>events.push(`key-up:${e.key}:${e.ctrlKey}`));</script>"#,
+        )
+        .await
+        .unwrap();
+
+    agent
+        .mouse_down(20.0, 20.0, eoka_server::eoka::MouseButton::Left)
+        .await
+        .unwrap();
+    agent.mouse_move(90.0, 20.0).await.unwrap();
+    agent
+        .mouse_up(90.0, 20.0, eoka_server::eoka::MouseButton::Left)
+        .await
+        .unwrap();
+    agent.key_down("Ctrl").await.unwrap();
+    agent.key_down("A").await.unwrap();
+    agent.key_up("Ctrl").await.unwrap();
+    agent.key_up("A").await.unwrap();
+    agent.release_all_inputs().await.unwrap();
+
+    let events: Vec<String> = agent.eval("window.events").await.unwrap();
+    assert!(events
+        .windows(3)
+        .any(|events| events == ["down", "move", "up"]));
+    assert!(
+        events.contains(&"key-down:a:true".to_string()),
+        "{events:?}"
+    );
+    assert!(events.contains(&"key-up:a:false".to_string()), "{events:?}");
+    agent.close().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires Chrome"]
 async fn test_session_eval_exec() {
     if !chrome_available() {
         return;

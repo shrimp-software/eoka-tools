@@ -1,6 +1,6 @@
 [package]
 name = "eoka-cli"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 license = "MIT"
 description = "Browser automation CLI for AI agents and pentesting"
@@ -12,13 +12,13 @@ name = "eoka"
 path = "src/main.rs"
 
 [dependencies]
-eoka-protocol = { version = "0.2.0", path = "../eoka-protocol" }
+eoka-protocol = { version = "0.2.1", path = "../eoka-protocol" }
 eoka-proxy = { path = "../eoka-proxy", version = "0.2.0" }
-eoka-server = { version = "0.2.0", path = "../eoka-server" }
-eoka-sdk = { version = "0.3.0", path = "../eoka-sdk" }
-eoka-tack = { version = "0.2.0", path = "../eoka-tack" }
+eoka-server = { version = "0.2.1", path = "../eoka-server" }
+eoka-sdk = { version = "0.3.1", path = "../eoka-sdk" }
+eoka-tack = { version = "0.2.2", path = "../eoka-tack" }
 captcha = { package = "eoka-captcha", version = "0.1.1", path = "../captcha" }
-eoka = "0.5.9"
+eoka = "0.5.10"
 tack-core = { workspace = true }
 tack-runtime-quickjs = { workspace = true }
 clap = { workspace = true }

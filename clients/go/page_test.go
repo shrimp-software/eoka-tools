@@ -46,6 +46,12 @@ func TestPageNoResultMethods(t *testing.T) {
 		{"page.select", func() error { return page.Select(ctx, "#opt", "a") }},
 		{"page.hover", func() error { return page.Hover(ctx, "#go") }},
 		{"page.press_key", func() error { return page.PressKey(ctx, "Enter") }},
+		{"page.mouse_down", func() error { return page.MouseDown(ctx, 10, 20, MouseButtonLeft) }},
+		{"page.mouse_move", func() error { return page.MouseMove(ctx, 20, 30) }},
+		{"page.mouse_up", func() error { return page.MouseUp(ctx, 20, 30, MouseButtonLeft) }},
+		{"page.key_down", func() error { return page.KeyDown(ctx, "Shift") }},
+		{"page.key_up", func() error { return page.KeyUp(ctx, "Shift") }},
+		{"page.release_all_inputs", func() error { return page.ReleaseAllInputs(ctx) }},
 		{"page.close", func() error { return page.Close(ctx) }},
 	}
 

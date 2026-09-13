@@ -27,7 +27,7 @@ locates the binary in this order:
 2. The `EOKA_SERVER_BIN` environment variable, if set.
 3. `eoka-server` on `PATH`.
 4. A prebuilt binary downloaded from this repo's GitHub Releases
-   (`eoka-server-v0.1.8`), cached under `os.UserCacheDir()/eoka/` and
+   (`eoka-server-v0.2.1`), cached under `os.UserCacheDir()/eoka/` and
    verified against the release's published sha256 checksums before use.
    Supported platforms: linux/amd64, darwin/amd64, darwin/arm64,
    windows/amd64. Pass `eoka.WithNoAutoDownload()` to disable this and get
@@ -102,7 +102,9 @@ a response failed to decode) come back as plain Go errors, not `*eoka.Error`
 
 Every method takes a `context.Context` first; if it's cancelled or times out
 while a call is in flight, the method returns `ctx.Err()` and the call is
-abandoned (a late response, if one ever arrives, is discarded).
+abandoned (a late response, if one ever arrives, is discarded). `Browser.CloseTab`
+returns an error when held-input cleanup fails after the server has already
+closed the tab; callers should treat the tab as closed in that case.
 
 ## Testing
 
