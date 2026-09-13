@@ -1,6 +1,6 @@
 [package]
 name = "eoka-server"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 license = "MIT"
 description = "Shared browser runtime and sidecar process for eoka browser automation"
@@ -16,7 +16,7 @@ path = "src/main.rs"
 
 [dependencies]
 eoka = "0.5.10"
-eoka-protocol = { path = "../eoka-protocol", version = "0.2.0" }
+eoka-protocol = { path = "../eoka-protocol", version = "0.2.1" }
 eoka-proxy = { path = "../eoka-proxy", version = "0.2.0" }
 tokio = { version = "1", features = ["rt", "macros", "io-std", "io-util", "time"] }
 serde = { version = "1", features = ["derive"] }
