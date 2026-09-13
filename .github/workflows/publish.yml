@@ -1,9 +1,5 @@
 name: Publish
 
-# Auto-publishes any workspace crate whose Cargo.toml version is ahead of
-# crates.io. Runs on every push to main; safe to run repeatedly because
-# already-published versions are skipped.
-
 on:
   push:
     branches: [main]
@@ -22,11 +18,11 @@ jobs:
       actions: write
       contents: write
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           fetch-depth: 0
 
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
 
       - name: Configure git
         run: |
@@ -45,8 +41,7 @@ jobs:
             exit 1
           fi
 
-          # Stable publish order: leaf deps first so dependents resolve.
-          for crate in captcha eoka-proxy eoka-protocol eoka-sdk eoka-runner eoka-email eoka-server eoka-mcp eoka-tack eoka-cli; do
+          for crate in captcha eoka-proxy eoka-protocol eoka-sdk eoka-email eoka-runner eoka-server eoka-mcp eoka-tack eoka-cli; do
             manifest="crates/${crate}/Cargo.toml"
             [ -f "$manifest" ] || continue
 
@@ -62,34 +57,37 @@ jobs:
             api_url="https://crates.io/api/v1/crates/${package_name}/${version}"
             http_status=$(curl -sS -o /dev/null -w "%{http_code}" -A "$UA" "$api_url" || echo 000)
             if [ "$http_status" = "200" ]; then
-              echo "${package_name} ${version} already on crates.io — skip"
-              echo "::endgroup::"
-              continue
-            fi
+              echo "${package_name} ${version} already on crates.io — reconcile release"
+            else
+              echo "Publishing ${package_name} ${version}"
+              cargo publish --manifest-path "$manifest" --token "$CARGO_REGISTRY_TOKEN"
 
-            echo "Publishing ${package_name} ${version}"
-            cargo publish --manifest-path "$manifest" --token "$CARGO_REGISTRY_TOKEN"
-
-            published=false
-            for attempt in $(seq 1 30); do
-              http_status=$(curl -sS -o /dev/null -w "%{http_code}" -A "$UA" "$api_url" || echo 000)
-              if [ "$http_status" = "200" ]; then
-                published=true
-                break
+              published=false
+              for attempt in $(seq 1 30); do
+                http_status=$(curl -sS -o /dev/null -w "%{http_code}" -A "$UA" "$api_url" || echo 000)
+                if [ "$http_status" = "200" ]; then
+                  published=true
+                  break
+                fi
+                sleep 5
+              done
+              if [ "$published" != true ]; then
+                echo "${package_name} ${version} did not become available on crates.io"
+                exit 1
               fi
-              sleep 5
-            done
-            if [ "$published" != true ]; then
-              echo "${package_name} ${version} did not become available on crates.io"
-              exit 1
             fi
 
             if git rev-parse "$tag" >/dev/null 2>&1; then
-              echo "Tag ${tag} already exists — skip tag push"
+              echo "Tag ${tag} already exists — reconcile release"
             else
               git tag -a "$tag" -m "Release ${crate} v${version}"
               git push origin "$tag"
-              if [ "$crate" = "eoka-server" ]; then
+            fi
+
+            if [ "$crate" = "eoka-server" ]; then
+              if GH_TOKEN="${{ github.token }}" gh release view "$tag" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+                echo "Release ${tag} already exists — skip server release dispatch"
+              else
                 GH_TOKEN="${{ github.token }}" gh workflow run release-eoka-server.yml --repo "${{ github.repository }}" --ref "$tag" -f tag="$tag"
               fi
             fi
