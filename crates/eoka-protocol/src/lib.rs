@@ -388,6 +388,71 @@ define_operations! {
         destructive: true,
         input: KeyArgs,
     },
+    MouseDown {
+        path: "mouse.down",
+        cmd: "mouse_down",
+        name: "mouse_down",
+        description: "Press and hold mouse button at viewport coordinates",
+        capability: Interaction,
+        exposure: DefaultAgent,
+        read_only: false,
+        destructive: true,
+        input: MouseButtonArgs,
+    },
+    MouseMove {
+        path: "mouse.move",
+        cmd: "mouse_move",
+        name: "mouse_move",
+        description: "Move mouse to viewport coordinates",
+        capability: Interaction,
+        exposure: DefaultAgent,
+        read_only: false,
+        destructive: false,
+        input: MouseMoveArgs,
+    },
+    MouseUp {
+        path: "mouse.up",
+        cmd: "mouse_up",
+        name: "mouse_up",
+        description: "Release held mouse button at viewport coordinates",
+        capability: Interaction,
+        exposure: DefaultAgent,
+        read_only: false,
+        destructive: true,
+        input: MouseButtonArgs,
+    },
+    KeyDown {
+        path: "key.down",
+        cmd: "key_down",
+        name: "key_down",
+        description: "Press and hold key",
+        capability: Interaction,
+        exposure: DefaultAgent,
+        read_only: false,
+        destructive: true,
+        input: KeyArgs,
+    },
+    KeyUp {
+        path: "key.up",
+        cmd: "key_up",
+        name: "key_up",
+        description: "Release held key",
+        capability: Interaction,
+        exposure: DefaultAgent,
+        read_only: false,
+        destructive: true,
+        input: KeyArgs,
+    },
+    ReleaseAllInputs {
+        path: "release_all_inputs",
+        cmd: "release_all_inputs",
+        name: "release_all_inputs",
+        description: "Release every held mouse button and key",
+        capability: Interaction,
+        exposure: DefaultAgent,
+        read_only: false,
+        destructive: true,
+    },
     Scroll {
         path: "scroll",
         cmd: "scroll",
@@ -1061,6 +1126,9 @@ mod tests {
             .collect();
 
         assert!(paths.contains(&"open"));
+        assert!(paths.contains(&"mouse.down"));
+        assert!(paths.contains(&"key.down"));
+        assert!(paths.contains(&"release_all_inputs"));
         assert!(paths.contains(&"tab.list"));
         assert!(!paths.contains(&"network.log"));
         assert!(!paths.contains(&"close"));
@@ -1107,6 +1175,9 @@ mod tests {
             .collect();
 
         assert!(paths.contains("eoka.open"));
+        assert!(paths.contains("eoka.mouse.down"));
+        assert!(paths.contains("eoka.key.down"));
+        assert!(paths.contains("eoka.release_all_inputs"));
         assert!(paths.contains("eoka.tab.list"));
         assert!(!paths.contains("eoka.network.log"));
         assert!(!paths.contains("eoka.close"));
@@ -1154,7 +1225,11 @@ mod tests {
                 }
                 "fill" => serde_json::json!({"target":"body","text":"value"}),
                 "select" => serde_json::json!({"target":"select","value":"A"}),
-                "key" => serde_json::json!({"key":"Enter"}),
+                "key" | "key_down" | "key_up" => serde_json::json!({"key":"Enter"}),
+                "mouse_down" | "mouse_up" => {
+                    serde_json::json!({"x":10.0,"y":20.0,"button":"left"})
+                }
+                "mouse_move" => serde_json::json!({"x":10.0,"y":20.0}),
                 "eval" | "exec" => serde_json::json!({"code":"return 1"}),
                 "emulate" => serde_json::json!({"width":390,"height":844}),
                 "fetch" => serde_json::json!({"url":"https://example.com"}),

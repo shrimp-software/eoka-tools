@@ -49,6 +49,10 @@ impl AppState {
             .ok_or_else(|| ServerError::invalid_page(id))
     }
 
+    pub fn pages(&self) -> impl Iterator<Item = &Page> {
+        self.pages.values()
+    }
+
     pub fn clear_pages(&mut self) {
         self.pages.clear();
     }

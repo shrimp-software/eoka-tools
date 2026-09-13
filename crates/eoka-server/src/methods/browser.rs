@@ -150,10 +150,11 @@ pub async fn tabs(state: &AppState, _params: Value) -> Result<Value, ServerError
 }
 
 pub(crate) async fn close_tab_impl(state: &mut AppState, page_id: &str) -> Result<(), ServerError> {
-    state.page(page_id)?;
+    let release_result = state.page(page_id)?.release_all_inputs().await;
     let browser = state.browser()?;
     browser.close_tab(page_id).await?;
     state.remove_page(page_id);
+    release_result?;
     Ok(())
 }
 
@@ -167,10 +168,19 @@ pub async fn close(state: &mut AppState, _params: Value) -> Result<Value, Server
     let browser = state
         .take_browser()
         .ok_or_else(|| ServerError::internal("browser not launched"))?;
+    let mut release_error = None;
+    for page in state.pages() {
+        if let Err(error) = page.release_all_inputs().await {
+            release_error.get_or_insert(error);
+        }
+    }
     state.clear_pages();
     let browser = std::sync::Arc::try_unwrap(browser)
         .map_err(|_| ServerError::internal("browser is still in use"))?;
     browser.close().await?;
     state.mark_shutdown();
+    if let Some(error) = release_error {
+        return Err(error.into());
+    }
     Ok(json!({}))
 }

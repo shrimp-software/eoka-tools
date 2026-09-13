@@ -6,7 +6,7 @@ pub use crate::target::{BBox, LivePattern, Resolved, Target};
 use std::collections::HashSet;
 use std::fmt;
 
-use crate::eoka::{BoundingBox, Page, Result};
+use crate::eoka::{BoundingBox, MouseButton, Page, Result};
 
 pub use crate::eoka::{Browser, Error, StealthConfig};
 
@@ -506,6 +506,30 @@ impl Session {
         self.page.human().press_key(key).await
     }
 
+    pub async fn mouse_down(&self, x: f64, y: f64, button: MouseButton) -> Result<()> {
+        self.page.mouse_down(x, y, button).await
+    }
+
+    pub async fn mouse_move(&self, x: f64, y: f64) -> Result<()> {
+        self.page.mouse_move(x, y).await
+    }
+
+    pub async fn mouse_up(&self, x: f64, y: f64, button: MouseButton) -> Result<()> {
+        self.page.mouse_up(x, y, button).await
+    }
+
+    pub async fn key_down(&self, key: &str) -> Result<()> {
+        self.page.key_down(key).await
+    }
+
+    pub async fn key_up(&self, key: &str) -> Result<()> {
+        self.page.key_up(key).await
+    }
+
+    pub async fn release_all_inputs(&self) -> Result<()> {
+        self.page.release_all_inputs().await
+    }
+
     pub async fn eval<T: serde::de::DeserializeOwned>(&self, js: &str) -> Result<T> {
         self.page.evaluate(js).await
     }
@@ -560,7 +584,9 @@ impl Session {
     }
 
     pub async fn close(self) -> Result<()> {
-        self.browser.close().await
+        let release_result = self.page.release_all_inputs().await;
+        self.browser.close().await?;
+        release_result
     }
 }
 

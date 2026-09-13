@@ -7,11 +7,11 @@ use crate::session;
 use eoka_protocol::{
     read_msg, write_msg, CaptchaInjectArgs, ClearFlagArgs, CloneFromArgs, ConsoleArgs,
     DeleteCookieArgs, DomainArgs, EmulateArgs, FakeCameraArgs, FetchArgs, FillArgs, HeadersArgs,
-    IdArgs, InterceptAddArgs, KeyArgs, LoadStateArgs, ModeArgs, NetworkExportArgs, NetworkLogArgs,
-    NetworkRecordStartArgs, NetworkShowArgs, NetworkWaitArgs, ObserveArgs, OpenArgs, PathArgs,
-    PathStringArgs, Request, Response, ScreenshotArgs, ScriptArgs, SelectArgs, SetCookieArgs,
-    SetStorageArgs, SnapshotArgs, StorageArgs, TabIdArgs, TabNewArgs, TargetArgs, TextArgs,
-    WaitArgs, WasmFindArgs, WasmReadArgs, WasmWriteArgs,
+    IdArgs, InterceptAddArgs, KeyArgs, LoadStateArgs, ModeArgs, MouseButtonArgs, MouseMoveArgs,
+    NetworkExportArgs, NetworkLogArgs, NetworkRecordStartArgs, NetworkShowArgs, NetworkWaitArgs,
+    ObserveArgs, OpenArgs, PathArgs, PathStringArgs, Request, Response, ScreenshotArgs, ScriptArgs,
+    SelectArgs, SetCookieArgs, SetStorageArgs, SnapshotArgs, StorageArgs, TabIdArgs, TabNewArgs,
+    TargetArgs, TextArgs, WaitArgs, WasmFindArgs, WasmReadArgs, WasmWriteArgs,
 };
 
 #[derive(Debug, Clone)]
@@ -106,6 +106,30 @@ impl EokaClient {
 
     pub async fn key(&self, args: KeyArgs) -> anyhow::Result<Response> {
         self.call(Request::Key(args)).await
+    }
+
+    pub async fn mouse_down(&self, args: MouseButtonArgs) -> anyhow::Result<Response> {
+        self.call(Request::MouseDown(args)).await
+    }
+
+    pub async fn mouse_move(&self, args: MouseMoveArgs) -> anyhow::Result<Response> {
+        self.call(Request::MouseMove(args)).await
+    }
+
+    pub async fn mouse_up(&self, args: MouseButtonArgs) -> anyhow::Result<Response> {
+        self.call(Request::MouseUp(args)).await
+    }
+
+    pub async fn key_down(&self, args: KeyArgs) -> anyhow::Result<Response> {
+        self.call(Request::KeyDown(args)).await
+    }
+
+    pub async fn key_up(&self, args: KeyArgs) -> anyhow::Result<Response> {
+        self.call(Request::KeyUp(args)).await
+    }
+
+    pub async fn release_all_inputs(&self) -> anyhow::Result<Response> {
+        self.call(Request::ReleaseAllInputs).await
     }
 
     pub async fn scroll(&self, args: TargetArgs) -> anyhow::Result<Response> {
@@ -503,6 +527,41 @@ mod tests {
                 geo_align: false,
             },
         )
+    }
+
+    #[tokio::test]
+    async fn typed_mouse_down_helper_sends_protocol_request() {
+        let session = format!("eoka-sdk-held-input-test-{}", std::process::id());
+        session::ensure_runtime_dir().unwrap();
+        let sock = session::socket_path(&session);
+        let _ = std::fs::remove_file(&sock);
+        let listener = UnixListener::bind(&sock).unwrap();
+
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let (mut reader, mut writer) = stream.into_split();
+            let request: Request = read_msg(&mut reader).await.unwrap();
+            assert_eq!(request.cmd(), "mouse_down");
+            assert_eq!(request.args_json()["x"], 10.0);
+            assert_eq!(request.args_json()["y"], 20.0);
+            assert_eq!(request.args_json()["button"], "left");
+            write_msg(&mut writer, &Response::ok_text("ok"))
+                .await
+                .unwrap();
+        });
+
+        let response = test_client(&session)
+            .mouse_down(MouseButtonArgs {
+                x: 10.0,
+                y: 20.0,
+                button: eoka_protocol::MouseButton::Left,
+            })
+            .await
+            .unwrap();
+
+        assert!(response.ok);
+        server.await.unwrap();
+        let _ = std::fs::remove_file(&sock);
     }
 
     #[tokio::test]

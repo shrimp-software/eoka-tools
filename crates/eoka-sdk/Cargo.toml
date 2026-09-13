@@ -12,6 +12,6 @@ authors = ["cbxss"]
 
 [dependencies]
 anyhow = { workspace = true }
-eoka = "0.5"
+eoka = "0.5.10"
 eoka-protocol = { path = "../eoka-protocol", version = "0.2.0" }
 tokio = { workspace = true }

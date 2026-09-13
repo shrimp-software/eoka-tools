@@ -220,8 +220,10 @@ impl BrowserState {
         if self.tabs.len() <= 1 {
             return Err(eoka::Error::cdp_msg("Cannot close the last tab"));
         }
+        let release_result = self.tabs[tab_id].page.release_all_inputs().await;
         self.browser.close_tab(tab_id).await?;
         self.tabs.remove(tab_id);
+        release_result?;
         if self.current_tab_id.as_deref() == Some(tab_id) {
             if let Some(new_id) = self.tabs.keys().next().cloned() {
                 self.browser.activate_tab(&new_id).await?;
@@ -234,6 +236,17 @@ impl BrowserState {
     }
 
     pub async fn close(self) -> eoka::Result<()> {
-        self.browser.close().await
+        let BrowserState { browser, tabs, .. } = self;
+        let mut release_error = None;
+        for tab in tabs.values() {
+            if let Err(error) = tab.page.release_all_inputs().await {
+                release_error.get_or_insert(error);
+            }
+        }
+        browser.close().await?;
+        match release_error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
     }
 }

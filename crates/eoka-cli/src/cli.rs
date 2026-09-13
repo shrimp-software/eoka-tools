@@ -199,6 +199,28 @@ pub enum Command {
     Hover { target: String },
     #[command(about = "Press keyboard key")]
     Key { key: String },
+    #[command(about = "Press and hold a mouse button at viewport coordinates")]
+    MouseDown {
+        x: f64,
+        y: f64,
+        #[arg(long, default_value = "left")]
+        button: String,
+    },
+    #[command(about = "Move the mouse to viewport coordinates")]
+    MouseMove { x: f64, y: f64 },
+    #[command(about = "Release a held mouse button at viewport coordinates")]
+    MouseUp {
+        x: f64,
+        y: f64,
+        #[arg(long, default_value = "left")]
+        button: String,
+    },
+    #[command(about = "Press and hold a keyboard key")]
+    KeyDown { key: String },
+    #[command(about = "Release a held keyboard key")]
+    KeyUp { key: String },
+    #[command(about = "Release every held mouse button and key")]
+    ReleaseAllInputs,
     #[command(about = "Scroll page or element into view")]
     Scroll { target: String },
     #[command(about = "Execute JavaScript and return result")]

@@ -15,6 +15,7 @@ use std::fmt::Write as FmtWrite;
 use base64::Engine;
 use captcha::{build_captcha_inject_js, parse_captcha_inject_kind};
 use eoka::cdp::{transport::CdpMessage, Session as CdpSession};
+use eoka::MouseButton;
 use eoka_server::{annotate, observe, snapshot};
 use serde_json::{json, Value};
 
@@ -196,6 +197,12 @@ impl Handler {
             "select" => self.cmd_select(args).await,
             "hover" => self.cmd_hover(args).await,
             "key" => self.cmd_key(args).await,
+            "mouse_down" => self.cmd_mouse_down(args).await,
+            "mouse_move" => self.cmd_mouse_move(args).await,
+            "mouse_up" => self.cmd_mouse_up(args).await,
+            "key_down" => self.cmd_key_down(args).await,
+            "key_up" => self.cmd_key_up(args).await,
+            "release_all_inputs" => self.cmd_release_all_inputs().await,
             "scroll" => self.cmd_scroll(args).await,
             "eval" => self.cmd_eval(args).await,
             "exec" => self.cmd_exec(args).await,
@@ -253,6 +260,25 @@ impl Handler {
         args[key]
             .as_str()
             .ok_or_else(|| format!("Missing '{}'", key))
+    }
+
+    fn arg_f64(&self, args: &Value, key: &str) -> Result<f64, String> {
+        args[key]
+            .as_f64()
+            .ok_or_else(|| format!("Missing '{}'", key))
+    }
+
+    fn mouse_button_args(&self, args: &Value) -> Result<(f64, f64, MouseButton), String> {
+        let button = serde_json::from_value::<crate::protocol::MouseButton>(args["button"].clone())
+            .map_err(|error| error.to_string())?;
+        let button = match button {
+            crate::protocol::MouseButton::Left => MouseButton::Left,
+            crate::protocol::MouseButton::Middle => MouseButton::Middle,
+            crate::protocol::MouseButton::Right => MouseButton::Right,
+            crate::protocol::MouseButton::Back => MouseButton::Back,
+            crate::protocol::MouseButton::Forward => MouseButton::Forward,
+        };
+        Ok((self.arg_f64(args, "x")?, self.arg_f64(args, "y")?, button))
     }
 
     fn tab_with_config(&mut self) -> Result<(&mut TabState, bool), String> {
@@ -828,6 +854,66 @@ impl Handler {
             .await
             .map_err(|e| e.to_string())?;
         Ok(Response::ok_text(format!("Pressed {}", key)))
+    }
+
+    async fn cmd_mouse_down(&mut self, args: &Value) -> Result<Response, String> {
+        let (x, y, button) = self.mouse_button_args(args)?;
+        self.require_tab()?
+            .page
+            .mouse_down(x, y, button)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(Response::ok_text("Mouse button held"))
+    }
+
+    async fn cmd_mouse_move(&mut self, args: &Value) -> Result<Response, String> {
+        let x = self.arg_f64(args, "x")?;
+        let y = self.arg_f64(args, "y")?;
+        self.require_tab()?
+            .page
+            .mouse_move(x, y)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(Response::ok_text("Mouse moved"))
+    }
+
+    async fn cmd_mouse_up(&mut self, args: &Value) -> Result<Response, String> {
+        let (x, y, button) = self.mouse_button_args(args)?;
+        self.require_tab()?
+            .page
+            .mouse_up(x, y, button)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(Response::ok_text("Mouse button released"))
+    }
+
+    async fn cmd_key_down(&mut self, args: &Value) -> Result<Response, String> {
+        let key = self.arg_str(args, "key")?;
+        self.require_tab()?
+            .page
+            .key_down(key)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(Response::ok_text(format!("Held {key}")))
+    }
+
+    async fn cmd_key_up(&mut self, args: &Value) -> Result<Response, String> {
+        let key = self.arg_str(args, "key")?;
+        self.require_tab()?
+            .page
+            .key_up(key)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(Response::ok_text(format!("Released {key}")))
+    }
+
+    async fn cmd_release_all_inputs(&mut self) -> Result<Response, String> {
+        self.require_tab()?
+            .page
+            .release_all_inputs()
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(Response::ok_text("Released all held inputs"))
     }
 
     async fn cmd_scroll(&mut self, args: &Value) -> Result<Response, String> {

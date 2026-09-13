@@ -124,6 +124,12 @@ field. Element handles never cross the wire — everything is
 | `page.select` | `{"pageId", "selector", "value"}` | `{}` |
 | `page.hover` | `{"pageId", "selector"}` | `{}` |
 | `page.press_key` | `{"pageId", "key"}` | `{}` |
+| `page.mouse_down` | `{"pageId", "x", "y", "button"}` | `{}` — button is `left`, `middle`, `right`, `back`, or `forward`; remains held until released |
+| `page.mouse_move` | `{"pageId", "x", "y"}` | `{}` — preserves held buttons |
+| `page.mouse_up` | `{"pageId", "x", "y", "button"}` | `{}` |
+| `page.key_down` | `{"pageId", "key"}` | `{}` — remains held until released |
+| `page.key_up` | `{"pageId", "key"}` | `{}` |
+| `page.release_all_inputs` | `{"pageId"}` | `{}` — releases every held key and mouse button |
 | `page.close` | `{"pageId"}` | `{}` |
 
 ## Go-side API shape (informative, not part of the wire contract)

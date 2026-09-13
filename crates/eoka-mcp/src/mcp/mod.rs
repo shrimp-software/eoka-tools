@@ -30,6 +30,16 @@ pub struct EokaServer {
 }
 
 impl EokaServer {
+    fn core_mouse_button(button: eoka_protocol::MouseButton) -> eoka_server::eoka::MouseButton {
+        match button {
+            eoka_protocol::MouseButton::Left => eoka_server::eoka::MouseButton::Left,
+            eoka_protocol::MouseButton::Middle => eoka_server::eoka::MouseButton::Middle,
+            eoka_protocol::MouseButton::Right => eoka_server::eoka::MouseButton::Right,
+            eoka_protocol::MouseButton::Back => eoka_server::eoka::MouseButton::Back,
+            eoka_protocol::MouseButton::Forward => eoka_server::eoka::MouseButton::Forward,
+        }
+    }
+
     #[allow(dead_code)]
     async fn lock_browser(
         &self,
@@ -467,6 +477,111 @@ impl EokaServer {
             .await
             .map_err(internal)?;
         text_ok(format!("Pressed {}", req.0.key))
+    }
+
+    #[tool(
+        description = "Press and hold a mouse button at viewport coordinates. Use mouse_move while it is held, then mouse_up or release_all_inputs."
+    )]
+    async fn mouse_down(
+        &self,
+        req: Parameters<MouseButtonRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.ensure_browser().await?;
+        let guard = self.state.lock().await;
+        let state = guard
+            .as_ref()
+            .ok_or_else(|| ErrorData::from(AgentError::NoBrowser))?;
+        let tab = state
+            .current_tab()
+            .ok_or_else(|| ErrorData::from(AgentError::NoTab))?;
+        tab.page
+            .mouse_down(req.0.x, req.0.y, Self::core_mouse_button(req.0.button))
+            .await
+            .map_err(internal)?;
+        text_ok("Mouse button held".to_string())
+    }
+
+    #[tool(description = "Move the mouse to viewport coordinates while preserving held buttons.")]
+    async fn mouse_move(
+        &self,
+        req: Parameters<MouseMoveRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.ensure_browser().await?;
+        let guard = self.state.lock().await;
+        let state = guard
+            .as_ref()
+            .ok_or_else(|| ErrorData::from(AgentError::NoBrowser))?;
+        let tab = state
+            .current_tab()
+            .ok_or_else(|| ErrorData::from(AgentError::NoTab))?;
+        tab.page
+            .mouse_move(req.0.x, req.0.y)
+            .await
+            .map_err(internal)?;
+        text_ok("Mouse moved".to_string())
+    }
+
+    #[tool(description = "Release a held mouse button at viewport coordinates.")]
+    async fn mouse_up(
+        &self,
+        req: Parameters<MouseButtonRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.ensure_browser().await?;
+        let guard = self.state.lock().await;
+        let state = guard
+            .as_ref()
+            .ok_or_else(|| ErrorData::from(AgentError::NoBrowser))?;
+        let tab = state
+            .current_tab()
+            .ok_or_else(|| ErrorData::from(AgentError::NoTab))?;
+        tab.page
+            .mouse_up(req.0.x, req.0.y, Self::core_mouse_button(req.0.button))
+            .await
+            .map_err(internal)?;
+        text_ok("Mouse button released".to_string())
+    }
+
+    #[tool(
+        description = "Press and hold a keyboard key. Use key_up or release_all_inputs to release it."
+    )]
+    async fn key_down(&self, req: Parameters<TypeKeyRequest>) -> Result<CallToolResult, ErrorData> {
+        self.ensure_browser().await?;
+        let guard = self.state.lock().await;
+        let state = guard
+            .as_ref()
+            .ok_or_else(|| ErrorData::from(AgentError::NoBrowser))?;
+        let tab = state
+            .current_tab()
+            .ok_or_else(|| ErrorData::from(AgentError::NoTab))?;
+        tab.page.key_down(&req.0.key).await.map_err(internal)?;
+        text_ok(format!("Held {}", req.0.key))
+    }
+
+    #[tool(description = "Release a keyboard key previously held with key_down.")]
+    async fn key_up(&self, req: Parameters<TypeKeyRequest>) -> Result<CallToolResult, ErrorData> {
+        self.ensure_browser().await?;
+        let guard = self.state.lock().await;
+        let state = guard
+            .as_ref()
+            .ok_or_else(|| ErrorData::from(AgentError::NoBrowser))?;
+        let tab = state
+            .current_tab()
+            .ok_or_else(|| ErrorData::from(AgentError::NoTab))?;
+        tab.page.key_up(&req.0.key).await.map_err(internal)?;
+        text_ok(format!("Released {}", req.0.key))
+    }
+
+    #[tool(description = "Release every mouse button and key held on the current tab.")]
+    async fn release_all_inputs(&self) -> Result<CallToolResult, ErrorData> {
+        let guard = self.state.lock().await;
+        let state = guard
+            .as_ref()
+            .ok_or_else(|| ErrorData::from(AgentError::NoBrowser))?;
+        let tab = state
+            .current_tab()
+            .ok_or_else(|| ErrorData::from(AgentError::NoTab))?;
+        tab.page.release_all_inputs().await.map_err(internal)?;
+        text_ok("Released all held inputs".to_string())
     }
 
     #[tool(

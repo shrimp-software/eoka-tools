@@ -43,6 +43,12 @@ pub async fn dispatch(
         "page.select" => page::select(state, params).await,
         "page.hover" => page::hover(state, params).await,
         "page.press_key" => page::press_key(state, params).await,
+        "page.mouse_down" => page::mouse_down(state, params).await,
+        "page.mouse_move" => page::mouse_move(state, params).await,
+        "page.mouse_up" => page::mouse_up(state, params).await,
+        "page.key_down" => page::key_down(state, params).await,
+        "page.key_up" => page::key_up(state, params).await,
+        "page.release_all_inputs" => page::release_all_inputs(state, params).await,
         "page.solve_captcha" => page::solve_captcha(state, params).await,
         "page.close" => page::close(state, params).await,
 

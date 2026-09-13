@@ -5,6 +5,8 @@ pub type TargetRequest = eoka_protocol::TargetArgs;
 pub type FillRequest = eoka_protocol::FillArgs;
 pub type SelectRequest = eoka_protocol::SelectArgs;
 pub type TypeKeyRequest = eoka_protocol::KeyArgs;
+pub type MouseButtonRequest = eoka_protocol::MouseButtonArgs;
+pub type MouseMoveRequest = eoka_protocol::MouseMoveArgs;
 pub type ScrollRequest = eoka_protocol::TargetArgs;
 pub type FindTextRequest = eoka_protocol::TextArgs;
 pub type NewTabRequest = eoka_protocol::TabNewArgs;
@@ -244,8 +246,9 @@ mod tests {
     use eoka_protocol::{input_schema_for_cmd, operation_by_cmd};
 
     use super::{
-        FillRequest, NewTabRequest, ObserveRequest, SaveStateRequest, SelectRequest,
-        SpaNavigateRequest, TabIdRequest, TargetRequest, TypeKeyRequest,
+        FillRequest, MouseButtonRequest, MouseMoveRequest, NewTabRequest, ObserveRequest,
+        SaveStateRequest, SelectRequest, SpaNavigateRequest, TabIdRequest, TargetRequest,
+        TypeKeyRequest,
     };
 
     #[test]
@@ -255,6 +258,12 @@ mod tests {
             "fill",
             "select",
             "key",
+            "mouse_down",
+            "mouse_move",
+            "mouse_up",
+            "key_down",
+            "key_up",
+            "release_all_inputs",
             "scroll",
             "find",
             "tab_new",
@@ -290,6 +299,14 @@ mod tests {
         assert_eq!(
             serde_json::to_value(schemars::schema_for!(TypeKeyRequest)).unwrap(),
             input_schema_for_cmd("key")
+        );
+        assert_eq!(
+            serde_json::to_value(schemars::schema_for!(MouseButtonRequest)).unwrap(),
+            input_schema_for_cmd("mouse_down")
+        );
+        assert_eq!(
+            serde_json::to_value(schemars::schema_for!(MouseMoveRequest)).unwrap(),
+            input_schema_for_cmd("mouse_move")
         );
         assert_eq!(
             serde_json::to_value(schemars::schema_for!(NewTabRequest)).unwrap(),
