@@ -19,6 +19,7 @@ jobs:
     name: Publish missing crate versions
     runs-on: ubuntu-latest
     permissions:
+      actions: write
       contents: write
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -88,6 +89,9 @@ jobs:
             else
               git tag -a "$tag" -m "Release ${crate} v${version}"
               git push origin "$tag"
+              if [ "$crate" = "eoka-server" ]; then
+                GH_TOKEN="${{ github.token }}" gh workflow run release-eoka-server.yml --repo "${{ github.repository }}" --ref "$tag" -f tag="$tag"
+              fi
             fi
             echo "::endgroup::"
           done

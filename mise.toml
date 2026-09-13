@@ -31,11 +31,11 @@ run = [
 
 [tasks.release-check]
 description = "Run the full release check"
-run = "bash scripts/release-check.sh"
+run = ["bash scripts/check-server-release-trigger.sh", "bash scripts/release-check.sh"]
 
 [tasks.release-check-local-tack]
 description = "Run the full release check with a local tack-rs override"
-run = "bash scripts/release-check.sh --with-local-tack"
+run = ["bash scripts/check-server-release-trigger.sh", "bash scripts/release-check.sh --with-local-tack"]
 
 [tasks.install-cli]
 description = "Install the local eoka CLI"
