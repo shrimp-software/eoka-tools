@@ -12,7 +12,7 @@ Image-puzzle matching remains synthetic-test-only.
 ## CLI: continue in the existing session
 
 Install the updated CLI with `mise run install-cli`. This crate requires published
-Eoka 0.5.12 or later; no sibling checkout is needed. Older daemons must be upgraded
+Eoka 0.5.13 or later; no sibling checkout is needed. Older daemons must be upgraded
 explicitly.
 
 ```sh
@@ -132,6 +132,14 @@ Supported options:
 | `EOKA_TEST_PROFILE_URL` | SoundCloud profile URL/slug; always verify its password stage |
 | `EOKA_TEST_REQUIRE_PASSWORD_STAGE=1` | Explicit password-stage intent; required for credential mode |
 | `EOKA_TEST_PASSWORD_FILE` | Opt-in credential entry, described below |
+
+The example's `click_visible` helper selects one unambiguous visible target,
+checks iframe owners for overlays, then clicks the exact checked point without
+jitter. It rechecks the original element and coordinates after hover; replacements,
+movement and covering elements abort rather than retargeting. Temporary element
+references stay in an isolated world and expire if the operation is cancelled.
+These are preflight checks, not an atomic guarantee against later page mutation.
+The helper is example support code, not a public click API.
 
 A profile identifier requires a SoundCloud target URL and defaults the initial
 click to `button.loginButton`. The password-stage gate requires the secure auth

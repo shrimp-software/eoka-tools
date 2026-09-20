@@ -1,3 +1,5 @@
+#[path = "support/click.rs"]
+mod click;
 #[path = "support/login.rs"]
 mod login;
 #[path = "support/options.rs"]
@@ -7,44 +9,12 @@ mod profile;
 
 use std::time::Duration;
 
+use click::click_visible;
 use eoka::{Browser, Page};
 use eoka_datadome::{DataDomeSolver, SolveOutcome};
 use options::Options;
 
 type RunResult = Result<(), Box<dyn std::error::Error>>;
-
-async fn trusted_click(
-    page: &Page,
-    frame_id: Option<&str>,
-    selector: &str,
-    text: Option<&str>,
-) -> eoka::Result<()> {
-    let args = serde_json::json!({"selector": selector, "text": text}).to_string();
-    let script = r#"(() => {
-        const {selector, text} = __ARGS__;
-        for (const e of document.querySelectorAll(selector)) {
-            if (e.disabled || (text !== null && e.textContent.trim() !== text)) continue;
-            if (!e.checkVisibility({checkOpacity:true, checkVisibilityCSS:true})) continue;
-            const r = e.getBoundingClientRect(), x = r.left + r.width/2, y = r.top + r.height/2;
-            if (r.width <= 0 || r.height <= 0 || x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) continue;
-            const hit = document.elementFromPoint(x, y);
-            if (hit && (hit === e || e.contains(hit))) return [x,y];
-        }
-        return null;
-    })()"#.replace("__ARGS__", &args);
-    let point: Option<[f64; 2]> = match frame_id {
-        Some(id) => page.evaluate_in_frame_id(id, &script).await?,
-        None => page.evaluate_sync(&script).await?,
-    };
-    let [x, y] = point.ok_or_else(|| eoka::Error::ElementNotVisible {
-        selector: selector.into(),
-    })?;
-    let (x, y) = match frame_id {
-        Some(id) => page.frame_point_to_viewport(id, x, y).await?,
-        None => (x, y),
-    };
-    page.human().move_and_click(x, y).await
-}
 
 async fn observe_pass(page: &Page) -> RunResult {
     let auth = profile::auth_frame(page)
@@ -96,7 +66,7 @@ async fn verify_password_stage(page: &Page, options: &Options, identifier: &str)
                 if initial {
                     page.goto(&options.url).await?;
                     tokio::time::sleep(Duration::from_secs(3)).await;
-                    trusted_click(page, None, "button.loginButton", None).await?;
+                    click_visible(page, None, "button.loginButton", None).await?;
                     tokio::time::sleep(Duration::from_secs(2)).await;
                     profile::enter(page, identifier).await?;
                     retried = true;
@@ -148,7 +118,7 @@ async fn run(browser: &Browser, options: &Options) -> RunResult {
     let page = browser.new_page(&options.url).await?;
     tokio::time::sleep(Duration::from_secs(5)).await;
     if let Some(selector) = &options.click_selector {
-        trusted_click(&page, None, selector, None).await?;
+        click_visible(&page, None, selector, None).await?;
         tokio::time::sleep(Duration::from_secs(8)).await;
     }
     if let Some(identifier) = &options.profile {
