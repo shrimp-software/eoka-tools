@@ -41,7 +41,7 @@ jobs:
             exit 1
           fi
 
-          for crate in captcha eoka-proxy eoka-protocol eoka-sdk eoka-email eoka-runner eoka-server eoka-mcp eoka-tack eoka-cli; do
+          for crate in captcha eoka-proxy eoka-protocol eoka-sdk eoka-email eoka-runner eoka-server eoka-mcp eoka-tack datadome eoka-cli; do
             manifest="crates/${crate}/Cargo.toml"
             [ -f "$manifest" ] || continue
 

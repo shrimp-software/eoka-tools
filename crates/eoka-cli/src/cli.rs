@@ -163,7 +163,7 @@ pub enum Command {
         #[arg(long)]
         annotate: bool,
     },
-    #[command(about = "Solve or inject CAPTCHA tokens")]
+    #[command(about = "Handle CAPTCHAs locally or solve/inject provider tokens")]
     Captcha {
         #[command(subcommand)]
         action: CaptchaAction,
@@ -234,6 +234,13 @@ pub enum Command {
         max_size: Option<usize>,
         #[arg(long)]
         no_await: bool,
+    },
+    #[command(about = "Execute JavaScript inside an iframe")]
+    FrameEval {
+        frame: String,
+        code: Option<String>,
+        #[arg(short, long)]
+        file: Option<PathBuf>,
     },
     #[command(about = "Execute JavaScript without returning a value")]
     Exec {
@@ -503,6 +510,15 @@ pub enum NetworkRecordAction {
 #[derive(Subcommand)]
 #[allow(clippy::large_enum_variant)]
 pub enum CaptchaAction {
+    #[command(
+        about = "Attempt local DataDome clearance on the current tab; keep the session open"
+    )]
+    Datadome {
+        #[arg(long, default_value_t = eoka_protocol::DATADOME_DEFAULT_ATTEMPTS, value_parser = clap::value_parser!(u32).range(1..=i64::from(eoka_protocol::DATADOME_MAX_ATTEMPTS)))]
+        max_attempts: u32,
+        #[arg(long, default_value_t = eoka_protocol::DATADOME_DEFAULT_TIMEOUT_MS, value_parser = clap::value_parser!(u64).range(eoka_protocol::DATADOME_MIN_TIMEOUT_MS..=eoka_protocol::DATADOME_MAX_TIMEOUT_MS))]
+        timeout_ms: u64,
+    },
     Solve(Box<SolveArgs>),
     Inject {
         token: String,

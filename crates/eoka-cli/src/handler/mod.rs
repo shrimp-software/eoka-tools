@@ -1,5 +1,9 @@
+mod captcha;
 mod eval;
+#[cfg(test)]
+mod fetch_tests;
 pub mod intercept;
+mod intercept_files;
 pub mod network;
 mod persist;
 pub mod profile;
@@ -12,16 +16,19 @@ mod wasm;
 use std::collections::HashMap;
 use std::fmt::Write as FmtWrite;
 
+use ::captcha::{build_captcha_inject_js, parse_captcha_inject_kind};
 use base64::Engine;
-use captcha::{build_captcha_inject_js, parse_captcha_inject_kind};
-use eoka::cdp::{transport::CdpMessage, Session as CdpSession};
+use eoka::cdp::{
+    transport::{CommandDispatch, RequestPause},
+    Session as CdpSession,
+};
 use eoka::MouseButton;
 use eoka_server::{annotate, observe, snapshot};
 use serde_json::{json, Value};
 
 use crate::launch_spec::LaunchSpec;
 use crate::protocol::{Request, Response};
-use intercept::{InterceptLogEntry, InterceptRule, InterceptState};
+use intercept::{InterceptLog, InterceptLogEntry, InterceptRule, InterceptState};
 use network::{NetworkConfig, NetworkRecorder};
 use persist::{capture_state, ensure_console_capture, restore_cookies, restore_state, SavedState};
 use script_policy::{ScriptPolicyMode, ScriptPolicyState};
@@ -38,7 +45,10 @@ pub struct Handler {
     intercept: InterceptState,
     script_policy: ScriptPolicyState,
     network: Option<NetworkRecorder>,
-    fetch_events: Option<tokio::sync::broadcast::Receiver<CdpMessage>>,
+    idle_fetch_drain: Option<FetchDrainHandle>,
+    fetch_events: Option<FetchQueue>,
+    fetch_sender: Option<tokio::sync::mpsc::Sender<RequestPause>>,
+    fetch_dropped: std::sync::Arc<std::sync::atomic::AtomicU64>,
     fetch_sessions: HashMap<String, CdpSession>,
 }
 
@@ -68,7 +78,10 @@ impl Handler {
             intercept: InterceptState::new(),
             script_policy,
             network: None,
+            idle_fetch_drain: None,
             fetch_events: None,
+            fetch_sender: None,
+            fetch_dropped: Default::default(),
             fetch_sessions: HashMap::new(),
         }
     }
@@ -157,6 +170,11 @@ impl Handler {
     }
 
     pub async fn handle(&mut self, cmd: &str, args: &Value) -> Response {
+        if cmd == "captcha_datadome" {
+            return self.cmd_captcha_datadome(args).await;
+        }
+        let idle = self.idle_fetch_drain.take();
+        self.stop_fetch_drain(idle).await;
         self.drain_fetch_events().await;
         let response = match self.dispatch(cmd, args).await {
             Ok(resp) => resp,
@@ -204,8 +222,19 @@ impl Handler {
             "key_up" => self.cmd_key_up(args).await,
             "release_all_inputs" => self.cmd_release_all_inputs().await,
             "scroll" => self.cmd_scroll(args).await,
-            "eval" => self.cmd_eval(args).await,
-            "exec" => self.cmd_exec(args).await,
+            "eval" | "exec" | "frame_eval" => {
+                let drain = self.start_fetch_drain();
+                let result = match cmd {
+                    "eval" => self.cmd_eval(args).await,
+                    "exec" => self.cmd_exec(args).await,
+                    _ => self.cmd_frame_eval(args).await,
+                };
+                if !self.stop_fetch_drain(drain).await {
+                    return Err("Request interception cleanup failed".into());
+                }
+                result
+            }
+            "captcha_datadome" => Ok(self.cmd_captcha_datadome(args).await),
             "captcha_inject" => self.cmd_captcha_inject(args).await,
             "fetch" => self.cmd_fetch(args).await,
             "cookies" => self.cmd_cookies().await,
@@ -1529,11 +1558,17 @@ impl Handler {
 
     async fn disable_fetch_session(&mut self, session: &CdpSession) {
         let session_id = session.session_id().to_string();
-        let _ = session.send::<_, Value>("Fetch.disable", &json!({})).await;
+        session.transport().remove_request_route(&session_id);
+        self.drain_fetch_events().await;
+        let _ = session
+            .transport()
+            .set_request_interception(&session_id, None)
+            .await;
         self.fetch_sessions.remove(&session_id);
         if self.fetch_sessions.is_empty() {
             self.intercept.enabled = false;
             self.fetch_events = None;
+            self.fetch_sender = None;
         }
     }
 
@@ -1555,6 +1590,7 @@ impl Handler {
         self.fetch_sessions.clear();
         self.intercept.enabled = false;
         self.fetch_events = None;
+        self.fetch_sender = None;
     }
 
     fn fetch_command_transport(&self) -> Option<std::sync::Arc<eoka::cdp::Transport>> {
@@ -1570,14 +1606,10 @@ impl Handler {
             })
     }
 
-    fn current_fetch_session_id(&self) -> Option<&str> {
-        self.fetch_sessions.keys().next().map(String::as_str)
-    }
-
     fn fetch_drain_config(&self) -> Option<FetchDrainConfig> {
         Some(FetchDrainConfig {
             transport: self.fetch_command_transport()?,
-            fallback_session_id: self.current_fetch_session_id().map(str::to_string),
+            failures: self.fetch_dropped.clone(),
             rules: self.intercept.rules_snapshot(),
         })
     }
@@ -1596,22 +1628,42 @@ impl Handler {
         })
     }
 
-    async fn stop_fetch_drain(&mut self, handle: Option<FetchDrainHandle>) {
-        let Some(handle) = handle else {
-            return;
+    async fn stop_fetch_drain(&mut self, handle: Option<FetchDrainHandle>) -> bool {
+        let Some(mut handle) = handle else {
+            return true;
         };
         let _ = handle.stop.send(());
-        match handle.join.await {
-            Ok((rx, logs)) => {
+        match tokio::time::timeout(std::time::Duration::from_secs(5), &mut handle.join).await {
+            Ok(Ok((rx, logs))) => {
                 if self.fetch_events.is_none() && self.intercept.enabled {
                     self.fetch_events = Some(rx);
                 }
                 for log in logs {
                     self.intercept.add_log(log);
                 }
+                true
             }
-            Err(_) => {
+            failed => {
+                self.fetch_dropped
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                for session in self.fetch_sessions.values() {
+                    session
+                        .transport()
+                        .remove_request_route(session.session_id());
+                }
                 self.fetch_events = None;
+                self.fetch_sender = None;
+                if failed.is_err() {
+                    if let Some(config) = self.fetch_drain_config() {
+                        tokio::spawn(async move {
+                            if let Ok((mut rx, mut logs)) = handle.join.await {
+                                rx.receiver.close();
+                                drain_fetch_receiver(&mut rx, &config, &mut logs).await;
+                            }
+                        });
+                    }
+                }
+                false
             }
         }
     }
@@ -1630,20 +1682,45 @@ impl Handler {
         };
         let session_id = session.session_id().to_string();
         self.disable_stale_fetch_sessions(Some(&session_id)).await;
-        session
-            .send::<_, serde_json::Value>(
-                "Fetch.enable",
-                &json!({
-                    "patterns": patterns,
-                    "handleAuthRequests": false,
-                }),
+        if self.fetch_sender.is_none() {
+            let (sender, receiver) = tokio::sync::mpsc::channel(256);
+            self.fetch_sender = Some(sender);
+            self.fetch_events = Some(FetchQueue {
+                receiver,
+                transport: session.transport().clone(),
+                failures: self.fetch_dropped.clone(),
+            });
+            for existing in self.fetch_sessions.values() {
+                existing
+                    .transport()
+                    .remove_request_route(existing.session_id());
+            }
+            self.fetch_sessions.clear();
+        }
+        if !self.fetch_sessions.contains_key(&session_id) {
+            session
+                .transport()
+                .install_request_route(
+                    &session_id,
+                    self.fetch_sender.as_ref().unwrap().clone(),
+                    self.fetch_dropped.clone(),
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        if let Err(error) = session
+            .transport()
+            .set_request_interception(
+                &session_id,
+                Some(patterns.as_array().cloned().unwrap_or_default()),
             )
             .await
-            .map_err(|e| e.to_string())?;
-        self.intercept.enabled = true;
-        if self.fetch_events.is_none() {
-            self.fetch_events = Some(session.transport().subscribe());
+        {
+            session.transport().remove_request_route(&session_id);
+            self.fetch_sessions.remove(&session_id);
+            self.intercept.enabled = false;
+            return Err(error.to_string());
         }
+        self.intercept.enabled = true;
         self.fetch_sessions.insert(session_id, session);
         Ok(())
     }
@@ -1933,31 +2010,18 @@ impl Handler {
         Ok(Response::ok(result))
     }
 
-    async fn drain_fetch_events(&mut self) {
-        if !self.intercept.enabled {
-            return;
+    pub(crate) fn service_idle_fetch(&mut self) {
+        if self.idle_fetch_drain.is_none() {
+            self.idle_fetch_drain = self.start_fetch_drain();
         }
+    }
 
-        let config = match self.fetch_drain_config() {
-            Some(config) => config,
-            None => return,
-        };
-        let mut logs = Vec::new();
-        let closed = {
-            let rx = match self.fetch_events.as_mut() {
-                Some(rx) => rx,
-                None => return,
-            };
-            drain_fetch_receiver(rx, &config, &mut logs).await
-        };
-        if closed {
-            self.fetch_events = None;
-            return;
-        }
-
-        for log in logs {
-            self.intercept.add_log(log);
-        }
+    pub(crate) async fn drain_fetch_events(&mut self) {
+        let drain = self
+            .idle_fetch_drain
+            .take()
+            .or_else(|| self.start_fetch_drain());
+        self.stop_fetch_drain(drain).await;
     }
 
     async fn cmd_close(&mut self) -> Result<Response, String> {
@@ -1986,83 +2050,174 @@ async fn tab_summary(tab: &TabState) -> Result<(String, String), String> {
     Ok((url, title))
 }
 
-struct FetchPausedEvent {
-    session_id: Option<String>,
-    params: Value,
-}
-
+#[derive(Clone)]
 struct FetchDrainConfig {
     transport: std::sync::Arc<eoka::cdp::Transport>,
-    fallback_session_id: Option<String>,
+    failures: std::sync::Arc<std::sync::atomic::AtomicU64>,
     rules: Vec<InterceptRule>,
+}
+
+struct FetchQueue {
+    receiver: tokio::sync::mpsc::Receiver<RequestPause>,
+    transport: std::sync::Arc<eoka::cdp::Transport>,
+    failures: std::sync::Arc<std::sync::atomic::AtomicU64>,
+}
+
+fn hand_off_fetch_pause(
+    event: RequestPause,
+    transport: std::sync::Arc<eoka::cdp::Transport>,
+    failures: std::sync::Arc<std::sync::atomic::AtomicU64>,
+) {
+    failures.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+        runtime.spawn(async move {
+            let config = FetchDrainConfig {
+                transport,
+                failures,
+                rules: Vec::new(),
+            };
+            continue_fetch_pause(&config, &event, &CommandDispatch::new()).await;
+        });
+    }
+}
+
+impl Drop for FetchQueue {
+    fn drop(&mut self) {
+        self.receiver.close();
+        while let Ok(event) = self.receiver.try_recv() {
+            hand_off_fetch_pause(event, self.transport.clone(), self.failures.clone());
+        }
+    }
+}
+
+struct FetchPauseOwner {
+    event: Option<RequestPause>,
+    config: FetchDrainConfig,
+    dispatch: CommandDispatch,
+}
+
+impl Drop for FetchPauseOwner {
+    fn drop(&mut self) {
+        if let Some(event) = self.event.take() {
+            if self.dispatch.may_have_been_sent() {
+                self.config
+                    .failures
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                return;
+            }
+            hand_off_fetch_pause(
+                event,
+                self.config.transport.clone(),
+                self.config.failures.clone(),
+            );
+        }
+    }
+}
+
+async fn process_owned_fetch_pause(mut owner: FetchPauseOwner) -> Option<InterceptLogEntry> {
+    let result = match tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        process_fetch_paused_event(
+            &owner.config,
+            owner.event.as_ref().unwrap(),
+            &owner.dispatch,
+        ),
+    )
+    .await
+    {
+        Ok(log) => log,
+        Err(_) => {
+            owner
+                .config
+                .failures
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            None
+        }
+    };
+    if !owner.dispatch.may_have_been_sent() {
+        owner.dispatch = CommandDispatch::new();
+        continue_fetch_pause(
+            &owner.config,
+            owner.event.as_ref().unwrap(),
+            &owner.dispatch,
+        )
+        .await;
+    }
+    owner.event.take();
+    result
 }
 
 struct FetchDrainHandle {
     stop: tokio::sync::oneshot::Sender<()>,
-    join: tokio::task::JoinHandle<(
-        tokio::sync::broadcast::Receiver<CdpMessage>,
-        Vec<InterceptLogEntry>,
-    )>,
+    join: tokio::task::JoinHandle<(FetchQueue, InterceptLog)>,
 }
 
 async fn fetch_drain_until_stopped(
-    mut rx: tokio::sync::broadcast::Receiver<CdpMessage>,
+    mut rx: FetchQueue,
     config: FetchDrainConfig,
     mut stop_rx: tokio::sync::oneshot::Receiver<()>,
-) -> (
-    tokio::sync::broadcast::Receiver<CdpMessage>,
-    Vec<InterceptLogEntry>,
-) {
-    let mut logs = Vec::new();
+) -> (FetchQueue, InterceptLog) {
+    let mut logs = InterceptLog::default();
     loop {
-        tokio::select! {
-            _ = &mut stop_rx => {
-                let _ = drain_fetch_receiver(&mut rx, &config, &mut logs).await;
-                break;
-            }
-            _ = tokio::time::sleep(std::time::Duration::from_millis(25)) => {
-                if drain_fetch_receiver(&mut rx, &config, &mut logs).await {
-                    break;
-                }
-            }
+        let event = tokio::select! {
+            biased;
+            _ = &mut stop_rx => break,
+            event = rx.receiver.recv() => match event {
+                Some(event) => event,
+                None => break,
+            },
+        };
+        if let Some(log) = process_owned_fetch_pause(FetchPauseOwner {
+            event: Some(event),
+            config: config.clone(),
+            dispatch: CommandDispatch::new(),
+        })
+        .await
+        {
+            logs.push(log);
         }
     }
+    drain_fetch_receiver(&mut rx, &config, &mut logs).await;
     (rx, logs)
 }
 
 async fn drain_fetch_receiver(
-    rx: &mut tokio::sync::broadcast::Receiver<CdpMessage>,
+    rx: &mut FetchQueue,
     config: &FetchDrainConfig,
-    logs: &mut Vec<InterceptLogEntry>,
+    logs: &mut InterceptLog,
 ) -> bool {
-    loop {
-        match rx.try_recv() {
-            Ok(message) if is_fetch_request_paused(&message) => {
-                if let CdpMessage::Event {
-                    params, session_id, ..
-                } = message
-                {
-                    if let Some(log) =
-                        process_fetch_paused_event(config, FetchPausedEvent { session_id, params })
-                            .await
-                    {
-                        logs.push(log);
-                    }
-                }
+    let mut batch = tokio::task::JoinSet::new();
+    for _ in 0..rx.receiver.len() {
+        let Ok(event) = rx.receiver.try_recv() else {
+            break;
+        };
+        let owner = FetchPauseOwner {
+            event: Some(event),
+            config: config.clone(),
+            dispatch: CommandDispatch::new(),
+        };
+        batch.spawn(process_owned_fetch_pause(owner));
+    }
+    while let Some(result) = batch.join_next().await {
+        match result {
+            Ok(Some(log)) => logs.push(log),
+            Ok(None) => {}
+            Err(_) => {
+                config
+                    .failures
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
-            Ok(_) => {}
-            Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => continue,
-            Err(tokio::sync::broadcast::error::TryRecvError::Empty) => return false,
-            Err(tokio::sync::broadcast::error::TryRecvError::Closed) => return true,
         }
     }
+    rx.receiver.is_closed() && rx.receiver.is_empty()
 }
 
 async fn process_fetch_paused_event(
     config: &FetchDrainConfig,
-    event: FetchPausedEvent,
+    event: &RequestPause,
+    dispatch: &CommandDispatch,
 ) -> Option<InterceptLogEntry> {
-    let params = event.params;
+    let params = &event.params;
     let request_id = params
         .get("requestId")
         .and_then(|v| v.as_str())?
@@ -2077,24 +2232,15 @@ async fn process_fetch_paused_event(
         .get("networkId")
         .and_then(Value::as_str)
         .map(str::to_string);
-    let session_id = fetch_command_session_id(
-        event.session_id.as_deref(),
-        config.fallback_session_id.as_deref(),
-    )?;
+    let session_id = event.session_id.clone();
 
     let matched = config.rules.iter().find(|rule| rule.matches_url(&url));
     let Some(rule) = matched else {
-        let _ = config
-            .transport
-            .send_to_session::<_, serde_json::Value>(
-                &session_id,
-                "Fetch.continueRequest",
-                &json!({ "requestId": request_id }),
-            )
-            .await;
+        continue_fetch_pause(config, event, dispatch).await;
         return None;
     };
 
+    let mut capture_failed = false;
     if let Some(ref path) = rule.capture_path {
         let body = json!({
             "url": &url,
@@ -2102,58 +2248,55 @@ async fn process_fetch_paused_event(
             "postData": &post_data,
             "headers": params.get("request").and_then(|r| r.get("headers")),
         });
-        match serde_json::to_string_pretty(&body) {
-            Ok(json) => {
-                if let Err(e) = std::fs::write(path, json) {
-                    eprintln!(
-                        "[eoka] intercept capture write failed ({}): {}",
-                        path.display(),
-                        e
-                    );
-                }
-            }
-            Err(e) => eprintln!("[eoka] intercept capture serialize failed: {}", e),
+        if intercept_files::capture(path, body).await.is_err() {
+            config
+                .failures
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            capture_failed = true;
+            eprintln!("[eoka] interception capture failed");
         }
     }
 
     let action = if let Some(ref path) = rule.respond_path {
-        if let Ok(body) = std::fs::read(path) {
-            let body_str = String::from_utf8_lossy(&body);
-            let _ = config
+        if let Ok(body) = intercept_files::read(path).await {
+            let fulfilled = config
                 .transport
-                .send_to_session::<_, serde_json::Value>(
+                .send_to_session_with_dispatch::<_, serde_json::Value>(
                     &session_id,
                     "Fetch.fulfillRequest",
                     &json!({
                         "requestId": request_id,
                         "responseCode": rule.respond_status,
                         "body": base64::engine::general_purpose::STANDARD
-                            .encode(body_str.as_bytes()),
+                            .encode(&body),
                     }),
+                    dispatch,
                 )
                 .await;
-            "responded"
+            if fulfilled.is_err() {
+                config
+                    .failures
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                "response unconfirmed"
+            } else {
+                "responded"
+            }
         } else {
-            let _ = config
-                .transport
-                .send_to_session::<_, serde_json::Value>(
-                    &session_id,
-                    "Fetch.continueRequest",
-                    &json!({ "requestId": request_id }),
-                )
-                .await;
-            "continue (respond file not found)"
+            config
+                .failures
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if continue_fetch_pause(config, event, dispatch).await {
+                "continued (response read failed)"
+            } else {
+                "continuation and response read failed"
+            }
         }
     } else {
-        let _ = config
-            .transport
-            .send_to_session::<_, serde_json::Value>(
-                &session_id,
-                "Fetch.continueRequest",
-                &json!({ "requestId": request_id }),
-            )
-            .await;
-        "continue (captured)"
+        if continue_fetch_pause(config, event, dispatch).await {
+            "continued"
+        } else {
+            "continuation failed"
+        }
     };
 
     Some(InterceptLogEntry {
@@ -2161,25 +2304,36 @@ async fn process_fetch_paused_event(
         url,
         method,
         has_body: post_data.is_some(),
-        action: action.to_string(),
+        action: if capture_failed {
+            format!("{action}; capture failed")
+        } else {
+            action.to_string()
+        },
         session_id: Some(session_id),
         network_id,
         network_entry_id: None,
     })
 }
 
-fn is_fetch_request_paused(message: &CdpMessage) -> bool {
-    matches!(
-        message,
-        CdpMessage::Event { method, .. } if method == "Fetch.requestPaused"
-    )
-}
-
-fn fetch_command_session_id(
-    event_session_id: Option<&str>,
-    fallback_session_id: Option<&str>,
-) -> Option<String> {
-    event_session_id.or(fallback_session_id).map(str::to_string)
+async fn continue_fetch_pause(
+    config: &FetchDrainConfig,
+    event: &RequestPause,
+    dispatch: &CommandDispatch,
+) -> bool {
+    let confirmed = matches!(
+        tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            event.continue_request_with_dispatch(&config.transport, dispatch)
+        )
+        .await,
+        Ok(Ok(()))
+    );
+    if !confirmed {
+        config
+            .failures
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+    confirmed
 }
 
 fn fetch_body_only_text(parsed: &Value) -> Result<String, String> {
@@ -2371,30 +2525,5 @@ mod tests {
         let body = fetch_body_only_text(&json!({ "status": 200, "body": "ok" })).unwrap();
 
         assert_eq!(body, "ok");
-    }
-
-    #[test]
-    fn fetch_command_session_prefers_event_session() {
-        assert_eq!(
-            fetch_command_session_id(Some("event-session"), Some("current-session")),
-            Some("event-session".to_string())
-        );
-    }
-
-    #[test]
-    fn fetch_request_paused_detection_keeps_session_id_available() {
-        let message = CdpMessage::Event {
-            method: "Fetch.requestPaused".into(),
-            params: json!({ "requestId": "req-1" }),
-            session_id: Some("session-1".into()),
-        };
-
-        assert!(is_fetch_request_paused(&message));
-        match message {
-            CdpMessage::Event { session_id, .. } => {
-                assert_eq!(session_id.as_deref(), Some("session-1"))
-            }
-            _ => panic!("expected event"),
-        }
     }
 }

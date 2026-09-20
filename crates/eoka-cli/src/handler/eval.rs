@@ -1,5 +1,3 @@
-//! `eval`/`exec` commands and Runtime.evaluate result formatting.
-
 use eoka::cdp::Session as CdpSession;
 use serde_json::{json, Value};
 
@@ -54,6 +52,21 @@ impl Handler {
             let _ = tab.page.execute(&code).await;
         }
         Ok(Response::ok_text("Executed successfully"))
+    }
+
+    pub(super) async fn cmd_frame_eval(&mut self, args: &Value) -> Result<Response, String> {
+        let code = resolve_js(args)?;
+        let frame = args["frame"]
+            .as_str()
+            .ok_or_else(|| "Missing frame selector".to_string())?;
+        let page = self.require_tab()?.page.clone();
+        let value: Value = page
+            .evaluate_in_frame(frame, &code)
+            .await
+            .map_err(|e| e.to_string())?;
+        serde_json::to_string(&value)
+            .map(Response::ok_text)
+            .map_err(|e| e.to_string())
     }
 }
 

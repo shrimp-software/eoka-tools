@@ -61,5 +61,6 @@ Publish order:
   8. cargo publish -p eoka-server
   9. cargo publish -p eoka-mcp
  10. cargo publish -p eoka-tack
- 11. cargo publish -p eoka-cli
+ 11. cargo publish -p eoka-datadome
+ 12. cargo publish -p eoka-cli
 MSG

@@ -3,12 +3,12 @@ mod network;
 use crate::captcha_cmd::captcha_inject_request;
 use crate::cli::{CaptchaAction, Command, JsAction, TabAction, WasmAction};
 use crate::protocol::{
-    ClearFlagArgs, CloneFromArgs, ConsoleArgs, DeleteCookieArgs, DomainArgs, EmulateArgs,
-    FakeCameraArgs, FetchArgs, FillArgs, HeadersArgs, KeyArgs, LoadStateArgs, ModeArgs,
-    MouseButton, MouseButtonArgs, MouseMoveArgs, ObserveArgs, OpenArgs, PathArgs, PathStringArgs,
-    Request, ScreenshotArgs, ScriptArgs, SelectArgs, SetCookieArgs, SetStorageArgs, SnapshotArgs,
-    StorageArgs, TabIdArgs, TabNewArgs, TargetArgs, TextArgs, WaitArgs, WasmFindArgs, WasmReadArgs,
-    WasmWriteArgs,
+    CaptchaDatadomeArgs, ClearFlagArgs, CloneFromArgs, ConsoleArgs, DeleteCookieArgs, DomainArgs,
+    EmulateArgs, FakeCameraArgs, FetchArgs, FillArgs, FrameEvalArgs, HeadersArgs, KeyArgs,
+    LoadStateArgs, ModeArgs, MouseButton, MouseButtonArgs, MouseMoveArgs, ObserveArgs, OpenArgs,
+    PathArgs, PathStringArgs, Request, ScreenshotArgs, ScriptArgs, SelectArgs, SetCookieArgs,
+    SetStorageArgs, SnapshotArgs, StorageArgs, TabIdArgs, TabNewArgs, TargetArgs, TextArgs,
+    WaitArgs, WasmFindArgs, WasmReadArgs, WasmWriteArgs,
 };
 use network::network_action_to_request;
 
@@ -149,6 +149,11 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
             file: file.as_ref().map(|path| path.to_string_lossy().to_string()),
             max_size: None,
             no_await: *no_await,
+        }),
+        Command::FrameEval { frame, code, file } => Request::FrameEval(FrameEvalArgs {
+            frame: frame.clone(),
+            code: code.clone(),
+            file: file.as_ref().map(|path| path.to_string_lossy().to_string()),
         }),
         Command::Tack { .. } | Command::Tools { .. } => {
             unreachable!("command should be handled before daemon request conversion")
@@ -301,6 +306,16 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
         }),
         Command::Captcha {
             action:
+                CaptchaAction::Datadome {
+                    max_attempts,
+                    timeout_ms,
+                },
+        } => Request::CaptchaDatadome(CaptchaDatadomeArgs {
+            max_attempts: *max_attempts,
+            timeout_ms: *timeout_ms,
+        }),
+        Command::Captcha {
+            action:
                 CaptchaAction::Inject {
                     token,
                     captcha_type,
@@ -398,6 +413,41 @@ mod tests {
 
         assert_eq!(request.cmd(), "observe");
         assert_eq!(request.args_json()["structured"], true);
+    }
+
+    #[test]
+    fn datadome_maps_to_existing_session_operation() {
+        let (_, command) = parsed_command(&["eoka", "captcha", "datadome"]);
+        let request = command_to_request(&command, false);
+        assert_eq!(request.cmd(), "captcha_datadome");
+        assert_eq!(
+            request.args_json(),
+            json!({"max_attempts":1,"timeout_ms":60000})
+        );
+        let (_, command) = parsed_command(&[
+            "eoka",
+            "captcha",
+            "datadome",
+            "--max-attempts",
+            "2",
+            "--timeout-ms",
+            "5000",
+        ]);
+        assert_eq!(
+            command_to_request(&command, false).args_json(),
+            json!({"max_attempts":2,"timeout_ms":5000})
+        );
+        for extra in [
+            ["--max-attempts", "0"],
+            ["--max-attempts", "5"],
+            ["--timeout-ms", "4999"],
+            ["--timeout-ms", "120001"],
+            ["--api-key", "unused"],
+        ] {
+            assert!(
+                Cli::try_parse_from(["eoka", "captcha", "datadome", extra[0], extra[1]]).is_err()
+            );
+        }
     }
 
     #[test]

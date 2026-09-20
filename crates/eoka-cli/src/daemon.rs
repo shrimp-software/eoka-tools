@@ -53,13 +53,13 @@ pub async fn run(session_name: &str, spec: LaunchSpec) -> anyhow::Result<()> {
         let _ = shutdown_tx.send(()).await;
     });
 
+    let mut maintenance = tokio::time::interval(Duration::from_millis(25));
+    maintenance.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
-        let accept = tokio::time::timeout(Duration::from_secs(10), listener.accept());
-
         tokio::select! {
-            result = accept => {
+            result = listener.accept() => {
                 match result {
-                    Ok(Ok((stream, _))) => {
+                    Ok((stream, _)) => {
                         last_activity = Instant::now();
                         let (mut reader, mut writer) = stream.into_split();
 
@@ -91,14 +91,15 @@ pub async fn run(session_name: &str, spec: LaunchSpec) -> anyhow::Result<()> {
                             eprintln!("[eoka] write error: {}", e);
                         }
                     }
-                    Ok(Err(e)) => eprintln!("[eoka] accept error: {}", e),
-                    Err(_) => {
-                        if last_activity.elapsed() > timeout && !handler.is_network_recording().await {
-                            eprintln!("[eoka] idle timeout ({}s), shutting down", timeout.as_secs());
-                            let _ = handler.handle("close", &serde_json::Value::Null).await;
-                            break;
-                        }
-                    }
+                    Err(e) => eprintln!("[eoka] accept error: {}", e),
+                }
+            }
+            _ = maintenance.tick() => {
+                handler.service_idle_fetch();
+                if last_activity.elapsed() > timeout && !handler.is_network_recording().await {
+                    eprintln!("[eoka] idle timeout ({}s), shutting down", timeout.as_secs());
+                    let _ = handler.handle("close", &serde_json::Value::Null).await;
+                    break;
                 }
             }
             _ = shutdown_rx.recv() => {

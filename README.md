@@ -14,6 +14,7 @@ Companion tools for [eoka](https://github.com/shrimp-software/eoka), the low-lev
 | [**eoka-tack**](crates/eoka-tack) | Tack `ToolSet` adapter generated from the Eoka protocol catalog |
 | [**eoka-runner**](crates/eoka-runner) | Declarative YAML automation runner |
 | [**eoka-captcha**](crates/captcha) | Optional Anti-Captcha integrations |
+| [**eoka-datadome**](crates/datadome) | Experimental local DataDome slider solver |
 | [**eoka-email**](crates/eoka-email) | IMAP helpers for OTP and verification-link flows |
 | [**eoka-proxy**](crates/eoka-proxy) | Shared proxy parsing and configuration |
 
@@ -25,6 +26,28 @@ Companion tools for [eoka](https://github.com/shrimp-software/eoka), the low-lev
   against the active browser session.
 - Use `eoka-runner` for versioned, repeatable YAML workflows.
 - Use the Go client and `eoka-server` when embedding browser automation in a Go service.
+
+## Local DataDome on the current CLI tab
+
+Build/install with `mise run install-cli`. Core Eoka is fetched from crates.io;
+no sibling checkout is required. On a challenged page in an existing session:
+
+```sh
+eoka --session demo captcha datadome
+eoka --session demo snapshot
+```
+
+The command uses the existing session and selected tab, brings that tab to the
+foreground, and leaves the browser open. No API key, model, separate browser or
+cookie transfer is used. Default: one attempt and a 60-second solve budget;
+`--max-attempts 1..4` and `--timeout-ms 5000..120000` are optional. Allow up to five
+additional seconds for cleanup. JSON output is available through `--json`.
+
+`challenge_cleared` is widget clearance, not login proof. `not_present` is a
+successful no-op. Blocks, bans, failed clearance and errors exit nonzero. No
+session is launched/restarted and no preceding application action is replayed.
+Use the same session/connection flags as before; an older daemon must be upgraded
+explicitly. See [the DataDome guide](crates/datadome/README.md) for details.
 
 ## MCP quick start
 

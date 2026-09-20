@@ -90,6 +90,8 @@ eoka network intercept log --clear
 
 `fetch` runs inside the browser context with active cookies and fingerprint. Network bodies are captured unredacted by default; treat exports as sensitive.
 
+Interception logs retain the latest 1,000 entries, including during long-running commands; older entries are evicted. `--respond` serves the file's exact bytes, including binary content. Response/capture files must be regular opened descriptors, capped at 8 MiB. File operations have a 500 ms deadline and a single worker; special files (including FIFOs/devices) are rejected. Failed capture/read/fulfillment or unconfirmed continuation invalidates DataDome clearance; fallback continues only never-dispatched pauses without erasing failures. Possibly dispatched resolutions are never replayed after missing acknowledgments or errors. DataDome integrity starts at command entry and includes the transferred idle worker.
+
 ## State, Sessions, And Real Chrome
 
 ```bash
@@ -113,6 +115,8 @@ In `--cdp` and `--auto-connect` mode, eoka attaches to an existing Chrome and do
 ## CAPTCHA, Media, WASM, SPA
 
 ```bash
+eoka --session demo captcha datadome
+eoka --session demo --json captcha datadome --max-attempts 2 --timeout-ms 60000
 eoka captcha solve --captcha-type recaptcha_v3 --website-url https://target.com --website-key SITE_KEY --page-action submit
 eoka captcha solve --captcha-type recaptcha_v3 --website-url https://target.com --website-key SITE_KEY --inject
 eoka captcha inject TOKEN --captcha-type recaptcha --click-after "text:Continue"
@@ -125,7 +129,14 @@ eoka spa-info
 eoka spa-navigate /dashboard
 ```
 
-CAPTCHA solving uses `ANTI_CAPTCHA_KEY` unless `--api-key` is passed.
+`captcha datadome` is local and requires an existing session/tab, with no API key.
+It foregrounds that tab and leaves it open. Default: one attempt, 60-second budget
+plus bounded cleanup. `challenge_cleared` is not login proof; `not_present` is a
+no-op. Other outcomes/errors exit nonzero. Do not automatically retry application
+actions or uncertain transport results. Use the same session/connection flags;
+an old daemon is not automatically restarted.
+
+Provider-based `captcha solve` uses `ANTI_CAPTCHA_KEY` unless `--api-key` is passed.
 
 ## Launch Flags
 
