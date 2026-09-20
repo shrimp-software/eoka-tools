@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{collections::VecDeque, path::PathBuf};
 
 use serde_json::{json, Value};
 
@@ -31,9 +31,34 @@ pub struct InterceptLogEntry {
     pub network_entry_id: Option<u64>,
 }
 
+const MAX_LOG_ENTRIES: usize = 1000;
+
+#[derive(Default)]
+pub(super) struct InterceptLog {
+    entries: VecDeque<InterceptLogEntry>,
+}
+
+impl InterceptLog {
+    pub(super) fn push(&mut self, entry: InterceptLogEntry) {
+        if self.entries.len() == MAX_LOG_ENTRIES {
+            self.entries.pop_front();
+        }
+        self.entries.push_back(entry);
+    }
+}
+
+impl IntoIterator for InterceptLog {
+    type Item = InterceptLogEntry;
+    type IntoIter = std::collections::vec_deque::IntoIter<InterceptLogEntry>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.entries.into_iter()
+    }
+}
+
 pub struct InterceptState {
     rules: Vec<InterceptRule>,
-    log: Vec<InterceptLogEntry>,
+    log: InterceptLog,
     next_id: usize,
     pub enabled: bool,
 }
@@ -42,7 +67,7 @@ impl InterceptState {
     pub fn new() -> Self {
         Self {
             rules: Vec::new(),
-            log: Vec::new(),
+            log: InterceptLog::default(),
             next_id: 1,
             enabled: false,
         }
@@ -100,14 +125,11 @@ impl InterceptState {
     }
 
     pub fn add_log(&mut self, entry: InterceptLogEntry) {
-        if self.log.len() > 1000 {
-            self.log.drain(0..500);
-        }
         self.log.push(entry);
     }
 
     pub fn clear_log(&mut self) {
-        self.log.clear();
+        self.log.entries.clear();
     }
 
     pub async fn resolve_network_links<F, Fut>(&mut self, mut resolve: F)
@@ -115,7 +137,7 @@ impl InterceptState {
         F: FnMut(Option<&str>, Option<&str>, &str, &str) -> Fut,
         Fut: std::future::Future<Output = Option<u64>>,
     {
-        for entry in &mut self.log {
+        for entry in &mut self.log.entries {
             if entry.network_entry_id.is_some() {
                 continue;
             }
@@ -149,6 +171,7 @@ impl InterceptState {
     pub fn log_json(&self) -> Value {
         let entries: Vec<Value> = self
             .log
+            .entries
             .iter()
             .map(|e| {
                 json!({
@@ -170,6 +193,69 @@ impl InterceptState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn worker_and_state_logs_retain_only_the_latest_entries() {
+        let mut pending = InterceptLog::default();
+        for id in 0..MAX_LOG_ENTRIES * 3 {
+            pending.push(InterceptLogEntry {
+                rule_id: id,
+                url: format!("https://fixture.invalid/{id}"),
+                method: "GET".into(),
+                has_body: false,
+                action: "continue".into(),
+                session_id: None,
+                network_id: None,
+                network_entry_id: None,
+            });
+            assert!(pending.entries.len() <= MAX_LOG_ENTRIES);
+        }
+        assert_eq!(pending.entries.len(), MAX_LOG_ENTRIES);
+        let mut state = InterceptState::new();
+        for entry in pending {
+            state.add_log(entry.clone());
+            state.add_log(entry);
+        }
+        let logs = state.log_json();
+        assert_eq!(logs.as_array().unwrap().len(), MAX_LOG_ENTRIES);
+        assert_eq!(logs[0]["rule_id"], MAX_LOG_ENTRIES * 5 / 2);
+        assert_eq!(
+            logs[MAX_LOG_ENTRIES - 1]["rule_id"],
+            MAX_LOG_ENTRIES * 3 - 1
+        );
+        state.clear_log();
+        assert_eq!(state.log_json(), json!([]));
+    }
+
+    #[tokio::test]
+    async fn retained_logs_can_still_resolve_network_links() {
+        let mut state = InterceptState::new();
+        state.add_log(InterceptLogEntry {
+            rule_id: 1,
+            url: "https://fixture.invalid/".into(),
+            method: "GET".into(),
+            has_body: false,
+            action: "continue".into(),
+            session_id: Some("session".into()),
+            network_id: Some("network".into()),
+            network_entry_id: None,
+        });
+        state
+            .resolve_network_links(|session, network, url, method| {
+                assert_eq!(session, Some("session"));
+                assert_eq!(network, Some("network"));
+                assert_eq!(url, "https://fixture.invalid/");
+                assert_eq!(method, "GET");
+                std::future::ready(Some(42))
+            })
+            .await;
+        assert_eq!(state.log_json()[0]["network_entry_id"], 42);
+        state
+            .resolve_network_links(|_, _, _, _| async {
+                panic!("already resolved entries must not be queried again");
+            })
+            .await;
+    }
 
     #[test]
     fn glob_matching() {

@@ -142,6 +142,14 @@ pub struct ScriptArgs {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+pub struct FrameEvalArgs {
+    #[schemars(description = "CSS selector for the iframe in the active page.")]
+    pub frame: String,
+    pub code: Option<String>,
+    pub file: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
 pub struct FetchArgs {
     pub url: String,
     pub method: Option<String>,

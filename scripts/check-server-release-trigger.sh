@@ -7,7 +7,7 @@ release_workflow=.github/workflows/release-eoka-server.yml
 grep -Fqx '      actions: write' "$publish_workflow"
 grep -Fqx '  workflow_dispatch:' "$release_workflow"
 grep -Fqx '      - "eoka-server-v*"' "$release_workflow"
-grep -Fqx '          for crate in captcha eoka-proxy eoka-protocol eoka-sdk eoka-email eoka-runner eoka-server eoka-mcp eoka-tack eoka-cli; do' "$publish_workflow"
+grep -Fqx '          for crate in captcha eoka-proxy eoka-protocol eoka-sdk eoka-email eoka-runner eoka-server eoka-mcp eoka-tack datadome eoka-cli; do' "$publish_workflow"
 
 awk '
   /if \[ "\$http_status" = "200" \]; then/ { published_status = 1 }

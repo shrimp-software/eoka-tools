@@ -1,6 +1,6 @@
 [package]
 name = "eoka-cli"
-version = "0.3.2"
+version = "0.3.3"
 edition = "2021"
 license = "MIT"
 description = "Browser automation CLI for AI agents and pentesting"
@@ -12,13 +12,14 @@ name = "eoka"
 path = "src/main.rs"
 
 [dependencies]
-eoka-protocol = { version = "0.2.1", path = "../eoka-protocol" }
+eoka-protocol = { version = "0.2.2", path = "../eoka-protocol" }
 eoka-proxy = { path = "../eoka-proxy", version = "0.2.0" }
 eoka-server = { version = "0.2.1", path = "../eoka-server" }
-eoka-sdk = { version = "0.3.1", path = "../eoka-sdk" }
-eoka-tack = { version = "0.2.2", path = "../eoka-tack" }
+eoka-sdk = { version = "0.3.2", path = "../eoka-sdk" }
+eoka-tack = { version = "0.2.3", path = "../eoka-tack" }
 captcha = { package = "eoka-captcha", version = "0.1.1", path = "../captcha" }
-eoka = "0.5.10"
+eoka-datadome = { version = "0.1.0", path = "../datadome" }
+eoka = "0.5.12"
 tack-core = { workspace = true }
 tack-runtime-quickjs = { workspace = true }
 clap = { workspace = true }
@@ -26,7 +27,14 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 base64 = "0.22"
+libc = "0.2"
 anyhow = { workspace = true }
 url = "2"
 chrono = "0.4"
 async-trait = { workspace = true }
+
+[dev-dependencies]
+futures-util = { version = "0.3", features = ["sink"] }
+tokio-tungstenite = "0.30"
+tempfile = "3"
+eoka-datadome = { version = "0.1.0", path = "../datadome", features = ["test-fixtures"] }

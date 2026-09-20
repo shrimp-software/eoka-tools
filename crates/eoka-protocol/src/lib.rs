@@ -1,9 +1,11 @@
 mod args;
+mod datadome;
 mod io;
 mod metadata;
 mod response;
 
 pub use args::*;
+pub use datadome::*;
 pub use io::{read_msg, write_msg};
 pub use metadata::{OperationCapability, OperationExposure, ToolManifestEntry};
 pub use response::{ErrorDetail, Response, ResponseMeta};
@@ -485,6 +487,17 @@ define_operations! {
         read_only: false,
         destructive: true,
         input: ScriptArgs,
+    },
+    FrameEval {
+        path: "frame_eval",
+        cmd: "frame_eval",
+        name: "frame_eval",
+        description: "Evaluate JavaScript inside an iframe",
+        capability: JavaScript,
+        exposure: DefaultAgent,
+        read_only: false,
+        destructive: false,
+        input: FrameEvalArgs,
     },
     Fetch {
         path: "fetch",
@@ -979,6 +992,17 @@ define_operations! {
         read_only: false,
         destructive: true,
     },
+    CaptchaDatadome {
+        path: "captcha.datadome",
+        cmd: "captcha_datadome",
+        name: "captcha.datadome",
+        description: "Attempt local DataDome clearance on the existing current tab; not an authentication claim",
+        capability: Captcha,
+        exposure: OptIn,
+        read_only: false,
+        destructive: true,
+        input: CaptchaDatadomeArgs,
+    },
     CaptchaInject {
         path: "captcha.inject",
         cmd: "captcha_inject",
@@ -1231,6 +1255,11 @@ mod tests {
                 }
                 "mouse_move" => serde_json::json!({"x":10.0,"y":20.0}),
                 "eval" | "exec" => serde_json::json!({"code":"return 1"}),
+                "frame_eval" => serde_json::json!({"frame":"iframe","code":"return 1"}),
+                "frame_click" => serde_json::json!({"frame":"iframe","target":"button"}),
+                "frame_fill" => {
+                    serde_json::json!({"frame":"iframe","target":"input","text":"value"})
+                }
                 "emulate" => serde_json::json!({"width":390,"height":844}),
                 "fetch" => serde_json::json!({"url":"https://example.com"}),
                 "set_cookie" => serde_json::json!({"name":"a","value":"b"}),
