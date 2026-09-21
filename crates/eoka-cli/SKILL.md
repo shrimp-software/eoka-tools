@@ -68,6 +68,14 @@ isolated world with DOM access, not the page's own JavaScript globals. Frame
 operations require an existing session and never launch, restart or replay.
 Reacquire IDs after navigation; upgrade an old daemon explicitly.
 
+## Keyboard
+
+`eoka key o` sends a native printable key; `eoka key 'Shift+o'` sends uppercase
+`O`. Literal character case is preserved. Shift uses US-keyboard ASCII mappings;
+Ctrl/Alt/Meta shortcuts do not insert text. The command targets the current focus,
+including a focused frame. Success confirms dispatch, not that a page accepted an
+edit: read-only inputs and `preventDefault()` can still prevent insertion.
+
 ## Tack
 
 `eoka tack` runs Tack TypeScript with Eoka tools registered from `eoka-protocol`.

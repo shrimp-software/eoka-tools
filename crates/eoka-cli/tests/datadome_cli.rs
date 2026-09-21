@@ -115,6 +115,87 @@ impl Drop for Cli {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "local keyboard fixture; no live authentication"]
+async fn key_types_native_text_into_top_level_and_focused_frame_inputs() {
+    let fixture = Fixture::scenario("simple").await;
+    let cli = Cli::new("key-text", None);
+    cli.ok(&["open", &fixture.url]).await;
+    let pid = std::fs::read_to_string(cli.pid_path()).unwrap();
+    cli.eval("(() => {const input=document.createElement('input');input.id='key-fixture';input.type='search';document.body.appendChild(input);window.keyEvents=[];for(const type of ['keydown','keypress','beforeinput','input','keyup'])input.addEventListener(type,event=>keyEvents.push({type,trusted:event.isTrusted}));input.focus();return true})()").await;
+    cli.ok(&["key", "o"]).await;
+    assert_eq!(
+        cli.eval("document.querySelector('#key-fixture').value")
+            .await,
+        "o"
+    );
+    let events = cli.eval("keyEvents").await;
+    let events = events.as_array().unwrap();
+    assert_eq!(
+        events
+            .iter()
+            .map(|event| event["type"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["keydown", "keypress", "beforeinput", "input", "keyup"]
+    );
+    assert!(events.iter().all(|event| event["trusted"] == true));
+    cli.ok(&["key-down", "Shift"]).await;
+    cli.ok(&["key", "a"]).await;
+    cli.ok(&["key-up", "Shift"]).await;
+    cli.ok(&["key", "@"]).await;
+    assert_eq!(
+        cli.eval("document.querySelector('#key-fixture').value")
+            .await,
+        "oA@"
+    );
+    cli.ok(&[
+        "key",
+        if cfg!(target_os = "macos") {
+            "Cmd+A"
+        } else {
+            "Ctrl+A"
+        },
+    ])
+    .await;
+    cli.ok(&["key", "Backspace"]).await;
+    assert_eq!(
+        cli.eval("document.querySelector('#key-fixture').value")
+            .await,
+        ""
+    );
+    let frames = cli.ok(&["frames"]).await;
+    let frame = frames
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|frame| frame["url"].as_str().unwrap().contains("auth.test"))
+        .unwrap();
+    let frame_id = format!("id:{}", frame["id"].as_str().unwrap());
+    cli.ok(&["frame-eval", &frame_id, "(() => {const input=document.createElement('input');input.id='native-input';document.body.appendChild(input);input.addEventListener('input',event=>input.dataset.trusted=String(event.isTrusted));input.focus();return true})()"]).await;
+    cli.ok(&["key", "o"]).await;
+    assert_eq!(
+        cli.ok(&[
+            "frame-eval",
+            &frame_id,
+            "document.querySelector('#native-input').value"
+        ])
+        .await,
+        "\"o\""
+    );
+    assert_eq!(
+        cli.ok(&[
+            "frame-eval",
+            &frame_id,
+            "document.querySelector('#native-input').dataset.trusted"
+        ])
+        .await,
+        "\"true\""
+    );
+    assert_eq!(std::fs::read_to_string(cli.pid_path()).unwrap(), pid);
+    assert_eq!(cli.ok(&["info"]).await["url"], fixture.url);
+    cli.ok(&["close"]).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "local Chrome OOPIF fixture; no live authentication"]
 async fn frame_eval_preserves_the_embedded_context_and_selected_tab() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
