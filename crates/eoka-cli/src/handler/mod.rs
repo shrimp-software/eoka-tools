@@ -207,6 +207,7 @@ impl Handler {
             "screenshot" => self.cmd_screenshot(args).await,
             "emulate" => self.cmd_emulate(args).await,
             "info" => self.cmd_info().await,
+            "frames" => self.cmd_frames().await,
             "text" => self.cmd_text().await,
             "find" => self.cmd_find(args).await,
             "click" => self.cmd_click(args).await,

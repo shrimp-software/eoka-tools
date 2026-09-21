@@ -58,6 +58,22 @@ claude mcp add eoka -- eoka-mcp
 
 The MCP server communicates over standard input and output. It supports MCP `2026-07-28` through stateless `server/discover` requests. It creates and closes its browser through the shared eoka-server runtime for the lifetime of the MCP connection.
 
+## Frame evaluation
+
+```sh
+eoka --session demo frames
+eoka --session demo frame-eval 'iframe#login' 'document.title'
+eoka --session demo frame-eval 'id:FRAME_ID_FROM_FRAMES' 'document.title'
+```
+
+Frame operations require an existing session and selected tab. CSS selectors must
+match exactly one frame in the top document; use `id:` for explicit or nested
+selection. Bare URLs and numeric indices are not accepted. Cross-origin/OOPIF
+execution uses CDP isolated worlds: DOM access works, but page-owned JavaScript
+globals are unavailable. Reacquire frame IDs after navigation. These commands do
+not open the iframe in a new tab, restart the browser, or replay uncertain requests.
+Upgrade an older running daemon explicitly to use the corrected evaluation path.
+
 ## Held input
 
 The CLI, MCP server, Tack tools, Rust SDK, and JSON-RPC server support `mouse_down`, `mouse_move`, `mouse_up`, `key_down`, `key_up`, and `release_all_inputs`. Pointer coordinates are viewport CSS pixels and mouse buttons are `left`, `middle`, `right`, `back`, or `forward`. Always release held input explicitly when a drag or chord is complete; tab and session shutdown also attempt cleanup.

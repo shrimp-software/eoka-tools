@@ -54,16 +54,37 @@ impl Handler {
         Ok(Response::ok_text("Executed successfully"))
     }
 
+    pub(super) async fn cmd_frames(&mut self) -> Result<Response, String> {
+        let page = self.require_tab()?.page.clone();
+        let frames = page.frames().await.map_err(|error| error.to_string())?;
+        Ok(Response::ok(json!(frames
+            .into_iter()
+            .map(|frame| { json!({"id":frame.id,"url":frame.url,"name":frame.name}) })
+            .collect::<Vec<_>>())))
+    }
+
     pub(super) async fn cmd_frame_eval(&mut self, args: &Value) -> Result<Response, String> {
         let code = resolve_js(args)?;
         let frame = args["frame"]
             .as_str()
-            .ok_or_else(|| "Missing frame selector".to_string())?;
+            .ok_or_else(|| "Missing frame selector or id:<frame-id>".to_string())?;
+        if frame.is_empty()
+            || frame.bytes().all(|byte| byte.is_ascii_digit())
+            || frame.starts_with("http://")
+            || frame.starts_with("https://")
+        {
+            return Err("Use a CSS frame selector or id:<frame-id> from frames; bare URLs and indices are not supported".into());
+        }
         let page = self.require_tab()?.page.clone();
-        let value: Value = page
-            .evaluate_in_frame(frame, &code)
-            .await
-            .map_err(|e| e.to_string())?;
+        let value: Value = if let Some(id) = frame.strip_prefix("id:") {
+            if id.is_empty() {
+                return Err("Missing frame ID after id:".into());
+            }
+            page.evaluate_in_frame_id(id, &code).await
+        } else {
+            page.evaluate_in_frame(frame, &code).await
+        }
+        .map_err(|e| e.to_string())?;
         serde_json::to_string(&value)
             .map(Response::ok_text)
             .map_err(|e| e.to_string())

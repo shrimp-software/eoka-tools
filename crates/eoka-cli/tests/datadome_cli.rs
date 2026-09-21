@@ -115,6 +115,125 @@ impl Drop for Cli {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "local Chrome OOPIF fixture; no live authentication"]
+async fn frame_eval_preserves_the_embedded_context_and_selected_tab() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+    let browser = eoka::Browser::launch_with(|config| {
+        config.extra_args.extend([
+            format!("--remote-debugging-port={port}"),
+            "--host-resolver-rules=MAP * 127.0.0.1".into(),
+            "--no-proxy-server".into(),
+            "--disable-features=AutomationControlled,EnableAutomation".into(),
+            "--site-per-process".into(),
+        ])
+    })
+    .await
+    .unwrap();
+    let fixture = Fixture::scenario("simple").await;
+    let page = browser.new_page(&fixture.url).await.unwrap();
+    let other = browser.new_page("about:blank").await.unwrap();
+    other.execute_sync("window.untouched='yes'").await.unwrap();
+    let cli = Cli::new("frame-eval", Some(port));
+    cli.ok(&["tab", "attach", page.target_id()]).await;
+    let pid = std::fs::read_to_string(cli.pid_path()).unwrap();
+    let count = browser.tabs().await.unwrap().len();
+    let targets: Value = page
+        .session()
+        .transport()
+        .send("Target.getTargets", &serde_json::json!({}))
+        .await
+        .unwrap();
+    assert!(
+        targets["targetInfos"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|target| target["type"] == "iframe")
+            .count()
+            >= 2
+    );
+    let frames = cli.ok(&["frames"]).await;
+    let frames = frames.as_array().unwrap();
+    let auth = frames
+        .iter()
+        .find(|frame| frame["url"].as_str().unwrap().contains("auth.test"))
+        .unwrap();
+    let child = frames
+        .iter()
+        .find(|frame| frame["url"].as_str().unwrap().contains("/captcha/"))
+        .unwrap();
+    let auth_id = format!("id:{}", auth["id"].as_str().unwrap());
+    let child_id = format!("id:{}", child["id"].as_str().unwrap());
+    let result = cli.ok(&["frame-eval", "iframe", r#"(() => {const input=document.createElement('input');input.id='fixture-email';input.value='fixture@example.invalid';document.body.appendChild(input);return {host:location.hostname,email:input.value,embedded:window!==window.top}})()"#]).await;
+    let result: Value = serde_json::from_str(result.as_str().unwrap()).unwrap();
+    assert_eq!(
+        result,
+        serde_json::json!({"host":"auth.test","email":"fixture@example.invalid","embedded":true})
+    );
+    assert_eq!(
+        cli.ok(&[
+            "frame-eval",
+            &auth_id,
+            "document.querySelector('#fixture-email').value"
+        ])
+        .await,
+        "\"fixture@example.invalid\""
+    );
+    assert_eq!(
+        cli.ok(&[
+            "frame-eval",
+            &child_id,
+            "document.querySelector('#fixture-email')"
+        ])
+        .await,
+        "null"
+    );
+    assert_eq!(
+        cli.eval("document.querySelector('#fixture-email')===null")
+            .await,
+        true
+    );
+    let other_id = format!("id:{}", other.frames().await.unwrap()[0].id);
+    for invalid in [
+        "0",
+        "#missing",
+        "id:",
+        "id:missing",
+        &other_id,
+        &fixture.url,
+    ] {
+        assert_eq!(
+            cli.run(&["frame-eval", invalid, "window.untouched='changed'"])
+                .await["ok"],
+            false
+        );
+    }
+    assert_eq!(
+        other
+            .evaluate_sync::<String>("window.untouched")
+            .await
+            .unwrap(),
+        "yes"
+    );
+    assert_eq!(browser.tabs().await.unwrap().len(), count);
+    assert_eq!(std::fs::read_to_string(cli.pid_path()).unwrap(), pid);
+    assert_eq!(cli.ok(&["info"]).await["url"], fixture.url);
+    page.execute_sync("document.querySelector('iframe').remove()")
+        .await
+        .unwrap();
+    assert_eq!(
+        cli.run(&["frame-eval", &child_id, "1+1"]).await["ok"],
+        false
+    );
+    assert_eq!(cli.ok(&["info"]).await["url"], fixture.url);
+    cli.ok(&["close"]).await;
+    other.execute_sync("window.stillAlive=true").await.unwrap();
+    browser.close().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "local Chrome CLI/daemon fixture, not live DataDome acceptance"]
 async fn datadome_cli_preserves_owned_session_and_reports_outcomes() {
     let cli = Cli::new("owned", None);

@@ -143,7 +143,9 @@ pub struct ScriptArgs {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
 pub struct FrameEvalArgs {
-    #[schemars(description = "CSS selector for the iframe in the active page.")]
+    #[schemars(
+        description = "CSS selector matching exactly one iframe/frame in the top document, or id:<frame-id> from frames for explicit/nested selection. Bare URLs and indices are not supported. Evaluation uses an isolated world, not page-owned JavaScript globals."
+    )]
     pub frame: String,
     pub code: Option<String>,
     pub file: Option<String>,
