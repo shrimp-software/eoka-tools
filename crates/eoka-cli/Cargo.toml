@@ -1,6 +1,6 @@
 [package]
 name = "eoka-cli"
-version = "0.3.4"
+version = "0.3.5"
 edition = "2021"
 license = "MIT"
 description = "Browser automation CLI for AI agents and pentesting"
@@ -19,7 +19,7 @@ eoka-sdk = { version = "0.3.3", path = "../eoka-sdk" }
 eoka-tack = { version = "0.2.4", path = "../eoka-tack" }
 captcha = { package = "eoka-captcha", version = "0.1.1", path = "../captcha" }
 eoka-datadome = { version = "0.1.0", path = "../datadome" }
-eoka = "0.5.13"
+eoka = "0.5.14"
 tack-core = { workspace = true }
 tack-runtime-quickjs = { workspace = true }
 clap = { workspace = true }
