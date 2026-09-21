@@ -235,8 +235,13 @@ pub enum Command {
         #[arg(long)]
         no_await: bool,
     },
-    #[command(about = "Execute JavaScript inside an iframe")]
+    #[command(about = "List frame IDs, URLs and names in the active page")]
+    Frames,
+    #[command(about = "Execute JavaScript in an isolated frame world")]
     FrameEval {
+        #[arg(
+            help = "CSS selector matching one frame, or id:<frame-id> from frames; no bare URL/index"
+        )]
         frame: String,
         code: Option<String>,
         #[arg(short, long)]

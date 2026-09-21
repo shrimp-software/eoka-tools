@@ -488,11 +488,21 @@ define_operations! {
         destructive: true,
         input: ScriptArgs,
     },
+    Frames {
+        path: "frames",
+        cmd: "frames",
+        name: "frames",
+        description: "List the active page's frame IDs, URLs and names, including nested OOPIFs",
+        capability: Observation,
+        exposure: DefaultAgent,
+        read_only: true,
+        destructive: false,
+    },
     FrameEval {
         path: "frame_eval",
         cmd: "frame_eval",
         name: "frame_eval",
-        description: "Evaluate JavaScript inside an iframe",
+        description: "Evaluate JavaScript in an isolated frame world by CSS selector or id:<frame-id>",
         capability: JavaScript,
         exposure: DefaultAgent,
         read_only: false,
@@ -1255,7 +1265,7 @@ mod tests {
                 }
                 "mouse_move" => serde_json::json!({"x":10.0,"y":20.0}),
                 "eval" | "exec" => serde_json::json!({"code":"return 1"}),
-                "frame_eval" => serde_json::json!({"frame":"iframe","code":"return 1"}),
+                "frame_eval" => serde_json::json!({"frame":"iframe","code":"1+1"}),
                 "frame_click" => serde_json::json!({"frame":"iframe","target":"button"}),
                 "frame_fill" => {
                     serde_json::json!({"frame":"iframe","target":"input","text":"value"})

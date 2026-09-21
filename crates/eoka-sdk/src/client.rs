@@ -7,10 +7,10 @@ use crate::session;
 use eoka_protocol::{
     read_msg, write_msg, CaptchaDatadomeArgs, CaptchaInjectArgs, ClearFlagArgs, CloneFromArgs,
     ConsoleArgs, DeleteCookieArgs, DomainArgs, EmulateArgs, FakeCameraArgs, FetchArgs, FillArgs,
-    HeadersArgs, IdArgs, InterceptAddArgs, KeyArgs, LoadStateArgs, ModeArgs, MouseButtonArgs,
-    MouseMoveArgs, NetworkExportArgs, NetworkLogArgs, NetworkRecordStartArgs, NetworkShowArgs,
-    NetworkWaitArgs, ObserveArgs, OpenArgs, PathArgs, PathStringArgs, Request, Response,
-    ScreenshotArgs, ScriptArgs, SelectArgs, SetCookieArgs, SetStorageArgs, SnapshotArgs,
+    FrameEvalArgs, HeadersArgs, IdArgs, InterceptAddArgs, KeyArgs, LoadStateArgs, ModeArgs,
+    MouseButtonArgs, MouseMoveArgs, NetworkExportArgs, NetworkLogArgs, NetworkRecordStartArgs,
+    NetworkShowArgs, NetworkWaitArgs, ObserveArgs, OpenArgs, PathArgs, PathStringArgs, Request,
+    Response, ScreenshotArgs, ScriptArgs, SelectArgs, SetCookieArgs, SetStorageArgs, SnapshotArgs,
     StorageArgs, TabIdArgs, TabNewArgs, TargetArgs, TextArgs, WaitArgs, WasmFindArgs, WasmReadArgs,
     WasmWriteArgs,
 };
@@ -75,6 +75,14 @@ impl EokaClient {
 
     pub async fn info(&self) -> anyhow::Result<Response> {
         self.call(Request::Info).await
+    }
+
+    pub async fn frames(&self) -> anyhow::Result<Response> {
+        self.call(Request::Frames).await
+    }
+
+    pub async fn frame_eval(&self, args: FrameEvalArgs) -> anyhow::Result<Response> {
+        self.call(Request::FrameEval(args)).await
     }
 
     pub async fn text(&self) -> anyhow::Result<Response> {
@@ -348,6 +356,10 @@ pub async fn send_command(
     if let Request::CaptchaDatadome(args) = request {
         return Ok(send_datadome(session_name, args).await);
     }
+    if matches!(request, Request::Frames | Request::FrameEval(_)) {
+        return Ok(send_existing_session(session_name, &request, "frame_transport_error",
+            "This daemon does not support frame operations. Upgrade the daemon explicitly; the existing browser was not restarted.").await);
+    }
     let response = send_command_once(session_name, request.clone(), &spec).await?;
     if should_restart_headed_daemon(&response, &spec) {
         let _ = kill_daemon(session_name);
@@ -365,17 +377,27 @@ async fn send_datadome(session_name: &str, args: CaptchaDatadomeArgs) -> Respons
     if let Err(message) = args.validate() {
         return non_retryable_error("invalid_input", message);
     }
+    send_existing_session(session_name, &Request::CaptchaDatadome(args), "datadome_transport_error",
+        "This daemon does not support DataDome. Upgrade the daemon explicitly; the existing browser was not restarted.").await
+}
+
+async fn send_existing_session(
+    session_name: &str,
+    request: &Request,
+    transport_error: &str,
+    unsupported_message: &str,
+) -> Response {
     let Ok(stream) = UnixStream::connect(session::socket_path(session_name)).await else {
         return non_retryable_error(
             "session_unavailable",
             "Existing session unavailable; open the intended page first. No browser was launched.",
         );
     };
-    match exchange_request(stream, &Request::CaptchaDatadome(args)).await {
-        Ok(response) if response.error.as_deref().is_some_and(|error| error.contains("captcha_datadome") && (error.contains("unknown variant") || error.contains("unknown eoka protocol command"))) =>
-            non_retryable_error("unsupported_operation", "This daemon does not support DataDome. Upgrade the daemon explicitly; the existing browser was not restarted."),
+    match exchange_request(stream, request).await {
+        Ok(response) if response.error.as_deref().is_some_and(|error| error.contains(request.cmd()) && (error.contains("unknown variant") || error.contains("unknown eoka protocol command"))) =>
+            non_retryable_error("unsupported_operation", unsupported_message),
         Ok(response) => response,
-        Err(_) => non_retryable_error("datadome_transport_error", "Session transport failed; the request may have executed. Inspect the existing page before retrying. No replay was attempted."),
+        Err(_) => non_retryable_error(transport_error, "Session transport failed; the request may have executed. Inspect the existing page before retrying. No replay was attempted."),
     }
 }
 
@@ -598,7 +620,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn datadome_missing_session_never_launches_a_daemon() {
+    async fn existing_session_requests_never_launch_a_daemon() {
         let name = format!("datadome-missing-{}", std::process::id());
         let response = test_client(&name)
             .captcha_datadome(CaptchaDatadomeArgs::default())
@@ -608,6 +630,19 @@ mod tests {
         assert_eq!(response.error_detail.unwrap().code, "session_unavailable");
         assert!(!session::socket_path(&name).exists());
         assert!(!session::pid_path(&name).exists());
+        for request in [
+            Request::Frames,
+            Request::FrameEval(FrameEvalArgs {
+                frame: "id:fixture-frame".into(),
+                code: Some("1+1".into()),
+                file: None,
+            }),
+        ] {
+            let response = test_client(&name).call(request).await.unwrap();
+            assert_eq!(response.error_detail.unwrap().code, "session_unavailable");
+            assert!(!session::socket_path(&name).exists());
+            assert!(!session::pid_path(&name).exists());
+        }
         let invalid = test_client(&name)
             .captcha_datadome(CaptchaDatadomeArgs {
                 max_attempts: 0,
@@ -619,60 +654,72 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn datadome_transport_failure_and_old_daemon_are_not_replayed() {
-        for (index, error) in [
-            None,
-            Some("channel is empty and sending half is closed"),
-            Some("Invalid command request: unknown variant captcha_datadome"),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            let name = format!("datadome-transport-{}-{index}", std::process::id());
-            session::ensure_runtime_dir().unwrap();
-            let sock = session::socket_path(&name);
-            let listener = UnixListener::bind(&sock).unwrap();
-            let server = tokio::spawn(async move {
-                let (stream, _) = listener.accept().await.unwrap();
-                let (mut reader, mut writer) = stream.into_split();
-                let request: Request = read_msg(&mut reader).await.unwrap();
-                assert!(matches!(request, Request::CaptchaDatadome(_)));
-                if let Some(message) = error {
-                    write_msg(&mut writer, &Response::err(message))
-                        .await
-                        .unwrap();
+    async fn existing_session_transport_failure_and_old_daemon_are_not_replayed() {
+        for request in [
+            Request::CaptchaDatadome(CaptchaDatadomeArgs::default()),
+            Request::Frames,
+            Request::FrameEval(FrameEvalArgs {
+                frame: "id:fixture-frame".into(),
+                code: Some("1+1".into()),
+                file: None,
+            }),
+        ] {
+            let cmd = request.cmd();
+            for (index, error) in [
+                None,
+                Some("channel is empty and sending half is closed".to_string()),
+                Some(format!("Invalid command request: unknown variant {cmd}")),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let name = format!("{cmd}-transport-{}-{index}", std::process::id());
+                session::ensure_runtime_dir().unwrap();
+                let sock = session::socket_path(&name);
+                let listener = UnixListener::bind(&sock).unwrap();
+                let server = tokio::spawn(async move {
+                    let (stream, _) = listener.accept().await.unwrap();
+                    let (mut reader, mut writer) = stream.into_split();
+                    let request: Request = read_msg(&mut reader).await.unwrap();
+                    assert_eq!(request.cmd(), cmd);
+                    if let Some(message) = error {
+                        write_msg(&mut writer, &Response::err(message))
+                            .await
+                            .unwrap();
+                    }
+                    drop(reader);
+                    drop(writer);
+                    assert!(
+                        tokio::time::timeout(Duration::from_millis(150), listener.accept())
+                            .await
+                            .is_err()
+                    );
+                });
+                let mut client = test_client(&name);
+                if let LaunchSpec::Launch { headless, .. } = &mut client.spec {
+                    *headless = false;
                 }
-                drop(reader);
-                drop(writer);
-                assert!(
-                    tokio::time::timeout(Duration::from_millis(150), listener.accept())
-                        .await
-                        .is_err()
-                );
-            });
-            let mut client = test_client(&name);
-            if let LaunchSpec::Launch { headless, .. } = &mut client.spec {
-                *headless = false;
+                let response = client.call(request.clone()).await.unwrap();
+                assert!(!response.ok);
+                if index == 0 {
+                    assert_eq!(
+                        response.error_detail.as_ref().unwrap().code,
+                        if cmd == "captcha_datadome" {
+                            "datadome_transport_error"
+                        } else {
+                            "frame_transport_error"
+                        }
+                    );
+                }
+                if index == 2 {
+                    assert_eq!(
+                        response.error_detail.as_ref().unwrap().code,
+                        "unsupported_operation"
+                    );
+                }
+                server.await.unwrap();
+                std::fs::remove_file(sock).unwrap();
             }
-            let response = client
-                .captcha_datadome(CaptchaDatadomeArgs::default())
-                .await
-                .unwrap();
-            assert!(!response.ok);
-            if index == 0 {
-                assert_eq!(
-                    response.error_detail.as_ref().unwrap().code,
-                    "datadome_transport_error"
-                );
-            }
-            if index == 2 {
-                assert_eq!(
-                    response.error_detail.as_ref().unwrap().code,
-                    "unsupported_operation"
-                );
-            }
-            server.await.unwrap();
-            std::fs::remove_file(sock).unwrap();
         }
     }
 

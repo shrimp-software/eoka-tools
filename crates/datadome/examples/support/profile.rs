@@ -125,7 +125,7 @@ pub async fn enter(page: &eoka::Page, profile: &str) -> Result<(), Box<dyn std::
     if !initial {
         return Err("not the initial profile-entry stage".into());
     }
-    super::trusted_click(page, Some(&auth.id), "input[name=email]", None).await?;
+    super::click_visible(page, Some(&auth.id), "input[name=email]", None).await?;
     let focused: bool = page
         .evaluate_in_frame_id(
             &auth.id,
@@ -170,6 +170,6 @@ pub async fn enter(page: &eoka::Page, profile: &str) -> Result<(), Box<dyn std::
     if !initial {
         return Err("profile-entry stage changed before Continue".into());
     }
-    super::trusted_click(page, Some(&auth.id), "button", Some("Continue")).await?;
+    super::click_visible(page, Some(&auth.id), "button", Some("Continue")).await?;
     Ok(())
 }

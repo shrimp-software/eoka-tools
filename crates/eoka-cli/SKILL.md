@@ -50,6 +50,9 @@ Targets accepted by action commands:
 eoka eval "document.title"
 eoka eval -f ./script.js --max-size 4096
 eoka exec "localStorage.clear()"
+eoka frames
+eoka frame-eval 'iframe#login' 'document.title'
+eoka frame-eval 'id:FRAME_ID_FROM_FRAMES' 'document.title'
 eoka wait --text "Welcome"
 eoka wait --url "/dashboard"
 eoka tab list
@@ -57,6 +60,13 @@ eoka tab new https://example.com
 ```
 
 Use `--no-return` or `--max-size` for JavaScript that may produce large results.
+
+Frame evaluation stays in the selected page, including cross-origin OOPIFs.
+Use a CSS selector matching one frame in the top document, or `id:` from `frames`
+for nested frames. Bare URLs and indices are invalid. Frame code runs in an
+isolated world with DOM access, not the page's own JavaScript globals. Frame
+operations require an existing session and never launch, restart or replay.
+Reacquire IDs after navigation; upgrade an old daemon explicitly.
 
 ## Tack
 

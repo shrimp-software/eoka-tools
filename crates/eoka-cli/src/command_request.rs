@@ -150,6 +150,7 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
             max_size: None,
             no_await: *no_await,
         }),
+        Command::Frames => Request::Frames,
         Command::FrameEval { frame, code, file } => Request::FrameEval(FrameEvalArgs {
             frame: frame.clone(),
             code: code.clone(),
@@ -566,6 +567,8 @@ mod tests {
             &["eoka", "screenshot"],
             &["eoka", "emulate"],
             &["eoka", "info"],
+            &["eoka", "frames"],
+            &["eoka", "frame-eval", "id:fixture-frame", "1+1"],
             &["eoka", "text"],
             &["eoka", "find", "Submit"],
             &["eoka", "click", "Submit"],

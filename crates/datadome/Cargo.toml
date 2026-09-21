@@ -1,6 +1,6 @@
 [package]
 name = "eoka-datadome"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "MIT"
 description = "Local DataDome slider captcha solver for the eoka ecosystem"
@@ -10,7 +10,7 @@ repository = "https://github.com/shrimp-software/eoka-tools"
 test-fixtures = ["tokio/net", "tokio/io-util"]
 
 [dependencies]
-eoka = "0.5.12"
+eoka = "0.5.13"
 image = { version = "0.25", default-features = false, features = ["png"] }
 base64 = "0.23"
 serde = { version = "1", features = ["derive"] }

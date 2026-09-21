@@ -1,6 +1,6 @@
 [package]
 name = "eoka-tack"
-version = "0.2.3"
+version = "0.2.4"
 edition = "2021"
 license = "MIT"
 description = "Tack tool catalog adapter for eoka browser automation"
@@ -12,8 +12,8 @@ authors = ["cbxss"]
 
 [dependencies]
 async-trait = { workspace = true }
-eoka-protocol = { path = "../eoka-protocol", version = "0.2.2" }
-eoka-sdk = { path = "../eoka-sdk", version = "0.3.2" }
+eoka-protocol = { path = "../eoka-protocol", version = "0.2.3" }
+eoka-sdk = { path = "../eoka-sdk", version = "0.3.3" }
 schemars = { workspace = true }
 serde_json = { workspace = true }
 tack-core = { workspace = true }
