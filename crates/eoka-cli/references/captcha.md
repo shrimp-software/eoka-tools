@@ -8,7 +8,7 @@ Install from crates.io on any supported platform.
 cargo install eoka-cli
 ```
 
-Ensure `$HOME/.local/bin` is on `PATH`.
+Ensure Cargo's binary directory (normally `$HOME/.cargo/bin`) is on `PATH`.
 
 ## Use
 

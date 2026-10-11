@@ -49,6 +49,32 @@ session is launched/restarted and no preceding application action is replayed.
 Use the same session/connection flags as before; an older daemon must be upgraded
 explicitly. See [the DataDome guide](crates/datadome/README.md) for details.
 
+## Page evidence and download diagnostics
+
+`observe` now includes the selected page URL/title, document readiness, visible
+headings and status/alert messages, and up to 2,000 characters of visible text.
+Document readiness does not establish that an application has finished loading.
+Context is best effort, limited to the top document, and excludes hidden text and
+form values; a context collection failure leaves element observation usable.
+
+`--agent` and `observe --structured` retain `text` and `elements` and add `page`
+(`null` when unavailable). Unstructured JSON retains string-valued `data`. MCP
+uses the same collector and honors `structured`. Control indices retain their
+existing meaning; re-observe or take a fresh snapshot after page changes.
+
+Download failures can include `error_detail.context`: optional `page`,
+`download_id`, and `action_status` (`not_attempted` or `may_have_executed`). Missing,
+hidden, disabled and stale controls are rejected before clicking. Resolution
+failures retain their own error code instead of becoming missing-target errors.
+No native start includes page evidence without asserting that the link expired.
+Download diagnostic URLs omit credentials, query strings and fragments.
+
+Normal terminal errors show the code, page evidence, known job state/paths and a
+follow-up command. JSON retains its envelope and existing job fields. A lost wait
+response retains the known job ID without claiming a current state. Wait timeouts
+leave jobs running; inspect or wait for the same job instead of starting again.
+Old daemons need an explicit restart to provide the new evidence.
+
 ## Browser downloads and bounded fetch
 
 Use an existing Eoka-owned session to save files with Chrome's cookies, proxy and

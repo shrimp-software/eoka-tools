@@ -15,13 +15,12 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use eoka_protocol::{input_schema_for_cmd, operation_by_cmd};
-use eoka_server::{annotate, captcha, observe, snapshot, spa, InteractiveElement};
+use eoka_server::{annotate, captcha, observe, snapshot, spa};
 
 use error::{internal, invalid, is_transport_error_msg, AgentError};
 use helpers::{
     auto_observe_if_needed, click_with_retry, element_list, ensure_console_capture,
     fill_with_retry, resolve_js, resolve_target, text_ok, title_nonblocking, wait_for_stable,
-    VALID_OBSERVE_FILTERS,
 };
 use state::BrowserState;
 use types::*;
@@ -164,7 +163,7 @@ impl EokaServer {
             .as_mut()
             .ok_or_else(|| ErrorData::from(AgentError::NoBrowser))?;
         if self.downloads.is_active() {
-            return download_tool_response(eoka_protocol::Response::err_detail(
+            return protocol_tool_response(eoka_protocol::Response::err_detail(
                 eoka_server::downloads::failure("download_busy", "One download is already active"),
             ));
         }
@@ -174,10 +173,23 @@ impl EokaServer {
             .current_tab_mut()
             .ok_or_else(|| ErrorData::from(AgentError::NoTab))?;
         let selector = if let Some(target) = req.0.click.as_deref() {
-            auto_observe_if_needed(tab, target, viewport).await?;
-            let resolved = resolve_target(tab, target).await?;
-            tab.invalidate();
-            Some(resolved.selector)
+            match eoka_server::downloads::resolve_click(
+                &tab.page,
+                &mut tab.elements,
+                &tab.snapshot_refs,
+                viewport,
+                target,
+            )
+            .await
+            {
+                Ok(selector) => {
+                    tab.invalidate();
+                    Some(selector)
+                }
+                Err(error) => {
+                    return protocol_tool_response(eoka_server::downloads::rejected(error))
+                }
+            }
         } else {
             None
         };
@@ -185,12 +197,12 @@ impl EokaServer {
             .downloads
             .start(&browser, &tab.page, req.0, selector)
             .await;
-        download_tool_response(eoka_server::downloads::start_response(result))
+        protocol_tool_response(eoka_server::downloads::start_response(result))
     }
 
     #[tool]
     async fn download_list(&self) -> Result<CallToolResult, ErrorData> {
-        download_tool_response(eoka_protocol::Response::ok(
+        protocol_tool_response(eoka_protocol::Response::ok(
             serde_json::to_value(self.downloads.list()).map_err(internal)?,
         ))
     }
@@ -200,7 +212,7 @@ impl EokaServer {
         &self,
         req: Parameters<DownloadIdRequest>,
     ) -> Result<CallToolResult, ErrorData> {
-        download_tool_response(match self.downloads.get(&req.0.id) {
+        protocol_tool_response(match self.downloads.get(&req.0.id) {
             Ok(job) => eoka_server::downloads::record_response(job.snapshot()),
             Err(error) => eoka_protocol::Response::err_detail(error),
         })
@@ -211,7 +223,7 @@ impl EokaServer {
         &self,
         req: Parameters<DownloadIdRequest>,
     ) -> Result<CallToolResult, ErrorData> {
-        download_tool_response(match self.downloads.get(&req.0.id) {
+        protocol_tool_response(match self.downloads.get(&req.0.id) {
             Ok(job) => eoka_server::downloads::record_response(job.cancel()),
             Err(error) => eoka_protocol::Response::err_detail(error),
         })
@@ -222,7 +234,7 @@ impl EokaServer {
         &self,
         req: Parameters<DownloadWaitRequest>,
     ) -> Result<CallToolResult, ErrorData> {
-        download_tool_response(self.downloads.wait(&req.0.id, req.0.timeout_ms).await)
+        protocol_tool_response(self.downloads.wait(&req.0.id, req.0.timeout_ms).await)
     }
 
     #[tool(description = "List all open browser tabs. Returns tab IDs, titles, and URLs.")]
@@ -364,16 +376,7 @@ impl EokaServer {
         description = "List interactive elements. Optional filter: 'inputs' (form elements), 'buttons' (clickables), 'all'. Optional max limit. Use live targeting (text:, css:) to skip observe."
     )]
     async fn observe(&self, req: Parameters<ObserveRequest>) -> Result<CallToolResult, ErrorData> {
-        if let Some(ref f) = req.0.filter {
-            if !VALID_OBSERVE_FILTERS.contains(&f.as_str()) {
-                return Err(invalid(format!(
-                    "Unknown filter '{}'. Valid: {}",
-                    f,
-                    VALID_OBSERVE_FILTERS.join(", ")
-                )));
-            }
-        }
-
+        observe::validate_filter(req.0.filter.as_deref()).map_err(invalid)?;
         let mut guard = self.state.lock().await;
         let state = guard
             .as_mut()
@@ -382,37 +385,18 @@ impl EokaServer {
         let tab = state
             .current_tab_mut()
             .ok_or_else(|| ErrorData::from(AgentError::NoTab))?;
-
-        tab.elements = match observe::observe(&tab.page, viewport_only).await {
-            Ok(e) => e,
-            Err(e) => {
+        let (elements, data) = match observe::inspect(&tab.page, viewport_only, &req.0).await {
+            Ok(result) => result,
+            Err(error) => {
                 drop(guard);
-                return Err(self.check_transport_err(e).await);
+                return Err(self.check_transport_err(error).await);
             }
         };
-
-        let filter_fn: fn(&&InteractiveElement) -> bool = match req.0.filter.as_deref() {
-            Some("inputs") => |e| {
-                matches!(
-                    e.tag.as_str(),
-                    "input" | "select" | "textarea" | "contenteditable"
-                )
-            },
-            Some("buttons") => {
-                |e| matches!(e.tag.as_str(), "button" | "a") || e.role.as_deref() == Some("button")
-            }
-            _ => |_| true,
-        };
-        let max = req.0.max.unwrap_or(usize::MAX);
-        let mut list = String::new();
-        for el in tab.elements.iter().filter(filter_fn).take(max) {
-            let _ = writeln!(list, "{}", el);
+        tab.elements = elements;
+        match data {
+            Value::String(text) => text_ok(text),
+            data => protocol_tool_response(eoka_protocol::Response::ok(data)),
         }
-        text_ok(if list.is_empty() {
-            "No interactive elements found.".into()
-        } else {
-            list
-        })
     }
 
     #[tool(
@@ -913,7 +897,7 @@ impl EokaServer {
             .ok_or_else(|| ErrorData::from(AgentError::NoTab))?;
 
         let response = eoka_server::browser_fetch::fetch(&tab.page, req.0).await;
-        download_tool_response(response)
+        protocol_tool_response(response)
     }
 
     #[tool(
@@ -1839,7 +1823,7 @@ pub async fn run_server() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn download_tool_response(response: eoka_protocol::Response) -> Result<CallToolResult, ErrorData> {
+fn protocol_tool_response(response: eoka_protocol::Response) -> Result<CallToolResult, ErrorData> {
     let ok = response.ok;
     let text = serde_json::to_string(&response).map_err(internal)?;
     Ok(if ok {
@@ -1852,6 +1836,64 @@ fn download_tool_response(response: eoka_protocol::Response) -> Result<CallToolR
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    #[ignore = "requires Chrome; MCP observation and download evidence"]
+    async fn mcp_observation_and_download_failures_share_page_context() {
+        let server = EokaServer::new();
+        server.navigate(Parameters(NavigateRequest {
+            url: "data:text/html,<title>MCP fixture</title><h1>Unavailable</h1><p role='alert'>Transfer unavailable</p><button>Features</button>".into(),
+            headers: None, user_agent: None, bypass_csp: None,
+        })).await.unwrap();
+        let structured = server
+            .observe(Parameters(ObserveRequest {
+                structured: true,
+                max: Some(1),
+                filter: None,
+            }))
+            .await
+            .unwrap();
+        let plain = server
+            .observe(Parameters(ObserveRequest::default()))
+            .await
+            .unwrap();
+        let failed = server
+            .download_start(Parameters(DownloadStartRequest {
+                click: Some("text:Download".into()),
+                url: None,
+                output: std::env::temp_dir()
+                    .join("eoka-mcp-not-created.bin")
+                    .to_string_lossy()
+                    .into_owned(),
+                expect_bytes: None,
+                start_timeout_ms: 1000,
+            }))
+            .await
+            .unwrap();
+        server.close().await.unwrap();
+        let structured = serde_json::to_value(structured).unwrap();
+        let response: eoka_protocol::Response =
+            serde_json::from_str(structured["content"][0]["text"].as_str().unwrap()).unwrap();
+        let data = response.data.unwrap();
+        assert_eq!(data["page"]["title"], "MCP fixture");
+        assert_eq!(data["page"]["messages"][0], "Transfer unavailable");
+        assert_eq!(data["elements"].as_array().unwrap().len(), 1);
+        let plain = serde_json::to_value(plain).unwrap();
+        assert!(plain["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("Page message: Transfer unavailable"));
+        let failed = serde_json::to_value(failed).unwrap();
+        assert_eq!(failed["isError"], true);
+        let error: eoka_protocol::Response =
+            serde_json::from_str(failed["content"][0]["text"].as_str().unwrap()).unwrap();
+        let context = error.error_detail.unwrap().context.unwrap();
+        assert_eq!(
+            context.action_status,
+            Some(eoka_protocol::ActionStatus::NotAttempted)
+        );
+        assert_eq!(context.page.unwrap().messages, ["Transfer unavailable"]);
+    }
 
     #[test]
     fn mcp_protocol_descriptors_match_catalog() {

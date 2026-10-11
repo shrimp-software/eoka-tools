@@ -147,7 +147,7 @@ pub enum Command {
         #[arg(long)]
         all: bool,
     },
-    #[command(about = "List interactive elements with indices")]
+    #[command(about = "Inspect page context and interactive elements with indices")]
     Observe {
         #[arg(long, help = "Filter elements: inputs, buttons, or all")]
         filter: Option<String>,

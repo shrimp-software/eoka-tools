@@ -393,7 +393,7 @@ pub async fn send_command(
             | Request::DownloadWait(_)
             | Request::DownloadCancel(_)
     ) {
-        return Ok(send_download(session_name, request).await);
+        return Ok(send_download(session_name, &request).await);
     }
     if let Request::CaptchaDatadome(args) = request {
         return Ok(send_datadome(session_name, args).await);
@@ -415,19 +415,54 @@ fn non_retryable_error(code: &str, message: &str) -> Response {
     Response::err_detail(eoka_protocol::ErrorDetail::new(code, message).retryable(false))
 }
 
-async fn send_download(session_name: &str, request: Request) -> Response {
+async fn send_download(session_name: &str, request: &Request) -> Response {
+    use eoka_protocol::{ActionStatus, ErrorContext};
+    let id = match request {
+        Request::DownloadWait(args) => Some(args.id.as_str()),
+        Request::DownloadGet(args) | Request::DownloadCancel(args) => Some(args.id.as_str()),
+        _ => None,
+    };
+    let disconnected = |code, message, action_status| {
+        Response::err_detail(
+            eoka_protocol::ErrorDetail::new(code, message)
+                .retryable(false)
+                .context(ErrorContext {
+                    download_id: id.map(str::to_owned),
+                    action_status: Some(action_status),
+                    ..Default::default()
+                }),
+        )
+    };
     let Ok(stream) = UnixStream::connect(session::socket_path(session_name)).await else {
-        return non_retryable_error(
+        return disconnected(
             "session_unavailable",
             "Existing session unavailable; open the intended page first. No daemon was launched.",
+            ActionStatus::NotAttempted,
         );
     };
-    match exchange_request(stream, &request).await {
-        Ok(response) if response.error.as_deref().is_some_and(|message| message.contains("unknown variant") || message.contains("unknown eoka protocol command")) =>
-            non_retryable_error("unsupported_operation", "This daemon does not support downloads. Restart it explicitly after upgrading; no action was replayed."),
+    let mut response = match exchange_request(stream, request).await {
+        Ok(response) if response.error.as_deref().is_some_and(|message| {
+            message.contains("unknown variant") || message.contains("unknown eoka protocol command")
+        }) => disconnected(
+            "unsupported_operation",
+            "This daemon does not support downloads. Restart it explicitly after upgrading; no action was replayed.",
+            ActionStatus::NotAttempted,
+        ),
         Ok(response) => response,
-        Err(_) => non_retryable_error("download_transport_error", "Session transport failed; the action may have executed. Inspect download list before retrying. No restart or replay was attempted."),
+        Err(_) => disconnected(
+            "download_transport_error",
+            "Session transport failed; the action may have executed. Inspect download list before retrying. No restart or replay was attempted.",
+            ActionStatus::MayHaveExecuted,
+        ),
+    };
+    if let (Some(error), Some(id)) = (response.error_detail.as_mut(), id) {
+        error
+            .context
+            .get_or_insert_with(Default::default)
+            .download_id
+            .get_or_insert_with(|| id.to_owned());
     }
+    response
 }
 
 async fn send_datadome(session_name: &str, args: CaptchaDatadomeArgs) -> Response {
@@ -785,6 +820,21 @@ mod tests {
         let name = format!("download-missing-{}", std::process::id());
         let response = test_client(&name).download_list().await.unwrap();
         assert_eq!(response.error_detail.unwrap().code, "session_unavailable");
+        let response = test_client(&name)
+            .download_wait(eoka_protocol::DownloadWaitArgs {
+                id: "known-job".into(),
+                timeout_ms: 1,
+            })
+            .await
+            .unwrap();
+        let error = response.error_detail.unwrap();
+        assert_eq!(error.code, "session_unavailable");
+        let context = error.context.unwrap();
+        assert_eq!(context.download_id.as_deref(), Some("known-job"));
+        assert_eq!(
+            context.action_status,
+            Some(eoka_protocol::ActionStatus::NotAttempted)
+        );
         assert!(!session::pid_path(&name).exists());
         for (index, error) in [
             None,

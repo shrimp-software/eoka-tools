@@ -1,5 +1,7 @@
 use crate::eoka::{Page, Result};
 use serde::Deserialize;
+use serde_json::{json, Value};
+use std::fmt::Write;
 
 use crate::InteractiveElement;
 
@@ -75,6 +77,71 @@ pub async fn observe(page: &Page, viewport_only: bool) -> Result<Vec<Interactive
     let json_str: String = page.evaluate(&js).await?;
 
     parse_raw_elements(&json_str).map_err(crate::eoka::Error::cdp_msg)
+}
+
+pub fn validate_filter(filter: Option<&str>) -> std::result::Result<(), String> {
+    if let Some(filter) = filter {
+        if !matches!(filter, "inputs" | "buttons" | "all") {
+            return Err(format!(
+                "Unknown filter '{filter}'. Valid: inputs, buttons, all"
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub async fn inspect(
+    page: &Page,
+    viewport_only: bool,
+    args: &eoka_protocol::ObserveArgs,
+) -> std::result::Result<(Vec<InteractiveElement>, Value), String> {
+    validate_filter(args.filter.as_deref())?;
+    let elements = observe(page, viewport_only)
+        .await
+        .map_err(|error| error.to_string())?;
+    let context = crate::page_context::capture(page).await;
+    let mut text = context
+        .as_ref()
+        .map(crate::page_context::format)
+        .unwrap_or_else(|| "Page context unavailable.\n".into());
+    let mut selected = elements
+        .iter()
+        .filter(|element| match args.filter.as_deref() {
+            Some("inputs") => matches!(
+                element.tag.as_str(),
+                "input" | "select" | "textarea" | "contenteditable"
+            ),
+            Some("buttons") => {
+                matches!(element.tag.as_str(), "button" | "a")
+                    || element.role.as_deref() == Some("button")
+            }
+            _ => true,
+        })
+        .take(args.max.unwrap_or(usize::MAX))
+        .peekable();
+    if selected.peek().is_none() {
+        text.push_str("No interactive elements found.\n");
+    }
+    let mut objects = Vec::new();
+    for el in selected {
+        let _ = writeln!(text, "{el}");
+        if args.structured {
+            objects.push(json!({
+                "index": el.index, "selector": el.selector, "text": el.text,
+                "role": el.role, "tag": el.tag, "visible": el.visible,
+                "disabled": el.disabled, "checked": el.checked,
+                "placeholder": el.placeholder, "input_type": el.input_type,
+                "value": el.value,
+                "bbox": {"x":el.bbox.x,"y":el.bbox.y,"width":el.bbox.width,"height":el.bbox.height}
+            }));
+        }
+    }
+    let data = if args.structured {
+        json!({"text":text,"elements":objects,"page":context})
+    } else {
+        Value::String(text)
+    };
+    Ok((elements, data))
 }
 
 #[cfg(test)]

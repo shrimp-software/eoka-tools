@@ -8,6 +8,8 @@ pub struct ErrorDetail {
     pub retryable: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<Box<crate::ErrorContext>>,
 }
 
 impl ErrorDetail {
@@ -17,6 +19,7 @@ impl ErrorDetail {
             message: message.into(),
             retryable: None,
             hint: None,
+            context: None,
         }
     }
 
@@ -27,6 +30,11 @@ impl ErrorDetail {
 
     pub fn hint(mut self, hint: impl Into<String>) -> Self {
         self.hint = Some(hint.into());
+        self
+    }
+
+    pub fn context(mut self, context: crate::ErrorContext) -> Self {
+        self.context = Some(Box::new(context));
         self
     }
 }
@@ -125,6 +133,41 @@ fn classify_error(message: &str) -> ErrorDetail {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn error_context_is_additive_and_round_trips_without_changing_legacy_data() {
+        let old: Response = serde_json::from_value(serde_json::json!({
+            "ok":false,"error":"missing", "error_detail":{"code":"missing","message":"missing"}
+        }))
+        .unwrap();
+        assert!(old.error_detail.unwrap().context.is_none());
+        let response = Response::err_detail(
+            ErrorDetail::new("download_wait_timeout", "Still running").context(
+                crate::ErrorContext {
+                    download_id: Some("job".into()),
+                    action_status: Some(crate::ActionStatus::MayHaveExecuted),
+                    ..Default::default()
+                },
+            ),
+        );
+        let value = serde_json::to_value(&response).unwrap();
+        assert_eq!(value["error"], "Still running");
+        assert_eq!(
+            value["error_detail"]["context"]["action_status"],
+            "may_have_executed"
+        );
+        let restored: Response = serde_json::from_value(value).unwrap();
+        assert_eq!(
+            restored
+                .error_detail
+                .unwrap()
+                .context
+                .unwrap()
+                .download_id
+                .as_deref(),
+            Some("job")
+        );
+    }
 
     #[test]
     fn structured_error_keeps_legacy_error_string() {
