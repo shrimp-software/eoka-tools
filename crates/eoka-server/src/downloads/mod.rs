@@ -1,8 +1,14 @@
 mod files;
+mod target;
 mod worker;
 
+pub use target::resolve_click;
+
 use eoka::{Browser, Page};
-use eoka_protocol::{DownloadRecord, DownloadStartArgs, DownloadState, ErrorDetail, Response};
+use eoka_protocol::{
+    ActionStatus, DownloadRecord, DownloadStartArgs, DownloadState, ErrorContext, ErrorDetail,
+    Response,
+};
 use files::{Destination, Publication};
 use std::collections::VecDeque;
 use std::sync::{
@@ -69,7 +75,12 @@ impl DownloadJob {
                 failure(
                     "download_wait_timeout",
                     "Wait timed out; the job continues. Inspect its status or wait again.",
-                ),
+                )
+                .hint(format!(
+                    "Use download status {} or download wait {}; do not start another transfer.",
+                    self.snapshot().id,
+                    self.snapshot().id
+                )),
             ),
         }
     }
@@ -287,6 +298,7 @@ impl DownloadManager {
             start_timeout: Duration::from_millis(args.start_timeout_ms),
             permit,
             dispatched: Some(dispatched),
+            action_attempted: false,
         };
         tokio::spawn(context.run());
         let _ = dispatched_rx.await;
@@ -304,6 +316,35 @@ impl Drop for Inner {
 
 pub fn failure(code: &str, message: impl Into<String>) -> ErrorDetail {
     ErrorDetail::new(code, message).retryable(false)
+}
+
+pub fn rejected(mut error: ErrorDetail) -> Response {
+    error.context.get_or_insert_with(|| {
+        Box::new(ErrorContext {
+            action_status: Some(ActionStatus::NotAttempted),
+            ..Default::default()
+        })
+    });
+    error.hint.get_or_insert_with(|| "No download action was attempted. Inspect the page before choosing a target; do not pre-click or restart the browser.".into());
+    Response::err_detail(error)
+}
+
+pub async fn diagnose(
+    mut error: ErrorDetail,
+    page: &Page,
+    action_status: ActionStatus,
+    id: Option<String>,
+) -> ErrorDetail {
+    let mut context = crate::page_context::capture(page).await;
+    if let Some(context) = context.as_mut() {
+        context.url = redact_url(&context.url);
+    }
+    error.context = Some(Box::new(ErrorContext {
+        page: context,
+        download_id: id,
+        action_status: Some(action_status),
+    }));
+    error
 }
 
 pub fn record_response(record: DownloadRecord) -> Response {
@@ -328,11 +369,16 @@ pub fn start_response(result: Result<DownloadRecord, ErrorDetail>) -> Response {
             error_with_record(record, error)
         }
         Ok(record) => record_response(record),
-        Err(error) => Response::err_detail(error),
+        Err(error) => rejected(error),
     }
 }
 
-pub fn error_with_record(record: DownloadRecord, error: ErrorDetail) -> Response {
+pub fn error_with_record(record: DownloadRecord, mut error: ErrorDetail) -> Response {
+    let context = error.context.get_or_insert_with(Default::default);
+    context.download_id = Some(record.id.clone());
+    context
+        .action_status
+        .get_or_insert(ActionStatus::MayHaveExecuted);
     match serde_json::to_value(record) {
         Ok(record) => {
             let mut response = Response::err_detail(error);

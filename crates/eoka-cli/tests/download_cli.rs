@@ -162,6 +162,10 @@ impl Cli {
     }
 
     fn command(&self, args: &[&str]) -> tokio::process::Command {
+        self.command_mode(args, true)
+    }
+
+    fn command_mode(&self, args: &[&str], json: bool) -> tokio::process::Command {
         let mut command = tokio::process::Command::new(Self::binary());
         for name in [
             "EOKA_CDP",
@@ -182,7 +186,10 @@ impl Cli {
         if let Some(ms) = self.idle_ms {
             command.env("EOKA_IDLE_TIMEOUT", ms.to_string());
         }
-        command.args(["--session", &self.session, "--json", "--no-geo-align"]);
+        command.args(["--session", &self.session, "--no-geo-align"]);
+        if json {
+            command.arg("--json");
+        }
         if std::env::var_os("EOKA_DOWNLOAD_TEST_HEADED").is_some() {
             command.arg("--headed");
         }
@@ -228,6 +235,220 @@ impl Drop for Cli {
             .args(["--session", &self.effective_name(), "kill"])
             .output();
     }
+}
+
+#[tokio::test]
+#[ignore = "requires Chrome; page evidence and preflight dispatch guards"]
+async fn unavailable_page_and_targets_report_evidence_without_clicking() {
+    let fixture = Fixture::new().await;
+    let cli = Cli::new();
+    cli.open(&fixture).await;
+    cli.ok(&["exec", r#"document.title='Transfer fixture';document.body.innerHTML='<nav><button>Features</button><button>Get started</button></nav><main><h1>Unavailable transfer</h1><p role="alert">This transfer was deleted</p><input value="INPUT_SECRET"><textarea>TEXTAREA_SECRET</textarea><div hidden>HIDDEN_SECRET</div><button id="disabled" disabled>Disabled</button><button id="hidden" style="display:none">Hidden</button><button id="old">Old target</button></main>';globalThis.clicks=0;document.addEventListener('click',()=>++globalThis.clicks);history.replaceState(null,'','/?secret=TOKEN')"#]).await;
+    let observed = cli.ok(&["observe", "--structured"]).await;
+    let page = &observed["page"];
+    assert_eq!(page["title"], "Transfer fixture");
+    let tack = cli
+        .ok(&[
+            "tack",
+            "--raw-json",
+            "return await tools.invoke({path:'eoka.observe',input:{structured:true,max:1}})",
+        ])
+        .await;
+    assert!(
+        tack.to_string().contains("This transfer was deleted"),
+        "{tack}"
+    );
+    assert_eq!(page["messages"][0], "This transfer was deleted");
+    for secret in ["INPUT_SECRET", "TEXTAREA_SECRET", "HIDDEN_SECRET"] {
+        assert!(!page.to_string().contains(secret), "{page}");
+    }
+    let legacy = cli.ok(&["observe"]).await;
+    assert!(legacy.is_string());
+    assert!(legacy
+        .as_str()
+        .unwrap()
+        .contains("This transfer was deleted"));
+    let human = cli
+        .command_mode(&["observe"], false)
+        .output()
+        .await
+        .unwrap();
+    assert!(human.status.success());
+    assert!(
+        String::from_utf8_lossy(&human.stdout).contains("Page message: This transfer was deleted")
+    );
+    let snapshot = cli.ok(&["snapshot", "-i"]).await;
+    let old_ref = snapshot
+        .as_str()
+        .unwrap()
+        .lines()
+        .find(|line| line.contains("Old target"))
+        .unwrap()
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_owned();
+    cli.ok(&["exec", "document.getElementById('old').remove()"])
+        .await;
+    for (target, code) in [
+        ("text:Download all", "download_target_not_found"),
+        ("css:#disabled", "download_target_disabled"),
+        ("css:#hidden", "download_target_hidden"),
+        (old_ref.as_str(), "download_target_stale"),
+        ("@e999999", "download_target_stale"),
+        ("css:[", "download_target_resolution_failed"),
+    ] {
+        let result = cli
+            .call(&["download", "--click", target, "--out", "absent.bin"])
+            .await;
+        assert_eq!(result["ok"], false, "{result}");
+        assert_eq!(result["error_detail"]["code"], code, "{result}");
+        let context = &result["error_detail"]["context"];
+        assert_eq!(context["action_status"], "not_attempted");
+        assert!(context["page"]["url"].as_str().unwrap().ends_with('/'));
+        assert_eq!(context["page"]["messages"][0], "This transfer was deleted");
+        assert!(result.get("data").is_none());
+    }
+    assert_eq!(cli.ok(&["eval", "globalThis.clicks"]).await, "0");
+    assert_eq!(cli.ok(&["download", "list"]).await, serde_json::json!([]));
+    assert!(!cli.directory.path().join("absent.bin").exists());
+    let error = cli
+        .command_mode(
+            &[
+                "download",
+                "--click",
+                "text:Download all",
+                "--out",
+                "absent.bin",
+            ],
+            false,
+        )
+        .output()
+        .await
+        .unwrap();
+    assert!(!error.status.success());
+    let stderr = String::from_utf8_lossy(&error.stderr);
+    assert!(stderr.contains("download_target_not_found"));
+    assert!(stderr.contains("This transfer was deleted"));
+    assert!(stderr.contains("Action was not attempted"));
+}
+
+#[tokio::test]
+#[ignore = "requires Chrome; bounded context and application readiness"]
+async fn observation_bounds_context_and_preserves_element_targeting() {
+    let fixture = Fixture::new().await;
+    let cli = Cli::new();
+    cli.open(&fixture).await;
+    let before = cli.ok(&["observe", "--structured"]).await;
+    cli.ok(&["exec", "const main=document.createElement('main');main.innerHTML=Array.from({length:8},(_,i)=>'<h1>Heading '+i+'</h1>').join('')+Array.from({length:8},(_,i)=>'<p role=alert>Message '+i+'</p>').join('')+'<p>'+ '🙂word '.repeat(1000)+'</p>';document.body.append(main)"]).await;
+    let after = cli.ok(&["--agent", "observe", "--max", "1"]).await;
+    assert_eq!(before["elements"][0], after["elements"][0]);
+    let page = &after["page"];
+    assert_eq!(page["headings"].as_array().unwrap().len(), 5);
+    assert_eq!(page["messages"].as_array().unwrap().len(), 5);
+    assert!(page["text_excerpt"].as_str().unwrap().chars().count() <= 2000);
+    assert_eq!(page["truncated"], true);
+    let completed = cli
+        .ok(&["download", "--click", "0", "--out", "indexed.bin", "--wait"])
+        .await;
+    assert_eq!(completed["state"], "completed");
+    cli.ok(&["exec", "document.body.innerHTML='<main><p role=status>Loading transfer</p></main>';setTimeout(()=>{document.querySelector('main').innerHTML='<h1>Transfer ready</h1><button>Download ready</button>'},1500)"]).await;
+    let loading = cli.ok(&["observe", "--structured"]).await;
+    assert_eq!(loading["page"]["ready_state"], "complete");
+    assert_eq!(loading["page"]["messages"][0], "Loading transfer");
+    cli.ok(&["wait", "--text", "Download ready"]).await;
+    let ready = cli.ok(&["observe", "--structured"]).await;
+    assert_eq!(ready["page"]["headings"][0], "Transfer ready");
+}
+
+#[tokio::test]
+#[ignore = "requires Chrome; diagnosis failure preserves the operation result"]
+async fn unavailable_context_does_not_mask_observation_or_download_errors() {
+    let fixture = Fixture::new().await;
+    let cli = Cli::new();
+    cli.open(&fixture).await;
+    cli.ok(&[
+        "exec",
+        "document.createTreeWalker=()=>{throw new Error('fixture context failure')}",
+    ])
+    .await;
+    let observed = cli.ok(&["observe", "--structured"]).await;
+    assert_eq!(observed["page"], Value::Null);
+    assert!(!observed["elements"].as_array().unwrap().is_empty());
+    let result = cli
+        .call(&["download", "--click", "css:#absent", "--out", "absent.bin"])
+        .await;
+    assert_eq!(result["error_detail"]["code"], "download_target_not_found");
+    assert_eq!(
+        result["error_detail"]["context"]["action_status"],
+        "not_attempted"
+    );
+    assert!(result["error_detail"]["context"].get("page").is_none());
+}
+
+#[tokio::test]
+#[ignore = "requires Chrome; temporary page context and resumed waiting"]
+async fn html_attachment_diagnostics_and_wait_timeout_keep_job_identity() {
+    let fixture = Fixture::new().await;
+    let cli = Cli::new();
+    cli.open(&fixture).await;
+    let before = cli.ok(&["info"]).await;
+    let html = cli
+        .call(&[
+            "download",
+            "--url",
+            &format!("{}/html#secret", fixture.url),
+            "--out",
+            "html.bin",
+            "--start-timeout-ms",
+            "1000",
+            "--wait",
+        ])
+        .await;
+    assert_eq!(html["ok"], false, "{html}");
+    let context = &html["error_detail"]["context"];
+    assert_eq!(context["download_id"], html["data"]["id"]);
+    assert_eq!(context["page"]["url"], format!("{}/html", fixture.url));
+    assert!(context["page"]["text_excerpt"]
+        .as_str()
+        .unwrap()
+        .contains("login"));
+    assert_eq!(cli.ok(&["info"]).await, before);
+    let waiting = cli
+        .call(&[
+            "download",
+            "--click",
+            "css:#slow",
+            "--out",
+            "slow.bin",
+            "--wait",
+            "--timeout-ms",
+            "10",
+        ])
+        .await;
+    assert_eq!(waiting["error_detail"]["code"], "download_wait_timeout");
+    let id = waiting["data"]["id"].as_str().unwrap();
+    assert_eq!(waiting["error_detail"]["context"]["download_id"], id);
+    let human = cli
+        .command_mode(&["download", "wait", id, "--timeout-ms", "10"], false)
+        .output()
+        .await
+        .unwrap();
+    assert!(!human.status.success());
+    let stderr = String::from_utf8_lossy(&human.stderr);
+    assert!(stderr.contains(id));
+    assert!(stderr.contains("state:"));
+    assert!(stderr.contains("download status"));
+    let completed = cli.ok(&["download", "wait", id]).await;
+    assert_eq!(completed["state"], "completed");
+    assert_eq!(
+        cli.ok(&["download", "list"])
+            .await
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
 }
 
 #[tokio::test]
@@ -438,6 +659,18 @@ async fn pending_click_is_not_replayed_and_releases_download_ownership() {
         result["error_detail"]["code"], "download_not_started",
         "{result}"
     );
+    assert_eq!(
+        result["error_detail"]["context"]["action_status"],
+        "may_have_executed"
+    );
+    assert_eq!(
+        result["error_detail"]["context"]["download_id"],
+        result["data"]["id"]
+    );
+    assert!(result["error_detail"]["context"]["page"]["url"]
+        .as_str()
+        .unwrap()
+        .contains(&fixture.url));
     assert_eq!(result["data"]["staging_path"], Value::Null);
     assert!(!cli.directory.path().join("timeout.bin").exists());
     assert_eq!(cli.ok(&["eval", "globalThis.downloadClicks"]).await, "1");

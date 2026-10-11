@@ -10,9 +10,7 @@ pub fn print_response(response: &Response, json_mode: bool) {
     }
 
     if !response.ok {
-        if let Some(ref err) = response.error {
-            eprintln!("Error: {}", err);
-        }
+        eprint!("{}", format_error(response));
         return;
     }
 
@@ -30,4 +28,75 @@ pub fn print_response(response: &Response, json_mode: bool) {
             ),
         }
     }
+}
+
+fn format_error(response: &Response) -> String {
+    use std::fmt::Write;
+    let mut text = String::new();
+    let detail = response.error_detail.as_ref();
+    let _ = writeln!(
+        text,
+        "Error [{}]: {}",
+        detail.map_or("eoka_error", |d| &d.code),
+        response.error.as_deref().unwrap_or("Command failed")
+    );
+    if let Some(context) = detail.and_then(|detail| detail.context.as_ref()) {
+        if let Some(action) = context.action_status {
+            text.push_str(match action {
+                eoka_protocol::ActionStatus::NotAttempted => "Action was not attempted.\n",
+                eoka_protocol::ActionStatus::MayHaveExecuted => {
+                    "Action may have executed; it was not replayed.\n"
+                }
+            });
+        }
+        if let Some(page) = &context.page {
+            text.push_str(&eoka_server::page_context::format(page));
+        }
+    }
+    let data = response.data.as_ref();
+    let id = data.and_then(|data| data["id"].as_str()).or_else(|| {
+        detail
+            .and_then(|detail| detail.context.as_ref())
+            .and_then(|context| context.download_id.as_deref())
+    });
+    let session = response
+        .meta
+        .as_ref()
+        .and_then(|meta| meta.session.as_deref())
+        .unwrap_or("default");
+    let quote = |value: &str| format!("'{}'", value.replace('\'', "'\"'\"'"));
+    if let Some(id) = id {
+        let _ = writeln!(text, "Download job: {id}");
+        if let Some(data) = data {
+            for key in ["state", "output", "published_path", "staging_path"] {
+                if let Some(value) = data[key].as_str() {
+                    let _ = writeln!(text, "{key}: {value}");
+                }
+            }
+        } else {
+            text.push_str("Current job state unavailable.\n");
+        }
+        let _ = writeln!(
+            text,
+            "Next: eoka --session {} download status {}",
+            quote(session),
+            quote(id)
+        );
+    }
+    if id.is_none()
+        && detail
+            .and_then(|detail| detail.context.as_ref())
+            .and_then(|context| context.page.as_ref())
+            .is_some()
+    {
+        let _ = writeln!(
+            text,
+            "Next: eoka --session {} --agent observe",
+            quote(session)
+        );
+    }
+    if let Some(hint) = detail.and_then(|detail| detail.hint.as_deref()) {
+        let _ = writeln!(text, "Hint: {hint}");
+    }
+    text
 }

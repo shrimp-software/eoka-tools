@@ -1,4 +1,5 @@
 mod args;
+mod context;
 mod datadome;
 mod download;
 mod io;
@@ -6,6 +7,7 @@ mod metadata;
 mod response;
 
 pub use args::*;
+pub use context::*;
 pub use datadome::*;
 pub use download::*;
 pub use io::{read_msg, write_msg};
@@ -266,7 +268,7 @@ define_operations! {
         path: "observe",
         cmd: "observe",
         name: "observe",
-        description: "Observe interactive elements",
+        description: "Inspect page URL, document readiness, visible text and interactive elements; readiness does not imply application readiness",
         capability: Observation,
         exposure: DefaultAgent,
         read_only: true,

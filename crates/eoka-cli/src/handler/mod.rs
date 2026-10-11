@@ -576,81 +576,12 @@ impl Handler {
     }
 
     async fn cmd_observe(&mut self, args: &Value) -> Result<Response, String> {
-        let filter = args["filter"].as_str();
-        let max = args["max"]
-            .as_u64()
-            .map(|v| v as usize)
-            .unwrap_or(usize::MAX);
-        let structured = args["structured"].as_bool().unwrap_or(false);
-
-        if let Some(f) = filter {
-            if !matches!(f, "inputs" | "buttons" | "all") {
-                return Err(format!(
-                    "Unknown filter '{}'. Valid: inputs, buttons, all",
-                    f
-                ));
-            }
-        }
-
+        let args: eoka_protocol::ObserveArgs =
+            serde_json::from_value(args.clone()).map_err(|error| error.to_string())?;
         let (tab, viewport_only) = self.tab_with_config()?;
-        tab.elements = observe::observe(&tab.page, viewport_only)
-            .await
-            .map_err(|e| e.to_string())?;
-
-        let filter_fn: fn(&&eoka_server::InteractiveElement) -> bool = match filter {
-            Some("inputs") => |e| {
-                matches!(
-                    e.tag.as_str(),
-                    "input" | "select" | "textarea" | "contenteditable"
-                )
-            },
-            Some("buttons") => {
-                |e| matches!(e.tag.as_str(), "button" | "a") || e.role.as_deref() == Some("button")
-            }
-            _ => |_| true,
-        };
-        let elements: Vec<&eoka_server::InteractiveElement> =
-            tab.elements.iter().filter(filter_fn).take(max).collect();
-        let mut list = String::new();
-        for el in &elements {
-            let _ = writeln!(list, "{}", el);
-        }
-        let text = if list.is_empty() {
-            "No interactive elements found.".into()
-        } else {
-            list
-        };
-        if !structured {
-            return Ok(Response::ok_text(text));
-        }
-        let elements_json: Vec<serde_json::Value> = elements
-            .into_iter()
-            .map(|el| {
-                serde_json::json!({
-                    "index": el.index,
-                    "selector": &el.selector,
-                    "text": &el.text,
-                    "role": &el.role,
-                    "tag": &el.tag,
-                    "visible": el.visible,
-                    "disabled": el.disabled,
-                    "checked": el.checked,
-                    "placeholder": &el.placeholder,
-                    "input_type": &el.input_type,
-                    "value": &el.value,
-                    "bbox": {
-                        "x": el.bbox.x,
-                        "y": el.bbox.y,
-                        "width": el.bbox.width,
-                        "height": el.bbox.height,
-                    }
-                })
-            })
-            .collect();
-        Ok(Response::ok(serde_json::json!({
-            "text": text,
-            "elements": elements_json,
-        })))
+        let (elements, response) = observe::inspect(&tab.page, viewport_only, &args).await?;
+        tab.elements = elements;
+        Ok(response)
     }
 
     async fn cmd_screenshot(&mut self, args: &Value) -> Result<Response, String> {

@@ -4,7 +4,7 @@ use super::{
     redact_url, DownloadJob,
 };
 use eoka::{DownloadEvent, DownloadWatch, NativeDownloadState, Page};
-use eoka_protocol::{DownloadState, ErrorDetail};
+use eoka_protocol::{ActionStatus, DownloadState, ErrorDetail};
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -87,13 +87,14 @@ pub(super) struct Transfer {
     pub start_timeout: Duration,
     pub permit: OwnedSemaphorePermit,
     pub dispatched: Option<oneshot::Sender<()>>,
+    pub action_attempted: bool,
 }
 
 impl Transfer {
     pub async fn run(mut self) {
         let mut guid = None;
         let mut verification = None;
-        let result = self.transfer(&mut guid, &mut verification).await;
+        let mut result = self.transfer(&mut guid, &mut verification).await;
         if result.is_err() {
             self.job.cancel();
         }
@@ -104,6 +105,15 @@ impl Transfer {
             if let Some(guid) = &guid {
                 let _ = self.native.cancel(guid).await;
             }
+        }
+        if let Err(error) = result {
+            let status = if self.action_attempted {
+                ActionStatus::MayHaveExecuted
+            } else {
+                ActionStatus::NotAttempted
+            };
+            result =
+                Err(super::diagnose(error, &self.page, status, Some(self.job.snapshot().id)).await);
         }
         if let Some(dispatched) = self.dispatched.take() {
             let _ = dispatched.send(());
@@ -168,6 +178,7 @@ impl Transfer {
             .into_iter()
             .map(|frame| frame.id)
             .collect();
+        self.action_attempted = true;
         let trigger = self.trigger.run(&self.page);
         tokio::pin!(trigger);
         let deadline = tokio::time::Instant::now() + self.start_timeout;
@@ -186,8 +197,11 @@ impl Transfer {
                     continue;
                 },
                 _ = tokio::time::sleep_until(deadline), if guid.is_none() => {
-                    return Err(failure(if matches!(trigger_result, Some(Err(_))) { "download_trigger_failed" } else { "download_not_started" },
-                        "No native download started before the deadline; the action was not replayed"));
+                    let error = match trigger_result.as_ref() {
+                        Some(Err(error)) => failure("download_trigger_failed", format!("No native download started; trigger failed: {error}")),
+                        _ => failure("download_not_started", "No native download started before the deadline; the action was not replayed"),
+                    };
+                    return Err(error.hint("Inspect this job and its page evidence before another action. No click or navigation was replayed."));
                 },
                 _ = disk_check.tick(), if verification.is_none() => {
                     let record = self.job.snapshot();

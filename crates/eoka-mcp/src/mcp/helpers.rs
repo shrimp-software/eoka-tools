@@ -235,8 +235,6 @@ pub(crate) fn element_list(elements: &[InteractiveElement]) -> String {
     out
 }
 
-pub(crate) const VALID_OBSERVE_FILTERS: &[&str] = &["inputs", "buttons", "all"];
-
 const CONSOLE_CAPTURE_JS: &str = include_str!("../js/console_capture.js");
 
 pub(crate) async fn ensure_console_capture(tab: &mut TabState) -> Result<(), ErrorData> {

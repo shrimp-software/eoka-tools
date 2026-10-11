@@ -109,7 +109,7 @@ pub async fn run(
             if !json {
                 eprintln!("Download {id} started; waiting for the saved file");
             }
-            return match crate::client::send_command(
+            let mut result = match crate::client::send_command(
                 session,
                 Request::DownloadWait(DownloadWaitArgs {
                     id: id.into(),
@@ -120,8 +120,21 @@ pub async fn run(
             .await
             {
                 Ok(response) => response,
-                Err(error) => Response::err(error.to_string()),
+                Err(error) => Response::err_detail(
+                    eoka_protocol::ErrorDetail::new("download_transport_error", error.to_string())
+                        .retryable(false),
+                ),
             };
+            if let Some(detail) = result.error_detail.as_mut() {
+                detail
+                    .context
+                    .get_or_insert_with(Default::default)
+                    .download_id = Some(id.to_owned());
+                detail.hint = Some(format!(
+                    "Inspect download status {id} or wait again; do not replay the start action."
+                ));
+            }
+            return result;
         }
     }
     response
@@ -131,6 +144,71 @@ pub async fn run(
 mod tests {
     use super::*;
     use clap::Parser;
+
+    #[tokio::test]
+    async fn lost_wait_response_keeps_known_id_without_replaying_start() {
+        use eoka_protocol::{read_msg, write_msg};
+        use tokio::net::UnixListener;
+        let session = format!("download-wait-loss-{}", std::process::id());
+        crate::session::ensure_runtime_dir().unwrap();
+        let path = crate::session::socket_path(&session);
+        let listener = UnixListener::bind(&path).unwrap();
+        let server = tokio::spawn(async move {
+            let (mut start, _) = listener.accept().await.unwrap();
+            assert!(matches!(
+                read_msg::<_, Request>(&mut start).await.unwrap(),
+                Request::DownloadStart(_)
+            ));
+            write_msg(
+                &mut start,
+                &Response::ok(serde_json::json!({"id":"known-job","state":"pending"})),
+            )
+            .await
+            .unwrap();
+            drop(start);
+            let (mut wait, _) = listener.accept().await.unwrap();
+            let request: Request = read_msg(&mut wait).await.unwrap();
+            assert!(matches!(request, Request::DownloadWait(ref args) if args.id == "known-job"));
+            drop(wait);
+            assert!(
+                tokio::time::timeout(std::time::Duration::from_millis(150), listener.accept())
+                    .await
+                    .is_err()
+            );
+        });
+        let cli = crate::cli::Cli::try_parse_from([
+            "eoka",
+            "download",
+            "--click",
+            "css:button",
+            "--out",
+            "unused.bin",
+            "--wait",
+        ])
+        .unwrap();
+        let Some(crate::cli::Command::Download(args)) = cli.command else {
+            panic!()
+        };
+        let response = run(
+            &args,
+            &session,
+            crate::launch_spec::LaunchSpec::Connect {
+                ws_url: "unused".into(),
+            },
+            true,
+        )
+        .await;
+        assert!(!response.ok);
+        assert!(response.data.is_none());
+        let error = response.error_detail.unwrap();
+        assert_eq!(error.code, "download_transport_error");
+        assert_eq!(
+            error.context.unwrap().download_id.as_deref(),
+            Some("known-job")
+        );
+        server.await.unwrap();
+        std::fs::remove_file(path).unwrap();
+    }
 
     #[test]
     fn cli_triggers_are_exclusive_and_paths_are_absolute() {
