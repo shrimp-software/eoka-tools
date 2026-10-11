@@ -1,4 +1,4 @@
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc,
@@ -247,6 +247,23 @@ async fn unavailable_page_and_targets_report_evidence_without_clicking() {
     let observed = cli.ok(&["observe", "--structured"]).await;
     let page = &observed["page"];
     assert_eq!(page["title"], "Transfer fixture");
+    let filtered = cli
+        .ok(&[
+            "observe",
+            "--structured",
+            "--filter",
+            "buttons",
+            "--max",
+            "1",
+        ])
+        .await;
+    assert_eq!(filtered["elements"], json!([observed["elements"][0]]));
+    let empty = cli.ok(&["observe", "--structured", "--max", "0"]).await;
+    assert_eq!(empty["elements"], json!([]));
+    assert!(empty["text"]
+        .as_str()
+        .unwrap()
+        .contains("No interactive elements found."));
     let tack = cli
         .ok(&[
             "tack",

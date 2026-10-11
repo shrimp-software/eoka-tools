@@ -1,7 +1,7 @@
-use super::failure;
+use super::{diagnose, failure};
 use crate::{observe, target, InteractiveElement, Target};
 use eoka::Page;
-use eoka_protocol::ErrorDetail;
+use eoka_protocol::{ActionStatus, ErrorDetail};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{collections::HashMap, time::Duration};
@@ -17,9 +17,12 @@ struct RemoteObject {
 
 impl Drop for RemoteObject {
     fn drop(&mut self) {
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
         let page = self.page.clone();
-        let id = self.id.clone();
-        tokio::spawn(async move {
+        let id = std::mem::take(&mut self.id);
+        runtime.spawn(async move {
             let _ = tokio::time::timeout(
                 Duration::from_secs(2),
                 page.session()
@@ -90,6 +93,19 @@ enum Availability {
 }
 
 pub async fn resolve_click(
+    page: &Page,
+    elements: &mut Vec<InteractiveElement>,
+    refs: &HashMap<String, i64>,
+    viewport: bool,
+    target: &str,
+) -> Result<String, ErrorDetail> {
+    match resolve_selector(page, elements, refs, viewport, target).await {
+        Ok(selector) => Ok(selector),
+        Err(error) => Err(diagnose(error, page, ActionStatus::NotAttempted, None).await),
+    }
+}
+
+async fn resolve_selector(
     page: &Page,
     elements: &mut Vec<InteractiveElement>,
     refs: &HashMap<String, i64>,

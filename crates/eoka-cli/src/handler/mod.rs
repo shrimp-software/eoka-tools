@@ -579,9 +579,9 @@ impl Handler {
         let args: eoka_protocol::ObserveArgs =
             serde_json::from_value(args.clone()).map_err(|error| error.to_string())?;
         let (tab, viewport_only) = self.tab_with_config()?;
-        let (elements, response) = observe::inspect(&tab.page, viewport_only, &args).await?;
+        let (elements, data) = observe::inspect(&tab.page, viewport_only, &args).await?;
         tab.elements = elements;
-        Ok(response)
+        Ok(Response::ok(data))
     }
 
     async fn cmd_screenshot(&mut self, args: &Value) -> Result<Response, String> {

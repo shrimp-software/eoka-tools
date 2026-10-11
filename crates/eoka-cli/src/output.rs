@@ -32,15 +32,14 @@ pub fn print_response(response: &Response, json_mode: bool) {
 
 fn format_error(response: &Response) -> String {
     use std::fmt::Write;
-    let mut text = String::new();
     let detail = response.error_detail.as_ref();
-    let _ = writeln!(
-        text,
-        "Error [{}]: {}",
+    let context = detail.and_then(|detail| detail.context.as_deref());
+    let mut text = format!(
+        "Error [{}]: {}\n",
         detail.map_or("eoka_error", |d| &d.code),
         response.error.as_deref().unwrap_or("Command failed")
     );
-    if let Some(context) = detail.and_then(|detail| detail.context.as_ref()) {
+    if let Some(context) = context {
         if let Some(action) = context.action_status {
             text.push_str(match action {
                 eoka_protocol::ActionStatus::NotAttempted => "Action was not attempted.\n",
@@ -54,11 +53,9 @@ fn format_error(response: &Response) -> String {
         }
     }
     let data = response.data.as_ref();
-    let id = data.and_then(|data| data["id"].as_str()).or_else(|| {
-        detail
-            .and_then(|detail| detail.context.as_ref())
-            .and_then(|context| context.download_id.as_deref())
-    });
+    let id = data
+        .and_then(|data| data["id"].as_str())
+        .or_else(|| context.and_then(|context| context.download_id.as_deref()));
     let session = response
         .meta
         .as_ref()
@@ -82,13 +79,7 @@ fn format_error(response: &Response) -> String {
             quote(session),
             quote(id)
         );
-    }
-    if id.is_none()
-        && detail
-            .and_then(|detail| detail.context.as_ref())
-            .and_then(|context| context.page.as_ref())
-            .is_some()
-    {
+    } else if context.is_some_and(|context| context.page.is_some()) {
         let _ = writeln!(
             text,
             "Next: eoka --session {} --agent observe",

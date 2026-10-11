@@ -70,18 +70,18 @@ impl DownloadJob {
                     .unwrap_or_else(|| failure("download_canceled", "Download canceled"));
                 error_with_record(record, error)
             }
-            Err(_) => error_with_record(
-                self.snapshot(),
-                failure(
+            Err(_) => {
+                let record = self.snapshot();
+                let error = failure(
                     "download_wait_timeout",
                     "Wait timed out; the job continues. Inspect its status or wait again.",
                 )
                 .hint(format!(
                     "Use download status {} or download wait {}; do not start another transfer.",
-                    self.snapshot().id,
-                    self.snapshot().id
-                )),
-            ),
+                    record.id, record.id
+                ));
+                error_with_record(record, error)
+            }
         }
     }
 }
@@ -298,7 +298,7 @@ impl DownloadManager {
             start_timeout: Duration::from_millis(args.start_timeout_ms),
             permit,
             dispatched: Some(dispatched),
-            action_attempted: false,
+            action_status: ActionStatus::NotAttempted,
         };
         tokio::spawn(context.run());
         let _ = dispatched_rx.await;
@@ -319,18 +319,17 @@ pub fn failure(code: &str, message: impl Into<String>) -> ErrorDetail {
 }
 
 pub fn rejected(mut error: ErrorDetail) -> Response {
-    error.context.get_or_insert_with(|| {
-        Box::new(ErrorContext {
-            action_status: Some(ActionStatus::NotAttempted),
-            ..Default::default()
-        })
-    });
+    error
+        .context
+        .get_or_insert_with(Default::default)
+        .action_status
+        .get_or_insert(ActionStatus::NotAttempted);
     error.hint.get_or_insert_with(|| "No download action was attempted. Inspect the page before choosing a target; do not pre-click or restart the browser.".into());
     Response::err_detail(error)
 }
 
-pub async fn diagnose(
-    mut error: ErrorDetail,
+async fn diagnose(
+    error: ErrorDetail,
     page: &Page,
     action_status: ActionStatus,
     id: Option<String>,
@@ -339,12 +338,11 @@ pub async fn diagnose(
     if let Some(context) = context.as_mut() {
         context.url = redact_url(&context.url);
     }
-    error.context = Some(Box::new(ErrorContext {
+    error.context(ErrorContext {
         page: context,
         download_id: id,
         action_status: Some(action_status),
-    }));
-    error
+    })
 }
 
 pub fn record_response(record: DownloadRecord) -> Response {

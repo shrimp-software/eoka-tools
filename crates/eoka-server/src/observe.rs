@@ -1,5 +1,7 @@
 use crate::eoka::{Page, Result};
 use serde::Deserialize;
+use serde_json::{json, Value};
+use std::fmt::Write;
 
 use crate::InteractiveElement;
 
@@ -92,9 +94,7 @@ pub async fn inspect(
     page: &Page,
     viewport_only: bool,
     args: &eoka_protocol::ObserveArgs,
-) -> std::result::Result<(Vec<InteractiveElement>, eoka_protocol::Response), String> {
-    use serde_json::json;
-    use std::fmt::Write;
+) -> std::result::Result<(Vec<InteractiveElement>, Value), String> {
     validate_filter(args.filter.as_deref())?;
     let elements = observe(page, viewport_only)
         .await
@@ -104,7 +104,7 @@ pub async fn inspect(
         .as_ref()
         .map(crate::page_context::format)
         .unwrap_or_else(|| "Page context unavailable.\n".into());
-    let selected: Vec<_> = elements
+    let mut selected = elements
         .iter()
         .filter(|element| match args.filter.as_deref() {
             Some("inputs") => matches!(
@@ -118,27 +118,30 @@ pub async fn inspect(
             _ => true,
         })
         .take(args.max.unwrap_or(usize::MAX))
-        .collect();
-    if selected.is_empty() {
+        .peekable();
+    if selected.peek().is_none() {
         text.push_str("No interactive elements found.\n");
     }
-    for element in &selected {
-        let _ = writeln!(text, "{element}");
+    let mut objects = Vec::new();
+    for el in selected {
+        let _ = writeln!(text, "{el}");
+        if args.structured {
+            objects.push(json!({
+                "index": el.index, "selector": el.selector, "text": el.text,
+                "role": el.role, "tag": el.tag, "visible": el.visible,
+                "disabled": el.disabled, "checked": el.checked,
+                "placeholder": el.placeholder, "input_type": el.input_type,
+                "value": el.value,
+                "bbox": {"x":el.bbox.x,"y":el.bbox.y,"width":el.bbox.width,"height":el.bbox.height}
+            }));
+        }
     }
-    let response = if args.structured {
-        let objects: Vec<_> = selected.into_iter().map(|el| json!({
-            "index": el.index, "selector": el.selector, "text": el.text,
-            "role": el.role, "tag": el.tag, "visible": el.visible,
-            "disabled": el.disabled, "checked": el.checked,
-            "placeholder": el.placeholder, "input_type": el.input_type,
-            "value": el.value,
-            "bbox": {"x":el.bbox.x,"y":el.bbox.y,"width":el.bbox.width,"height":el.bbox.height}
-        })).collect();
-        eoka_protocol::Response::ok(json!({"text":text,"elements":objects,"page":context}))
+    let data = if args.structured {
+        json!({"text":text,"elements":objects,"page":context})
     } else {
-        eoka_protocol::Response::ok_text(text)
+        Value::String(text)
     };
-    Ok((elements, response))
+    Ok((elements, data))
 }
 
 #[cfg(test)]

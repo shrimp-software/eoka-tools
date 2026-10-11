@@ -1,8 +1,6 @@
 use super::Handler;
-use eoka_protocol::{ActionStatus, DownloadStartArgs, Response};
-use eoka_server::downloads::{
-    diagnose, failure, rejected, resolve_click, start_response, DownloadManager,
-};
+use eoka_protocol::{DownloadStartArgs, Response};
+use eoka_server::downloads::{failure, rejected, resolve_click, start_response, DownloadManager};
 use serde_json::Value;
 
 impl Handler {
@@ -34,31 +32,23 @@ impl Handler {
             return rejected(failure("download_busy", "A download is already active"));
         }
         let selector = if let Some(target) = args.click.as_deref() {
-            let result = async {
-                let (tab, viewport) = self
-                    .tab_with_config()
-                    .map_err(|error| failure("session_unavailable", error))?;
-                let resolved = resolve_click(
-                    &tab.page,
-                    &mut tab.elements,
-                    &tab.snapshot_refs,
-                    viewport,
-                    target,
-                )
-                .await;
-                match resolved {
-                    Ok(selector) => {
-                        tab.invalidate();
-                        Ok(selector)
-                    }
-                    Err(error) => {
-                        Err(diagnose(error, &tab.page, ActionStatus::NotAttempted, None).await)
-                    }
+            let (tab, viewport) = match self.tab_with_config() {
+                Ok(tab) => tab,
+                Err(error) => return rejected(failure("session_unavailable", error)),
+            };
+            match resolve_click(
+                &tab.page,
+                &mut tab.elements,
+                &tab.snapshot_refs,
+                viewport,
+                target,
+            )
+            .await
+            {
+                Ok(selector) => {
+                    tab.invalidate();
+                    Some(selector)
                 }
-            }
-            .await;
-            match result {
-                Ok(selector) => Some(selector),
                 Err(error) => return rejected(error),
             }
         } else {
@@ -80,9 +70,6 @@ impl Handler {
         }
         .await;
         self.stop_fetch_drain(drain).await;
-        match result {
-            Ok(record) => start_response(Ok(record)),
-            Err(error) => rejected(error),
-        }
+        start_response(result)
     }
 }

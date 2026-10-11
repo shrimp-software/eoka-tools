@@ -87,7 +87,7 @@ pub(super) struct Transfer {
     pub start_timeout: Duration,
     pub permit: OwnedSemaphorePermit,
     pub dispatched: Option<oneshot::Sender<()>>,
-    pub action_attempted: bool,
+    pub action_status: ActionStatus,
 }
 
 impl Transfer {
@@ -107,13 +107,13 @@ impl Transfer {
             }
         }
         if let Err(error) = result {
-            let status = if self.action_attempted {
-                ActionStatus::MayHaveExecuted
-            } else {
-                ActionStatus::NotAttempted
-            };
-            result =
-                Err(super::diagnose(error, &self.page, status, Some(self.job.snapshot().id)).await);
+            result = Err(super::diagnose(
+                error,
+                &self.page,
+                self.action_status,
+                Some(self.job.snapshot().id),
+            )
+            .await);
         }
         if let Some(dispatched) = self.dispatched.take() {
             let _ = dispatched.send(());
@@ -178,7 +178,7 @@ impl Transfer {
             .into_iter()
             .map(|frame| frame.id)
             .collect();
-        self.action_attempted = true;
+        self.action_status = ActionStatus::MayHaveExecuted;
         let trigger = self.trigger.run(&self.page);
         tokio::pin!(trigger);
         let deadline = tokio::time::Instant::now() + self.start_timeout;

@@ -104,40 +104,42 @@ pub async fn run(
         Ok(response) => response,
         Err(error) => return Response::err(error.to_string()),
     };
-    if response.ok && args.action.is_none() && args.wait {
-        if let Some(id) = response.data.as_ref().and_then(|data| data["id"].as_str()) {
-            if !json {
-                eprintln!("Download {id} started; waiting for the saved file");
-            }
-            let mut result = match crate::client::send_command(
-                session,
-                Request::DownloadWait(DownloadWaitArgs {
-                    id: id.into(),
-                    timeout_ms: args.timeout_ms,
-                }),
-                spec,
-            )
-            .await
-            {
-                Ok(response) => response,
-                Err(error) => Response::err_detail(
-                    eoka_protocol::ErrorDetail::new("download_transport_error", error.to_string())
-                        .retryable(false),
-                ),
-            };
-            if let Some(detail) = result.error_detail.as_mut() {
-                detail
-                    .context
-                    .get_or_insert_with(Default::default)
-                    .download_id = Some(id.to_owned());
-                detail.hint = Some(format!(
-                    "Inspect download status {id} or wait again; do not replay the start action."
-                ));
-            }
-            return result;
-        }
+    if !response.ok || args.action.is_some() || !args.wait {
+        return response;
     }
-    response
+    let Some(id) = response.data.as_ref().and_then(|data| data["id"].as_str()) else {
+        return response;
+    };
+    if !json {
+        eprintln!("Download {id} started; waiting for the saved file");
+    }
+    let mut result = match crate::client::send_command(
+        session,
+        Request::DownloadWait(DownloadWaitArgs {
+            id: id.into(),
+            timeout_ms: args.timeout_ms,
+        }),
+        spec,
+    )
+    .await
+    {
+        Ok(response) => response,
+        Err(error) => Response::err_detail(
+            eoka_protocol::ErrorDetail::new("download_transport_error", error.to_string())
+                .retryable(false),
+        ),
+    };
+    if let Some(detail) = result.error_detail.as_mut() {
+        detail
+            .context
+            .get_or_insert_with(Default::default)
+            .download_id
+            .get_or_insert_with(|| id.to_owned());
+        detail.hint.get_or_insert_with(|| {
+            format!("Inspect download status {id} or wait again; do not replay the start action.")
+        });
+    }
+    result
 }
 
 #[cfg(test)]

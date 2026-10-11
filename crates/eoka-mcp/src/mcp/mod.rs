@@ -187,15 +187,7 @@ impl EokaServer {
                     Some(selector)
                 }
                 Err(error) => {
-                    return protocol_tool_response(eoka_server::downloads::rejected(
-                        eoka_server::downloads::diagnose(
-                            error,
-                            &tab.page,
-                            eoka_protocol::ActionStatus::NotAttempted,
-                            None,
-                        )
-                        .await,
-                    ))
+                    return protocol_tool_response(eoka_server::downloads::rejected(error))
                 }
             }
         } else {
@@ -393,7 +385,7 @@ impl EokaServer {
         let tab = state
             .current_tab_mut()
             .ok_or_else(|| ErrorData::from(AgentError::NoTab))?;
-        let (elements, response) = match observe::inspect(&tab.page, viewport_only, &req.0).await {
+        let (elements, data) = match observe::inspect(&tab.page, viewport_only, &req.0).await {
             Ok(result) => result,
             Err(error) => {
                 drop(guard);
@@ -401,15 +393,9 @@ impl EokaServer {
             }
         };
         tab.elements = elements;
-        if req.0.structured {
-            protocol_tool_response(response)
-        } else {
-            text_ok(
-                response
-                    .data
-                    .and_then(|value| value.as_str().map(str::to_owned))
-                    .unwrap_or_default(),
-            )
+        match data {
+            Value::String(text) => text_ok(text),
+            data => protocol_tool_response(eoka_protocol::Response::ok(data)),
         }
     }
 
