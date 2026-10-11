@@ -1,4 +1,5 @@
 use std::time::{Duration, Instant};
+use tokio::io::AsyncReadExt;
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 
@@ -38,6 +39,7 @@ pub async fn run(session_name: &str, spec: LaunchSpec) -> anyhow::Result<()> {
 
     let mut handler = Handler::new(session_name, spec);
     let mut last_activity = Instant::now();
+    let mut waiters = tokio::task::JoinSet::new();
     let timeout = idle_timeout();
 
     let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
@@ -86,7 +88,21 @@ pub async fn run(session_name: &str, spec: LaunchSpec) -> anyhow::Result<()> {
                             break;
                         }
 
+                        if let Request::DownloadWait(args) = req {
+                            let manager = handler.download_manager();
+                            waiters.spawn(async move {
+                                let mut disconnected = [0u8; 1];
+                                tokio::select! {
+                                    response = manager.wait(&args.id, args.timeout_ms) => {
+                                        let _ = write_msg(&mut writer, &response).await;
+                                    },
+                                    _ = reader.read(&mut disconnected) => {},
+                                }
+                            });
+                            continue;
+                        }
                         let resp = handler.handle_request(req).await;
+                        last_activity = Instant::now();
                         if let Err(e) = write_msg(&mut writer, &resp).await {
                             eprintln!("[eoka] write error: {}", e);
                         }
@@ -96,12 +112,14 @@ pub async fn run(session_name: &str, spec: LaunchSpec) -> anyhow::Result<()> {
             }
             _ = maintenance.tick() => {
                 handler.service_idle_fetch();
+                if handler.download_manager().is_active() { last_activity = Instant::now(); }
                 if last_activity.elapsed() > timeout && !handler.is_network_recording().await {
                     eprintln!("[eoka] idle timeout ({}s), shutting down", timeout.as_secs());
                     let _ = handler.handle("close", &serde_json::Value::Null).await;
                     break;
                 }
             }
+            _ = waiters.join_next(), if !waiters.is_empty() => {},
             _ = shutdown_rx.recv() => {
                 let _ = handler.handle("close", &serde_json::Value::Null).await;
                 break;
@@ -109,6 +127,7 @@ pub async fn run(session_name: &str, spec: LaunchSpec) -> anyhow::Result<()> {
         }
     }
 
+    waiters.shutdown().await;
     let _ = std::fs::remove_file(&sock_path);
     let _ = std::fs::remove_file(&pid_path);
     eprintln!("[eoka] daemon stopped");

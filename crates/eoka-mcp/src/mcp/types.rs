@@ -40,25 +40,10 @@ pub struct JsRequest {
     pub file: Option<String>,
 }
 
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct FetchRequest {
-    #[schemars(description = "URL to fetch")]
-    pub url: String,
-    #[schemars(description = "HTTP method: GET, POST, PUT, DELETE, PATCH (default: GET)")]
-    pub method: Option<String>,
-    #[schemars(description = "Request headers as key-value pairs")]
-    pub headers: Option<HashMap<String, String>>,
-    #[schemars(description = "Request body string (for POST/PUT/PATCH)")]
-    pub body: Option<String>,
-    #[schemars(
-        description = "Redirect handling: 'follow' (default, follow redirects), 'manual' (capture redirect URL without following — response type will be 'opaqueredirect'), 'error' (fail on redirect)"
-    )]
-    pub redirect: Option<String>,
-    #[schemars(
-        description = "Max response body bytes to return (default: 8192). Set to 0 for headers-only."
-    )]
-    pub max_body: Option<usize>,
-}
+pub type FetchRequest = eoka_protocol::FetchArgs;
+pub type DownloadStartRequest = eoka_protocol::DownloadStartArgs;
+pub type DownloadIdRequest = eoka_protocol::DownloadIdArgs;
+pub type DownloadWaitRequest = eoka_protocol::DownloadWaitArgs;
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct SetCookieRequest {
