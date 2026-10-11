@@ -31,6 +31,10 @@ fn parse_headers_json(raw: &str) -> serde_json::Value {
 
 pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
     match cmd {
+        Command::Download(args) => args.request().unwrap_or_else(|error| {
+            eprintln!("Error: {error}");
+            std::process::exit(1);
+        }),
         Command::Open {
             url,
             headers,

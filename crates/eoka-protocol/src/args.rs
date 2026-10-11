@@ -160,6 +160,10 @@ pub struct FetchArgs {
     pub redirect: Option<String>,
     #[serde(default)]
     pub body_only: bool,
+    #[schemars(
+        description = "Raw text byte limit: default 8192, maximum 16777216; zero inspects headers only.",
+        range(max = 16777216)
+    )]
     pub max_body: Option<usize>,
 }
 

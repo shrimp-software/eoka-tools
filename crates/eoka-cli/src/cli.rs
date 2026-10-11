@@ -274,7 +274,9 @@ pub enum Command {
         #[command(subcommand)]
         action: ToolsAction,
     },
-    #[command(about = "Fetch URL from browser context")]
+    #[command(about = "Download files through the existing browser session")]
+    Download(crate::download_cmd::DownloadCli),
+    #[command(about = "Fetch bounded text from browser context; use download for files")]
     Fetch {
         url: String,
         #[arg(short, long)]
@@ -287,7 +289,10 @@ pub enum Command {
         redirect: Option<String>,
         #[arg(long)]
         body_only: bool,
-        #[arg(long)]
+        #[arg(
+            long,
+            help = "Raw text bytes to retain: default 8192, maximum 16777216; 0 means headers only"
+        )]
         max_body: Option<usize>,
     },
 

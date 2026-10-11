@@ -1,6 +1,6 @@
 [package]
 name = "eoka-server"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 license = "MIT"
 description = "Shared browser runtime and sidecar process for eoka browser automation"
@@ -15,9 +15,11 @@ name = "eoka-server"
 path = "src/main.rs"
 
 [dependencies]
-eoka = "0.5.10"
-eoka-protocol = { path = "../eoka-protocol", version = "0.2.1" }
+eoka = "0.5.15"
+eoka-protocol = { path = "../eoka-protocol", version = "0.2.4" }
 eoka-proxy = { path = "../eoka-proxy", version = "0.2.0" }
+url = "2"
+libc = "0.2"
 tokio = { version = "1", features = ["rt", "macros", "io-std", "io-util", "time"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -28,5 +30,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 captcha = { package = "eoka-captcha", version = "0.1.1", path = "../captcha" }
 
 [dev-dependencies]
+tempfile = "3"
 dirs = "5"
 reqwest = { version = "0.12", features = ["json"] }

@@ -1,4 +1,5 @@
 mod captcha;
+mod downloads;
 mod eval;
 #[cfg(test)]
 mod fetch_tests;
@@ -39,6 +40,7 @@ use target::{
 };
 
 pub struct Handler {
+    downloads: eoka_server::downloads::DownloadManager,
     state: Option<BrowserState>,
     spec: LaunchSpec,
     session_name: String,
@@ -72,6 +74,7 @@ impl Handler {
             LaunchSpec::Connect { .. } => ScriptPolicyState::default(),
         };
         Self {
+            downloads: Default::default(),
             state: None,
             spec,
             session_name: session_name.into(),
@@ -170,6 +173,9 @@ impl Handler {
     }
 
     pub async fn handle(&mut self, cmd: &str, args: &Value) -> Response {
+        if cmd == "download_start" {
+            return self.cmd_download_start(args).await;
+        }
         if cmd == "captcha_datadome" {
             return self.cmd_captcha_datadome(args).await;
         }
@@ -192,6 +198,29 @@ impl Handler {
 
     async fn dispatch(&mut self, cmd: &str, args: &Value) -> Result<Response, String> {
         match cmd {
+            "download_list" => Ok(Response::ok(
+                serde_json::to_value(self.downloads.list()).map_err(|e| e.to_string())?,
+            )),
+            "download_get" | "download_cancel" => {
+                let id = self.arg_str(args, "id")?;
+                Ok(match self.downloads.get(id) {
+                    Ok(job) => {
+                        eoka_server::downloads::record_response(if cmd == "download_cancel" {
+                            job.cancel()
+                        } else {
+                            job.snapshot()
+                        })
+                    }
+                    Err(error) => Response::err_detail(error),
+                })
+            }
+            "download_wait" => Ok(self
+                .downloads
+                .wait(
+                    self.arg_str(args, "id")?,
+                    args["timeout_ms"].as_u64().unwrap_or(30000),
+                )
+                .await),
             "open" => self.cmd_open(args).await,
             "back" => {
                 self.cmd_nav(|p| Box::pin(async { p.back().await }), "Back")
@@ -1003,60 +1032,8 @@ impl Handler {
     }
 
     async fn cmd_fetch(&mut self, args: &Value) -> Result<Response, String> {
-        let url = self.arg_str(args, "url")?;
-        let method = args["method"].as_str().unwrap_or("GET");
-        let redirect = args["redirect"].as_str().unwrap_or("follow");
-        let body_only = args["body_only"].as_bool().unwrap_or(false);
-        let max_body = args["max_body"]
-            .as_u64()
-            .map(|v| v as usize)
-            .unwrap_or(if body_only { 0 } else { 8192 });
-
-        let headers_json = args
-            .get("headers")
-            .filter(|v| !v.is_null())
-            .map(|h| serde_json::to_string(h).unwrap_or_else(|_| "null".into()))
-            .unwrap_or_else(|| "null".into());
-        let body_json = args
-            .get("body")
-            .filter(|v| !v.is_null())
-            .map(|b| serde_json::to_string(b).unwrap_or_else(|_| "null".into()))
-            .unwrap_or_else(|| "null".into());
-
-        let js = format!(
-            r#"(async () => {{
-                try {{
-                    const opts = {{ method: {method}, credentials: 'include', redirect: {redirect} }};
-                    const h = {headers};
-                    if (h) opts.headers = h;
-                    const b = {body};
-                    if (b) opts.body = b;
-                    const r = await fetch({url}, opts);
-                    const hdrs = {{}};
-                    r.headers.forEach((v,k) => hdrs[k] = v);
-                    let text = '';
-                    try {{ text = await r.text(); }} catch(e) {{}}
-                    if ({max_body} > 0 && text.length > {max_body}) text = text.slice(0, {max_body}) + '...(truncated)';
-                    return JSON.stringify({{ status: r.status, statusText: r.statusText, type: r.type, url: r.url, headers: hdrs, body: text }});
-                }} catch(e) {{
-                    return JSON.stringify({{ error: e.message }});
-                }}
-            }})()"#,
-            method = json_str(method),
-            redirect = json_str(redirect),
-            headers = headers_json,
-            body = body_json,
-            url = json_str(url),
-            max_body = max_body,
-        );
-
-        let tab = self.require_tab()?;
-        let result: String = tab.page.evaluate(&js).await.map_err(|e| e.to_string())?;
-        let parsed: Value = serde_json::from_str(&result).unwrap_or(Value::String(result));
-        if body_only {
-            return Ok(Response::ok_text(fetch_body_only_text(&parsed)?));
-        }
-        Ok(Response::ok(parsed))
+        let args = serde_json::from_value(args.clone()).map_err(|error| error.to_string())?;
+        Ok(eoka_server::browser_fetch::fetch(&self.require_tab()?.page, args).await)
     }
 
     async fn cmd_cookies(&mut self) -> Result<Response, String> {
@@ -2026,6 +2003,7 @@ impl Handler {
     }
 
     async fn cmd_close(&mut self) -> Result<Response, String> {
+        self.downloads.stop().await;
         if let Some(recorder) = self.network.clone() {
             let session = self
                 .state
@@ -2337,17 +2315,6 @@ async fn continue_fetch_pause(
     confirmed
 }
 
-fn fetch_body_only_text(parsed: &Value) -> Result<String, String> {
-    if let Some(error) = parsed.get("error").and_then(Value::as_str) {
-        return Err(error.to_string());
-    }
-    Ok(parsed
-        .get("body")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string())
-}
-
 async fn restore_state_and_maybe_reload(
     tab: &mut TabState,
     saved: &SavedState,
@@ -2512,19 +2479,5 @@ mod tests {
         assert!(js.contains("sessionStorage.setItem(k,v)"));
         assert!(js.contains("\"auth\":\"ok\""));
         assert!(js.contains("\"flow\":\"booking\""));
-    }
-
-    #[test]
-    fn fetch_body_only_surfaces_fetch_errors() {
-        let err = fetch_body_only_text(&json!({ "error": "Failed to fetch" })).unwrap_err();
-
-        assert_eq!(err, "Failed to fetch");
-    }
-
-    #[test]
-    fn fetch_body_only_extracts_body() {
-        let body = fetch_body_only_text(&json!({ "status": 200, "body": "ok" })).unwrap();
-
-        assert_eq!(body, "ok");
     }
 }

@@ -27,6 +27,12 @@ use state::BrowserState;
 use types::*;
 
 const MCP_PROTOCOL_TOOL_ROUTES: &[(&str, &str)] = &[
+    ("download_start", "download_start"),
+    ("download_list", "download_list"),
+    ("download_get", "download_get"),
+    ("download_wait", "download_wait"),
+    ("download_cancel", "download_cancel"),
+    ("fetch", "fetch"),
     ("snapshot", "snapshot"),
     ("observe", "observe"),
     ("click", "click"),
@@ -71,6 +77,7 @@ pub struct EokaServer {
     state: Arc<Mutex<Option<BrowserState>>>,
     headless: bool,
     tool_router: ToolRouter<EokaServer>,
+    downloads: eoka_server::downloads::DownloadManager,
 }
 
 impl EokaServer {
@@ -99,6 +106,7 @@ impl EokaServer {
         let mut guard = self.state.lock().await;
         if guard.as_ref().map(|s| s.unhealthy).unwrap_or(false) {
             eprintln!("[eoka-mcp] browser unhealthy, relaunching...");
+            self.downloads.stop().await;
             if let Some(state) = guard.take() {
                 let _ = state.close().await;
             }
@@ -141,7 +149,80 @@ impl EokaServer {
             state: Arc::new(Mutex::new(None)),
             headless,
             tool_router,
+            downloads: Default::default(),
         }
+    }
+
+    #[tool]
+    async fn download_start(
+        &self,
+        req: Parameters<DownloadStartRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        req.0.validate().map_err(invalid)?;
+        let mut guard = self.state.lock().await;
+        let state = guard
+            .as_mut()
+            .ok_or_else(|| ErrorData::from(AgentError::NoBrowser))?;
+        if self.downloads.is_active() {
+            return download_tool_response(eoka_protocol::Response::err_detail(
+                eoka_server::downloads::failure("download_busy", "One download is already active"),
+            ));
+        }
+        let viewport = state.config.viewport_only;
+        let browser = state.browser.clone();
+        let tab = state
+            .current_tab_mut()
+            .ok_or_else(|| ErrorData::from(AgentError::NoTab))?;
+        let selector = if let Some(target) = req.0.click.as_deref() {
+            auto_observe_if_needed(tab, target, viewport).await?;
+            let resolved = resolve_target(tab, target).await?;
+            tab.invalidate();
+            Some(resolved.selector)
+        } else {
+            None
+        };
+        let result = self
+            .downloads
+            .start(&browser, &tab.page, req.0, selector)
+            .await;
+        download_tool_response(eoka_server::downloads::start_response(result))
+    }
+
+    #[tool]
+    async fn download_list(&self) -> Result<CallToolResult, ErrorData> {
+        download_tool_response(eoka_protocol::Response::ok(
+            serde_json::to_value(self.downloads.list()).map_err(internal)?,
+        ))
+    }
+
+    #[tool]
+    async fn download_get(
+        &self,
+        req: Parameters<DownloadIdRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        download_tool_response(match self.downloads.get(&req.0.id) {
+            Ok(job) => eoka_server::downloads::record_response(job.snapshot()),
+            Err(error) => eoka_protocol::Response::err_detail(error),
+        })
+    }
+
+    #[tool]
+    async fn download_cancel(
+        &self,
+        req: Parameters<DownloadIdRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        download_tool_response(match self.downloads.get(&req.0.id) {
+            Ok(job) => eoka_server::downloads::record_response(job.cancel()),
+            Err(error) => eoka_protocol::Response::err_detail(error),
+        })
+    }
+
+    #[tool]
+    async fn download_wait(
+        &self,
+        req: Parameters<DownloadWaitRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        download_tool_response(self.downloads.wait(&req.0.id, req.0.timeout_ms).await)
     }
 
     #[tool(description = "List all open browser tabs. Returns tab IDs, titles, and URLs.")]
@@ -831,111 +912,8 @@ impl EokaServer {
             .current_tab()
             .ok_or_else(|| ErrorData::from(AgentError::NoTab))?;
 
-        let method = serde_json::to_string(req.0.method.as_deref().unwrap_or("GET")).unwrap();
-        let redirect =
-            serde_json::to_string(req.0.redirect.as_deref().unwrap_or("follow")).unwrap();
-        let max_body = req.0.max_body.unwrap_or(8192);
-        let url = serde_json::to_string(&req.0.url).unwrap();
-        let headers = match &req.0.headers {
-            Some(h) => serde_json::to_string(h).unwrap_or_else(|_| "null".into()),
-            None => "null".into(),
-        };
-        let body = match &req.0.body {
-            Some(b) => serde_json::to_string(b).unwrap_or_else(|_| "null".into()),
-            None => "null".into(),
-        };
-
-        let js = format!(
-            r#"(async () => {{
-                try {{
-                    const opts = {{ method: {method}, credentials: 'include', redirect: {redirect} }};
-                    const h = {headers};
-                    if (h) opts.headers = h;
-                    const b = {body};
-                    if (b !== null) opts.body = b;
-                    const r = await fetch({url}, opts);
-                    const rh = {{}};
-                    r.headers.forEach((v, k) => {{ rh[k] = v; }});
-                    const text = await r.text();
-                    return JSON.stringify({{
-                        status: r.status,
-                        statusText: r.statusText,
-                        url: r.url,
-                        redirected: r.redirected,
-                        type: r.type,
-                        headers: rh,
-                        body: text.slice(0, {max_body}),
-                        truncated: text.length > {max_body}
-                    }});
-                }} catch(e) {{
-                    return JSON.stringify({{ error: String(e) }});
-                }}
-            }})()"#,
-        );
-
-        let json_str: String = tab.page.evaluate(&js).await.map_err(internal)?;
-
-        let val: serde_json::Value =
-            serde_json::from_str(&json_str).unwrap_or(serde_json::Value::Null);
-        let inner: serde_json::Value = if val.is_string() {
-            serde_json::from_str(val.as_str().unwrap_or("{}")).unwrap_or(serde_json::Value::Null)
-        } else {
-            val
-        };
-
-        if let Some(e) = inner.get("error").and_then(|v| v.as_str()) {
-            return text_ok(format!("fetch error: {}", e));
-        }
-
-        let status = inner.get("status").and_then(|v| v.as_u64()).unwrap_or(0);
-        let status_text = inner
-            .get("statusText")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let final_url = inner
-            .get("url")
-            .and_then(|v| v.as_str())
-            .unwrap_or(&req.0.url);
-        let redirected = inner
-            .get("redirected")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        let resp_type = inner.get("type").and_then(|v| v.as_str()).unwrap_or("");
-        let body_str = inner.get("body").and_then(|v| v.as_str()).unwrap_or("");
-        let truncated = inner
-            .get("truncated")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-
-        let mut out = format!("Status: {} {}\nURL: {}", status, status_text, final_url);
-        if redirected {
-            out.push_str(&format!("\nRedirected: true (original: {})", req.0.url));
-        }
-        if !resp_type.is_empty() && resp_type != "basic" {
-            out.push_str(&format!("\nType: {}", resp_type));
-        }
-
-        if let Some(headers_obj) = inner.get("headers").and_then(|v| v.as_object()) {
-            if !headers_obj.is_empty() {
-                out.push_str("\nHeaders:");
-                for (k, v) in headers_obj {
-                    out.push_str(&format!("\n  {}: {}", k, v.as_str().unwrap_or("")));
-                }
-            }
-        }
-
-        if !body_str.is_empty() {
-            out.push_str(&format!("\nBody:\n{}", body_str));
-            if truncated {
-                out.push_str(&format!("\n[truncated at {} bytes]", max_body));
-            }
-        } else if resp_type == "opaqueredirect" {
-            out.push_str(
-                "\nBody: (opaque redirect — server tried to redirect, body not accessible)",
-            );
-        }
-
-        text_ok(out)
+        let response = eoka_server::browser_fetch::fetch(&tab.page, req.0).await;
+        download_tool_response(response)
     }
 
     #[tool(
@@ -1779,6 +1757,7 @@ impl EokaServer {
 
     #[tool(description = "Close the browser. Call when done to free resources.")]
     async fn close(&self) -> Result<CallToolResult, ErrorData> {
+        self.downloads.stop().await;
         let mut guard = self.state.lock().await;
         if let Some(state) = guard.take() {
             state.close().await.map_err(internal)?;
@@ -1817,7 +1796,11 @@ impl ServerHandler for EokaServer {
     }
 }
 
-async fn cleanup_browser(state: &Arc<Mutex<Option<BrowserState>>>) {
+async fn cleanup_browser(
+    state: &Arc<Mutex<Option<BrowserState>>>,
+    downloads: &eoka_server::downloads::DownloadManager,
+) {
+    downloads.stop().await;
     let mut guard = state.lock().await;
     if let Some(bs) = guard.take() {
         eprintln!("[eoka-mcp] closing browser...");
@@ -1831,6 +1814,8 @@ pub async fn run_server() -> anyhow::Result<()> {
 
     let server = EokaServer::new();
     let state_handle = Arc::clone(&server.state);
+    let downloads = server.downloads.clone();
+    let signal_downloads = downloads.clone();
 
     let sig_state = Arc::clone(&state_handle);
     tokio::spawn(async move {
@@ -1842,7 +1827,7 @@ pub async fn run_server() -> anyhow::Result<()> {
             _ = sigterm.recv() => eprintln!("[eoka-mcp] received SIGTERM"),
             _ = sigint.recv() => eprintln!("[eoka-mcp] received SIGINT"),
         }
-        cleanup_browser(&sig_state).await;
+        cleanup_browser(&sig_state, &signal_downloads).await;
         std::process::exit(0);
     });
 
@@ -1850,8 +1835,18 @@ pub async fn run_server() -> anyhow::Result<()> {
     service.waiting().await?;
 
     eprintln!("[eoka-mcp] MCP connection closed, cleaning up.");
-    cleanup_browser(&state_handle).await;
+    cleanup_browser(&state_handle, &downloads).await;
     Ok(())
+}
+
+fn download_tool_response(response: eoka_protocol::Response) -> Result<CallToolResult, ErrorData> {
+    let ok = response.ok;
+    let text = serde_json::to_string(&response).map_err(internal)?;
+    Ok(if ok {
+        CallToolResult::success(vec![ContentBlock::text(text)])
+    } else {
+        CallToolResult::error(vec![ContentBlock::text(text)])
+    })
 }
 
 #[cfg(test)]

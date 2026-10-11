@@ -157,6 +157,38 @@ impl EokaClient {
         self.call(Request::Fetch(args)).await
     }
 
+    pub async fn download_start(
+        &self,
+        args: eoka_protocol::DownloadStartArgs,
+    ) -> anyhow::Result<Response> {
+        self.call(Request::DownloadStart(args)).await
+    }
+
+    pub async fn download_list(&self) -> anyhow::Result<Response> {
+        self.call(Request::DownloadList).await
+    }
+
+    pub async fn download_get(
+        &self,
+        args: eoka_protocol::DownloadIdArgs,
+    ) -> anyhow::Result<Response> {
+        self.call(Request::DownloadGet(args)).await
+    }
+
+    pub async fn download_wait(
+        &self,
+        args: eoka_protocol::DownloadWaitArgs,
+    ) -> anyhow::Result<Response> {
+        self.call(Request::DownloadWait(args)).await
+    }
+
+    pub async fn download_cancel(
+        &self,
+        args: eoka_protocol::DownloadIdArgs,
+    ) -> anyhow::Result<Response> {
+        self.call(Request::DownloadCancel(args)).await
+    }
+
     pub async fn cookies(&self) -> anyhow::Result<Response> {
         self.call(Request::Cookies).await
     }
@@ -353,6 +385,16 @@ pub async fn send_command(
     request: Request,
     spec: LaunchSpec,
 ) -> anyhow::Result<Response> {
+    if matches!(
+        request,
+        Request::DownloadStart(_)
+            | Request::DownloadList
+            | Request::DownloadGet(_)
+            | Request::DownloadWait(_)
+            | Request::DownloadCancel(_)
+    ) {
+        return Ok(send_download(session_name, request).await);
+    }
     if let Request::CaptchaDatadome(args) = request {
         return Ok(send_datadome(session_name, args).await);
     }
@@ -371,6 +413,21 @@ pub async fn send_command(
 
 fn non_retryable_error(code: &str, message: &str) -> Response {
     Response::err_detail(eoka_protocol::ErrorDetail::new(code, message).retryable(false))
+}
+
+async fn send_download(session_name: &str, request: Request) -> Response {
+    let Ok(stream) = UnixStream::connect(session::socket_path(session_name)).await else {
+        return non_retryable_error(
+            "session_unavailable",
+            "Existing session unavailable; open the intended page first. No daemon was launched.",
+        );
+    };
+    match exchange_request(stream, &request).await {
+        Ok(response) if response.error.as_deref().is_some_and(|message| message.contains("unknown variant") || message.contains("unknown eoka protocol command")) =>
+            non_retryable_error("unsupported_operation", "This daemon does not support downloads. Restart it explicitly after upgrading; no action was replayed."),
+        Ok(response) => response,
+        Err(_) => non_retryable_error("download_transport_error", "Session transport failed; the action may have executed. Inspect download list before retrying. No restart or replay was attempted."),
+    }
 }
 
 async fn send_datadome(session_name: &str, args: CaptchaDatadomeArgs) -> Response {
@@ -720,6 +777,64 @@ mod tests {
                 server.await.unwrap();
                 std::fs::remove_file(sock).unwrap();
             }
+        }
+    }
+
+    #[tokio::test]
+    async fn downloads_require_existing_sessions_and_never_replay() {
+        let name = format!("download-missing-{}", std::process::id());
+        let response = test_client(&name).download_list().await.unwrap();
+        assert_eq!(response.error_detail.unwrap().code, "session_unavailable");
+        assert!(!session::pid_path(&name).exists());
+        for (index, error) in [
+            None,
+            Some("Invalid command request: unknown variant download_start"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let name = format!("download-transport-{}-{index}", std::process::id());
+            session::ensure_runtime_dir().unwrap();
+            let sock = session::socket_path(&name);
+            let listener = UnixListener::bind(&sock).unwrap();
+            let server = tokio::spawn(async move {
+                let (stream, _) = listener.accept().await.unwrap();
+                let (mut reader, mut writer) = stream.into_split();
+                let request: Request = read_msg(&mut reader).await.unwrap();
+                assert!(matches!(request, Request::DownloadStart(_)));
+                if let Some(message) = error {
+                    write_msg(&mut writer, &Response::err(message))
+                        .await
+                        .unwrap();
+                }
+                drop(reader);
+                drop(writer);
+                assert!(
+                    tokio::time::timeout(Duration::from_millis(150), listener.accept())
+                        .await
+                        .is_err()
+                );
+            });
+            let response = test_client(&name)
+                .download_start(eoka_protocol::DownloadStartArgs {
+                    click: Some("css:#download".into()),
+                    url: None,
+                    output: "/tmp/not-created".into(),
+                    expect_bytes: None,
+                    start_timeout_ms: 1000,
+                })
+                .await
+                .unwrap();
+            assert_eq!(
+                response.error_detail.unwrap().code,
+                if error.is_some() {
+                    "unsupported_operation"
+                } else {
+                    "download_transport_error"
+                }
+            );
+            server.await.unwrap();
+            std::fs::remove_file(sock).unwrap();
         }
     }
 

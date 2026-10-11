@@ -5,6 +5,7 @@ mod client;
 mod code;
 mod command_request;
 mod daemon;
+mod download_cmd;
 mod handler;
 mod launch;
 mod launch_spec;
@@ -33,10 +34,6 @@ async fn main() {
                 std::process::exit(1);
             }
         };
-        // The client already passes the suffixed session name (e.g. `foo-live`
-        // for connect mode); re-applying effective_session here double-appends
-        // the suffix (`foo-live-live`) and the socket never matches what the
-        // client waits for.
         if let Err(e) = daemon::run(&cli.session, spec).await {
             eprintln!("[eoka] daemon error: {}", e);
             std::process::exit(1);
@@ -232,6 +229,16 @@ async fn main() {
             Err(error) => protocol::Response::err(error),
         }
         .with_meta(response_meta(&effective_session, "batch"));
+        output::print_response(&response, json_mode);
+        if !response.ok {
+            std::process::exit(1);
+        }
+        return;
+    }
+    if let Command::Download(args) = &command {
+        let response = download_cmd::run(args, &effective_session, spec, json_mode)
+            .await
+            .with_meta(response_meta(&effective_session, "download"));
         output::print_response(&response, json_mode);
         if !response.ok {
             std::process::exit(1);

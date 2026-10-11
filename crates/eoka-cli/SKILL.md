@@ -106,9 +106,37 @@ eoka network intercept add "*/config" --respond /tmp/mock.json --status 200
 eoka network intercept log --clear
 ```
 
-`fetch` runs inside the browser context with active cookies and fingerprint. Network bodies are captured unredacted by default; treat exports as sensitive.
+`fetch` runs inside the browser context with active cookies and fingerprint. It retains at most 8192 raw text bytes by default; `--max-body` accepts 0 (headers only) through 16777216. JSON reports `bytesRead`, `truncated`, and `bodyOmitted`; known binary bodies are skipped. `--body-only` remains bounded and fails on binary or truncated bodies. Use native downloads for files. Network bodies are captured unredacted by default; treat exports as sensitive.
 
 Interception logs retain the latest 1,000 entries, including during long-running commands; older entries are evicted. `--respond` serves the file's exact bytes, including binary content. Response/capture files must be regular opened descriptors, capped at 8 MiB. File operations have a 500 ms deadline and a single worker; special files (including FIFOs/devices) are rejected. Failed capture/read/fulfillment or unconfirmed continuation invalidates DataDome clearance; fallback continues only never-dispatched pauses without erasing failures. Possibly dispatched resolutions are never replayed after missing acknowledgments or errors. DataDome integrity starts at command entry and includes the transferred idle worker.
+
+## Download Files
+
+```bash
+eoka download --click 'text:Download' --out ./archive.zip
+eoka download --url https://target.com/attachment --out ./file.zip --wait
+eoka download list
+eoka download status JOB_ID
+eoka download wait JOB_ID --timeout-ms 120000
+eoka download cancel JOB_ID
+```
+
+Use the existing Eoka-owned browser session; borrowed/remote browsers are rejected.
+The default returns a job ID. One file runs per session; wait timeout or client
+exit leaves it running, and session closure cancels unfinished work. Start actions
+are never replayed. An older daemon requires an explicit restart before use.
+`--click` accepts observation refs, text and CSS. `--url` uses a temporary tab and
+must produce a native attachment, not an HTML landing/login page. The output parent
+must exist; relative CLI paths resolve in the calling shell's directory.
+`--expect-bytes` verifies a known size. `--start-timeout-ms` bounds native-start
+detection (default 30000, maximum 300000); `--timeout-ms` only bounds waiting.
+
+Completion means a verified regular file was atomically published without replacing
+anything. Inspect `published_path` and retained `staging_path` on failures before
+retrying or cleaning up. Published files survive session closure. Jobs are in-memory;
+there is no resume or restart recovery. SDK/MCP/Tack require absolute output paths
+on their host and use canonical `download.start/list/get/wait/cancel` operations
+(Tack prefix: `eoka.`).
 
 ## State, Sessions, And Real Chrome
 

@@ -1,11 +1,13 @@
 mod args;
 mod datadome;
+mod download;
 mod io;
 mod metadata;
 mod response;
 
 pub use args::*;
 pub use datadome::*;
+pub use download::*;
 pub use io::{read_msg, write_msg};
 pub use metadata::{OperationCapability, OperationExposure, ToolManifestEntry};
 pub use response::{ErrorDetail, Response, ResponseMeta};
@@ -509,11 +511,65 @@ define_operations! {
         destructive: false,
         input: FrameEvalArgs,
     },
+    DownloadStart {
+        path: "download.start",
+        cmd: "download_start",
+        name: "download.start",
+        description: "Start one native browser download to an absolute output filename; returns a background job",
+        capability: Network,
+        exposure: DefaultAgent,
+        read_only: false,
+        destructive: true,
+        input: DownloadStartArgs,
+    },
+    DownloadList {
+        path: "download.list",
+        cmd: "download_list",
+        name: "download.list",
+        description: "List download jobs in the existing session",
+        capability: Network,
+        exposure: DefaultAgent,
+        read_only: true,
+        destructive: false,
+    },
+    DownloadGet {
+        path: "download.get",
+        cmd: "download_get",
+        name: "download.get",
+        description: "Inspect a download job and its saved artifact",
+        capability: Network,
+        exposure: DefaultAgent,
+        read_only: true,
+        destructive: false,
+        input: DownloadIdArgs,
+    },
+    DownloadWait {
+        path: "download.wait",
+        cmd: "download_wait",
+        name: "download.wait",
+        description: "Wait for a download; timeout or caller disconnection does not cancel the transfer",
+        capability: Network,
+        exposure: DefaultAgent,
+        read_only: true,
+        destructive: false,
+        input: DownloadWaitArgs,
+    },
+    DownloadCancel {
+        path: "download.cancel",
+        cmd: "download_cancel",
+        name: "download.cancel",
+        description: "Request cancellation of a download without deleting a completed artifact",
+        capability: Network,
+        exposure: DefaultAgent,
+        read_only: false,
+        destructive: true,
+        input: DownloadIdArgs,
+    },
     Fetch {
         path: "fetch",
         cmd: "fetch",
         name: "fetch",
-        description: "Fetch URL in page context",
+        description: "Inspect bounded text using browser credentials; binary files use download.start",
         capability: Network,
         exposure: DefaultAgent,
         read_only: false,
@@ -1271,6 +1327,10 @@ mod tests {
                     serde_json::json!({"frame":"iframe","target":"input","text":"value"})
                 }
                 "emulate" => serde_json::json!({"width":390,"height":844}),
+                "download_start" => serde_json::json!({"click":"@e1","output":"/tmp/download"}),
+                "download_get" | "download_cancel" | "download_wait" => {
+                    serde_json::json!({"id":"job"})
+                }
                 "fetch" => serde_json::json!({"url":"https://example.com"}),
                 "set_cookie" => serde_json::json!({"name":"a","value":"b"}),
                 "delete_cookie" => serde_json::json!({"name":"a"}),

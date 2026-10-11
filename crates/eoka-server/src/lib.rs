@@ -1,7 +1,9 @@
 pub mod annotate;
 pub mod browser;
+pub mod browser_fetch;
 pub mod captcha;
 pub mod dispatch;
+pub mod downloads;
 mod methods;
 pub mod observe;
 pub mod protocol;
