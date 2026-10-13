@@ -2,7 +2,7 @@ pub mod commands;
 pub mod sidecar;
 pub(crate) mod store;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use eoka::{Action, ActionOptions, ActionOutcome, DispatchObserver, Error, Page};
 use eoka_protocol::{OperationListArgs, OperationRecord, OperationState};
 use std::{
@@ -61,7 +61,12 @@ impl DispatchObserver for Intent {
                         Err(anyhow!("Operation is no longer owned and running"))
                     }
                 })
-                .map_err(|_| Error::transport("Could not durably record dispatch intent"))
+                .map_err(|error| {
+                    Error::transport_io(
+                        "Could not durably record dispatch intent",
+                        std::io::Error::other(error),
+                    )
+                })
         })
     }
 }
@@ -97,9 +102,7 @@ impl OperationManager {
         let manager = self.clone();
         tokio::spawn(async move { manager.submit_owned(page, id, action, options).await })
             .await
-            .map_err(|_| {
-                anyhow!("Operation admission task failed; inspect its ID before retrying")
-            })?
+            .context("Operation admission task failed; inspect its ID before retrying")?
     }
 
     async fn submit_owned(
@@ -109,9 +112,8 @@ impl OperationManager {
         action: Action,
         mut options: ActionOptions,
     ) -> Result<OperationRecord> {
-        let parsed = uuid::Uuid::parse_str(&id).map_err(|_| {
-            anyhow!("operation_id must be a UUID generated before sending the request")
-        })?;
+        let parsed = uuid::Uuid::parse_str(&id)
+            .context("operation_id must be a UUID generated before sending the request")?;
         if parsed.to_string() != id {
             return Err(anyhow!("operation_id must be a canonical lowercase UUID"));
         }
@@ -185,8 +187,8 @@ impl OperationManager {
                     }
                 })
                 .await;
-            if finish.is_err() {
-                tracing::error!(operation_id=%id,"Could not persist operation completion; outcome remains uncertain");
+            if let Err(error) = finish {
+                tracing::error!(operation_id = %id, %error, "Could not persist operation completion; outcome remains uncertain");
             }
             if let Ok(mut jobs) = manager.inner.jobs.lock() {
                 jobs.remove(&id);
@@ -201,10 +203,20 @@ impl OperationManager {
     }
     pub async fn list(&self, args: OperationListArgs) -> Result<Vec<OperationRecord>> {
         let limit = args.limit.unwrap_or(100).clamp(1, 500);
-        self.store().await?.run(move |connection| {
-            let rows=connection.prepare("SELECT record FROM operations WHERE started < ? ORDER BY started DESC,id LIMIT ?")?.query_map(rusqlite::params![args.before_ms.unwrap_or(i64::MAX as u64),limit],|r|r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
-            rows.into_iter().map(|s|Ok(serde_json::from_str(&s)?)).collect()
-        }).await
+        let before = args.before_ms.unwrap_or(i64::MAX as u64);
+        self.store()
+            .await?
+            .run(move |connection| {
+                let mut query = connection.prepare(
+                    "SELECT record FROM operations WHERE started < ?
+                     ORDER BY started DESC,id LIMIT ?",
+                )?;
+                let rows = query.query_map(rusqlite::params![before, limit], |row| {
+                    row.get::<_, String>(0)
+                })?;
+                rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
+            })
+            .await
     }
     pub async fn wait(&self, id: &str, timeout_ms: u64) -> Result<OperationRecord> {
         if timeout_ms > 86_400_000 {
@@ -251,7 +263,9 @@ impl OperationManager {
             Vec::new()
         };
         for id in ids {
-            let _ = self.wait(&id, 5000).await;
+            if let Err(error) = self.wait(&id, 5000).await {
+                tracing::warn!(operation_id = %id, %error, "Could not confirm operation shutdown");
+            }
         }
     }
     pub fn is_active(&self) -> bool {

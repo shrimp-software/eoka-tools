@@ -74,55 +74,38 @@ impl Runner {
         if max_attempts > 1 {
             return Err(crate::Error::Config("Whole-workflow retries are disabled for durable actions; inspect operation IDs and use bounded waits".into()));
         }
-        let retry_delay = retry_config.map(|r| r.delay_ms).unwrap_or(0);
-
-        let mut last_error = None;
-        let mut last_actions_executed = 0;
-        let mut retries = 0;
-
-        for attempt in 1..=max_attempts {
-            if attempt > 1 {
-                retries += 1;
-                info!("Retry attempt {}/{}", attempt, max_attempts);
-                if retry_delay > 0 {
-                    tokio::time::sleep(std::time::Duration::from_millis(retry_delay)).await;
-                }
-            }
-
-            match self.run_once(config, &ctx).await {
-                Ok(result) if result.success => {
-                    return Ok(RunResult {
-                        success: true,
-                        error: None,
-                        actions_executed: result.actions_executed,
-                        duration_ms: start.elapsed().as_millis() as u64,
-                        retries,
-                    });
-                }
-                Ok(result) => {
-                    last_actions_executed = result.actions_executed;
-                    last_error = Some("success conditions not met".to_string());
-                    if attempt == max_attempts {
-                        self.handle_failure(config).await;
-                    }
-                }
-                Err(e) => {
-                    warn!("Attempt {} failed: {}", attempt, e);
-                    last_error = Some(e.to_string());
-                    if attempt == max_attempts {
-                        self.handle_failure(config).await;
-                    }
-                }
-            }
+        if max_attempts == 0 {
+            return Ok(RunResult {
+                success: false,
+                error: None,
+                actions_executed: 0,
+                duration_ms: start.elapsed().as_millis() as u64,
+                retries: 0,
+            });
         }
-
-        Ok(RunResult {
-            success: false,
-            error: last_error,
-            actions_executed: last_actions_executed,
-            duration_ms: start.elapsed().as_millis() as u64,
-            retries,
-        })
+        let mut result = match self.run_once(config, &ctx).await {
+            Ok(mut result) => {
+                if !result.success {
+                    result.error = Some("success conditions not met".into());
+                }
+                result
+            }
+            Err(error) => {
+                warn!(%error, "Workflow failed");
+                RunResult {
+                    success: false,
+                    error: Some(error.to_string()),
+                    actions_executed: 0,
+                    duration_ms: 0,
+                    retries: 0,
+                }
+            }
+        };
+        if !result.success {
+            self.handle_failure(config).await;
+        }
+        result.duration_ms = start.elapsed().as_millis() as u64;
+        Ok(result)
     }
 
     async fn handle_failure(&self, config: &Config) {
@@ -135,7 +118,7 @@ impl Runner {
                 let path = screenshot_path.replace("{timestamp}", &timestamp.to_string());
                 info!("Saving failure screenshot to: {}", path);
                 if let Ok(data) = self.page.screenshot().await {
-                    if let Err(e) = std::fs::write(&path, data) {
+                    if let Err(e) = tokio::fs::write(&path, data).await {
                         warn!("Failed to save screenshot: {}", e);
                     }
                 }

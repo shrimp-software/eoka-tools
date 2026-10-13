@@ -16,10 +16,10 @@ fn locator(target: &Target) -> Result<LocatorSpec> {
     }
 }
 
-pub(super) fn prepare(action: &Action) -> Result<Option<(ActionPerformArgs, bool)>> {
+pub(super) fn prepare(action: &Action) -> Result<(ActionPerformArgs, bool)> {
     let defaults = ActionSettings::default();
     let (action, settings, optional) = match action {
-        Action::Perform(request) => return Ok(Some((request.clone(), false))),
+        Action::Perform(request) => return Ok((request.clone(), false)),
         Action::Goto(a) => (
             Core::Navigate {
                 url: a.url.clone(),
@@ -100,7 +100,12 @@ pub(super) fn prepare(action: &Action) -> Result<Option<(ActionPerformArgs, bool
             &a.operation,
             false,
         ),
-        _ => return Ok(None),
+        _ => {
+            return Err(Error::Config(format!(
+                "{} is not a durable action",
+                action.name()
+            )))
+        }
     };
     let options = ActionOptions {
         timeout_ms: settings.timeout_ms.unwrap_or(30000),
@@ -108,7 +113,7 @@ pub(super) fn prepare(action: &Action) -> Result<Option<(ActionPerformArgs, bool
         wait_for_target: !optional,
         ..Default::default()
     };
-    Ok(Some((
+    Ok((
         ActionPerformArgs {
             operation_id: settings
                 .operation_id
@@ -118,7 +123,7 @@ pub(super) fn prepare(action: &Action) -> Result<Option<(ActionPerformArgs, bool
             options,
         },
         optional,
-    )))
+    ))
 }
 
 pub(super) async fn run(

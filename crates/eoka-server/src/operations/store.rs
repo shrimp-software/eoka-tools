@@ -93,19 +93,35 @@ impl Store {
         drop(private_file(&db_path)?);
         let mut connection = Connection::open(db_path)?;
         connection.busy_timeout(std::time::Duration::from_secs(5))?;
-        connection.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; CREATE TABLE IF NOT EXISTS secrets (id INTEGER PRIMARY KEY, key BLOB NOT NULL); CREATE TABLE IF NOT EXISTS operations (id TEXT PRIMARY KEY, digest BLOB NOT NULL, runtime TEXT NOT NULL, state TEXT NOT NULL, started INTEGER NOT NULL, finished INTEGER, record TEXT NOT NULL); CREATE INDEX IF NOT EXISTS operations_started ON operations(started); CREATE TABLE IF NOT EXISTS download_records (id TEXT PRIMARY KEY, runtime TEXT NOT NULL, record TEXT NOT NULL, evidence TEXT);")?;
-        let mut key: Option<Vec<u8>> = connection
-            .query_row("SELECT key FROM secrets WHERE id=1", [], |r| r.get(0))
-            .optional()?;
-        if key.is_none() {
-            let generated = [
-                uuid::Uuid::new_v4().as_bytes().as_slice(),
-                uuid::Uuid::new_v4().as_bytes().as_slice(),
-            ]
-            .concat();
-            connection.execute("INSERT INTO secrets(id,key) VALUES(1,?)", [&generated])?;
-            key = Some(generated);
-        }
+        connection.execute_batch(
+            "PRAGMA journal_mode=WAL;
+             PRAGMA synchronous=FULL;
+             CREATE TABLE IF NOT EXISTS secrets (id INTEGER PRIMARY KEY, key BLOB NOT NULL);
+             CREATE TABLE IF NOT EXISTS operations (
+                 id TEXT PRIMARY KEY, digest BLOB NOT NULL, runtime TEXT NOT NULL,
+                 state TEXT NOT NULL, started INTEGER NOT NULL, finished INTEGER,
+                 record TEXT NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS operations_started ON operations(started);
+             CREATE TABLE IF NOT EXISTS download_records (
+                 id TEXT PRIMARY KEY, runtime TEXT NOT NULL, record TEXT NOT NULL, evidence TEXT
+             );",
+        )?;
+        let key = match connection
+            .query_row("SELECT key FROM secrets WHERE id=1", [], |row| row.get(0))
+            .optional()?
+        {
+            Some(key) => key,
+            None => {
+                let key = [
+                    uuid::Uuid::new_v4().as_bytes().as_slice(),
+                    uuid::Uuid::new_v4().as_bytes().as_slice(),
+                ]
+                .concat();
+                connection.execute("INSERT INTO secrets(id,key) VALUES(1,?)", [&key])?;
+                key
+            }
+        };
         let runtime = uuid::Uuid::new_v4().to_string();
         let runtime_lock = private_file(&path.join(format!("runtime-{runtime}.lock")))?;
         runtime_lock.lock_exclusive()?;
@@ -130,7 +146,7 @@ impl Store {
         Ok(Arc::new(Self {
             connection: Mutex::new(connection),
             runtime,
-            key: key.ok_or_else(|| anyhow!("Missing store key"))?,
+            key,
             _lock: runtime_lock,
             directory: path.into(),
             last_recovery: Mutex::new(std::time::Instant::now()),
@@ -173,8 +189,7 @@ impl Store {
     }
 
     pub fn digest(&self, canonical: &[u8]) -> Result<Vec<u8>> {
-        let mut mac =
-            Hmac::<Sha256>::new_from_slice(&self.key).map_err(|_| anyhow!("Invalid store key"))?;
+        let mut mac = Hmac::<Sha256>::new_from_slice(&self.key).context("Invalid store key")?;
         mac.update(canonical);
         Ok(mac.finalize().into_bytes().to_vec())
     }
@@ -185,25 +200,8 @@ impl Store {
         canonical: Vec<u8>,
     ) -> Result<Option<OperationRecord>> {
         let digest = self.digest(&canonical)?;
-        self.run(move |connection| {
-            let prior: Option<(Vec<u8>, String)> = connection
-                .query_row(
-                    "SELECT digest,record FROM operations WHERE id=?",
-                    [id],
-                    |r| Ok((r.get(0)?, r.get(1)?)),
-                )
-                .optional()?;
-            match prior {
-                Some((existing, json)) if existing == digest => {
-                    Ok(Some(serde_json::from_str(&json)?))
-                }
-                Some(_) => Err(anyhow!(
-                    "operation_id_conflict: ID is already bound to different arguments"
-                )),
-                None => Ok(None),
-            }
-        })
-        .await
+        self.run(move |connection| bound_operation(connection, &id, &digest))
+            .await
     }
 
     pub async fn admit(
@@ -213,14 +211,16 @@ impl Store {
     ) -> Result<(OperationRecord, bool)> {
         let digest = self.digest(&canonical)?;
         self.run(move |connection| {
-            let tx=connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-            let prior: Option<(Vec<u8>,String)>=tx.query_row("SELECT digest,record FROM operations WHERE id=?",[&record.id],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
-            if let Some((existing,json))=prior {
-                if existing!=digest { return Err(anyhow!("operation_id_conflict: ID is already bound to different arguments")); }
-                return Ok((serde_json::from_str(&json)?,false));
+            let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            if let Some(existing) = bound_operation(&tx, &record.id, &digest)? {
+                return Ok((existing, false));
             }
-            tx.execute("INSERT INTO operations(id,digest,runtime,state,started,record) VALUES(?,?,?,'running',?,?)",params![record.id,digest,record.runtime_id,record.started_at_ms,serde_json::to_string(&record)?])?;
-            tx.commit()?; Ok((record,true))
+            tx.execute(
+                "INSERT INTO operations(id,digest,runtime,state,started,record) VALUES(?,?,?,'running',?,?)",
+                params![record.id, digest, record.runtime_id, record.started_at_ms, serde_json::to_string(&record)?],
+            )?;
+            tx.commit()?;
+            Ok((record, true))
         }).await
     }
 
@@ -274,8 +274,35 @@ impl Store {
     }
 }
 
+fn bound_operation(
+    connection: &Connection,
+    id: &str,
+    digest: &[u8],
+) -> Result<Option<OperationRecord>> {
+    let prior: Option<(Vec<u8>, String)> = connection
+        .query_row(
+            "SELECT digest,record FROM operations WHERE id=?",
+            [id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    match prior {
+        Some((existing, json)) if existing == digest => Ok(Some(serde_json::from_str(&json)?)),
+        Some(_) => Err(anyhow!(
+            "operation_id_conflict: ID is already bound to different arguments"
+        )),
+        None => Ok(None),
+    }
+}
+
 fn recover_abandoned(connection: &mut Connection, path: &Path) -> Result<()> {
-    let abandoned: Vec<String> = connection.prepare("SELECT DISTINCT runtime FROM operations WHERE state='running' UNION SELECT DISTINCT runtime FROM download_records")?.query_map([],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?;
+    let abandoned = connection
+        .prepare(
+            "SELECT DISTINCT runtime FROM operations WHERE state='running'
+             UNION SELECT DISTINCT runtime FROM download_records",
+        )?
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
     for owner in abandoned {
         uuid::Uuid::parse_str(&owner).context("Invalid runtime identity in store")?;
         let lock = private_file(&path.join(format!("runtime-{owner}.lock")))?;

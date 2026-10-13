@@ -1,5 +1,5 @@
 use crate::config::actions::{
-    EmailAction, EmailExtractAction, EmailFilterAction, ImapConfigAction, ScrollDirection, Target,
+    EmailAction, EmailExtractAction, EmailFilterAction, ImapConfigAction, ScrollDirection,
     TryClickAnyAction, WaitForEmailAction,
 };
 use crate::config::{Action, Config, Params};
@@ -75,60 +75,28 @@ impl Default for ExecutionContext {
     }
 }
 
-const FIND_BY_TEXT_JS: &str = r#"(() => {
-    const text = arguments[0];
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT, null);
-    while (walker.nextNode()) {
-        const el = walker.currentNode;
-        if (el.textContent?.trim().toLowerCase().includes(text.toLowerCase())) {
-            if (el.matches('a, button, input, select, [role="button"], [onclick]')) {
-                if (el.id) return '#' + el.id;
-                const path = [];
-                let node = el;
-                while (node && node !== document.body) {
-                    let selector = node.tagName.toLowerCase();
-                    if (node.id) {
-                        path.unshift('#' + node.id);
-                        break;
-                    }
-                    const siblings = Array.from(node.parentNode?.children || []);
-                    const index = siblings.indexOf(node) + 1;
-                    if (siblings.length > 1) selector += ':nth-child(' + index + ')';
-                    path.unshift(selector);
-                    node = node.parentNode;
-                }
-                return path.join(' > ');
-            }
-        }
-    }
-    return null;
-})()"#;
-
 pub async fn execute_with_context(
     page: &Page,
     action: &Action,
     ctx: &ExecutionContext,
 ) -> Result<()> {
-    if let Some(prepared) = super::operations::prepare(action)? {
-        return super::operations::run(page, ctx, prepared).await;
-    }
     match action {
-        Action::Perform(_) => return Err(Error::Config("Invalid durable action".into())),
-        Action::Goto(a) => {
-            info!("goto: {}", a.url);
-            page.goto(&a.url).await?;
-        }
-        Action::Back => {
-            debug!("back");
-            page.back().await?;
-        }
-        Action::Forward => {
-            debug!("forward");
-            page.forward().await?;
-        }
-        Action::Reload => {
-            debug!("reload");
-            page.reload().await?;
+        Action::Perform(_)
+        | Action::Goto(_)
+        | Action::Back
+        | Action::Forward
+        | Action::Reload
+        | Action::Click(_)
+        | Action::TryClick(_)
+        | Action::Fill(_)
+        | Action::Type(_)
+        | Action::Clear(_)
+        | Action::Select(_)
+        | Action::PressKey(_)
+        | Action::Hover(_)
+        | Action::ScrollTo(_) => {
+            let prepared = super::operations::prepare(action)?;
+            super::operations::run(page, ctx, prepared).await?;
         }
         Action::Wait(a) => {
             debug!("wait: {}ms", a.ms);
@@ -153,64 +121,12 @@ pub async fn execute_with_context(
         Action::WaitForEmail(a) => {
             wait_for_email(page, a).await?;
         }
-        Action::Click(a) => {
-            let selector = resolve_target(page, &a.target).await?;
-            info!("click: {}", a.target);
-            if a.scroll_into_view {
-                scroll_into_view(page, &selector).await?;
-            }
-            if a.human {
-                page.human_click(&selector).await?;
-            } else {
-                page.click(&selector).await?;
-            }
-        }
-        Action::TryClick(a) => {
-            debug!("try_click: {}", a.target);
-            if let Ok(selector) = resolve_target(page, &a.target).await {
-                let _ = page.try_click(&selector).await;
-            }
-        }
         Action::TryClickAny(a) => {
             debug!(
                 "try_click_any: {:?}",
                 a.texts.as_ref().or(a.selectors.as_ref())
             );
             try_click_any(page, a, ctx).await?;
-        }
-        Action::Fill(a) => {
-            info!("fill: {} = '{}'", a.target, a.value);
-            let selector = resolve_target(page, &a.target).await?;
-            if a.human {
-                page.human_fill(&selector, &a.value).await?;
-            } else {
-                page.fill(&selector, &a.value).await?;
-            }
-        }
-        Action::Type(a) => {
-            debug!("type: {} = '{}'", a.target, a.value);
-            let selector = resolve_target(page, &a.target).await?;
-            focus_element(page, &selector).await?;
-            page.type_text(&a.value).await?;
-        }
-        Action::Clear(a) => {
-            debug!("clear: {}", a.target);
-            let selector = resolve_target(page, &a.target).await?;
-            page.fill(&selector, "").await?;
-        }
-        Action::Select(a) => {
-            info!("select: {} = '{}'", a.target, a.value);
-            let selector = resolve_target(page, &a.target).await?;
-            select_option(page, &selector, &a.value, &a.target).await?;
-        }
-        Action::PressKey(a) => {
-            debug!("press_key: {}", a.key);
-            page.human().press_key(&a.key).await?;
-        }
-        Action::Hover(a) => {
-            debug!("hover: {}", a.target);
-            let selector = resolve_target(page, &a.target).await?;
-            hover_element(page, &selector).await?;
         }
         Action::SetCookie(a) => {
             debug!("set_cookie: {}={}", a.name, a.value);
@@ -222,13 +138,13 @@ pub async fn execute_with_context(
             page.delete_cookie(&a.name, a.domain.as_deref()).await?;
         }
         Action::Execute(a) => {
-            debug!("execute: {}...", &a.js[..a.js.len().min(50)]);
+            debug!("execute: {}...", a.js.chars().take(50).collect::<String>());
             page.execute(&a.js).await?;
         }
         Action::Screenshot(a) => {
             info!("screenshot: {}", a.path);
             let data = page.screenshot().await?;
-            std::fs::write(&a.path, data)?;
+            tokio::fs::write(&a.path, data).await?;
         }
         Action::Log(a) => {
             info!("[log] {}", a.message);
@@ -257,11 +173,6 @@ pub async fn execute_with_context(
             debug!("scroll: {:?} x{}", a.direction, a.amount);
             scroll(page, &a.direction, a.amount).await?;
         }
-        Action::ScrollTo(a) => {
-            debug!("scroll_to: {}", a.target);
-            let selector = resolve_target(page, &a.target).await?;
-            scroll_into_view(page, &selector).await?;
-        }
         Action::WaitFor(a) => {
             debug!("wait_for: {}", a.selector);
             page.wait_for(&a.selector, a.timeout_ms).await?;
@@ -288,7 +199,11 @@ pub async fn execute_with_context(
             }
         }
         Action::IfSelectorExists(a) => {
-            let exists = element_exists(page, &a.selector).await?;
+            let exists = match page.find(&a.selector).await {
+                Ok(_) => true,
+                Err(eoka::Error::ElementNotFound(_)) => false,
+                Err(error) => return Err(error.into()),
+            };
             debug!("if_selector_exists '{}': {}", a.selector, exists);
             let actions = if exists {
                 &a.then_actions
@@ -424,59 +339,13 @@ fn extract_email_values(
     Ok((link, code))
 }
 
-pub async fn resolve_target(page: &Page, target: &Target) -> Result<String> {
-    if let Some(ref sel) = target.selector {
-        return Ok(sel.clone());
-    }
-    if let Some(ref txt) = target.text {
-        let js = FIND_BY_TEXT_JS.replace("arguments[0]", &serde_json::to_string(txt).unwrap());
-        let result: Option<String> = page.evaluate(&js).await?;
-        if let Some(sel) = result {
-            return Ok(sel);
-        }
-        return Err(Error::ActionFailed(format!(
-            "element with text '{}' not found",
-            txt
-        )));
-    }
-    Err(Error::ActionFailed(
-        "either selector or text must be provided".into(),
-    ))
-}
-
-async fn focus_element(page: &Page, selector: &str) -> Result<()> {
-    let js = format!(
-        "document.querySelector({})?.focus()",
-        serde_json::to_string(selector).unwrap()
-    );
-    page.execute(&js).await?;
-    Ok(())
-}
-
-async fn element_exists(page: &Page, selector: &str) -> Result<bool> {
-    let js = format!(
-        "!!document.querySelector({})",
-        serde_json::to_string(selector).unwrap()
-    );
-    Ok(page.evaluate(&js).await?)
-}
-
-async fn scroll_into_view(page: &Page, selector: &str) -> Result<()> {
-    let js = format!(
-        "document.querySelector({})?.scrollIntoView({{behavior:'smooth',block:'center'}})",
-        serde_json::to_string(selector).unwrap()
-    );
-    page.execute(&js).await?;
-    page.wait(200).await;
-    Ok(())
-}
-
 async fn scroll(page: &Page, direction: &ScrollDirection, amount: u32) -> Result<()> {
+    let distance = i64::from(amount) * 300;
     let (x, y) = match direction {
-        ScrollDirection::Up => (0, -(amount as i32 * 300)),
-        ScrollDirection::Down => (0, amount as i32 * 300),
-        ScrollDirection::Left => (-(amount as i32 * 300), 0),
-        ScrollDirection::Right => (amount as i32 * 300, 0),
+        ScrollDirection::Up => (0, -distance),
+        ScrollDirection::Down => (0, distance),
+        ScrollDirection::Left => (-distance, 0),
+        ScrollDirection::Right => (distance, 0),
     };
     page.execute(&format!("window.scrollBy({x}, {y})")).await?;
     Ok(())
@@ -547,40 +416,5 @@ async fn try_click_any(
             )));
         }
     }
-    Ok(())
-}
-
-async fn select_option(page: &Page, selector: &str, value: &str, target: &Target) -> Result<()> {
-    let js = format!(
-        r#"(() => {{
-            const sel = document.querySelector({sel});
-            if (!sel) return 'element_not_found';
-            const opt = Array.from(sel.options).find(o => o.value === {val} || o.text === {val});
-            if (!opt) return 'option_not_found';
-            sel.value = opt.value;
-            sel.dispatchEvent(new Event('change', {{ bubbles: true }}));
-            return 'ok';
-        }})()"#,
-        sel = serde_json::to_string(selector).unwrap(),
-        val = serde_json::to_string(value).unwrap()
-    );
-    let result: String = page.evaluate(&js).await?;
-    match result.as_str() {
-        "ok" => Ok(()),
-        "element_not_found" => Err(Error::ActionFailed(format!(
-            "select element '{}' not found",
-            target
-        ))),
-        "option_not_found" => Err(Error::ActionFailed(format!(
-            "option '{}' not found in select",
-            value
-        ))),
-        _ => Err(Error::ActionFailed(format!("select failed: {}", result))),
-    }
-}
-
-async fn hover_element(page: &Page, selector: &str) -> Result<()> {
-    page.hover(selector).await?;
-    page.wait(100).await;
     Ok(())
 }
