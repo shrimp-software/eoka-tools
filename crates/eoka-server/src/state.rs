@@ -7,6 +7,7 @@ use crate::protocol::ServerError;
 
 #[derive(Default)]
 pub struct AppState {
+    pub agent: crate::agent::AgentSession,
     pub operations: crate::operations::OperationManager,
     browser: Option<Arc<Browser>>,
     pages: HashMap<String, Page>,

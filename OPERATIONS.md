@@ -133,11 +133,8 @@ these queries do not launch Chrome.
 
 ## Paired release
 
-This branch requires eoka 0.6.0. Build against a local core checkout with a
-command-line Cargo patch; no path override is committed. Publish core first,
-then protocol, SDK, server, runner, MCP/Tack and CLI (and the updated DataDome
-adapter before CLI). Normal conformance and release checks remain required.
-Local release checks can use that same patch. Registry-only builds require the
-new core version to exist on crates.io. After publishing core, regenerate the
-workspace lockfile against the registry without the local patch before running
-the registry-only release gates.
+This release uses eoka 0.6.1 from crates.io. The workspace lockfile records the
+registry source and checksum; no local core override is needed. Publish protocol,
+SDK, server, runner, MCP/Tack and CLI in dependency order (and the updated
+DataDome adapter before CLI). Run `mise run conformance` and
+`mise run release-check` against registry dependencies before release.

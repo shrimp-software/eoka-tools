@@ -2,6 +2,12 @@
 
 Companion tools for [eoka](https://github.com/shrimp-software/eoka), the low-level CDP browser automation library.
 
+For existing AI agents, use `eoka view` and `eoka step` (MCP `agent_observe` /
+`agent_step`, Tack `eoka.agent.observe` / `eoka.agent.step`). They combine compact
+page state, stable control references, one durable action and fresh observations.
+Exploratory input reports uncertainty without claiming task completion.
+See [AGENT-BROWSING.md](AGENT-BROWSING.md) for the contract and examples.
+
 ## Durable actions (core 0.6 / CLI 0.4)
 
 High-level actions now return durable operation records. Click and key actions

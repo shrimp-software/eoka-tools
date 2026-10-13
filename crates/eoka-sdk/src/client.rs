@@ -47,6 +47,15 @@ impl EokaClient {
     ) -> anyhow::Result<Response> {
         self.call(Request::ActionPerform(request)).await
     }
+    pub async fn agent_observe(
+        &self,
+        args: eoka_protocol::AgentObserveArgs,
+    ) -> anyhow::Result<Response> {
+        self.call(Request::AgentObserve(args)).await
+    }
+    pub async fn agent_step(&self, args: eoka_protocol::AgentStepArgs) -> anyhow::Result<Response> {
+        self.call(Request::AgentStep(args)).await
+    }
     pub async fn operation(&self, id: impl Into<String>) -> anyhow::Result<Response> {
         self.call(Request::OperationGet(eoka_protocol::OperationIdArgs {
             id: id.into(),
@@ -418,9 +427,15 @@ pub async fn send_command(
         args.operation_id
             .get_or_insert_with(|| uuid::Uuid::new_v4().to_string());
     }
+    if let Request::AgentStep(args) = &mut request {
+        args.operation_id
+            .get_or_insert_with(|| uuid::Uuid::new_v4().to_string());
+    }
     if matches!(
         request.cmd(),
-        "click"
+        "agent_step"
+            | "agent_observe"
+            | "click"
             | "dblclick"
             | "fill"
             | "select"
@@ -773,7 +788,9 @@ async fn send_operation(
     ) {
         wire = serde_json::json!({"cmd":"action_command","args":{"operation_id":id,"command":request.cmd(),"arguments":args}});
     }
-    wire["operation_id"] = serde_json::json!(id);
+    if !matches!(request, Request::AgentObserve(_)) {
+        wire["operation_id"] = serde_json::json!(id);
+    }
     let stream = match UnixStream::connect(session::socket_path(session_name)).await {
         Ok(stream) => stream,
         Err(_) if request.cmd().starts_with("operation_") => {
@@ -788,13 +805,23 @@ async fn send_operation(
         }
     };
     let (mut reader, mut writer) = stream.into_split();
-    let result: anyhow::Result<Response> = async {
+    let exchange = async {
         write_msg(&mut writer, &wire).await?;
-        Ok(read_msg(&mut reader).await?)
-    }
-    .await;
+        Ok::<Response, anyhow::Error>(read_msg(&mut reader).await?)
+    };
+    let result = if matches!(request, Request::AgentStep(_) | Request::AgentObserve(_)) {
+        tokio::time::timeout(
+            Duration::from_millis(args["timeout_ms"].as_u64().unwrap_or(10000).min(60000) + 1000),
+            exchange,
+        )
+        .await
+        .unwrap_or_else(|_| Err(anyhow::anyhow!("Agent response deadline exceeded")))
+    } else {
+        exchange.await
+    };
     Ok(match result {
         Ok(response)=>response,
+        Err(_) if matches!(request, Request::AgentObserve(_)) => non_retryable_error("observation_transport_error", "Observation response unavailable; no action was requested."),
         Err(_)=>non_retryable_error("operation_transport_error",&format!("Connection lost; inspect operation {id}. Its outcome is unknown. No action was replayed.")),
     })
 }
@@ -803,6 +830,32 @@ async fn send_operation(
 mod tests {
     use super::*;
     use tokio::net::UnixListener;
+
+    #[tokio::test]
+    async fn agent_step_allocates_id_before_transport_and_retains_it_on_disconnect() {
+        let session = format!("agent-step-{}", uuid::Uuid::new_v4());
+        session::ensure_runtime_dir().unwrap();
+        let socket = session::socket_path(&session);
+        let listener = UnixListener::bind(&socket).unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let (mut reader, _) = stream.into_split();
+            let request: Request = read_msg(&mut reader).await.unwrap();
+            let Request::AgentStep(args) = request else {
+                panic!("wrong request")
+            };
+            args.operation_id.unwrap()
+        });
+        let request =
+            serde_json::from_value(serde_json::json!({"action":{"kind":"press_key","key":"Tab"}}))
+                .unwrap();
+        let response = test_client(&session).agent_step(request).await.unwrap();
+        let id = server.await.unwrap();
+        assert!(!response.ok);
+        assert!(response.error.unwrap().contains(&id));
+        assert_eq!(response.error_detail.unwrap().retryable, Some(false));
+        std::fs::remove_file(socket).unwrap();
+    }
 
     fn test_client(session: &str) -> EokaClient {
         EokaClient::new(

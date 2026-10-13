@@ -27,6 +27,12 @@ struct Manager {
     jobs: Mutex<HashMap<String, watch::Sender<bool>>>,
 }
 
+#[derive(Default)]
+pub(crate) struct Execution {
+    pub canonical: Option<Vec<u8>>,
+    pub exploratory: bool,
+}
+
 pub(crate) struct Intent {
     pub store: Arc<Store>,
     pub id: String,
@@ -99,10 +105,26 @@ impl OperationManager {
         action: Action,
         options: ActionOptions,
     ) -> Result<OperationRecord> {
-        let manager = self.clone();
-        tokio::spawn(async move { manager.submit_owned(page, id, action, options).await })
+        self.submit_with(page, id, action, options, Execution::default())
             .await
-            .context("Operation admission task failed; inspect its ID before retrying")?
+    }
+
+    pub(crate) async fn submit_with(
+        &self,
+        page: Page,
+        id: String,
+        action: Action,
+        options: ActionOptions,
+        execution: Execution,
+    ) -> Result<OperationRecord> {
+        let manager = self.clone();
+        tokio::spawn(async move {
+            manager
+                .submit_owned(page, id, action, options, execution)
+                .await
+        })
+        .await
+        .context("Operation admission task failed; inspect its ID before retrying")?
     }
 
     async fn submit_owned(
@@ -111,6 +133,7 @@ impl OperationManager {
         id: String,
         action: Action,
         mut options: ActionOptions,
+        execution: Execution,
     ) -> Result<OperationRecord> {
         let parsed = uuid::Uuid::parse_str(&id)
             .context("operation_id must be a UUID generated before sending the request")?;
@@ -118,8 +141,10 @@ impl OperationManager {
             return Err(anyhow!("operation_id must be a canonical lowercase UUID"));
         }
         let store = self.store().await?.clone();
-        let canonical =
-            serde_json::to_vec(&serde_json::json!({"action":action,"options":options}))?;
+        let canonical = match execution.canonical {
+            Some(canonical) => canonical,
+            None => serde_json::to_vec(&serde_json::json!({"action":action,"options":options}))?,
+        };
         let initial = OperationRecord {
             id: id.clone(),
             runtime_id: store.runtime.clone(),
@@ -153,7 +178,10 @@ impl OperationManager {
             let result = tokio::select! {
                 biased;
                 _ = canceled.changed() => None,
-                result = page.act(action,options) => Some(result),
+                result = async {
+                    if execution.exploratory { page.explore(action, options).await }
+                    else { page.act(action, options).await }
+                } => Some(result),
             };
             let finish = store
                 .update(id.clone(), move |record| {

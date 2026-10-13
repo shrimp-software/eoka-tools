@@ -1,6 +1,6 @@
 [package]
 name = "eoka-protocol"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 license = "MIT"
 description = "Protocol and tool catalog definitions for eoka browser automation"
@@ -16,4 +16,4 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 
-eoka = { version = "0.6.0", features = ["schema"] }
+eoka = { version = "0.6.1", features = ["schema"] }

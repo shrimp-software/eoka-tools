@@ -1,0 +1,236 @@
+[
+  {
+    "pair": 0,
+    "version": "before",
+    "directory": "/var/tmp/eoka-agent-eval/download-fix/before-0",
+    "task": "download",
+    "backend": "eoka",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 73.438,
+    "tool_calls": 3,
+    "tool_time_s": 0.383,
+    "usage": {
+      "input": 6572,
+      "output": 683,
+      "cacheRead": 768,
+      "cacheWrite": 0,
+      "totalTokens": 8023
+    },
+    "answer": "The CSV report was downloaded exactly once and saved successfully. Here's the confirmation:\n\n**File saved:** `/var/tmp/eoka-agent-eval/download-fix/before-0/download-eoka-0/downloads/report.csv`\n- **Size:** 36 bytes\n- **SHA256:** `c7e1f983fbd73ae90509e553899d5ab5c442be038fda14f0e0bc1b54cb359708`\n- **Source URL:** `http://127.0.0.1:35271/3df79023fba5/download/report.csv`\n- **Status:** Completed\n\n```json\n{\"success\": true, \"answer\": \"Downloaded CSV report to /var/tmp/eoka-agent-eval/download-fix/before-0/download-eoka-0/downloads/report.csv (36 bytes, SHA256 c7e1f983fbd73ae90509e553899d5ab5c442be038fda14f0e0bc1b54cb359708)\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/3df79023fba5/download/report.csv",
+        "download": true
+      }
+    ],
+    "expected_download_sha256": "c7e1f983fbd73ae90509e553899d5ab5c442be038fda14f0e0bc1b54cb359708",
+    "claimed_success": true,
+    "false_success": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ],
+    "download_command_ms": 278,
+    "completion_present": false
+  },
+  {
+    "pair": 0,
+    "version": "after",
+    "directory": "/var/tmp/eoka-agent-eval/download-fix/after-0",
+    "task": "download",
+    "backend": "eoka",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 24.049,
+    "tool_calls": 3,
+    "tool_time_s": 0.266,
+    "usage": {
+      "input": 7276,
+      "output": 558,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "totalTokens": 7834
+    },
+    "answer": "{\"success\":true,\"answer\":\"The CSV report was downloaded exactly once and saved to /var/tmp/eoka-agent-eval/download-fix/after-0/download-eoka-0/downloads/report.csv (36 bytes, SHA256: c7e1f983fbd73ae90509e553899d5ab5c442be038fda14f0e0bc1b54cb359708).\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/2a05b19feedd/download/report.csv",
+        "download": true
+      }
+    ],
+    "expected_download_sha256": "c7e1f983fbd73ae90509e553899d5ab5c442be038fda14f0e0bc1b54cb359708",
+    "claimed_success": true,
+    "false_success": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ],
+    "download_command_ms": 242,
+    "completion_present": true
+  },
+  {
+    "pair": 1,
+    "version": "after",
+    "directory": "/var/tmp/eoka-agent-eval/download-fix/after-1",
+    "task": "download",
+    "backend": "eoka",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 74.794,
+    "tool_calls": 2,
+    "tool_time_s": 0.264,
+    "usage": {
+      "input": 4322,
+      "output": 492,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "totalTokens": 4814
+    },
+    "answer": "The CSV report has been downloaded and saved successfully.\n\n**Result:**\n- **File:** `/var/tmp/eoka-agent-eval/download-fix/after-1/download-eoka-0/downloads/report.csv`\n- **Size:** 36 bytes\n- **SHA256:** `c7e1f983fbd73ae90509e553899d5ab5c442be038fda14f0e0bc1b54cb359708`\n- **Source URL:** `http://127.0.0.1:43877/152f210c612b/download/report.csv`\n\nThe file saving is confirmed and verified.\n\n```json\n{\"success\":true,\"answer\":\"Successfully downloaded the CSV report to /var/tmp/eoka-agent-eval/download-fix/after-1/download-eoka-0/downloads/report.csv (36 bytes, SHA256: c7e1f983fbd73ae90509e553899d5ab5c442be038fda14f0e0bc1b54cb359708)\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/152f210c612b/download/report.csv",
+        "download": true
+      }
+    ],
+    "expected_download_sha256": "c7e1f983fbd73ae90509e553899d5ab5c442be038fda14f0e0bc1b54cb359708",
+    "claimed_success": true,
+    "false_success": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ],
+    "download_command_ms": 248,
+    "completion_present": true
+  },
+  {
+    "pair": 1,
+    "version": "before",
+    "directory": "/var/tmp/eoka-agent-eval/download-fix/before-1",
+    "task": "download",
+    "backend": "eoka",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 43.283,
+    "tool_calls": 6,
+    "tool_time_s": 0.357,
+    "usage": {
+      "input": 7333,
+      "output": 1057,
+      "cacheRead": 12544,
+      "cacheWrite": 0,
+      "totalTokens": 20934
+    },
+    "answer": "The download was completed successfully. The file was saved at the specified path with 36 bytes and a SHA-256 of `c7e1f983fbd73ae90509e553899d5ab5c442be038fda14f0e0bc1b54cb359708`. The second attempt to download again returned \"Output already exists\" confirming the file is present.\n\n```json\n{\n  \"success\": true,\n  \"answer\": \"CSV report downloaded and saved to /var/tmp/eoka-agent-eval/download-fix/before-1/download-eoka-0/downloads/report.csv (36 bytes, sha256: c7e1f983fbd73ae90509e553899d5ab5c442be038fda14f0e0bc1b54cb359708)\"\n}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/d0ce8977d9f5/download/report.csv",
+        "download": true
+      }
+    ],
+    "expected_download_sha256": "c7e1f983fbd73ae90509e553899d5ab5c442be038fda14f0e0bc1b54cb359708",
+    "claimed_success": true,
+    "false_success": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ],
+    "download_command_ms": 279,
+    "completion_present": false
+  },
+  {
+    "pair": 2,
+    "version": "before",
+    "directory": "/var/tmp/eoka-agent-eval/download-fix/before-2",
+    "task": "download",
+    "backend": "eoka",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 17.142,
+    "tool_calls": 3,
+    "tool_time_s": 0.613,
+    "usage": {
+      "input": 6970,
+      "output": 525,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "totalTokens": 7495
+    },
+    "answer": "The CSV report has been successfully downloaded exactly once to the specified path and confirmed.\n\n```json\n{\"success\":true,\"answer\":\"Downloaded report.csv (36 bytes, SHA-256: c7e1f983fbd73ae90509e553899d5ab5c442be038fda14f0e0bc1b54cb359708) to /var/tmp/eoka-agent-eval/download-fix/before-2/download-eoka-0/downloads/report.csv\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/45876469988d/download/report.csv",
+        "download": true
+      }
+    ],
+    "expected_download_sha256": "c7e1f983fbd73ae90509e553899d5ab5c442be038fda14f0e0bc1b54cb359708",
+    "claimed_success": true,
+    "false_success": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ],
+    "download_command_ms": 586,
+    "completion_present": false
+  },
+  {
+    "pair": 2,
+    "version": "after",
+    "directory": "/var/tmp/eoka-agent-eval/download-fix/after-2",
+    "task": "download",
+    "backend": "eoka",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 12.687,
+    "tool_calls": 2,
+    "tool_time_s": 0.39,
+    "usage": {
+      "input": 3771,
+      "output": 390,
+      "cacheRead": 768,
+      "cacheWrite": 0,
+      "totalTokens": 4929
+    },
+    "answer": "The CSV report has been downloaded and saved successfully.\n\n```json\n{\"success\":true,\"answer\":\"Downloaded report.csv (36 bytes, SHA256: c7e1f983fbd73ae90509e553899d5ab5c442be038fda14f0e0bc1b54cb359708) to /var/tmp/eoka-agent-eval/download-fix/after-2/download-eoka-0/downloads/report.csv\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/1add7ab345a1/download/report.csv",
+        "download": true
+      }
+    ],
+    "expected_download_sha256": "c7e1f983fbd73ae90509e553899d5ab5c442be038fda14f0e0bc1b54cb359708",
+    "claimed_success": true,
+    "false_success": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ],
+    "download_command_ms": 375,
+    "completion_present": true
+  }
+]

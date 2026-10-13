@@ -95,9 +95,72 @@ pub struct DownloadRecord {
     pub error: Option<crate::ErrorDetail>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DownloadResult {
+    #[serde(flatten)]
+    pub download: DownloadRecord,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completion: Option<String>,
+}
+
+impl From<DownloadRecord> for DownloadResult {
+    fn from(download: DownloadRecord) -> Self {
+        let completion = (download.state == DownloadState::Completed
+            && download.native_complete
+            && download.published_path.is_some()
+            && download.sha256.is_some())
+        .then(|| {
+            "File saving is complete and verified. published_path, received_bytes and sha256 describe the saved file. This receipt confirms successful saving; inspect file contents only if the task requires content inspection. Do not download again.".into()
+        });
+        Self {
+            download,
+            completion,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn completion_requires_verified_publication_and_preserves_record_fields() {
+        let record: DownloadRecord = serde_json::from_value(serde_json::json!({
+            "id":"job", "tab_id":"tab", "state":"completed",
+            "output":"/tmp/report.csv", "published_path":"/tmp/report.csv",
+            "received_bytes":36, "created_at_ms":0, "updated_at_ms":1,
+            "native_complete":true, "sha256":"0".repeat(64)
+        }))
+        .unwrap();
+        let response = serde_json::to_value(DownloadResult::from(record.clone())).unwrap();
+        assert!(response["completion"].as_str().is_some());
+        let restored: DownloadRecord = serde_json::from_value(response).unwrap();
+        assert_eq!(
+            serde_json::to_value(restored).unwrap(),
+            serde_json::to_value(&record).unwrap()
+        );
+        for state in [
+            DownloadState::Pending,
+            DownloadState::Downloading,
+            DownloadState::Verifying,
+            DownloadState::Canceled,
+            DownloadState::Failed,
+        ] {
+            let mut incomplete = record.clone();
+            incomplete.state = state;
+            assert!(DownloadResult::from(incomplete).completion.is_none());
+        }
+        let mut no_native_completion = record.clone();
+        no_native_completion.native_complete = false;
+        let mut no_hash = record.clone();
+        no_hash.sha256 = None;
+        let mut unpublished = record;
+        unpublished.published_path = None;
+        for incomplete in [no_native_completion, no_hash, unpublished] {
+            let response = serde_json::to_value(DownloadResult::from(incomplete)).unwrap();
+            assert!(response.get("completion").is_none());
+        }
+    }
 
     #[test]
     fn download_inputs_reject_ambiguous_triggers_and_relative_paths() {

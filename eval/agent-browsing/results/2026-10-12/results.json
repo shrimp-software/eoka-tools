@@ -1,0 +1,380 @@
+[
+  {
+    "task": "pricing",
+    "backend": "eoka",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 3.971,
+    "tool_calls": 3,
+    "tool_time_s": 0.181,
+    "usage": {
+      "input": 3324,
+      "output": 332,
+      "cacheRead": 4864,
+      "cacheWrite": 0,
+      "totalTokens": 8520
+    },
+    "answer": "{\"success\": true, \"answer\": \"$29 per month\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "task": "pricing",
+    "backend": "browser-use",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 8.822,
+    "tool_calls": 8,
+    "tool_time_s": 1.914,
+    "usage": {
+      "input": 2701,
+      "output": 776,
+      "cacheRead": 10752,
+      "cacheWrite": 0,
+      "totalTokens": 14229
+    },
+    "answer": "{\"success\": true, \"answer\": \"$29 per month\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "task": "form",
+    "backend": "eoka",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 77.372,
+    "tool_calls": 9,
+    "tool_time_s": 18.404,
+    "usage": {
+      "input": 66546,
+      "output": 1403,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "totalTokens": 67949
+    },
+    "answer": "The form has been submitted successfully. I can see the confirmation message \"Request received for Ava Park\" on the page.\n\n{\"success\":true,\"answer\":\"The contact form was successfully submitted with name Ava Park, email ava@example.test, and role Analyst. The page displayed the confirmation message: 'Request received for Ava Park'.\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/85919771e9be/form",
+        "body": "name=Ava+Park&email=ava%40example.test&role=analyst"
+      }
+    ],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "task": "form",
+    "backend": "browser-use",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 115.273,
+    "tool_calls": 25,
+    "tool_time_s": 3.151,
+    "usage": {
+      "input": 67709,
+      "output": 3291,
+      "cacheRead": 20992,
+      "cacheWrite": 0,
+      "totalTokens": 91992
+    },
+    "answer": "{\"success\":true,\"answer\":\"The contact form was submitted successfully with name Ava Park, email ava@example.test, and role Analyst. The page displayed the confirmation message: 'Request received for Ava Park'.\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/1e4950d49ca4/form",
+        "body": "name=Ava+Park&email=ava%40example.test&role=analyst"
+      }
+    ],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "task": "tabs",
+    "backend": "eoka",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 18.342,
+    "tool_calls": 4,
+    "tool_time_s": 0.235,
+    "usage": {
+      "input": 11526,
+      "output": 446,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "totalTokens": 11972
+    },
+    "answer": "The shipment tracker shows the tracking code: **ZX-4821**.\n\n```json\n{\"success\":true,\"answer\":\"ZX-4821\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "task": "tabs",
+    "backend": "browser-use",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 46.49,
+    "tool_calls": 13,
+    "tool_time_s": 1.624,
+    "usage": {
+      "input": 15764,
+      "output": 1379,
+      "cacheRead": 20480,
+      "cacheWrite": 0,
+      "totalTokens": 37623
+    },
+    "answer": "The shipment tracker page is open. The tracking code from the page is **ZX-4821**.\n\n```json\n{\"success\":true,\"answer\":\"ZX-4821\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "task": "download",
+    "backend": "eoka",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 100.716,
+    "tool_calls": 6,
+    "tool_time_s": 0.287,
+    "usage": {
+      "input": 3686,
+      "output": 868,
+      "cacheRead": 13056,
+      "cacheWrite": 0,
+      "totalTokens": 17610
+    },
+    "answer": "{\"success\":true,\"answer\":\"The CSV report was downloaded exactly once to /var/tmp/eoka-agent-eval/final-2/download-eoka-0/downloads/report.csv (36 bytes, SHA256 c7e1f983fbd73ae90509e553899d5ab5c442be038fda14f0e0bc1b54cb359708). The file has been confirmed saved.\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/cfec07507ce1/download/report.csv",
+        "download": true
+      }
+    ],
+    "expected_download_sha256": "c7e1f983fbd73ae90509e553899d5ab5c442be038fda14f0e0bc1b54cb359708",
+    "claimed_success": true,
+    "false_success": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "task": "download",
+    "backend": "browser-use",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 42.634,
+    "tool_calls": 9,
+    "tool_time_s": 5.103,
+    "usage": {
+      "input": 8208,
+      "output": 1512,
+      "cacheRead": 9216,
+      "cacheWrite": 0,
+      "totalTokens": 18936
+    },
+    "answer": "The CSV report has been successfully downloaded and saved.\n\n```json\n{\"success\": true, \"answer\": \"Downloaded CSV report to /var/tmp/eoka-agent-eval/final-2/download-browser-use-0/downloads/report.csv (36 bytes) containing: name,total\\\\nAva Park,29\\\\nMira Chen,43\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/bf0c1b597f61/download/report.csv",
+        "download": true
+      }
+    ],
+    "expected_download_sha256": "c7e1f983fbd73ae90509e553899d5ab5c442be038fda14f0e0bc1b54cb359708",
+    "claimed_success": true,
+    "false_success": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "task": "dynamic",
+    "backend": "eoka",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 13.884,
+    "tool_calls": 4,
+    "tool_time_s": 0.244,
+    "usage": {
+      "input": 8310,
+      "output": 575,
+      "cacheRead": 5120,
+      "cacheWrite": 0,
+      "totalTokens": 14005
+    },
+    "answer": "The report has been generated successfully. The page now shows \"Report generated\".\n\n```json\n{\"success\":true,\"answer\":\"Prepared and generated the report successfully. The page now displays 'Report generated'.\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/7f82604aae55/dynamic",
+        "body": "generate"
+      }
+    ],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "task": "dynamic",
+    "backend": "browser-use",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 46.388,
+    "tool_calls": 9,
+    "tool_time_s": 3.607,
+    "usage": {
+      "input": 8397,
+      "output": 1399,
+      "cacheRead": 11776,
+      "cacheWrite": 0,
+      "totalTokens": 21572
+    },
+    "answer": "{\"success\":true,\"answer\":\"Report prepared and generated successfully. Status shows 'Report generated'.\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/92305be7ec5e/dynamic",
+        "body": "generate"
+      }
+    ],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "task": "pagination",
+    "backend": "eoka",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 10.88,
+    "tool_calls": 3,
+    "tool_time_s": 0.228,
+    "usage": {
+      "input": 7867,
+      "output": 408,
+      "cacheRead": 768,
+      "cacheWrite": 0,
+      "totalTokens": 9043
+    },
+    "answer": "Found Mira Chen on page 3 of the directory.\n\n```json\n{\"success\":true,\"answer\":\"mira@example.test\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "task": "pagination",
+    "backend": "browser-use",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 49.289,
+    "tool_calls": 17,
+    "tool_time_s": 2.062,
+    "usage": {
+      "input": 10549,
+      "output": 1641,
+      "cacheRead": 24320,
+      "cacheWrite": 0,
+      "totalTokens": 36510
+    },
+    "answer": "{\"success\":true,\"answer\":\"Mira Chen's email address is mira@example.test\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  }
+]

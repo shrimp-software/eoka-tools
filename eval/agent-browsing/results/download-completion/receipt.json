@@ -1,0 +1,13 @@
+{
+  "before_commit": "aa1b948c41c3aca7b24b3cce3053fe52be49df89",
+  "after_commit": "ef424d1eed557420291888a00be4624e123835e5",
+  "core_commit": "e443e8f22e58bbe821b106975f7e0f5313d409f7",
+  "raw_directory": "/var/tmp/eoka-agent-eval/download-fix",
+  "scope": "Three alternating before/after pairs, same model, unchanged task/system/tool prompts, pinned binaries, local fixture. No browser engine speed claim.",
+  "sha256": {
+    "tools.jsonl": "53d285f4cbfddb268046c4d8d96a57ea700467bc47ae88ec60e7cdbc8660ad66",
+    "results.json": "34b7c03d8eb087f61c37aad3b7adc901e8a72fd6723363f99f25831d7ebb2507",
+    "manifests.json": "c25dde341dd2aaf03ea6cb5bc88790ac5c63ff4255d240b44c8b51128d2f755d",
+    "run_pairs.py": "be529b15146fe67230c9e6d65e5a0083d5bd4377f6700f048cc92903c9852c42"
+  }
+}

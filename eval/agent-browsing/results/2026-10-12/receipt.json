@@ -1,0 +1,11 @@
+{
+  "tools_commit": "baddec1baa52d82745ddd64b989aa8f211d5f042",
+  "core_commit": "e443e8f22e58bbe821b106975f7e0f5313d409f7",
+  "raw_directory": "/var/tmp/eoka-agent-eval/final-2",
+  "audit": "All tool inputs reviewed. No HTTP clients or prohibited local/source file reads in the final run; CSV reads were limited to browser downloads. Native and JavaScript browser input were permitted.",
+  "sha256": {
+    "results.json": "e713a92eba194498e5d64f1d88b6a338e47eebbb78f055069b323c2f228a9fd4",
+    "manifest.json": "6735be6099001e247c5bf90413ec06356146b4dbda3e11a9d101ca124e09cfc4",
+    "tools.jsonl": "0bd60b183ea69ecfcf70a44340d3683aef95012365b0a32403b93f6fa4abfefa"
+  }
+}
