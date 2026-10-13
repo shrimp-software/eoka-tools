@@ -1,5 +1,8 @@
 # Existing-agent browsing comparison
 
+The first completed pilot is recorded in [RESULTS.md](RESULTS.md), with measured
+results, limitations, tool traces and artifact identities.
+
 This pilot runs the same configured Pi provider/model/thinking level and task
 instructions against Eoka and Browser Use's actual CLI. Each backend gets its
 own documented tool interface, isolated browser state and fresh fixture state.
