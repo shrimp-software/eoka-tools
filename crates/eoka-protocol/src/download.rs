@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DownloadStartArgs {
+    #[serde(default)]
+    pub operation_id: Option<String>,
     pub click: Option<String>,
     pub url: Option<String>,
     #[schemars(
@@ -72,6 +74,12 @@ impl DownloadState {
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DownloadRecord {
+    #[serde(default)]
+    pub native_guid: Option<String>,
+    #[serde(default)]
+    pub native_complete: bool,
+    #[serde(default)]
+    pub sha256: Option<String>,
     pub id: String,
     pub tab_id: String,
     pub state: DownloadState,
@@ -94,6 +102,7 @@ mod tests {
     #[test]
     fn download_inputs_reject_ambiguous_triggers_and_relative_paths() {
         let mut args = DownloadStartArgs {
+            operation_id: None,
             click: Some("@e1".into()),
             url: None,
             output: "/tmp/file".into(),

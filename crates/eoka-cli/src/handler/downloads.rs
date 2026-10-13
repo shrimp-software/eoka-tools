@@ -16,6 +16,11 @@ impl Handler {
         if let Err(error) = args.validate() {
             return rejected(failure("invalid_input", error));
         }
+        match self.downloads.existing(&args).await {
+            Ok(Some(record)) => return start_response(Ok(record)),
+            Ok(None) => {}
+            Err(error) => return rejected(error),
+        }
         let Some(state) = &self.state else {
             return rejected(failure(
                 "session_unavailable",

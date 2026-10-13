@@ -72,7 +72,16 @@ impl Cli {
     async fn ok(&self, args: &[&str]) -> Value {
         let response = self.run(args).await;
         assert_eq!(response["ok"], true, "{response}");
-        response["data"].clone()
+        let mut data = response["data"].clone();
+        if data["action"].is_string() && data["state"] == "running" {
+            let finished = self
+                .run(&["operations", "wait", data["id"].as_str().unwrap()])
+                .await;
+            assert_eq!(finished["ok"], true, "{finished}");
+            data = finished["data"].clone();
+            assert_eq!(data["outcome"], "verified_complete", "{data}");
+        }
+        data
     }
 
     async fn eval(&self, expression: &str) -> Value {
@@ -122,7 +131,7 @@ async fn key_types_native_text_into_top_level_and_focused_frame_inputs() {
     cli.ok(&["open", &fixture.url]).await;
     let pid = std::fs::read_to_string(cli.pid_path()).unwrap();
     cli.eval("(() => {const input=document.createElement('input');input.id='key-fixture';input.type='search';document.body.appendChild(input);window.keyEvents=[];for(const type of ['keydown','keypress','beforeinput','input','keyup'])input.addEventListener(type,event=>keyEvents.push({type,trusted:event.isTrusted}));input.focus();return true})()").await;
-    cli.ok(&["key", "o"]).await;
+    cli.ok(&["key", "o", "--expect", r##"{"kind":"value","target":{"query":{"kind":"css","selector":"#key-fixture"}},"value":"o"}"##]).await;
     assert_eq!(
         cli.eval("document.querySelector('#key-fixture').value")
             .await,
@@ -139,24 +148,23 @@ async fn key_types_native_text_into_top_level_and_focused_frame_inputs() {
     );
     assert!(events.iter().all(|event| event["trusted"] == true));
     cli.ok(&["key-down", "Shift"]).await;
-    cli.ok(&["key", "a"]).await;
+    cli.ok(&["key-down", "a"]).await;
+    cli.ok(&["key-up", "a"]).await;
     cli.ok(&["key-up", "Shift"]).await;
-    cli.ok(&["key", "@"]).await;
+    cli.ok(&["key", "@", "--expect", r##"{"kind":"value","target":{"query":{"kind":"css","selector":"#key-fixture"}},"value":"oA@"}"##]).await;
     assert_eq!(
         cli.eval("document.querySelector('#key-fixture').value")
             .await,
         "oA@"
     );
-    cli.ok(&[
-        "key",
-        if cfg!(target_os = "macos") {
-            "Cmd+A"
-        } else {
-            "Ctrl+A"
-        },
-    ])
-    .await;
-    cli.ok(&["key", "Backspace"]).await;
+    let select_all = if cfg!(target_os = "macos") {
+        "Cmd+A"
+    } else {
+        "Ctrl+A"
+    };
+    cli.ok(&["key-down", select_all]).await;
+    cli.ok(&["key-up", select_all]).await;
+    cli.ok(&["key", "Backspace", "--expect", r##"{"kind":"value","target":{"query":{"kind":"css","selector":"#key-fixture"}},"value":""}"##]).await;
     assert_eq!(
         cli.eval("document.querySelector('#key-fixture').value")
             .await,
@@ -171,7 +179,8 @@ async fn key_types_native_text_into_top_level_and_focused_frame_inputs() {
         .unwrap();
     let frame_id = format!("id:{}", frame["id"].as_str().unwrap());
     cli.ok(&["frame-eval", &frame_id, "(() => {const input=document.createElement('input');input.id='native-input';document.body.appendChild(input);input.addEventListener('input',event=>input.dataset.trusted=String(event.isTrusted));input.focus();return true})()"]).await;
-    cli.ok(&["key", "o"]).await;
+    let expect=serde_json::json!({"kind":"value","target":{"query":{"kind":"css","selector":"#native-input"},"frame_id":frame["id"]},"value":"o"}).to_string();
+    cli.ok(&["key", "o", "--expect", &expect]).await;
     assert_eq!(
         cli.ok(&[
             "frame-eval",
@@ -383,7 +392,7 @@ async fn datadome_cli_preserves_owned_session_and_reports_outcomes() {
             );
         }
         cli.ok(&["snapshot"]).await;
-        cli.ok(&["click", "Continue"]).await;
+        cli.ok(&["click", "Continue", "--expect", r##"{"kind":"visible","target":{"query":{"kind":"css","selector":"body[data-continued=true]"}}}"##]).await;
         assert_eq!(
             cli.eval("document.body.dataset.continued==='true'").await,
             true
@@ -507,7 +516,7 @@ async fn accepted_request_finishes_after_cli_disconnect_without_replay() {
         cli.ok(&["captcha", "datadome"]).await["outcome"],
         "not_present"
     );
-    cli.ok(&["click", "Continue"]).await;
+    cli.ok(&["click", "Continue", "--expect", r##"{"kind":"visible","target":{"query":{"kind":"css","selector":"body[data-continued=true]"}}}"##]).await;
     cli.ok(&["close"]).await;
 }
 

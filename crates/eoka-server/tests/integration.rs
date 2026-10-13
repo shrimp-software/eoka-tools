@@ -89,6 +89,13 @@ async fn test_click() {
 
     agent.observe().await.expect("Failed to observe");
 
+    agent.set_action_options(eoka_server::eoka::ActionOptions::expecting(
+        eoka_server::eoka::Expectation::Text {
+            target: eoka_server::eoka::LocatorSpec::css("body"),
+            value: "Clicked!".into(),
+            contains: true,
+        },
+    ));
     agent.click(0).await.expect("Failed to click");
     agent.wait(100).await;
 
@@ -413,6 +420,13 @@ async fn test_session_basic() {
     agent.observe().await.expect("Failed to observe");
     assert_eq!(agent.len(), 1);
 
+    agent.set_action_options(eoka_server::eoka::ActionOptions::expecting(
+        eoka_server::eoka::Expectation::Text {
+            target: eoka_server::eoka::LocatorSpec::css("body"),
+            value: "Clicked!".into(),
+            contains: true,
+        },
+    ));
     agent.click(0).await.expect("Failed to click");
 
     let text = agent.text().await.expect("Failed to get text");
@@ -806,8 +820,29 @@ async fn test_session_press_key() {
     agent.exec("document.body.focus()").await.unwrap();
     agent.wait(50).await;
 
+    agent.set_action_options(eoka_server::eoka::ActionOptions::expecting(
+        eoka_server::eoka::Expectation::Text {
+            target: eoka_server::eoka::LocatorSpec::css("#log"),
+            value: "Tab".into(),
+            contains: true,
+        },
+    ));
     agent.press_key("Tab").await.unwrap();
+    agent.set_action_options(eoka_server::eoka::ActionOptions::expecting(
+        eoka_server::eoka::Expectation::Text {
+            target: eoka_server::eoka::LocatorSpec::css("#log"),
+            value: "Escape".into(),
+            contains: true,
+        },
+    ));
     agent.press_key("Escape").await.unwrap();
+    agent.set_action_options(eoka_server::eoka::ActionOptions::expecting(
+        eoka_server::eoka::Expectation::Text {
+            target: eoka_server::eoka::LocatorSpec::css("#log"),
+            value: "Enter".into(),
+            contains: true,
+        },
+    ));
     agent.press_key("Enter").await.unwrap();
     agent.wait(100).await;
 
@@ -857,10 +892,10 @@ async fn test_session_held_input_drag_and_overlapping_keys() {
         .windows(3)
         .any(|events| events == ["down", "move", "up"]));
     assert!(
-        events.contains(&"key-down:a:true".to_string()),
+        events.contains(&"key-down:A:true".to_string()),
         "{events:?}"
     );
-    assert!(events.contains(&"key-up:a:false".to_string()), "{events:?}");
+    assert!(events.contains(&"key-up:A:false".to_string()), "{events:?}");
     agent.close().await.unwrap();
 }
 

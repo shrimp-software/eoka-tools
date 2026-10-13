@@ -124,6 +124,8 @@ impl fmt::Display for ObserveDiff {
 }
 
 pub struct Session {
+    operations: crate::operations::OperationManager,
+    action_options: eoka::ActionOptions,
     browser: Browser,
     page: Page,
     elements: Vec<InteractiveElement>,
@@ -135,6 +137,8 @@ impl Session {
         let browser = Browser::launch().await?;
         let page = browser.new_page("about:blank").await?;
         Ok(Self {
+            operations: Default::default(),
+            action_options: Default::default(),
             browser,
             page,
             elements: Vec::new(),
@@ -146,11 +150,71 @@ impl Session {
         let browser = Browser::launch_with_config(stealth).await?;
         let page = browser.new_page("about:blank").await?;
         Ok(Self {
+            operations: Default::default(),
+            action_options: Default::default(),
             browser,
             page,
             elements: Vec::new(),
             config: ObserveConfig::default(),
         })
+    }
+
+    pub fn set_action_options(&mut self, options: eoka::ActionOptions) {
+        self.action_options = options;
+    }
+    pub fn operations(&self) -> &crate::operations::OperationManager {
+        &self.operations
+    }
+    pub async fn perform(
+        &self,
+        request: eoka_protocol::ActionPerformArgs,
+    ) -> anyhow::Result<eoka_protocol::OperationRecord> {
+        self.operations
+            .submit(
+                self.page.clone(),
+                request.operation_id,
+                request.action,
+                request.options,
+            )
+            .await
+    }
+    async fn perform_and_wait(&self, action: eoka::Action) -> Result<()> {
+        self.perform_with_options(action, self.action_options.clone())
+            .await
+    }
+    async fn perform_with_options(
+        &self,
+        action: eoka::Action,
+        options: eoka::ActionOptions,
+    ) -> Result<()> {
+        let id = uuid::Uuid::new_v4().to_string();
+        let record = self
+            .operations
+            .submit(self.page.clone(), id.clone(), action, options)
+            .await
+            .map_err(|e| Error::transport(format!("Operation {id}: {e}")))?;
+        let record = if matches!(record.state, eoka_protocol::OperationState::Running) {
+            self.operations
+                .wait(&id, 86_400_000)
+                .await
+                .map_err(|e| Error::transport(format!("Operation {id}: {e}")))?
+        } else {
+            record
+        };
+        if record.outcome == eoka::ActionOutcome::VerifiedComplete {
+            return Ok(());
+        }
+        if let Some(receipt) = record.receipt {
+            return Err(Error::Action {
+                code: record.error_code.unwrap_or_else(|| "action_failed".into()),
+                receipt: Box::new(receipt),
+                source: Box::new(Error::transport(format!("Inspect operation {id}"))),
+            });
+        }
+        Err(Error::transport(format!(
+            "Operation {id}: {:?}",
+            record.outcome
+        )))
     }
 
     pub fn set_observe_config(&mut self, config: ObserveConfig) {
@@ -309,99 +373,107 @@ impl Session {
     }
 
     pub async fn click(&mut self, index: usize) -> Result<()> {
-        let el = self.require_fresh(index).await?;
-        let selector = el.selector.clone();
-        self.page.click(&selector).await?;
-        self.wait_for_stable().await?;
-        self.elements.clear();
-        Ok(())
+        let selector = self.require_fresh(index).await?.selector.clone();
+        self.perform_and_wait(eoka::Action::Click {
+            target: eoka::LocatorSpec::css(selector),
+            human: false,
+            double: false,
+        })
+        .await
     }
 
     pub async fn fill(&mut self, index: usize, text: &str) -> Result<()> {
-        let el = self.require_fresh(index).await?;
-        let selector = el.selector.clone();
-        self.page.fill(&selector, text).await?;
-        self.wait_for_stable().await?;
-        Ok(())
+        let selector = self.require_fresh(index).await?.selector.clone();
+        self.perform_and_wait(eoka::Action::Fill {
+            target: eoka::LocatorSpec::css(selector),
+            value: text.into(),
+            human: false,
+        })
+        .await
     }
 
     pub async fn select(&mut self, index: usize, value: &str) -> Result<()> {
-        let el = self.require_fresh(index).await?;
-        let selector = el.selector.clone();
-        let arg = serde_json::json!({ "sel": selector, "val": value });
-        let js = format!(
-            r#"(() => {{
-                const arg = {arg};
-                const sel = document.querySelector(arg.sel);
-                if (!sel) return false;
-                const opt = Array.from(sel.options).find(o => o.value === arg.val || o.text === arg.val);
-                if (!opt) return false;
-                sel.value = opt.value;
-                sel.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                return true;
-            }})()"#,
-            arg = serde_json::to_string(&arg).unwrap()
-        );
-        let selected: bool = self.page.evaluate(&js).await?;
-        if !selected {
-            return Err(crate::eoka::Error::ElementNotFound(format!(
-                "option \"{}\" in element [{}]",
-                value, index
-            )));
-        }
-        self.wait_for_stable().await?;
-        self.elements.clear();
-        Ok(())
+        let selector = self.require_fresh(index).await?.selector.clone();
+        self.perform_and_wait(eoka::Action::SelectOption {
+            target: eoka::LocatorSpec::css(selector),
+            value: value.into(),
+        })
+        .await
     }
 
     pub async fn hover(&mut self, index: usize) -> Result<()> {
         let selector = self.require_fresh(index).await?.selector.clone();
-        self.page.hover(&selector).await
+        self.perform_and_wait(eoka::Action::Hover {
+            target: eoka::LocatorSpec::css(selector),
+            human: false,
+        })
+        .await
     }
 
     pub async fn scroll_to(&mut self, index: usize) -> Result<()> {
-        let el = self.require_fresh(index).await?;
-        let selector = el.selector.clone();
-        let js = format!(
-            "document.querySelector({})?.scrollIntoView({{behavior:'smooth',block:'center'}})",
-            serde_json::to_string(&selector).unwrap()
-        );
-        self.page.execute(&js).await
+        let selector = self.require_fresh(index).await?.selector.clone();
+        self.perform_and_wait(eoka::Action::ScrollIntoView {
+            target: eoka::LocatorSpec::css(selector),
+        })
+        .await
     }
 
     pub async fn try_click(&mut self, index: usize) -> Result<bool> {
-        let el = self.require_fresh(index).await?;
-        let selector = el.selector.clone();
-        self.page.try_click(&selector).await
-    }
-
-    pub async fn human_click(&mut self, index: usize) -> Result<()> {
-        let el = self.require_fresh(index).await?;
-        let selector = el.selector.clone();
-        self.page.human_click(&selector).await
-    }
-
-    pub async fn human_fill(&mut self, index: usize, text: &str) -> Result<()> {
-        let el = self.require_fresh(index).await?;
-        let selector = el.selector.clone();
-        self.page.human_fill(&selector, text).await
-    }
-
-    pub async fn focus(&mut self, index: usize) -> Result<()> {
-        let el = self.require_fresh(index).await?;
-        let selector = el.selector.clone();
-        self.page
-            .execute(&format!(
-                "document.querySelector({})?.focus()",
-                serde_json::to_string(&selector).unwrap()
-            ))
+        let selector = self.require_fresh(index).await?.selector.clone();
+        let mut options = self.action_options.clone();
+        options.wait_for_target = false;
+        match self
+            .perform_with_options(
+                eoka::Action::Click {
+                    target: eoka::LocatorSpec::css(selector),
+                    human: false,
+                    double: false,
+                },
+                options,
+            )
             .await
+        {
+            Ok(()) => Ok(true),
+            Err(Error::Action { code, receipt, .. })
+                if code == "target_unavailable"
+                    && receipt.outcome == eoka::ActionOutcome::NotDispatched =>
+            {
+                Ok(false)
+            }
+            Err(error) => Err(error),
+        }
     }
-
+    pub async fn human_click(&mut self, index: usize) -> Result<()> {
+        let selector = self.require_fresh(index).await?.selector.clone();
+        self.perform_and_wait(eoka::Action::Click {
+            target: eoka::LocatorSpec::css(selector),
+            human: true,
+            double: false,
+        })
+        .await
+    }
+    pub async fn human_fill(&mut self, index: usize, text: &str) -> Result<()> {
+        let selector = self.require_fresh(index).await?.selector.clone();
+        self.perform_and_wait(eoka::Action::Fill {
+            target: eoka::LocatorSpec::css(selector),
+            value: text.into(),
+            human: true,
+        })
+        .await
+    }
+    pub async fn focus(&mut self, index: usize) -> Result<()> {
+        let selector = self.require_fresh(index).await?.selector.clone();
+        self.perform_and_wait(eoka::Action::Focus {
+            target: eoka::LocatorSpec::css(selector),
+        })
+        .await
+    }
     pub async fn submit(&mut self, index: usize) -> Result<()> {
-        self.focus(index).await?;
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        self.page.human().press_key("Enter").await
+        let selector = self.require_fresh(index).await?.selector.clone();
+        self.perform_and_wait(eoka::Action::Submit {
+            target: eoka::LocatorSpec::css(selector),
+        })
+        .await
     }
 
     pub async fn options(&mut self, index: usize) -> Result<Vec<(String, String)>> {
@@ -422,27 +494,23 @@ impl Session {
     }
 
     pub async fn goto(&mut self, url: &str) -> Result<()> {
-        self.elements.clear();
-        self.page.goto(url).await?;
-        self.wait_for_stable().await
+        self.perform_and_wait(eoka::Action::Navigate {
+            url: url.into(),
+            referrer: None,
+        })
+        .await
     }
 
     pub async fn back(&mut self) -> Result<()> {
-        self.elements.clear();
-        self.page.back().await?;
-        self.wait_for_stable().await
+        self.perform_and_wait(eoka::Action::Back).await
     }
 
     pub async fn forward(&mut self) -> Result<()> {
-        self.elements.clear();
-        self.page.forward().await?;
-        self.wait_for_stable().await
+        self.perform_and_wait(eoka::Action::Forward).await
     }
 
     pub async fn reload(&mut self) -> Result<()> {
-        self.elements.clear();
-        self.page.reload().await?;
-        self.wait_for_stable().await
+        self.perform_and_wait(eoka::Action::Reload).await
     }
 
     pub async fn url(&self) -> Result<String> {
@@ -503,7 +571,8 @@ impl Session {
     }
 
     pub async fn press_key(&self, key: &str) -> Result<()> {
-        self.page.human().press_key(key).await
+        self.perform_and_wait(eoka::Action::PressKey { key: key.into() })
+            .await
     }
 
     pub async fn mouse_down(&self, x: f64, y: f64, button: MouseButton) -> Result<()> {
@@ -578,12 +647,14 @@ impl Session {
     }
 
     pub async fn history_go(&mut self, delta: i32) -> Result<()> {
-        spa::history_go(&self.page, delta).await?;
+        self.perform_and_wait(eoka::Action::History { delta })
+            .await?;
         self.elements.clear();
         Ok(())
     }
 
     pub async fn close(self) -> Result<()> {
+        self.operations.stop().await;
         let release_result = self.page.release_all_inputs().await;
         self.browser.close().await?;
         release_result

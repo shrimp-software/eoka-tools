@@ -1,3 +1,4 @@
+pub(crate) mod durable;
 mod files;
 mod target;
 mod worker;
@@ -11,16 +12,15 @@ use eoka_protocol::{
 };
 use files::{Destination, Publication};
 use std::collections::VecDeque;
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc, Mutex,
-};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::{watch, Semaphore};
 use worker::Trigger;
 
 #[derive(Clone)]
 pub struct DownloadJob {
+    journal: Option<durable::Journal>,
+    owned: bool,
     record: watch::Sender<DownloadRecord>,
     cancel: watch::Sender<bool>,
     publication: Arc<Mutex<Publication>>,
@@ -31,14 +31,26 @@ impl DownloadJob {
         self.record.borrow().clone()
     }
 
-    fn update(&self, apply: impl FnOnce(&mut DownloadRecord)) {
-        self.record.send_modify(|record| {
-            apply(record);
-            record.updated_at_ms = now();
-        });
+    async fn update(&self, apply: impl FnOnce(&mut DownloadRecord)) -> Result<(), ErrorDetail> {
+        let mut record = self.snapshot();
+        apply(&mut record);
+        record.updated_at_ms = now();
+        if let Some(journal) = &self.journal {
+            journal.save(record.clone()).await.map_err(|error| {
+                failure(
+                    "download_store_failed",
+                    format!("Could not persist download state: {error}"),
+                )
+            })?;
+        }
+        self.record.send_replace(record);
+        Ok(())
     }
 
     pub fn cancel(&self) -> DownloadRecord {
+        if !self.owned {
+            return self.snapshot();
+        }
         let mut gate = self.publication.lock().unwrap_or_else(|e| e.into_inner());
         if *gate == Publication::Open && !self.record.borrow().state.is_terminal() {
             *gate = Publication::Canceled;
@@ -86,7 +98,49 @@ impl DownloadJob {
     }
 }
 
+struct SetupGuard {
+    journal: durable::Journal,
+    pending: Option<DownloadRecord>,
+}
+impl Drop for SetupGuard {
+    fn drop(&mut self) {
+        let Some(record) = self.pending.take() else {
+            return;
+        };
+        let journal = self.journal.clone();
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            runtime.spawn(async move {
+                fail_setup(
+                    &journal,
+                    record,
+                    failure(
+                        "download_setup_canceled",
+                        "Download setup was canceled before trigger dispatch",
+                    ),
+                )
+                .await;
+            });
+        }
+    }
+}
+async fn fail_setup(journal: &durable::Journal, mut record: DownloadRecord, error: ErrorDetail) {
+    record.state = DownloadState::Failed;
+    record.updated_at_ms = now();
+    record.error = Some(error.clone());
+    let _ = journal.save(record).await;
+    let _ = journal
+        .store
+        .update(journal.id.clone(), move |op| {
+            op.state = eoka_protocol::OperationState::Finished;
+            op.finished_at_ms = Some(now());
+            op.error_code = Some(error.code);
+            op.outcome = eoka::ActionOutcome::NotDispatched;
+        })
+        .await;
+}
+
 struct Inner {
+    operations: crate::operations::OperationManager,
     jobs: Mutex<VecDeque<DownloadJob>>,
     slot: Arc<Semaphore>,
     waiters: Semaphore,
@@ -101,6 +155,7 @@ impl Default for DownloadManager {
     fn default() -> Self {
         Self {
             inner: Arc::new(Inner {
+                operations: Default::default(),
                 jobs: Mutex::new(VecDeque::new()),
                 slot: Arc::new(Semaphore::new(1)),
                 waiters: Semaphore::new(32),
@@ -110,6 +165,83 @@ impl Default for DownloadManager {
 }
 
 impl DownloadManager {
+    pub async fn restore(&self) -> Result<(), ErrorDetail> {
+        let store = self
+            .inner
+            .operations
+            .store()
+            .await
+            .map_err(|_| {
+                failure(
+                    "download_store_failed",
+                    "Could not open durable download history",
+                )
+            })?
+            .clone();
+        store
+            .recover()
+            .await
+            .map_err(|e| failure("download_store_failed", e.to_string()))?;
+        let records = store
+            .run(|connection| {
+                let rows = connection
+                    .prepare("SELECT record FROM download_records ORDER BY id")?
+                    .query_map([], |r| r.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                rows.into_iter()
+                    .map(|row| Ok(serde_json::from_str::<DownloadRecord>(&row)?))
+                    .collect::<anyhow::Result<Vec<_>>>()
+            })
+            .await
+            .map_err(|_| {
+                failure(
+                    "download_store_failed",
+                    "Could not restore download history",
+                )
+            })?;
+        let mut jobs = self.inner.jobs.lock().unwrap_or_else(|e| e.into_inner());
+        for record in records {
+            if let Some(job) = jobs.iter().find(|j| j.snapshot().id == record.id) {
+                if !job.owned {
+                    job.record.send_replace(record);
+                }
+            } else {
+                jobs.push_back(DownloadJob {
+                    journal: None,
+                    owned: false,
+                    record: watch::channel(record).0,
+                    cancel: watch::channel(false).0,
+                    publication: Arc::new(Mutex::new(Publication::Open)),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn existing(
+        &self,
+        args: &DownloadStartArgs,
+    ) -> Result<Option<DownloadRecord>, ErrorDetail> {
+        let Some(id) = &args.operation_id else {
+            return Ok(None);
+        };
+        let store = self
+            .inner
+            .operations
+            .store()
+            .await
+            .map_err(|_| failure("download_store_failed", "Could not open durable history"))?;
+        let existing = store
+            .lookup(id.clone(), canonical_request(args)?)
+            .await
+            .map_err(|e| failure("download_admission_failed", e.to_string()))?;
+        if existing.is_none() {
+            return Ok(None);
+        };
+        self.restore().await?;
+        self.get(id).map(|job| Some(job.snapshot()))
+    }
+
     pub fn is_active(&self) -> bool {
         self.inner.slot.available_permits() == 0
     }
@@ -154,10 +286,44 @@ impl DownloadManager {
                 "timeout_ms must be between 1 and 86400000",
             ));
         }
-        match self.get(id) {
-            Ok(job) => job.wait(Duration::from_millis(timeout_ms)).await,
-            Err(error) => Response::err_detail(error),
+        if let Err(error) = self.restore().await {
+            return Response::err_detail(error);
         }
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
+        loop {
+            if let Err(error) = self.restore().await {
+                return Response::err_detail(error);
+            }
+            let job = match self.get(id) {
+                Ok(job) => job,
+                Err(error) => return Response::err_detail(error),
+            };
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            let response = job
+                .wait(if job.owned {
+                    remaining
+                } else {
+                    remaining.min(Duration::from_millis(100))
+                })
+                .await;
+            if job.owned
+                || job.snapshot().state.is_terminal()
+                || tokio::time::Instant::now() >= deadline
+            {
+                return response;
+            }
+        }
+    }
+
+    pub fn cancel(&self, id: &str) -> Result<DownloadRecord, ErrorDetail> {
+        let job = self.get(id)?;
+        if !job.owned && !job.snapshot().state.is_terminal() {
+            return Err(failure(
+                "download_owned_elsewhere",
+                "Request cancellation from the owning runtime",
+            ));
+        }
+        Ok(job.cancel())
     }
 
     pub async fn stop(&self) {
@@ -167,6 +333,7 @@ impl DownloadManager {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .iter()
+            .filter(|job| job.owned)
             .cloned()
             .collect();
         for job in &jobs {
@@ -184,8 +351,11 @@ impl DownloadManager {
         browser: &Browser,
         source: &Page,
         args: DownloadStartArgs,
-        selector: Option<String>,
+        selector: Option<eoka::LocatorSpec>,
     ) -> Result<DownloadRecord, ErrorDetail> {
+        if let Some(record) = self.existing(&args).await? {
+            return Ok(record);
+        }
         args.validate()
             .map_err(|message| failure("invalid_input", message))?;
         if !browser.owns_process() {
@@ -219,53 +389,55 @@ impl DownloadManager {
                 "One download is already active in this session",
             )
         })?;
-        static NEXT: AtomicU64 = AtomicU64::new(0);
-        let id = format!(
-            "{}-{}-{}",
-            std::process::id(),
-            now(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        );
-        let output = args.output.clone();
-        let prepare_id = id.clone();
-        let expected = args.expect_bytes;
-        let destination = Arc::new(
-            tokio::task::spawn_blocking(move || {
-                Destination::prepare(&output, &prepare_id, expected)
-            })
+        let id = args
+            .operation_id
+            .clone()
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        uuid::Uuid::parse_str(&id)
+            .map_err(|_| failure("invalid_input", "operation_id must be a UUID"))?;
+        let store = self
+            .inner
+            .operations
+            .store()
             .await
-            .map_err(|_| failure("download_io_error", "Destination preparation failed"))??,
-        );
-        let auxiliary = args.url.is_some();
-        let page = if auxiliary {
-            match browser.new_blank_page().await {
-                Ok(page) => page,
-                Err(error) => {
-                    destination.retained_path();
-                    return Err(failure("download_setup_failed", error.to_string()));
-                }
-            }
-        } else {
-            source.clone()
+            .map_err(|_| failure("download_store_failed", "Could not open durable store"))?
+            .clone();
+        let operation = eoka_protocol::OperationRecord {
+            id: id.clone(),
+            runtime_id: store.runtime.clone(),
+            target_id: source.target_id().into(),
+            action: "download".into(),
+            state: eoka_protocol::OperationState::Running,
+            outcome: eoka::ActionOutcome::NotDispatched,
+            dispatch_intent: false,
+            preparation_intent: false,
+            started_at_ms: now(),
+            finished_at_ms: None,
+            receipt: None,
+            error_code: None,
         };
-        let mut auxiliary = auxiliary.then(|| worker::AuxiliaryPage::new(page.clone()));
-        let native = match browser.watch_downloads(&destination.staging).await {
-            Ok(native) => native,
-            Err(error) => {
-                if let Some(auxiliary) = auxiliary.as_mut() {
-                    let _ = auxiliary.close().await;
-                }
-                destination.retained_path();
-                return Err(failure("download_setup_failed", error.to_string()));
-            }
+        let (_, created) = store
+            .admit(operation, canonical_request(&args)?)
+            .await
+            .map_err(|error| failure("download_admission_failed", error.to_string()))?;
+        if !created {
+            self.restore().await?;
+            return self.get(&id).map(|job| job.snapshot());
+        }
+        let journal = durable::Journal {
+            store,
+            id: id.clone(),
         };
-        let record = DownloadRecord {
-            id,
+        let pending = DownloadRecord {
+            native_guid: None,
+            native_complete: false,
+            sha256: None,
+            id: id.clone(),
             tab_id: source.target_id().into(),
             state: DownloadState::Pending,
-            output: destination.output.to_string_lossy().into_owned(),
+            output: args.output.clone(),
             published_path: None,
-            staging_path: Some(destination.staging.to_string_lossy().into_owned()),
+            staging_path: None,
             received_bytes: 0,
             total_bytes: None,
             suggested_filename: None,
@@ -274,35 +446,106 @@ impl DownloadManager {
             updated_at_ms: now(),
             error: None,
         };
-        let job = DownloadJob {
-            record: watch::channel(record).0,
-            cancel: watch::channel(false).0,
-            publication: Arc::new(Mutex::new(Publication::Open)),
+        let mut setup = SetupGuard {
+            journal: journal.clone(),
+            pending: Some(pending.clone()),
         };
-        {
-            let mut jobs = self.inner.jobs.lock().unwrap_or_else(|e| e.into_inner());
-            while jobs.len() > 256 {
-                jobs.pop_front();
+        journal
+            .save(pending.clone())
+            .await
+            .map_err(|e| failure("download_store_failed", e.to_string()))?;
+        let result: Result<DownloadRecord, ErrorDetail> = async {
+            let output = args.output.clone();
+            let prepare_id = id.clone();
+            let expected = args.expect_bytes;
+            let destination = Arc::new(
+                tokio::task::spawn_blocking(move || {
+                    Destination::prepare(&output, &prepare_id, expected)
+                })
+                .await
+                .map_err(|_| failure("download_io_error", "Destination preparation failed"))??,
+            );
+            let auxiliary = args.url.is_some();
+            let page = if auxiliary {
+                match browser.new_blank_page().await {
+                    Ok(page) => page,
+                    Err(error) => {
+                        destination.retained_path();
+                        return Err(failure("download_setup_failed", error.to_string()));
+                    }
+                }
+            } else {
+                source.clone()
+            };
+            let mut auxiliary = auxiliary.then(|| worker::AuxiliaryPage::new(page.clone()));
+            let native = match browser.watch_downloads(&destination.staging).await {
+                Ok(native) => native,
+                Err(error) => {
+                    if let Some(auxiliary) = auxiliary.as_mut() {
+                        let _ = auxiliary.close().await;
+                    }
+                    destination.retained_path();
+                    return Err(failure("download_setup_failed", error.to_string()));
+                }
+            };
+            let record = DownloadRecord {
+                native_guid: None,
+                native_complete: false,
+                sha256: None,
+                id,
+                tab_id: source.target_id().into(),
+                state: DownloadState::Pending,
+                output: destination.output.to_string_lossy().into_owned(),
+                published_path: None,
+                staging_path: Some(destination.staging.to_string_lossy().into_owned()),
+                received_bytes: 0,
+                total_bytes: None,
+                suggested_filename: None,
+                source_url: args.url.as_deref().map(redact_url),
+                created_at_ms: now(),
+                updated_at_ms: now(),
+                error: None,
+            };
+            journal.save(record.clone()).await.map_err(|_| {
+                failure(
+                    "download_store_failed",
+                    "Could not persist download admission",
+                )
+            })?;
+            let job = DownloadJob {
+                journal: Some(journal.clone()),
+                owned: true,
+                record: watch::channel(record).0,
+                cancel: watch::channel(false).0,
+                publication: Arc::new(Mutex::new(Publication::Open)),
+            };
+            {
+                let mut jobs = self.inner.jobs.lock().unwrap_or_else(|e| e.into_inner());
+                jobs.push_back(job.clone());
             }
-            jobs.push_back(job.clone());
+            let (dispatched, _dispatched_rx) = tokio::sync::oneshot::channel();
+            let context = worker::Transfer {
+                job: job.clone(),
+                native,
+                destination,
+                page,
+                auxiliary,
+                trigger,
+                expected_bytes: args.expect_bytes,
+                start_timeout: Duration::from_millis(args.start_timeout_ms),
+                permit,
+                dispatched: Some(dispatched),
+                action_status: ActionStatus::NotAttempted,
+            };
+            tokio::spawn(context.run());
+            Ok(job.snapshot())
         }
-        let (dispatched, dispatched_rx) = tokio::sync::oneshot::channel();
-        let context = worker::Transfer {
-            job: job.clone(),
-            native,
-            destination,
-            page,
-            auxiliary,
-            trigger,
-            expected_bytes: args.expect_bytes,
-            start_timeout: Duration::from_millis(args.start_timeout_ms),
-            permit,
-            dispatched: Some(dispatched),
-            action_status: ActionStatus::NotAttempted,
-        };
-        tokio::spawn(context.run());
-        let _ = dispatched_rx.await;
-        Ok(job.snapshot())
+        .await;
+        if let Err(error) = &result {
+            fail_setup(&journal, pending, error.clone()).await;
+        }
+        setup.pending.take();
+        result
     }
 }
 
@@ -405,4 +648,11 @@ fn redact_url(value: &str) -> String {
             url.to_string().chars().take(4096).collect()
         })
         .unwrap_or_else(|_| "[unavailable]".into())
+}
+
+fn canonical_request(args: &DownloadStartArgs) -> Result<Vec<u8>, ErrorDetail> {
+    let mut args = args.clone();
+    args.operation_id = None;
+    serde_json::to_vec(&args)
+        .map_err(|_| failure("invalid_input", "Could not encode download request"))
 }

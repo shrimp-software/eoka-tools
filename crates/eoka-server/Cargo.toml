@@ -1,6 +1,6 @@
 [package]
 name = "eoka-server"
-version = "0.2.3"
+version = "0.3.0"
 edition = "2021"
 license = "MIT"
 description = "Shared browser runtime and sidecar process for eoka browser automation"
@@ -15,8 +15,8 @@ name = "eoka-server"
 path = "src/main.rs"
 
 [dependencies]
-eoka = "0.5.15"
-eoka-protocol = { path = "../eoka-protocol", version = "0.2.5" }
+eoka = "0.6.0"
+eoka-protocol = { path = "../eoka-protocol", version = "0.3.0" }
 eoka-proxy = { path = "../eoka-proxy", version = "0.2.0" }
 url = "2"
 libc = "0.2"
@@ -28,6 +28,12 @@ anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 captcha = { package = "eoka-captcha", version = "0.1.1", path = "../captcha" }
+
+rusqlite = { version = "0.37", features = ["bundled"] }
+uuid = { version = "1", features = ["v4"] }
+sha2 = "0.10"
+hmac = "0.12"
+fs2 = "0.4"
 
 [dev-dependencies]
 tempfile = "3"

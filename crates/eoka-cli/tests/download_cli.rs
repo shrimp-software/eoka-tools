@@ -186,6 +186,7 @@ impl Cli {
         if let Some(ms) = self.idle_ms {
             command.env("EOKA_IDLE_TIMEOUT", ms.to_string());
         }
+        command.env("EOKA_STATE_DIR", self.directory.path().join("state"));
         command.args(["--session", &self.session, "--no-geo-align"]);
         if json {
             command.arg("--json");
@@ -705,7 +706,17 @@ async fn pending_click_is_not_replayed_and_releases_download_ownership() {
     );
     assert_eq!(result["data"]["staging_path"], Value::Null);
     assert!(!cli.directory.path().join("canceled.bin").exists());
-    assert_eq!(cli.ok(&["eval", "globalThis.downloadClicks"]).await, "2");
+    let clicks = cli.ok(&["eval", "globalThis.downloadClicks"]).await;
+    assert!(clicks == "1" || clicks == "2", "{clicks}");
+    let operation = cli.ok(&["operations", "get", id]).await;
+    assert_eq!(
+        operation["outcome"],
+        if clicks == "1" {
+            "not_dispatched"
+        } else {
+            "outcome_unknown"
+        }
+    );
 
     let completed = cli
         .ok(&[
@@ -797,6 +808,7 @@ async fn disconnected_clients_do_not_cancel_and_large_files_stay_out_of_daemon_m
     eoka_sdk::write_msg(
         &mut stream,
         &eoka_sdk::Request::DownloadStart(eoka_protocol::DownloadStartArgs {
+            operation_id: None,
             click: Some("css:#slow".into()),
             url: None,
             output: cli
@@ -903,8 +915,111 @@ async fn borrowed_browser_download_is_rejected_without_clicking() {
         .await;
     assert_eq!(response["error_detail"]["code"], "download_unsupported");
     assert_eq!(page.evaluate::<u64>("window.clicks").await.unwrap(), 0);
-    assert!(cli.directory.path().read_dir().unwrap().next().is_none());
+    assert!(!cli.directory.path().join("borrowed.bin").exists());
+    assert!(cli
+        .directory
+        .path()
+        .read_dir()
+        .unwrap()
+        .all(|entry| entry.unwrap().file_name() == "state"));
     cli.ok(&["close"]).await;
     page.execute("window.alive=true").await.unwrap();
     browser.close().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires Chrome; durable action identity and daemon restart"]
+async fn durable_actions_survive_client_disconnect_and_completed_downloads_survive_restart() {
+    use tokio::net::UnixStream;
+    let fixture = Fixture::new().await;
+    let cli = Cli::new();
+    cli.open(&fixture).await;
+    cli.ok(&["eval", "document.body.insertAdjacentHTML('beforeend','<button id=operation>Run</button><p id=operation-result>pending</p>');window.operationHits=0;document.getElementById('operation').onclick=()=>{window.operationHits++;setTimeout(()=>document.getElementById('operation-result').textContent='done',300)};true"]).await;
+    let id = "6d098ba0-d7d5-4d08-940a-438a0d6a5375";
+    let expect=serde_json::json!({"kind":"text","target":{"query":{"kind":"css","selector":"#operation-result"}},"value":"done"}).to_string();
+    let request = serde_json::json!({"cmd":"action_command","args":{"operation_id":id,"command":"click","arguments":{"target":"css:#operation","expect":serde_json::from_str::<Value>(&expect).unwrap()}}});
+    let mut stream = UnixStream::connect(eoka_sdk::session::socket_path(&cli.session))
+        .await
+        .unwrap();
+    eoka_protocol::write_msg(&mut stream, &request)
+        .await
+        .unwrap();
+    drop(stream);
+    let mut record = Value::Null;
+    for _ in 0..50 {
+        let result = cli.call(&["operations", "get", id]).await;
+        if result["ok"] == true {
+            record = result["data"].clone();
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(record["id"], id, "{record}");
+    let record = cli.ok(&["operations", "wait", id]).await;
+    assert_eq!(record["outcome"], "verified_complete", "{record}");
+    let duplicate = cli
+        .ok(&[
+            "click",
+            "css:#operation",
+            "--operation-id",
+            id,
+            "--expect",
+            &expect,
+        ])
+        .await;
+    assert_eq!(duplicate["id"], id);
+    assert_eq!(cli.ok(&["eval", "window.operationHits"]).await, "1");
+    let conflict = cli
+        .call(&[
+            "click",
+            "css:#download",
+            "--operation-id",
+            id,
+            "--expect",
+            &expect,
+        ])
+        .await;
+    assert_eq!(conflict["ok"], false);
+    let download_id = "4c15a941-56d3-4534-bbe6-347898a56f9a";
+    let started = cli
+        .ok(&[
+            "download",
+            "--click",
+            "css:#download",
+            "--out",
+            "restart.bin",
+            "--operation-id",
+            download_id,
+        ])
+        .await;
+    let download = started["id"].as_str().unwrap();
+    assert_eq!(download, download_id);
+    let completed = cli.ok(&["download", "wait", download]).await;
+    assert_eq!(completed["state"], "completed");
+    assert_eq!(completed["native_complete"], true);
+    assert_eq!(completed["sha256"].as_str().unwrap().len(), 64);
+    assert!(completed["native_guid"].as_str().is_some());
+    let bytes = std::fs::read(cli.directory.path().join("restart.bin")).unwrap();
+    cli.ok(&["kill"]).await;
+    let history = cli.ok(&["download", "status", download]).await;
+    let recovered = cli.ok(&["operations", "get", download]).await;
+    assert_eq!(recovered["outcome"], "verified_complete");
+    assert_eq!(history["state"], "completed");
+    let duplicate = cli
+        .ok(&[
+            "download",
+            "--click",
+            "css:#download",
+            "--out",
+            "restart.bin",
+            "--operation-id",
+            download_id,
+        ])
+        .await;
+    assert_eq!(duplicate["id"], download_id);
+    assert_eq!(duplicate["sha256"], completed["sha256"]);
+    assert_eq!(
+        std::fs::read(cli.directory.path().join("restart.bin")).unwrap(),
+        bytes
+    );
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"time"
 
@@ -32,7 +33,8 @@ func run() error {
 		}
 	}()
 
-	page, err := b.NewPage(ctx, "https://example.com")
+	fixture := `<title>Durable action example</title><input id="user"><button id="submit" onclick="document.getElementById('status').textContent='Saved'">Save</button><p id="status"></p>`
+	page, err := b.NewPage(ctx, "data:text/html,"+url.PathEscape(fixture))
 	if err != nil {
 		return fmt.Errorf("new page: %w", err)
 	}
@@ -43,13 +45,15 @@ func run() error {
 	}
 	fmt.Printf("page title: %s\n", title)
 
-	if ok, err := page.Exists(ctx, "input#user"); err == nil && ok {
-		if err := page.Fill(ctx, "input#user", "bob"); err != nil {
-			return fmt.Errorf("fill: %w", err)
-		}
-		if err := page.Click(ctx, "button#submit"); err != nil {
-			return fmt.Errorf("click: %w", err)
-		}
+	if err := page.Fill(ctx, "input#user", "bob"); err != nil {
+		return fmt.Errorf("fill: %w", err)
+	}
+	if err := page.Click(ctx, "button#submit", eoka.ActionOptions{Expect: map[string]any{
+		"kind":   "text",
+		"target": map[string]any{"query": map[string]any{"kind": "css", "selector": "#status"}},
+		"value":  "Saved",
+	}}); err != nil {
+		return fmt.Errorf("click: %w", err)
 	}
 
 	text, err := page.Text(ctx)

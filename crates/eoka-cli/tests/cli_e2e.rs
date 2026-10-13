@@ -49,12 +49,22 @@ fn daemon_pid(session: &str) -> u32 {
 }
 
 fn child_pids(pid: u32) -> Vec<u32> {
-    let path = format!("/proc/{pid}/task/{pid}/children");
-    std::fs::read_to_string(path)
-        .unwrap_or_default()
-        .split_whitespace()
-        .filter_map(|value| value.parse().ok())
-        .collect()
+    let mut children = Vec::new();
+    for task in std::fs::read_dir(format!("/proc/{pid}/task"))
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
+        if let Ok(text) = std::fs::read_to_string(task.path().join("children")) {
+            children.extend(
+                text.split_whitespace()
+                    .filter_map(|id| id.parse::<u32>().ok()),
+            );
+        }
+    }
+    children.sort_unstable();
+    children.dedup();
+    children
 }
 
 fn chrome_cmdline_for_daemon(pid: u32) -> Vec<String> {

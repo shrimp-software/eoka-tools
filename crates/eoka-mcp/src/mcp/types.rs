@@ -18,6 +18,8 @@ pub type SaveStateRequest = eoka_protocol::PathArgs;
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct NavigateRequest {
+    #[serde(flatten)]
+    pub operation: eoka_protocol::ActionSettings,
     #[schemars(description = "URL to navigate to")]
     pub url: String,
     #[schemars(
@@ -61,25 +63,13 @@ pub struct SetCookieRequest {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct HistoryGoRequest {
+    #[serde(flatten)]
+    pub operation: eoka_protocol::ActionSettings,
     #[schemars(description = "History delta: -1 for back, 1 for forward, -2 for back twice, etc.")]
     pub delta: i32,
 }
 
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct BatchAction {
-    #[schemars(description = "Action type: 'click', 'fill', 'type_key'")]
-    pub action: String,
-    #[schemars(description = "Target element (for click/fill)")]
-    pub target: Option<String>,
-    #[schemars(description = "Text value (for fill/type_key)")]
-    pub text: Option<String>,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct BatchRequest {
-    #[schemars(description = "Array of actions to execute in sequence")]
-    pub actions: Vec<BatchAction>,
-}
+pub type BatchRequest = eoka_protocol::ActionBatchArgs;
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct SolveCaptchaRequest {
@@ -135,10 +125,8 @@ pub struct ClickInterceptNavRequest {
         description = "Target element. Supports: index (0), text:Submit, placeholder:Email, role:button, css:form button, id:my-btn, or plain text search"
     )]
     pub target: String,
-    #[schemars(
-        description = "How long to wait after click for navigation to be intercepted (ms, default 3000)"
-    )]
-    pub wait_ms: Option<u64>,
+    #[serde(flatten)]
+    pub operation: eoka_protocol::ActionSettings,
     #[schemars(
         description = "If true, allow the navigation to proceed after capturing the URL (default: false — blocks navigation so you can read the page)"
     )]

@@ -2,6 +2,13 @@
 
 Companion tools for [eoka](https://github.com/shrimp-software/eoka), the low-level CDP browser automation library.
 
+## Durable actions (core 0.6 / CLI 0.4)
+
+High-level actions now return durable operation records. Click and key actions
+require an explicit expected outcome. Generate an operation UUID before sending,
+then inspect `operations get/wait` after a lost response. See [OPERATIONS.md](OPERATIONS.md)
+for CLI, MCP, Rust/Go and runner migration, retention and download recovery.
+
 ## Components
 
 | Component | Purpose |
@@ -93,7 +100,8 @@ eoka --session work download --url https://example.com/attachment --out ./file.z
 Starts return a job ID; `--wait` adds a separate wait. Wait timeout or client
 exit leaves the transfer running, and active jobs prevent idle shutdown. One file
 may run per session. Closing the session cancels unfinished work. Jobs remain in
-memory (up to 256 previous jobs); daemon restart loses job history. There is no
+durable SQLite storage; daemon restart preserves job history. Recovery can reconcile
+provably completed files. There is no
 resume, queue or fallback HTTP downloader. Borrowed/remote `--cdp` browsers are
 rejected. Existing old daemons need an explicit restart to gain these operations;
 requests never upgrade or replay automatically.
@@ -182,11 +190,15 @@ eoka key-up Shift
 ## Rust session API
 
 ```rust
-use eoka_server::Session;
+use eoka_server::{Session, eoka::{ActionOptions, Expectation}};
 
 let mut session = Session::launch().await?;
 session.goto("https://example.com").await?;
 session.observe().await?;
+session.set_action_options(ActionOptions::expecting(Expectation::Url {
+    value: "https://www.iana.org/help/example-domains".into(),
+    contains: false,
+}));
 session.click(0).await?;
 session.close().await?;
 ```
@@ -200,6 +212,9 @@ target:
 actions:
   - click:
       text: More information
+      expect:
+        kind: url
+        value: https://www.iana.org/help/example-domains
   - screenshot:
       path: result.png
 ```

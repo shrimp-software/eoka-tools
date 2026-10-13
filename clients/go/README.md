@@ -27,7 +27,7 @@ locates the binary in this order:
 2. The `EOKA_SERVER_BIN` environment variable, if set.
 3. `eoka-server` on `PATH`.
 4. A prebuilt binary downloaded from this repo's GitHub Releases
-   (`eoka-server-v0.2.1`), cached under `os.UserCacheDir()/eoka/` and
+   (`eoka-server-v0.3.0`), cached under `os.UserCacheDir()/eoka/` and
    verified against the release's published sha256 checksums before use.
    Supported platforms: linux/amd64, darwin/amd64, darwin/arm64,
    windows/amd64. Pass `eoka.WithNoAutoDownload()` to disable this and get
@@ -36,6 +36,15 @@ locates the binary in this order:
 For any other platform, or to build from source, run
 `cargo build -p eoka-server --release` from this repo and point at the
 resulting binary via step 1 or 2 above.
+
+## Action migration
+
+This client requires server 0.3 and core 0.6. For a development checkout, pass
+`WithServerPath` to the locally built server. Click/type/key methods accept
+`ActionOptions{Expect: ...}` and require a fresh observable completion condition.
+Use `NewOperationID` plus `Page.Perform` to retain the ID before transmission;
+`Operation` and `WaitOperation` recover the record after a lost response.
+See [OPERATIONS.md](../../OPERATIONS.md) for JSON expectations and durable recovery.
 
 ## Usage
 
@@ -48,7 +57,7 @@ if err != nil {
 }
 defer b.Close(ctx)
 
-page, err := b.NewPage(ctx, "https://example.com")
+page, err := b.NewPage(ctx, "https://your-app.example/form")
 if err != nil {
     log.Fatal(err)
 }
@@ -56,7 +65,11 @@ if err != nil {
 if err := page.Fill(ctx, "#user", "bob"); err != nil {
     log.Fatal(err)
 }
-if err := page.Click(ctx, "#submit"); err != nil {
+if err := page.Click(ctx, "#submit", eoka.ActionOptions{Expect: map[string]any{
+    "kind": "text",
+    "target": map[string]any{"query": map[string]any{"kind": "css", "selector": "#status"}},
+    "value": "Saved",
+}}); err != nil {
     log.Fatal(err)
 }
 
@@ -85,11 +98,7 @@ matching PROTOCOL.md's error table (`ElementNotFound`, `ElementNotVisible`,
 `UnknownMethod`, `Internal`):
 
 ```go
-err := page.Click(ctx, "#missing")
-if eoka.HasCode(err, eoka.ErrCodeElementNotFound) {
-    // ...
-}
-
+_, err := page.Text(ctx)
 var eErr *eoka.Error
 if errors.As(err, &eErr) {
     fmt.Println(eErr.Code, eErr.Message)
@@ -102,7 +111,9 @@ a response failed to decode) come back as plain Go errors, not `*eoka.Error`
 
 Every method takes a `context.Context` first; if it's cancelled or times out
 while a call is in flight, the method returns `ctx.Err()` and the call is
-abandoned (a late response, if one ever arrives, is discarded). `Browser.CloseTab`
+abandoned (a late response, if one ever arrives, is discarded). Durable actions
+continue on the server; action errors include the operation ID and may wrap
+the context error. Inspect that ID before another action. `Browser.CloseTab`
 returns an error when held-input cleanup fails after the server has already
 closed the tab; callers should treat the tab as closed in that case.
 

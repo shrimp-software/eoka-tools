@@ -51,14 +51,15 @@ cat <<'MSG'
 Release check passed.
 
 Publish order:
+  0. publish eoka 0.6.0 from the core repository first
   1. publish tack-rs 0.0.2 crates first
   2. cargo publish -p eoka-captcha
   3. cargo publish -p eoka-proxy
   4. cargo publish -p eoka-protocol
   5. cargo publish -p eoka-sdk
   6. cargo publish -p eoka-email
-  7. cargo publish -p eoka-runner
-  8. cargo publish -p eoka-server
+  7. cargo publish -p eoka-server
+  8. cargo publish -p eoka-runner
   9. cargo publish -p eoka-mcp
  10. cargo publish -p eoka-tack
  11. cargo publish -p eoka-datadome

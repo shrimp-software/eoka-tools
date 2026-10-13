@@ -6,6 +6,7 @@ mod fetch_tests;
 pub mod intercept;
 mod intercept_files;
 pub mod network;
+mod operations;
 mod persist;
 pub mod profile;
 mod proxy_forward;
@@ -28,18 +29,19 @@ use eoka_server::{annotate, observe, snapshot};
 use serde_json::{json, Value};
 
 use crate::launch_spec::LaunchSpec;
-use crate::protocol::{Request, Response};
+use crate::protocol::Response;
 use intercept::{InterceptLog, InterceptLogEntry, InterceptRule, InterceptState};
 use network::{NetworkConfig, NetworkRecorder};
 use persist::{capture_state, ensure_console_capture, restore_cookies, restore_state, SavedState};
 use script_policy::{ScriptPolicyMode, ScriptPolicyState};
 use state::{BrowserState, TabState};
 use target::{
-    auto_observe_if_needed, click_with_retry, fill_with_retry, json_str, resolve_target,
-    title_nonblocking, wait_for_stable,
+    auto_observe_if_needed, click_once, fill_once, json_str, resolve_target, title_nonblocking,
+    wait_for_stable,
 };
 
 pub struct Handler {
+    operations: eoka_server::operations::OperationManager,
     downloads: eoka_server::downloads::DownloadManager,
     state: Option<BrowserState>,
     spec: LaunchSpec,
@@ -74,6 +76,7 @@ impl Handler {
             LaunchSpec::Connect { .. } => ScriptPolicyState::default(),
         };
         Self {
+            operations: Default::default(),
             downloads: Default::default(),
             state: None,
             spec,
@@ -173,6 +176,38 @@ impl Handler {
     }
 
     pub async fn handle(&mut self, cmd: &str, args: &Value) -> Response {
+        if cmd == "action_command" {
+            let command = args["command"].as_str().unwrap_or_default();
+            if (!eoka_server::operations::commands::is_action(command)
+                && command != "download_start")
+                || command == "action_perform"
+            {
+                return Response::err("Invalid convenience action");
+            }
+            let mut arguments = args["arguments"].clone();
+            if !arguments.is_object() {
+                arguments = serde_json::json!({});
+            }
+            arguments["operation_id"] = args["operation_id"].clone();
+            if command == "download_start" {
+                return self.cmd_download_start(&arguments).await;
+            }
+            return self.handle_action(command, &arguments).await;
+        }
+        if let Some(response) = self.operations.query(cmd, args).await {
+            return response;
+        }
+        if eoka_server::operations::commands::is_action(cmd) {
+            return self.handle_action(cmd, args).await;
+        }
+        if matches!(cmd, "close" | "tab_close") {
+            self.operations.stop().await;
+        }
+        if cmd.starts_with("download_") {
+            if let Err(error) = self.downloads.restore().await {
+                return Response::err_detail(error);
+            }
+        }
         if cmd == "download_start" {
             return self.cmd_download_start(args).await;
         }
@@ -190,12 +225,6 @@ impl Handler {
         response
     }
 
-    pub async fn handle_request(&mut self, request: Request) -> Response {
-        let cmd = request.cmd();
-        let args = request.args_json();
-        self.handle(cmd, &args).await
-    }
-
     async fn dispatch(&mut self, cmd: &str, args: &Value) -> Result<Response, String> {
         match cmd {
             "download_list" => Ok(Response::ok(
@@ -203,14 +232,13 @@ impl Handler {
             )),
             "download_get" | "download_cancel" => {
                 let id = self.arg_str(args, "id")?;
+                if cmd == "download_cancel" {
+                    return Ok(eoka_server::downloads::start_response(
+                        self.downloads.cancel(id),
+                    ));
+                }
                 Ok(match self.downloads.get(id) {
-                    Ok(job) => {
-                        eoka_server::downloads::record_response(if cmd == "download_cancel" {
-                            job.cancel()
-                        } else {
-                            job.snapshot()
-                        })
-                    }
+                    Ok(job) => eoka_server::downloads::record_response(job.snapshot()),
                     Err(error) => Response::err_detail(error),
                 })
             }
@@ -733,7 +761,7 @@ impl Handler {
         let result = async {
             let (tab, vp) = self.tab_with_config()?;
             auto_observe_if_needed(tab, target_str, vp).await?;
-            let desc = click_with_retry(tab, target_str, vp).await?;
+            let desc = click_once(tab, target_str, vp).await?;
             let _ = wait_for_stable(&tab.page).await;
             tab.elements.clear();
             Ok::<_, String>(desc)
@@ -772,7 +800,7 @@ impl Handler {
         let (tab, vp) = self.tab_with_config()?;
 
         auto_observe_if_needed(tab, target_str, vp).await?;
-        let desc = fill_with_retry(tab, target_str, text, vp).await?;
+        let desc = fill_once(tab, target_str, text, vp).await?;
         tab.elements.clear();
         Ok(Response::ok_text(format!(
             "Filled {} with \"{}\"",
@@ -944,7 +972,7 @@ impl Handler {
         let mut parsed: Value = serde_json::from_str(&result).map_err(|e| e.to_string())?;
         if let Some(target) = click_after {
             let (tab, viewport_only) = self.tab_with_config()?;
-            let desc = click_with_retry(tab, &target, viewport_only).await?;
+            let desc = click_once(tab, &target, viewport_only).await?;
             if let Value::Object(ref mut object) = parsed {
                 object.insert(
                     "click_after".into(),

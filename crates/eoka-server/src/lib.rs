@@ -6,6 +6,7 @@ pub mod dispatch;
 pub mod downloads;
 mod methods;
 pub mod observe;
+pub mod operations;
 pub mod page_context;
 pub mod protocol;
 pub mod snapshot;
