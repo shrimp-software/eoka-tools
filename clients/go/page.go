@@ -23,14 +23,8 @@ const (
 	MouseButtonForward MouseButton = "forward"
 )
 
-// CaptchaOptions describes a CAPTCHA challenge to solve in the current browser
-// session. The API key and resulting token remain inside the local Eoka server
-// process; callers receive only injection metadata.
 type CaptchaOptions struct {
-	APIKey string `json:"-"`
-	// Mode is deliberately required by the server. Explicitly choosing
-	// anti_captcha_proxyless prevents a caller from overlooking that the
-	// solver runs from a different network than the browser.
+	APIKey            string          `json:"-"`
 	Mode              string          `json:"-"`
 	Type              string          `json:"-"`
 	WebsiteURL        string          `json:"-"`
@@ -40,8 +34,6 @@ type CaptchaOptions struct {
 	Callback          string          `json:"-"`
 }
 
-// CaptchaInjection reports how Eoka applied a solved CAPTCHA token. It never
-// contains the token itself.
 type CaptchaInjection struct {
 	Kind            string   `json:"kind"`
 	UpdatedCount    int      `json:"updated_count"`
@@ -51,8 +43,6 @@ type CaptchaInjection struct {
 	SolverUserAgent string   `json:"solverUserAgent"`
 }
 
-// FetchOptions configures a request executed from the page's browser context.
-// Body is sent verbatim; JSON callers should marshal it before calling Fetch.
 type FetchOptions struct {
 	Method   string
 	Headers  map[string]string
@@ -60,8 +50,6 @@ type FetchOptions struct {
 	Redirect string
 }
 
-// FetchResponse is the result of a browser-context request. Body is returned
-// verbatim so callers can decode the API format they requested.
 type FetchResponse struct {
 	URL     string            `json:"url"`
 	Status  int               `json:"status"`
@@ -80,41 +68,36 @@ func (p *Page) call(ctx context.Context, method string, params map[string]any, r
 	return p.b.t.call(ctx, method, params, result)
 }
 
-func (p *Page) Goto(ctx context.Context, url string) error {
-	return p.call(ctx, "page.goto", map[string]any{"url": url}, nil)
+func (p *Page) Goto(ctx context.Context, url string, options ...ActionOptions) error {
+	return p.performLegacy(ctx, "page.goto", map[string]any{"url": url}, options)
 }
 
-func (p *Page) Click(ctx context.Context, selector string) error {
-	return p.call(ctx, "page.click", map[string]any{"selector": selector}, nil)
+func (p *Page) Click(ctx context.Context, selector string, options ...ActionOptions) error {
+	return p.performLegacy(ctx, "page.click", map[string]any{"selector": selector}, options)
 }
 
-// ClickText finds an interactive element by visible text and invokes Eoka's
-// semantic element click. This is appropriate for modal continuation controls
-// that a site handles through its element listener rather than pointer input.
-func (p *Page) ClickText(ctx context.Context, text string) error {
-	return p.call(ctx, "page.click_text", map[string]any{"text": text}, nil)
+func (p *Page) ClickText(ctx context.Context, text string, options ...ActionOptions) error {
+	return p.performLegacy(ctx, "page.click_text", map[string]any{"text": text}, options)
 }
 
-func (p *Page) HumanClick(ctx context.Context, selector string) error {
-	return p.call(ctx, "page.human_click", map[string]any{"selector": selector}, nil)
+func (p *Page) HumanClick(ctx context.Context, selector string, options ...ActionOptions) error {
+	return p.performLegacy(ctx, "page.human_click", map[string]any{"selector": selector}, options)
 }
 
-// HumanClickText finds an interactive element by visible text and clicks it
-// with Eoka's human-like pointer input.
-func (p *Page) HumanClickText(ctx context.Context, text string) error {
-	return p.call(ctx, "page.human_click_text", map[string]any{"text": text}, nil)
+func (p *Page) HumanClickText(ctx context.Context, text string, options ...ActionOptions) error {
+	return p.performLegacy(ctx, "page.human_click_text", map[string]any{"text": text}, options)
 }
 
-func (p *Page) Fill(ctx context.Context, selector, value string) error {
-	return p.call(ctx, "page.fill", map[string]any{"selector": selector, "value": value}, nil)
+func (p *Page) Fill(ctx context.Context, selector, value string, options ...ActionOptions) error {
+	return p.performLegacy(ctx, "page.fill", map[string]any{"selector": selector, "value": value}, options)
 }
 
-func (p *Page) HumanFill(ctx context.Context, selector, value string) error {
-	return p.call(ctx, "page.human_fill", map[string]any{"selector": selector, "value": value}, nil)
+func (p *Page) HumanFill(ctx context.Context, selector, value string, options ...ActionOptions) error {
+	return p.performLegacy(ctx, "page.human_fill", map[string]any{"selector": selector, "value": value}, options)
 }
 
-func (p *Page) TypeInto(ctx context.Context, selector, text string) error {
-	return p.call(ctx, "page.type_into", map[string]any{"selector": selector, "text": text}, nil)
+func (p *Page) TypeInto(ctx context.Context, selector, text string, options ...ActionOptions) error {
+	return p.performLegacy(ctx, "page.type_into", map[string]any{"selector": selector, "text": text}, options)
 }
 
 func (p *Page) Text(ctx context.Context) (string, error) {
@@ -217,9 +200,6 @@ func (p *Page) Execute(ctx context.Context, js string) error {
 	return p.call(ctx, "page.execute", map[string]any{"js": js}, nil)
 }
 
-// Fetch performs a request in this page's real browser context. It retains the
-// page's cookies, browser fingerprint, and same-origin behavior; it is not an
-// external HTTP client.
 func (p *Page) Fetch(ctx context.Context, url string, options FetchOptions) (FetchResponse, error) {
 	params := map[string]any{"url": url}
 	if options.Method != "" {
@@ -239,8 +219,6 @@ func (p *Page) Fetch(ctx context.Context, url string, options FetchOptions) (Fet
 	return response, err
 }
 
-// SolveCaptcha solves a supported CAPTCHA and injects the result into this
-// page. It currently supports recaptcha_v2_enterprise.
 func (p *Page) SolveCaptcha(ctx context.Context, options CaptchaOptions) (CaptchaInjection, error) {
 	params := map[string]any{
 		"apiKey":      options.APIKey,
@@ -295,16 +273,16 @@ func (p *Page) Screenshot(ctx context.Context) ([]byte, error) {
 	return data, nil
 }
 
-func (p *Page) Select(ctx context.Context, selector, value string) error {
-	return p.call(ctx, "page.select", map[string]any{"selector": selector, "value": value}, nil)
+func (p *Page) Select(ctx context.Context, selector, value string, options ...ActionOptions) error {
+	return p.performLegacy(ctx, "page.select", map[string]any{"selector": selector, "value": value}, options)
 }
 
-func (p *Page) Hover(ctx context.Context, selector string) error {
-	return p.call(ctx, "page.hover", map[string]any{"selector": selector}, nil)
+func (p *Page) Hover(ctx context.Context, selector string, options ...ActionOptions) error {
+	return p.performLegacy(ctx, "page.hover", map[string]any{"selector": selector}, options)
 }
 
-func (p *Page) PressKey(ctx context.Context, key string) error {
-	return p.call(ctx, "page.press_key", map[string]any{"key": key}, nil)
+func (p *Page) PressKey(ctx context.Context, key string, options ...ActionOptions) error {
+	return p.performLegacy(ctx, "page.press_key", map[string]any{"key": key}, options)
 }
 
 func (p *Page) MouseDown(ctx context.Context, x, y float64, button MouseButton) error {

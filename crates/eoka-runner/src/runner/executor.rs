@@ -27,28 +27,24 @@ impl From<&ImapConfigAction> for ImapConfig {
     }
 }
 
-/// Maximum include depth to prevent infinite loops.
 const MAX_INCLUDE_DEPTH: usize = 10;
 
-/// Context for action execution.
 #[derive(Clone)]
 pub struct ExecutionContext {
-    /// Base path for resolving relative includes.
+    pub operations: eoka_server::operations::OperationManager,
     pub base_path: PathBuf,
-    /// Current include depth.
     pub include_depth: usize,
 }
 
 impl ExecutionContext {
-    /// Create a new context with a base path.
     pub fn new(base_path: impl Into<PathBuf>) -> Self {
         Self {
+            operations: Default::default(),
             base_path: base_path.into(),
             include_depth: 0,
         }
     }
 
-    /// Create a child context for an include.
     pub fn child(&self, new_base: impl Into<PathBuf>) -> Result<Self> {
         if self.include_depth >= MAX_INCLUDE_DEPTH {
             return Err(Error::Config(format!(
@@ -57,12 +53,12 @@ impl ExecutionContext {
             )));
         }
         Ok(Self {
+            operations: self.operations.clone(),
             base_path: new_base.into(),
             include_depth: self.include_depth + 1,
         })
     }
 
-    /// Resolve a relative path against the base path.
     pub fn resolve_path(&self, path: &str) -> PathBuf {
         let path = Path::new(path);
         if path.is_absolute() {
@@ -79,7 +75,6 @@ impl Default for ExecutionContext {
     }
 }
 
-/// Find element by text - returns CSS selector.
 const FIND_BY_TEXT_JS: &str = r#"(() => {
     const text = arguments[0];
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT, null);
@@ -109,13 +104,16 @@ const FIND_BY_TEXT_JS: &str = r#"(() => {
     return null;
 })()"#;
 
-/// Execute a single action on the page with context.
 pub async fn execute_with_context(
     page: &Page,
     action: &Action,
     ctx: &ExecutionContext,
 ) -> Result<()> {
+    if let Some(prepared) = super::operations::prepare(action)? {
+        return super::operations::run(page, ctx, prepared).await;
+    }
     match action {
+        Action::Perform(_) => return Err(Error::Config("Invalid durable action".into())),
         Action::Goto(a) => {
             info!("goto: {}", a.url);
             page.goto(&a.url).await?;
@@ -178,7 +176,7 @@ pub async fn execute_with_context(
                 "try_click_any: {:?}",
                 a.texts.as_ref().or(a.selectors.as_ref())
             );
-            try_click_any(page, a).await?;
+            try_click_any(page, a, ctx).await?;
         }
         Action::Fill(a) => {
             info!("fill: {} = '{}'", a.target, a.value);
@@ -314,13 +312,11 @@ pub async fn execute_with_context(
             let path = ctx.resolve_path(&a.path);
             info!("include: {}", path.display());
 
-            // Build params from the include action
             let mut params = Params::new();
             for (k, v) in &a.params {
                 params = params.set(k.clone(), v.clone());
             }
 
-            // Load the included config
             let included_config = Config::load_with_params(&path, &params).map_err(|e| {
                 Error::Config(format!(
                     "failed to load include '{}': {}",
@@ -329,11 +325,9 @@ pub async fn execute_with_context(
                 ))
             })?;
 
-            // Create child context with the included file's directory as base
             let child_base = path.parent().unwrap_or(Path::new("."));
             let child_ctx = ctx.child(child_base)?;
 
-            // Execute included actions
             for action in &included_config.actions {
                 Box::pin(execute_with_context(page, action, &child_ctx)).await?;
             }
@@ -430,7 +424,6 @@ fn extract_email_values(
     Ok((link, code))
 }
 
-/// Resolve a Target to a CSS selector.
 pub async fn resolve_target(page: &Page, target: &Target) -> Result<String> {
     if let Some(ref sel) = target.selector {
         return Ok(sel.clone());
@@ -489,30 +482,71 @@ async fn scroll(page: &Page, direction: &ScrollDirection, amount: u32) -> Result
     Ok(())
 }
 
-async fn try_click_any(page: &Page, action: &TryClickAnyAction) -> Result<()> {
-    if let Some(ref selectors) = action.selectors {
-        for sel in selectors {
-            if page.try_click(sel).await? {
-                debug!("try_click_any: clicked selector '{}'", sel);
-                return Ok(());
-            }
+async fn try_click_any(
+    page: &Page,
+    action: &TryClickAnyAction,
+    ctx: &ExecutionContext,
+) -> Result<()> {
+    let group = match &action.operation.operation_id {
+        Some(id) => uuid::Uuid::parse_str(id).map_err(|e| Error::Config(e.to_string()))?,
+        None => uuid::Uuid::new_v4(),
+    };
+    let targets = action
+        .selectors
+        .iter()
+        .flatten()
+        .map(eoka::LocatorSpec::css)
+        .chain(action.texts.iter().flatten().map(eoka::LocatorSpec::text));
+    let started = tokio::time::Instant::now();
+    let timeout = action.operation.timeout_ms.unwrap_or(30000);
+    for (index, target) in targets.enumerate() {
+        let remaining =
+            timeout.saturating_sub(started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64);
+        if remaining == 0 {
+            return Err(Error::Config("try_click_any deadline exceeded".into()));
+        }
+        let id = uuid::Uuid::new_v5(&group, &index.to_be_bytes()).to_string();
+        tracing::info!(operation_id=%id,group_id=%group,"Trying durable click candidate");
+        let record = ctx
+            .operations
+            .submit(
+                page.clone(),
+                id.clone(),
+                eoka::Action::Click {
+                    target,
+                    human: false,
+                    double: false,
+                },
+                eoka::ActionOptions {
+                    timeout_ms: remaining,
+                    expect: action.operation.expect.clone(),
+                    wait_for_target: false,
+                    ..Default::default()
+                },
+            )
+            .await
+            .map_err(|e| Error::Config(e.to_string()))?;
+        let record = if matches!(record.state, eoka_protocol::OperationState::Running) {
+            ctx.operations
+                .wait(&id, remaining.saturating_add(1000))
+                .await
+                .map_err(|e| Error::Config(e.to_string()))?
+        } else {
+            record
+        };
+        if record.outcome == eoka::ActionOutcome::VerifiedComplete {
+            return Ok(());
+        }
+        if record.outcome != eoka::ActionOutcome::NotDispatched
+            || record.error_code.as_deref() != Some("target_unavailable")
+        {
+            return Err(Error::Config(format!(
+                "Operation {id}: {:?} ({})",
+                record.outcome,
+                record.error_code.unwrap_or_default()
+            )));
         }
     }
-    if let Some(ref texts) = action.texts {
-        for txt in texts {
-            let target = Target {
-                selector: None,
-                text: Some(txt.clone()),
-            };
-            if let Ok(sel) = resolve_target(page, &target).await {
-                if page.try_click(&sel).await? {
-                    debug!("try_click_any: clicked text '{}'", txt);
-                    return Ok(());
-                }
-            }
-        }
-    }
-    debug!("try_click_any: no element found");
     Ok(())
 }
 
@@ -546,9 +580,6 @@ async fn select_option(page: &Page, selector: &str, value: &str, target: &Target
 }
 
 async fn hover_element(page: &Page, selector: &str) -> Result<()> {
-    // eoka 0.5 exposes a public `Page::hover` that finds the element, computes
-    // its center, and dispatches a MouseMoved event — the same thing this used
-    // to do by hand via the (now private) CDP mouse API.
     page.hover(selector).await?;
     page.wait(100).await;
     Ok(())

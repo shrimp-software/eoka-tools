@@ -147,3 +147,12 @@ err = b.Close(ctx)                               // browser.close, waits for chi
 Every method takes `context.Context` first for cancellation/timeout. Errors
 are typed (`*eoka.Error` with a `Code` field matching the table above) so
 callers can `errors.As` / compare `err.Code == eoka.ElementNotFound`.
+
+## Durable actions
+
+`actions.perform` accepts the canonical `ActionPerformArgs` schema and a caller-known
+UUID. `operations.get/list/wait/cancel` inspect the original operation. Input options
+and receipts are re-exported from eoka 0.6 through eoka-protocol; adapters must use
+these definitions. Convenience actions use the `actions.command` envelope so an
+older daemon cannot ignore an operation ID and dispatch a legacy command.
+See [OPERATIONS.md](OPERATIONS.md) for outcomes, deduplication, recovery and migration.

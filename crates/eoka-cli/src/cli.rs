@@ -4,6 +4,12 @@ use std::path::PathBuf;
 #[derive(Parser)]
 #[command(name = "eoka", about = "Browser automation CLI", version)]
 pub struct Cli {
+    #[arg(long, global = true, help = "Expected action result as typed JSON")]
+    pub expect: Option<String>,
+    #[arg(long, global = true, help = "Stable UUID for a consequential action")]
+    pub operation_id: Option<String>,
+    #[arg(long, global = true, help = "Total action deadline in milliseconds")]
+    pub action_timeout_ms: Option<u64>,
     #[arg(
         long,
         default_value = "default",
@@ -120,6 +126,13 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
+    #[command(about = "Submit a typed action with an operation ID")]
+    Action { request: String },
+    #[command(about = "Inspect durable action records")]
+    Operations {
+        #[command(subcommand)]
+        command: OperationCommand,
+    },
     #[command(about = "Navigate to URL")]
     Open {
         url: String,
@@ -651,4 +664,23 @@ pub(crate) mod test_support {
         let command = cli.command.take().unwrap();
         (cli, command)
     }
+}
+
+#[derive(Subcommand)]
+pub enum OperationCommand {
+    Get {
+        id: String,
+    },
+    List {
+        #[arg(long, default_value_t = 100)]
+        limit: u32,
+    },
+    Wait {
+        id: String,
+        #[arg(long, default_value_t = 30000)]
+        timeout_ms: u64,
+    },
+    Cancel {
+        id: String,
+    },
 }

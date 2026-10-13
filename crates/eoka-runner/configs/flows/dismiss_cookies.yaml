@@ -8,6 +8,7 @@ target:
 
 actions:
   - try_click_any:
+      expect: { kind: hidden, target: { query: { kind: css, selector: "#cookie-banner" } } }
       texts:
         - "Accept"
         - "Accept All"

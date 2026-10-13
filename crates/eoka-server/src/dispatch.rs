@@ -9,6 +9,12 @@ pub async fn dispatch(
     method: &str,
     params: Value,
 ) -> Result<Value, ServerError> {
+    if let Some(result) = crate::operations::sidecar::dispatch(state, method, &params).await {
+        return result;
+    }
+    if matches!(method, "browser.close" | "browser.close_tab" | "page.close") {
+        state.operations.stop().await;
+    }
     match method {
         "browser.launch" => browser::launch(state, params).await,
         "browser.new_page" => browser::new_page(state, params).await,

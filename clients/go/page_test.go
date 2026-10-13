@@ -24,7 +24,35 @@ func newFakePage(t *testing.T, handle fakeHandler) *Page {
 func TestPageNoResultMethods(t *testing.T) {
 	seen := map[string]bool{}
 	page := newFakePage(t, func(id int64, method string, params json.RawMessage) (any, *rpcError) {
+		var request map[string]any
+		_ = json.Unmarshal(params, &request)
+		if method == "actions.perform" {
+			a := request["action"].(map[string]any)
+			switch a["kind"] {
+			case "navigate":
+				method = "page.goto"
+			case "click":
+				method = "page.click"
+				if a["human"] == true {
+					method = "page.human_click"
+				}
+			case "fill":
+				method = "page.fill"
+				if a["human"] == true {
+					method = "page.human_fill"
+				}
+			case "select_option":
+				method = "page.select"
+			case "type":
+				method = "page.type_into"
+			default:
+				method = "page." + a["kind"].(string)
+			}
+		}
 		seen[method] = true
+		if operationID, ok := request["operation_id"]; ok {
+			return map[string]any{"id": operationID, "state": "finished", "outcome": "verified_complete"}, nil
+		}
 		return map[string]any{}, nil
 	})
 

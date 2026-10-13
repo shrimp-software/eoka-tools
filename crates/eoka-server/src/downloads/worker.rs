@@ -57,7 +57,7 @@ impl Drop for AuxiliaryPage {
 
 pub(super) enum Trigger {
     Click {
-        selector: String,
+        selector: eoka::LocatorSpec,
     },
     Navigate {
         url: String,
@@ -66,13 +66,27 @@ pub(super) enum Trigger {
 }
 
 impl Trigger {
-    async fn run(&self, page: &Page) -> eoka::Result<()> {
-        match self {
-            Self::Click { selector } => page.click(selector).await,
-            Self::Navigate { url, referrer } => {
-                page.navigate_for_download(url, referrer.as_deref()).await
-            }
+    async fn run(&self, page: &Page, job: &DownloadJob, timeout: Duration) -> eoka::Result<()> {
+        let action = match self {
+            Self::Click { selector } => eoka::Action::Click {
+                target: selector.clone(),
+                human: false,
+                double: false,
+            },
+            Self::Navigate { url, referrer } => eoka::Action::Navigate {
+                url: url.clone(),
+                referrer: referrer.clone(),
+            },
+        };
+        let mut options = eoka::ActionOptions::expecting(eoka::Expectation::DownloadStarted);
+        options.timeout_ms = timeout.as_millis().min(u128::from(u64::MAX)) as u64;
+        if let Some(journal) = &job.journal {
+            options.observer = Some(Arc::new(crate::operations::Intent {
+                store: journal.store.clone(),
+                id: journal.id.clone(),
+            }));
         }
+        page.act(action, options).await.map(|_| ())
     }
 }
 
@@ -104,6 +118,15 @@ impl Transfer {
         if result.is_err() {
             if let Some(guid) = &guid {
                 let _ = self.native.cancel(guid).await;
+            }
+        }
+        if let Some(journal) = &self.job.journal {
+            if let Ok(operation) = journal.store.get(journal.id.clone()).await {
+                self.action_status = if operation.dispatch_intent {
+                    ActionStatus::MayHaveExecuted
+                } else {
+                    ActionStatus::NotAttempted
+                };
             }
         }
         if let Err(error) = result {
@@ -140,24 +163,50 @@ impl Transfer {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             == Publication::Published;
-        self.job.update(|record| {
-            let cleanup = retained.map(|path| record.staging_path = path);
-            if published {
-                record.published_path = Some(record.output.clone());
-            }
-            match result.and(cleanup) {
-                Ok(()) => record.state = DownloadState::Completed,
-                Err(error) => {
-                    record.state = if error.code == "download_canceled" {
-                        DownloadState::Canceled
-                    } else {
-                        DownloadState::Failed
-                    };
-                    record.error = Some(error);
-                }
-            }
-        });
         drop(self.permit);
+        let final_record = self
+            .job
+            .update(|record| {
+                let cleanup = retained.map(|path| record.staging_path = path);
+                if published {
+                    record.published_path = Some(record.output.clone());
+                }
+                match result.and(cleanup) {
+                    Ok(()) => record.state = DownloadState::Completed,
+                    Err(error) => {
+                        record.state = if published {
+                            DownloadState::Completed
+                        } else if error.code == "download_canceled" {
+                            DownloadState::Canceled
+                        } else {
+                            DownloadState::Failed
+                        };
+                        record.error = Some(error);
+                    }
+                }
+            })
+            .await;
+        if final_record.is_err() {
+            tracing::error!("Could not persist final download state");
+        }
+        if let Some(journal) = &self.job.journal {
+            let record = self.job.snapshot();
+            let _ = journal
+                .store
+                .update(journal.id.clone(), move |operation| {
+                    operation.state = eoka_protocol::OperationState::Finished;
+                    operation.finished_at_ms = Some(super::now());
+                    operation.outcome = if record.state == DownloadState::Completed {
+                        eoka::ActionOutcome::VerifiedComplete
+                    } else if operation.dispatch_intent {
+                        eoka::ActionOutcome::OutcomeUnknown
+                    } else {
+                        eoka::ActionOutcome::NotDispatched
+                    };
+                    operation.error_code = record.error.map(|e| e.code);
+                })
+                .await;
+        }
     }
 
     async fn transfer(
@@ -179,7 +228,7 @@ impl Transfer {
             .map(|frame| frame.id)
             .collect();
         self.action_status = ActionStatus::MayHaveExecuted;
-        let trigger = self.trigger.run(&self.page);
+        let trigger = self.trigger.run(&self.page, &self.job, self.start_timeout);
         tokio::pin!(trigger);
         let deadline = tokio::time::Instant::now() + self.start_timeout;
         let mut trigger_result = None;
@@ -198,6 +247,7 @@ impl Transfer {
                 },
                 _ = tokio::time::sleep_until(deadline), if guid.is_none() => {
                     let error = match trigger_result.as_ref() {
+                        Some(Err(eoka::Error::Action{code,..})) if code=="action_timeout" => failure("download_not_started","No native download started before the deadline; the action was not replayed"),
                         Some(Err(error)) => failure("download_trigger_failed", format!("No native download started; trigger failed: {error}")),
                         _ => failure("download_not_started", "No native download started before the deadline; the action was not replayed"),
                     };
@@ -219,6 +269,11 @@ impl Transfer {
                 } => {
                     verification.take();
                     result.map_err(|_| failure("download_io_error", "File verification worker failed"))??;
+                    if let Some(journal)=&self.job.journal {
+                        let mut record=journal.snapshot().await.map_err(|e|failure("download_store_failed",e.to_string()))?;
+                        record.state=DownloadState::Verifying;
+                        self.job.record.send_replace(record);
+                    }
                     return Ok(());
                 },
                 event = self.native.next_event() => event.map_err(|_| failure("download_event_loss", "Native download event stream disconnected or lost events"))?,
@@ -250,22 +305,30 @@ impl Transfer {
                         self.job.cancel();
                         return Err(failure("download_multiple_files", "The trigger started multiple downloads; only single-file actions are supported"));
                     }
-                    *guid = Some(begin.guid);
-                    self.job.update(|record| {
-                        record.state = DownloadState::Downloading;
-                        record.source_url = Some(redact_url(&begin.url));
-                        record.suggested_filename =
-                            Some(begin.suggested_filename.chars().take(1024).collect());
-                    });
+                    *guid = Some(begin.guid.clone());
+                    self.job
+                        .update(|record| {
+                            record.native_guid = Some(begin.guid.clone());
+                            record.state = DownloadState::Downloading;
+                            record.source_url = Some(redact_url(&begin.url));
+                            record.suggested_filename =
+                                Some(begin.suggested_filename.chars().take(1024).collect());
+                        })
+                        .await?;
                 }
                 DownloadEvent::Progress(progress) if guid.as_deref() == Some(&progress.guid) => {
+                    if verification.is_some() {
+                        continue;
+                    }
                     let received = byte_count(progress.received_bytes)?;
                     let total = byte_count(progress.total_bytes)?;
                     let total = (total > 0).then_some(total);
-                    self.job.update(|record| {
-                        record.received_bytes = received;
-                        record.total_bytes = total;
-                    });
+                    self.job
+                        .update(|record| {
+                            record.received_bytes = received;
+                            record.total_bytes = total;
+                        })
+                        .await?;
                     match progress.state {
                         NativeDownloadState::Canceled => {
                             return Err(failure(
@@ -275,17 +338,38 @@ impl Transfer {
                         }
                         NativeDownloadState::Completed if verification.is_none() => {
                             self.job
-                                .update(|record| record.state = DownloadState::Verifying);
+                                .update(|record| record.state = DownloadState::Verifying)
+                                .await?;
+                            if let Some(journal) = &self.job.journal {
+                                journal
+                                    .completed_event(super::durable::Evidence {
+                                        guid: Some(progress.guid.clone()),
+                                        native_complete: true,
+                                        received,
+                                        total,
+                                        expected: self.expected_bytes,
+                                        ..Default::default()
+                                    })
+                                    .await
+                                    .map_err(|_| {
+                                        failure(
+                                            "download_store_failed",
+                                            "Could not persist native completion",
+                                        )
+                                    })?;
+                            }
+                            let journal = self.job.journal.clone();
                             let destination = self.destination.clone();
                             let expected = self.expected_bytes;
                             let gate = self.job.publication.clone();
                             *verification = Some(tokio::task::spawn_blocking(move || {
-                                destination.publish(
+                                destination.publish_durable(
                                     &progress.guid,
                                     received,
                                     total,
                                     expected,
                                     &gate,
+                                    journal.as_ref(),
                                 )
                             }));
                         }

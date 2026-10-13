@@ -72,7 +72,7 @@ pub async fn run(session_name: &str, spec: LaunchSpec) -> anyhow::Result<()> {
                                 continue;
                             }
                         };
-                        let req: Request = match serde_json::from_value(raw) {
+                        let req: Request = match serde_json::from_value(raw.clone()) {
                             Ok(req) => req,
                             Err(e) => {
                                 let resp = Response::err(format!("Invalid command request: {}", e));
@@ -88,6 +88,18 @@ pub async fn run(session_name: &str, spec: LaunchSpec) -> anyhow::Result<()> {
                             break;
                         }
 
+                        if let Request::OperationWait(args) = &req {
+                            let manager=handler.operation_manager();
+                            let args=args.clone();
+                            waiters.spawn(async move {
+                                let mut disconnected=[0u8;1];
+                                tokio::select! {
+                                    result=manager.wait(&args.id,args.timeout_ms)=>{let response=eoka_server::operations::commands::response(result);let _=write_msg(&mut writer,&response).await;},
+                                    _=reader.read(&mut disconnected)=>{},
+                                }
+                            });
+                            continue;
+                        }
                         if let Request::DownloadWait(args) = req {
                             let manager = handler.download_manager();
                             waiters.spawn(async move {
@@ -101,7 +113,10 @@ pub async fn run(session_name: &str, spec: LaunchSpec) -> anyhow::Result<()> {
                             });
                             continue;
                         }
-                        let resp = handler.handle_request(req).await;
+                        let mut args=raw.get("args").cloned().unwrap_or_else(||serde_json::json!({}));
+                        if args.is_null() { args=serde_json::json!({}); }
+                        if let Some(id)=raw.get("operation_id") { args["operation_id"]=id.clone(); }
+                        let resp = handler.handle(req.cmd(),&args).await;
                         last_activity = Instant::now();
                         if let Err(e) = write_msg(&mut writer, &resp).await {
                             eprintln!("[eoka] write error: {}", e);
@@ -112,14 +127,14 @@ pub async fn run(session_name: &str, spec: LaunchSpec) -> anyhow::Result<()> {
             }
             _ = maintenance.tick() => {
                 handler.service_idle_fetch();
-                if handler.download_manager().is_active() { last_activity = Instant::now(); }
+                if !waiters.is_empty() || handler.download_manager().is_active() || handler.operation_manager().is_active() { last_activity = Instant::now(); }
                 if last_activity.elapsed() > timeout && !handler.is_network_recording().await {
                     eprintln!("[eoka] idle timeout ({}s), shutting down", timeout.as_secs());
                     let _ = handler.handle("close", &serde_json::Value::Null).await;
                     break;
                 }
             }
-            _ = waiters.join_next(), if !waiters.is_empty() => {},
+            _ = waiters.join_next(), if !waiters.is_empty() => { last_activity=Instant::now(); },
             _ = shutdown_rx.recv() => {
                 let _ = handler.handle("close", &serde_json::Value::Null).await;
                 break;

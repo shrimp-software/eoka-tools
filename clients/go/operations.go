@@ -1,0 +1,112 @@
+package eoka
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/json"
+	"fmt"
+)
+
+type ActionOptions struct {
+	TimeoutMS uint64         `json:"timeout_ms,omitempty"`
+	Expect    map[string]any `json:"expect,omitempty"`
+}
+
+type OperationRecord struct {
+	ID                string          `json:"id"`
+	RuntimeID         string          `json:"runtime_id"`
+	TargetID          string          `json:"target_id"`
+	State             string          `json:"state"`
+	Outcome           string          `json:"outcome"`
+	DispatchIntent    bool            `json:"dispatch_intent"`
+	PreparationIntent bool            `json:"preparation_intent"`
+	Receipt           json.RawMessage `json:"receipt"`
+	ErrorCode         string          `json:"error_code"`
+}
+
+func NewOperationID() (string, error) {
+	var id [16]byte
+	if _, err := rand.Read(id[:]); err != nil {
+		return "", err
+	}
+	id[6] = (id[6] & 0x0f) | 0x40
+	id[8] = (id[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", id[:4], id[4:6], id[6:8], id[8:10], id[10:]), nil
+}
+
+func (p *Page) Perform(ctx context.Context, id string, action map[string]any, options ActionOptions) (OperationRecord, error) {
+	var record OperationRecord
+	err := p.call(ctx, "actions.perform", map[string]any{"operation_id": id, "action": action, "options": options}, &record)
+	if err != nil {
+		return record, fmt.Errorf("operation %s: outcome unknown: %w", id, err)
+	}
+	return record, nil
+}
+
+func (b *Browser) Operation(ctx context.Context, id string) (OperationRecord, error) {
+	var record OperationRecord
+	err := b.t.call(ctx, "operations.get", map[string]any{"id": id}, &record)
+	return record, err
+}
+func (b *Browser) WaitOperation(ctx context.Context, id string, timeoutMS uint64) (OperationRecord, error) {
+	var record OperationRecord
+	err := b.t.call(ctx, "operations.wait", map[string]any{"id": id, "timeout_ms": timeoutMS}, &record)
+	return record, err
+}
+func (b *Browser) CancelOperation(ctx context.Context, id string) (OperationRecord, error) {
+	var record OperationRecord
+	err := b.t.call(ctx, "operations.cancel", map[string]any{"id": id}, &record)
+	return record, err
+}
+
+func (p *Page) performLegacy(ctx context.Context, method string, params map[string]any, options []ActionOptions) error {
+	id, err := NewOperationID()
+	if err != nil {
+		return err
+	}
+	action := map[string]any{}
+	selector := func() map[string]any {
+		return map[string]any{"query": map[string]any{"kind": "css", "selector": params["selector"]}}
+	}
+	switch method {
+	case "page.goto":
+		action = map[string]any{"kind": "navigate", "url": params["url"]}
+	case "page.click", "page.human_click":
+		action = map[string]any{"kind": "click", "target": selector(), "human": method == "page.human_click"}
+	case "page.click_text", "page.human_click_text":
+		action = map[string]any{"kind": "click", "target": map[string]any{"query": map[string]any{"kind": "text", "text": params["text"]}}, "human": method == "page.human_click_text"}
+	case "page.fill", "page.human_fill":
+		action = map[string]any{"kind": "fill", "target": selector(), "value": params["value"], "human": method == "page.human_fill"}
+	case "page.type_into":
+		action = map[string]any{"kind": "type", "target": selector(), "text": params["text"]}
+	case "page.select":
+		action = map[string]any{"kind": "select_option", "target": selector(), "value": params["value"]}
+	case "page.hover":
+		action = map[string]any{"kind": "hover", "target": selector()}
+	case "page.press_key":
+		action = map[string]any{"kind": "press_key", "key": params["key"]}
+	default:
+		return fmt.Errorf("unsupported action %s", method)
+	}
+	option := ActionOptions{}
+	if len(options) > 0 {
+		option = options[0]
+	}
+	record, err := p.Perform(ctx, id, action, option)
+	if err != nil {
+		return err
+	}
+	if record.ID != id {
+		return fmt.Errorf("operation %s: server lacks durable action support; restart explicitly", id)
+	}
+	for record.State == "running" {
+		record, err = p.b.WaitOperation(ctx, id, 30000)
+		if err != nil {
+			return fmt.Errorf("operation %s: outcome unknown: %w", id, err)
+		}
+	}
+	if record.Outcome != "verified_complete" {
+		return fmt.Errorf("operation %s: %s (%s)", id, record.Outcome, record.ErrorCode)
+	}
+	return nil
+}

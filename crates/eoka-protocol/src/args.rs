@@ -72,6 +72,8 @@ pub struct TextArgs {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
 pub struct TargetArgs {
+    #[serde(flatten)]
+    pub operation: crate::ActionSettings,
     #[schemars(
         description = "Target element. Supports index, snapshot refs like @e1, text:Submit, placeholder:Email, role:button, css:form button, id:my-btn, or plain text search."
     )]
@@ -80,6 +82,8 @@ pub struct TargetArgs {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
 pub struct FillArgs {
+    #[serde(flatten)]
+    pub operation: crate::ActionSettings,
     #[schemars(
         description = "Target input. Supports index, text:Email, placeholder:Enter code, css:input.search, id:email-field, or plain text search."
     )]
@@ -90,6 +94,8 @@ pub struct FillArgs {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
 pub struct SelectArgs {
+    #[serde(flatten)]
+    pub operation: crate::ActionSettings,
     #[schemars(description = "Target select element by index, text, CSS selector, id, or role.")]
     pub target: String,
     #[schemars(description = "Option value or visible text to select.")]
@@ -98,6 +104,8 @@ pub struct SelectArgs {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
 pub struct KeyArgs {
+    #[serde(flatten)]
+    pub operation: crate::ActionSettings,
     #[schemars(
         description = "Key to press, for example Enter, Tab, Escape, ArrowDown, or Backspace."
     )]

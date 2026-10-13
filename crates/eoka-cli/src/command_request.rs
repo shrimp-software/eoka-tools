@@ -31,6 +31,32 @@ fn parse_headers_json(raw: &str) -> serde_json::Value {
 
 pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
     match cmd {
+        Command::Action { request } => {
+            Request::ActionPerform(serde_json::from_str(request).unwrap_or_else(|e| {
+                eprintln!("Invalid action request: {e}");
+                std::process::exit(1)
+            }))
+        }
+        Command::Operations { command } => match command {
+            crate::cli::OperationCommand::Get { id } => {
+                Request::OperationGet(eoka_protocol::OperationIdArgs { id: id.clone() })
+            }
+            crate::cli::OperationCommand::List { limit } => {
+                Request::OperationList(eoka_protocol::OperationListArgs {
+                    limit: Some(*limit),
+                    before_ms: None,
+                })
+            }
+            crate::cli::OperationCommand::Wait { id, timeout_ms } => {
+                Request::OperationWait(eoka_protocol::OperationWaitArgs {
+                    id: id.clone(),
+                    timeout_ms: *timeout_ms,
+                })
+            }
+            crate::cli::OperationCommand::Cancel { id } => {
+                Request::OperationCancel(eoka_protocol::OperationIdArgs { id: id.clone() })
+            }
+        },
         Command::Download(args) => args.request().unwrap_or_else(|error| {
             eprintln!("Error: {error}");
             std::process::exit(1);
@@ -91,23 +117,31 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
         Command::Text => Request::Text,
         Command::Find { text } => Request::Find(TextArgs { text: text.clone() }),
         Command::Click { target } => Request::Click(TargetArgs {
+            operation: Default::default(),
             target: target.clone(),
         }),
         Command::DoubleClick { target } => Request::DblClick(TargetArgs {
+            operation: Default::default(),
             target: target.clone(),
         }),
         Command::Fill { target, text } => Request::Fill(FillArgs {
+            operation: Default::default(),
             target: target.clone(),
             text: text.clone(),
         }),
         Command::Select { target, value } => Request::Select(SelectArgs {
+            operation: Default::default(),
             target: target.clone(),
             value: value.clone(),
         }),
         Command::Hover { target } => Request::Hover(TargetArgs {
+            operation: Default::default(),
             target: target.clone(),
         }),
-        Command::Key { key } => Request::Key(KeyArgs { key: key.clone() }),
+        Command::Key { key } => Request::Key(KeyArgs {
+            operation: Default::default(),
+            key: key.clone(),
+        }),
         Command::MouseDown { x, y, button } => Request::MouseDown(MouseButtonArgs {
             x: *x,
             y: *y,
@@ -119,10 +153,17 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
             y: *y,
             button: parse_mouse_button(button),
         }),
-        Command::KeyDown { key } => Request::KeyDown(KeyArgs { key: key.clone() }),
-        Command::KeyUp { key } => Request::KeyUp(KeyArgs { key: key.clone() }),
+        Command::KeyDown { key } => Request::KeyDown(KeyArgs {
+            operation: Default::default(),
+            key: key.clone(),
+        }),
+        Command::KeyUp { key } => Request::KeyUp(KeyArgs {
+            operation: Default::default(),
+            key: key.clone(),
+        }),
         Command::ReleaseAllInputs => Request::ReleaseAllInputs,
         Command::Scroll { target } => Request::Scroll(TargetArgs {
+            operation: Default::default(),
             target: target.clone(),
         }),
         Command::Eval {

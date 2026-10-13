@@ -2,12 +2,9 @@ use serde::de::{self, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 use std::fmt;
 
-/// A target element - either by CSS selector or visible text.
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct Target {
-    /// CSS selector.
     pub selector: Option<String>,
-    /// Visible text to find.
     pub text: Option<String>,
 }
 
@@ -21,16 +18,14 @@ impl fmt::Display for Target {
     }
 }
 
-/// An action to execute in the browser.
 #[derive(Debug, Clone)]
 pub enum Action {
-    // Navigation
+    Perform(eoka_protocol::ActionPerformArgs),
     Goto(GotoAction),
     Back,
     Forward,
     Reload,
 
-    // Waiting
     Wait(WaitAction),
     WaitForNetworkIdle(WaitForNetworkIdleAction),
     WaitFor(WaitForAction),
@@ -40,51 +35,42 @@ pub enum Action {
     WaitForUrl(WaitForUrlAction),
     WaitForEmail(WaitForEmailAction),
 
-    // Clicking
     Click(ClickAction),
     TryClick(TargetAction),
     TryClickAny(TryClickAnyAction),
 
-    // Input
     Fill(FillAction),
     Type(TypeAction),
     Clear(ClearAction),
     Select(SelectAction),
     PressKey(PressKeyAction),
 
-    // Mouse
     Hover(TargetAction),
 
-    // Cookies
     SetCookie(SetCookieAction),
     DeleteCookie(DeleteCookieAction),
 
-    // JavaScript
     Execute(ExecuteAction),
 
-    // Scrolling
     Scroll(ScrollAction),
     ScrollTo(TargetAction),
 
-    // Debug
     Screenshot(ScreenshotAction),
     Log(LogAction),
     AssertText(AssertTextAction),
     AssertUrl(AssertUrlAction),
 
-    // Control flow
     IfTextExists(IfTextExistsAction),
     IfSelectorExists(IfSelectorExistsAction),
     Repeat(RepeatAction),
 
-    // Composition
     Include(IncludeAction),
 }
 
 impl Action {
-    /// Short name for logging.
     pub fn name(&self) -> &'static str {
         match self {
+            Self::Perform(_) => "perform",
             Self::Goto(_) => "goto",
             Self::Back => "back",
             Self::Forward => "forward",
@@ -124,6 +110,7 @@ impl Action {
 }
 
 const ACTION_NAMES: &[&str] = &[
+    "perform",
     "goto",
     "back",
     "forward",
@@ -202,6 +189,7 @@ impl<'de> Visitor<'de> for ActionVisitor {
             .ok_or_else(|| de::Error::custom("expected action type key"))?;
 
         let action = match key.as_str() {
+            "perform" => Action::Perform(map.next_value()?),
             "goto" => Action::Goto(map.next_value()?),
             "back" => {
                 let _: serde_yaml::Value = map.next_value()?;
@@ -252,10 +240,10 @@ impl<'de> Visitor<'de> for ActionVisitor {
     }
 }
 
-// --- Action payloads ---
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct GotoAction {
+    #[serde(flatten)]
+    pub operation: eoka_protocol::ActionSettings,
     pub url: String,
 }
 
@@ -401,7 +389,6 @@ pub enum EmailAction {
     Fill(EmailFillAction),
 }
 
-/// Empty config — accepts both `open_link: {}` and bare `open_link:` in YAML.
 #[derive(Debug, Clone, Default)]
 pub struct EmailOpenLinkAction;
 
@@ -410,7 +397,6 @@ impl<'de> Deserialize<'de> for EmailOpenLinkAction {
     where
         D: Deserializer<'de>,
     {
-        // Accept null/unit (bare `open_link:`) or empty map (`open_link: {}`)
         let v = serde_yaml::Value::deserialize(deserializer)?;
         match v {
             serde_yaml::Value::Null | serde_yaml::Value::Mapping(_) => Ok(Self),
@@ -429,6 +415,8 @@ pub struct EmailFillAction {
 #[derive(Debug, Clone, Deserialize)]
 pub struct ClickAction {
     #[serde(flatten)]
+    pub operation: eoka_protocol::ActionSettings,
+    #[serde(flatten)]
     pub target: Target,
     #[serde(default)]
     pub human: bool,
@@ -438,12 +426,16 @@ pub struct ClickAction {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct TryClickAnyAction {
+    #[serde(flatten)]
+    pub operation: eoka_protocol::ActionSettings,
     pub selectors: Option<Vec<String>>,
     pub texts: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct FillAction {
+    #[serde(flatten)]
+    pub operation: eoka_protocol::ActionSettings,
     #[serde(flatten)]
     pub target: Target,
     pub value: String,
@@ -454,6 +446,8 @@ pub struct FillAction {
 #[derive(Debug, Clone, Deserialize)]
 pub struct TypeAction {
     #[serde(flatten)]
+    pub operation: eoka_protocol::ActionSettings,
+    #[serde(flatten)]
     pub target: Target,
     pub value: String,
 }
@@ -461,11 +455,15 @@ pub struct TypeAction {
 #[derive(Debug, Clone, Deserialize)]
 pub struct ClearAction {
     #[serde(flatten)]
+    pub operation: eoka_protocol::ActionSettings,
+    #[serde(flatten)]
     pub target: Target,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SelectAction {
+    #[serde(flatten)]
+    pub operation: eoka_protocol::ActionSettings,
     #[serde(flatten)]
     pub target: Target,
     pub value: String,
@@ -473,12 +471,15 @@ pub struct SelectAction {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct PressKeyAction {
+    #[serde(flatten)]
+    pub operation: eoka_protocol::ActionSettings,
     pub key: String,
 }
 
-/// Generic action that just needs a target element.
 #[derive(Debug, Clone, Deserialize)]
 pub struct TargetAction {
+    #[serde(flatten)]
+    pub operation: eoka_protocol::ActionSettings,
     #[serde(flatten)]
     pub target: Target,
 }
@@ -566,13 +567,10 @@ pub struct RepeatAction {
     pub actions: Vec<Action>,
 }
 
-/// Include another config's actions.
 #[derive(Debug, Clone, Deserialize)]
 pub struct IncludeAction {
-    /// Path to the config file to include.
     pub path: String,
 
-    /// Parameters to pass to the included config.
     #[serde(default)]
     pub params: std::collections::HashMap<String, String>,
 }

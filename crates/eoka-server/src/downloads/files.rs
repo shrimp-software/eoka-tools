@@ -41,6 +41,7 @@ impl Destination {
         Ok(Self { output, staging })
     }
 
+    #[cfg(test)]
     pub fn publish(
         &self,
         guid: &str,
@@ -48,6 +49,18 @@ impl Destination {
         total: Option<u64>,
         expected: Option<u64>,
         gate: &Mutex<Publication>,
+    ) -> Result<(), ErrorDetail> {
+        self.publish_durable(guid, received, total, expected, gate, None)
+    }
+
+    pub(super) fn publish_durable(
+        &self,
+        guid: &str,
+        received: u64,
+        total: Option<u64>,
+        expected: Option<u64>,
+        gate: &Mutex<Publication>,
+        journal: Option<&super::durable::Journal>,
     ) -> Result<(), ErrorDetail> {
         if !safe_guid(guid) {
             return Err(failure(
@@ -82,6 +95,15 @@ impl Destination {
             ));
         }
         file.sync_all().map_err(io_failure)?;
+        let (hash, device, inode) = verify(&path, received, total, expected)?;
+        if let Some(journal) = journal {
+            journal.intent(hash, device, inode).map_err(|_| {
+                failure(
+                    "download_store_failed",
+                    "Could not persist publication intent",
+                )
+            })?;
+        }
         let mut state = gate.lock().unwrap_or_else(|e| e.into_inner());
         if *state == Publication::Canceled {
             return Err(failure(
@@ -99,7 +121,7 @@ impl Destination {
                 io_failure(error)
             }
         })?;
-        *state = Publication::Published;
+        *state = Publication::Publishing;
         drop(state);
         let parent = self
             .output
@@ -108,6 +130,23 @@ impl Destination {
         std::fs::File::open(parent)
             .and_then(|parent| parent.sync_all())
             .map_err(io_failure)?;
+        let (_, published_device, published_inode) =
+            verify(&self.output, received, total, expected)?;
+        if (device, inode) != (published_device, published_inode) {
+            return Err(failure(
+                "download_invalid_file",
+                "Published file identity changed",
+            ));
+        }
+        if let Some(journal) = journal {
+            journal.complete().map_err(|_| {
+                failure(
+                    "download_store_failed",
+                    "Could not persist completed publication",
+                )
+            })?;
+        }
+        *gate.lock().unwrap_or_else(|e| e.into_inner()) = Publication::Published;
         std::fs::remove_file(path).map_err(io_failure)?;
         Ok(())
     }
@@ -127,10 +166,66 @@ impl Drop for Destination {
     }
 }
 
+pub(super) fn verify(
+    path: &Path,
+    received: u64,
+    total: Option<u64>,
+    expected: Option<u64>,
+) -> Result<(String, u64, u64), ErrorDetail> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    let mut file = options.open(path).map_err(io_failure)?;
+    let metadata = file.metadata().map_err(io_failure)?;
+    if !metadata.is_file()
+        || metadata.len() != received
+        || total.is_some_and(|n| n != received)
+        || expected.is_some_and(|n| n != received)
+    {
+        return Err(failure(
+            "download_size_mismatch",
+            "Artifact is not a regular file with the recorded size",
+        ));
+    }
+    let mut hash = Sha256::new();
+    let mut buffer = [0u8; 65536];
+    let mut read = 0u64;
+    loop {
+        let n = file.read(&mut buffer).map_err(io_failure)?;
+        if n == 0 {
+            break;
+        }
+        hash.update(&buffer[..n]);
+        read += n as u64;
+    }
+    if read != received {
+        return Err(failure(
+            "download_size_mismatch",
+            "Artifact changed during verification",
+        ));
+    }
+    file.sync_all().map_err(io_failure)?;
+    #[cfg(unix)]
+    let identity = {
+        use std::os::unix::fs::MetadataExt;
+        (metadata.dev(), metadata.ino())
+    };
+    #[cfg(not(unix))]
+    let identity = (0, 0);
+    Ok((format!("{:x}", hash.finalize()), identity.0, identity.1))
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Publication {
     Open,
     Canceled,
+    Publishing,
     Published,
 }
 

@@ -13,7 +13,6 @@ use super::types::JsRequest;
 
 pub(crate) struct ResolvedTarget {
     pub selector: String,
-    pub desc: String,
 }
 
 const SELECTOR_JS: &str = include_str!("../js/selector.js");
@@ -79,15 +78,11 @@ pub(crate) async fn resolve_target(
             })?;
             Ok(ResolvedTarget {
                 selector: el.selector.clone(),
-                desc: el.to_string(),
             })
         }
         Target::Ref(label) => {
             let selector = resolve_ref(&tab.page, &tab.snapshot_refs, &label).await?;
-            Ok(ResolvedTarget {
-                desc: format!("ref {}", label),
-                selector,
-            })
+            Ok(ResolvedTarget { selector })
         }
         Target::Live(pattern) => {
             let r = target::resolve(&tab.page, &pattern)
@@ -101,7 +96,6 @@ pub(crate) async fn resolve_target(
             }
             Ok(ResolvedTarget {
                 selector: r.selector,
-                desc: format!("<{}> \"{}\"", r.tag, r.text),
             })
         }
     }
@@ -144,72 +138,6 @@ pub(crate) async fn auto_observe_if_needed(
             .map_err(internal)?;
     }
     Ok(())
-}
-
-pub(crate) fn is_stale_element_error(msg: &str) -> bool {
-    const NEEDLES: &[&str] = &[
-        "not found",
-        "not visible",
-        "node not connected",
-        "stale element",
-        "detached",
-    ];
-    NEEDLES.iter().any(|n| msg.contains(n))
-}
-
-enum Action<'a> {
-    Click,
-    Fill(&'a str),
-}
-
-impl Action<'_> {
-    async fn run(&self, page: &Page, selector: &str) -> eoka_server::eoka::Result<()> {
-        match self {
-            Action::Click => page.click(selector).await,
-            Action::Fill(text) => page.fill(selector, text).await,
-        }
-    }
-}
-
-async fn act_with_retry(
-    tab: &mut TabState,
-    target_str: &str,
-    viewport_only: bool,
-    action: Action<'_>,
-) -> Result<String, ErrorData> {
-    let resolved = resolve_target(tab, target_str).await?;
-    match action.run(&tab.page, &resolved.selector).await {
-        Ok(_) => Ok(resolved.desc),
-        Err(e) if is_stale_element_error(&e.to_string()) => {
-            tab.elements = observe::observe(&tab.page, viewport_only)
-                .await
-                .map_err(internal)?;
-            let resolved = resolve_target(tab, target_str).await?;
-            action
-                .run(&tab.page, &resolved.selector)
-                .await
-                .map_err(internal)?;
-            Ok(resolved.desc)
-        }
-        Err(e) => Err(internal(e)),
-    }
-}
-
-pub(crate) async fn click_with_retry(
-    tab: &mut TabState,
-    target_str: &str,
-    viewport_only: bool,
-) -> Result<String, ErrorData> {
-    act_with_retry(tab, target_str, viewport_only, Action::Click).await
-}
-
-pub(crate) async fn fill_with_retry(
-    tab: &mut TabState,
-    target_str: &str,
-    text: &str,
-    viewport_only: bool,
-) -> Result<String, ErrorData> {
-    act_with_retry(tab, target_str, viewport_only, Action::Fill(text)).await
 }
 
 pub(crate) fn resolve_js(req: &JsRequest) -> Result<String, ErrorData> {
@@ -476,22 +404,6 @@ mod tests {
         let result = text_ok("hello").unwrap();
         assert!(!result.is_error.unwrap_or(false));
         assert_eq!(result.content.len(), 1);
-    }
-
-    #[test]
-    fn is_stale_element_error_matches() {
-        assert!(is_stale_element_error("element not found in DOM"));
-        assert!(is_stale_element_error("element not visible"));
-        assert!(is_stale_element_error("node not connected"));
-        assert!(is_stale_element_error("stale element reference"));
-        assert!(is_stale_element_error("element detached from DOM"));
-    }
-
-    #[test]
-    fn is_stale_element_error_rejects_unrelated() {
-        assert!(!is_stale_element_error("invalid selector"));
-        assert!(!is_stale_element_error("timeout"));
-        assert!(!is_stale_element_error(""));
     }
 
     #[test]

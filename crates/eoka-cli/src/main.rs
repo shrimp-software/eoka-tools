@@ -236,16 +236,55 @@ async fn main() {
         return;
     }
     if let Command::Download(args) = &command {
-        let response = download_cmd::run(args, &effective_session, spec, json_mode)
-            .await
-            .with_meta(response_meta(&effective_session, "download"));
+        let response = download_cmd::run(
+            args,
+            &effective_session,
+            spec,
+            json_mode,
+            cli.operation_id.clone(),
+        )
+        .await
+        .with_meta(response_meta(&effective_session, "download"));
         output::print_response(&response, json_mode);
         if !response.ok {
             std::process::exit(1);
         }
         return;
     }
-    let request = command_request::command_to_request(&command, agent_mode);
+    let mut request = command_request::command_to_request(&command, agent_mode);
+    let settings = eoka_protocol::ActionSettings {
+        operation_id: cli.operation_id,
+        expect: cli
+            .expect
+            .as_deref()
+            .map(serde_json::from_str)
+            .transpose()
+            .unwrap_or_else(|error| {
+                eprintln!("Invalid --expect: {error}");
+                std::process::exit(1)
+            }),
+        timeout_ms: cli.action_timeout_ms,
+    };
+    match &mut request {
+        eoka_protocol::Request::Click(args)
+        | eoka_protocol::Request::DblClick(args)
+        | eoka_protocol::Request::Hover(args) => args.operation = settings,
+        eoka_protocol::Request::Fill(args) => args.operation = settings,
+        eoka_protocol::Request::Select(args) => args.operation = settings,
+        eoka_protocol::Request::Key(args) => args.operation = settings,
+        eoka_protocol::Request::Back
+        | eoka_protocol::Request::Forward
+        | eoka_protocol::Request::Reload => {
+            request = eoka_protocol::Request::ActionCommand(eoka_protocol::ActionCommandArgs {
+                operation_id: settings
+                    .operation_id
+                    .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+                command: request.cmd().into(),
+                arguments: serde_json::json!({"expect":settings.expect,"timeout_ms":settings.timeout_ms}),
+            });
+        }
+        _ => {}
+    }
     let request_cmd = request.cmd();
 
     let response = match client::send_command(&effective_session, request, spec.clone()).await {

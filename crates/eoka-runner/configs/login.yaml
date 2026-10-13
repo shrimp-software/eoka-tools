@@ -25,6 +25,7 @@ actions:
 
   # Dismiss cookie banner if present
   - try_click_any:
+      expect: { kind: hidden, target: { query: { kind: css, selector: "#cookie-banner" } } }
       texts: ["Accept", "Accept All", "OK", "Got it"]
 
   - fill:
@@ -39,6 +40,7 @@ actions:
 
   - click:
       text: "Sign In"
+      expect: { kind: url, value: "/dashboard", contains: true }
       human: true
 
   - wait_for_network_idle:
@@ -52,6 +54,3 @@ success:
 
 on_failure:
   screenshot: "login_failed_{timestamp}.png"
-  retry:
-    attempts: 2
-    delay_ms: 1000

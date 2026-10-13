@@ -16,11 +16,12 @@ actions:
       timeout_ms: 5000
   - click:
       text: "More information"
+      expect: { kind: url, value: "https://www.iana.org/help/example-domains" }
   - screenshot:
       path: "result.png"
 success:
   any:
-    - url_contains: "/info"
+    - url_contains: "iana.org/help/example-domains"
 ```
 
 ```sh
@@ -34,7 +35,7 @@ eoka-runner automation.yaml
 - **30 action types** — navigation, clicking, input, scrolling, cookies, JS, conditionals
 - **Text targeting** — click by visible text, not just CSS selectors
 - **Human-like actions** — optional mouse movement and typing delays
-- **Retry logic** — automatic retries with configurable delay
+- **Durable actions** — stable operation IDs, explicit completion evidence, no replay of uncertain input
 - **Success conditions** — verify URL or text content after completion
 - **Failure screenshots** — capture state on error for debugging
 
@@ -100,10 +101,14 @@ success:
 
 on_failure:
   screenshot: "error_{timestamp}.png"
-  retry:
-    attempts: 3
-    delay_ms: 2000
 ```
+
+Action steps accept `operation_id` and `timeout_ms`. Click, type and key input
+require an `expect` condition that is false before the action. Match the examples
+to your application; locators are strict. Whole-workflow retries with more than
+one attempt are rejected. Use the operation ID to inspect an uncertain result.
+See [OPERATIONS.md](../../OPERATIONS.md) for the canonical `perform` request and
+recovery commands.
 
 ## Action Types
 
@@ -124,16 +129,16 @@ on_failure:
 - `wait_for_email: { ... }` — Wait for IMAP email, extract link/code
 
 ### Clicking
-- `click: { selector | text, human, scroll_into_view }`
-- `try_click: { selector | text }` — No error if missing
-- `try_click_any: { texts }` — Click first found
+- `click: { selector | text, human, expect, operation_id?, timeout_ms? }`
+- `try_click: { selector | text, expect }` — Skip only a target unavailable before dispatch
+- `try_click_any: { texts, expect }` — Try candidates until one completes or has an uncertain result
 
 ### Input
 - `fill: { selector | text, value, human }` — Clear and type
-- `type: { selector | text, value }` — Append text
+- `type: { selector | text, value, expect }` — Append text
 - `clear: { selector | text }` — Clear input field
 - `select: { selector | text, value }` — Select dropdown option
-- `press_key: { key }` — Press key (Enter, Tab, Escape, ArrowDown, etc.)
+- `press_key: { key, expect }` — Press key (Enter, Tab, Escape, ArrowDown, etc.)
 
 ### Mouse
 - `hover: { selector | text }` — Hover over element
@@ -222,6 +227,7 @@ target:
 actions:
   - try_click_any:
       texts: ["Accept", "Accept All", "OK", "Got it"]
+      expect: { kind: hidden, target: { query: { kind: css, selector: "#cookie-banner" } } }
 ```
 
 ```yaml
@@ -235,7 +241,7 @@ target:
 actions:
   - fill: { selector: "#email", value: "${email}" }
   - fill: { selector: "#password", value: "${password}" }
-  - click: { text: "Sign In" }
+  - click: { text: "Sign In", expect: { kind: url, value: "/dashboard", contains: true } }
 ```
 
 Compose them in your main config:
@@ -251,7 +257,7 @@ actions:
       params:
         email: "user@example.com"
         password: "secret"
-  - click: { text: "Checkout" }
+  - click: { text: "Checkout", expect: { kind: url, value: "/checkout", contains: true } }
 ```
 
 Include paths are relative to the config file's directory.

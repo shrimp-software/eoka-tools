@@ -91,17 +91,6 @@ pub async fn resolve_target(tab: &TabState, target_str: &str) -> Result<Resolved
     }
 }
 
-fn is_stale_element_error(msg: &str) -> bool {
-    const NEEDLES: &[&str] = &[
-        "not found",
-        "not visible",
-        "node not connected",
-        "stale element",
-        "detached",
-    ];
-    NEEDLES.iter().any(|n| msg.contains(n))
-}
-
 pub async fn auto_observe_if_needed(
     tab: &mut TabState,
     target_str: &str,
@@ -129,41 +118,33 @@ impl<'a> Action<'a> {
     }
 }
 
-async fn act_with_retry(
+async fn act_once(
     tab: &mut TabState,
     target_str: &str,
     viewport_only: bool,
     action: Action<'_>,
 ) -> Result<String, String> {
-    let resolved = resolve_target(tab, target_str).await?;
-    match action.perform(&tab.page, &resolved.selector).await {
-        Ok(_) => return Ok(resolved.desc),
-        Err(e) if is_stale_element_error(&e) => {}
-        Err(e) => return Err(e),
-    }
-    tab.elements = observe::observe(&tab.page, viewport_only)
-        .await
-        .map_err(|e| e.to_string())?;
+    let _ = viewport_only;
     let resolved = resolve_target(tab, target_str).await?;
     action.perform(&tab.page, &resolved.selector).await?;
     Ok(resolved.desc)
 }
 
-pub async fn click_with_retry(
+pub async fn click_once(
     tab: &mut TabState,
     target_str: &str,
     viewport_only: bool,
 ) -> Result<String, String> {
-    act_with_retry(tab, target_str, viewport_only, Action::Click).await
+    act_once(tab, target_str, viewport_only, Action::Click).await
 }
 
-pub async fn fill_with_retry(
+pub async fn fill_once(
     tab: &mut TabState,
     target_str: &str,
     text: &str,
     viewport_only: bool,
 ) -> Result<String, String> {
-    act_with_retry(tab, target_str, viewport_only, Action::Fill(text)).await
+    act_once(tab, target_str, viewport_only, Action::Fill(text)).await
 }
 
 pub async fn wait_for_stable(page: &Page) -> Result<(), String> {

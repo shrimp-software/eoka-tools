@@ -98,9 +98,23 @@ pub async fn resolve_click(
     refs: &HashMap<String, i64>,
     viewport: bool,
     target: &str,
-) -> Result<String, ErrorDetail> {
+) -> Result<eoka::LocatorSpec, ErrorDetail> {
     match resolve_selector(page, elements, refs, viewport, target).await {
-        Ok(selector) => Ok(selector),
+        Ok(selector) => match Target::parse(target) {
+            Target::Ref(label) => Ok(eoka::LocatorSpec {
+                query: eoka::LocatorQuery::BackendNode {
+                    id: *refs
+                        .get(&label)
+                        .ok_or_else(|| failure("download_target_stale", "Reference unavailable"))?,
+                },
+                frame_id: None,
+                index: None,
+            }),
+            Target::Live(_) => {
+                crate::operations::commands::live_locator(target).map_err(resolution_error)
+            }
+            Target::Index(_) => Ok(eoka::LocatorSpec::css(selector)),
+        },
         Err(error) => Err(diagnose(error, page, ActionStatus::NotAttempted, None).await),
     }
 }

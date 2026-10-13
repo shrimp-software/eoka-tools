@@ -1,4 +1,5 @@
 mod executor;
+mod operations;
 
 use crate::config::{BrowserConfig, Config};
 use crate::Result;
@@ -8,22 +9,15 @@ use std::path::Path;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tracing::{debug, info, warn};
 
-/// Result of running a config.
 #[derive(Debug)]
 pub struct RunResult {
-    /// Whether the run succeeded.
     pub success: bool,
-    /// Error message if failed.
     pub error: Option<String>,
-    /// Number of actions executed.
     pub actions_executed: usize,
-    /// Total duration in milliseconds.
     pub duration_ms: u64,
-    /// Number of retry attempts made.
     pub retries: u32,
 }
 
-/// Executes automation configs.
 pub struct Runner {
     browser: Browser,
     page: Page,
@@ -60,17 +54,14 @@ impl Runner {
         Ok(Self { browser, page })
     }
 
-    /// Get a reference to the page (for swarm integration).
     pub fn page(&self) -> &Page {
         &self.page
     }
 
-    /// Run the config with retry support.
     pub async fn run(&mut self, config: &Config) -> Result<RunResult> {
         self.run_with_base_path(config, ".").await
     }
 
-    /// Run the config with a base path for resolving includes.
     pub async fn run_with_base_path(
         &mut self,
         config: &Config,
@@ -80,6 +71,9 @@ impl Runner {
         let start = Instant::now();
         let retry_config = config.on_failure.as_ref().and_then(|f| f.retry.as_ref());
         let max_attempts = retry_config.map(|r| r.attempts).unwrap_or(1);
+        if max_attempts > 1 {
+            return Err(crate::Error::Config("Whole-workflow retries are disabled for durable actions; inspect operation IDs and use bounded waits".into()));
+        }
         let retry_delay = retry_config.map(|r| r.delay_ms).unwrap_or(0);
 
         let mut last_error = None;
@@ -151,7 +145,22 @@ impl Runner {
 
     async fn run_once(&mut self, config: &Config, ctx: &ExecutionContext) -> Result<RunResult> {
         info!("Navigating to: {}", config.target.url);
-        self.page.goto(&config.target.url).await?;
+        operations::run(
+            &self.page,
+            ctx,
+            (
+                eoka_protocol::ActionPerformArgs {
+                    operation_id: uuid::Uuid::new_v4().to_string(),
+                    action: eoka::Action::Navigate {
+                        url: config.target.url.clone(),
+                        referrer: None,
+                    },
+                    options: Default::default(),
+                },
+                false,
+            ),
+        )
+        .await?;
 
         let mut actions_executed = 0;
         for (i, action) in config.actions.iter().enumerate() {
@@ -211,7 +220,6 @@ impl Runner {
         }
     }
 
-    /// Close the browser.
     pub async fn close(self) -> Result<()> {
         self.browser.close().await?;
         Ok(())

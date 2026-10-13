@@ -77,6 +77,7 @@ impl DownloadCli {
                     .ok_or("Output path must be valid UTF-8")?
                     .to_owned();
                 let args = DownloadStartArgs {
+                    operation_id: None,
                     click: self.click.clone(),
                     url: self.url.clone(),
                     output,
@@ -95,11 +96,15 @@ pub async fn run(
     session: &str,
     spec: crate::launch_spec::LaunchSpec,
     json: bool,
+    operation_id: Option<String>,
 ) -> Response {
-    let request = match args.request() {
+    let mut request = match args.request() {
         Ok(request) => request,
         Err(error) => return Response::err(error),
     };
+    if let Request::DownloadStart(args) = &mut request {
+        args.operation_id = operation_id;
+    }
     let response = match crate::client::send_command(session, request, spec.clone()).await {
         Ok(response) => response,
         Err(error) => return Response::err(error.to_string()),
@@ -159,7 +164,7 @@ mod tests {
             let (mut start, _) = listener.accept().await.unwrap();
             assert!(matches!(
                 read_msg::<_, Request>(&mut start).await.unwrap(),
-                Request::DownloadStart(_)
+                Request::ActionCommand(ref args) if args.command=="download_start"
             ));
             write_msg(
                 &mut start,
@@ -198,6 +203,7 @@ mod tests {
                 ws_url: "unused".into(),
             },
             true,
+            None,
         )
         .await;
         assert!(!response.ok);

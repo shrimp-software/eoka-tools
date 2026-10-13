@@ -1,4 +1,6 @@
 mod args;
+mod operations;
+pub use operations::*;
 mod context;
 mod datadome;
 mod download;
@@ -212,6 +214,12 @@ macro_rules! define_operations {
 }
 
 define_operations! {
+    ActionCommand {path:"actions.command",cmd:"action_command",name:"action_command",description:"Durable envelope for a convenience action",capability:Interaction,exposure:Lifecycle,read_only:false,destructive:false,input:ActionCommandArgs},
+    ActionPerform { path: "actions.perform", cmd: "action_perform", name: "action_perform", description: "Execute a verified action once and return a durable operation ID", capability: Interaction, exposure: DefaultAgent, read_only: false, destructive: false, input: ActionPerformArgs },
+    OperationGet { path: "operations.get", cmd: "operation_get", name: "operation_get", description: "Inspect a durable operation without replaying it", capability: Interaction, exposure: DefaultAgent, read_only: true, destructive: false, input: OperationIdArgs },
+    OperationList { path: "operations.list", cmd: "operation_list", name: "operation_list", description: "List durable operation records", capability: Interaction, exposure: DefaultAgent, read_only: true, destructive: false, input: OperationListArgs },
+    OperationWait { path: "operations.wait", cmd: "operation_wait", name: "operation_wait", description: "Wait for a durable operation without canceling it on timeout", capability: Interaction, exposure: DefaultAgent, read_only: true, destructive: false, input: OperationWaitArgs },
+    OperationCancel { path: "operations.cancel", cmd: "operation_cancel", name: "operation_cancel", description: "Request cancellation of a running operation", capability: Interaction, exposure: DefaultAgent, read_only: false, destructive: false, input: OperationIdArgs },
     Open {
         path: "open",
         cmd: "open",
@@ -1125,6 +1133,7 @@ mod tests {
         write_msg(
             &mut writer,
             &Request::Click(TargetArgs {
+                operation: Default::default(),
                 target: "@e1".into(),
             }),
         )
@@ -1310,6 +1319,15 @@ mod tests {
     impl OperationSpec {
         fn representative_input_for_test(&self) -> serde_json::Value {
             match self.cmd {
+                "action_command" => {
+                    serde_json::json!({"operation_id":"a116d158-2cc5-4473-b73c-616b4b73cb0e","command":"reload","arguments":{}})
+                }
+                "action_perform" => {
+                    serde_json::json!({"operation_id":"a116d158-2cc5-4473-b73c-616b4b73cb0e","action":{"kind":"reload"}})
+                }
+                "operation_get" | "operation_wait" | "operation_cancel" => {
+                    serde_json::json!({"id":"operation"})
+                }
                 "open" => serde_json::json!({"url":"about:blank"}),
                 "find" => serde_json::json!({"text":"needle"}),
                 "click" | "dblclick" | "hover" | "scroll" => {

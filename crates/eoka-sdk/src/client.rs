@@ -41,6 +41,35 @@ impl EokaClient {
         send_command(&self.session_name, request, self.spec.clone()).await
     }
 
+    pub async fn perform(
+        &self,
+        request: eoka_protocol::ActionPerformArgs,
+    ) -> anyhow::Result<Response> {
+        self.call(Request::ActionPerform(request)).await
+    }
+    pub async fn operation(&self, id: impl Into<String>) -> anyhow::Result<Response> {
+        self.call(Request::OperationGet(eoka_protocol::OperationIdArgs {
+            id: id.into(),
+        }))
+        .await
+    }
+    pub async fn wait_operation(
+        &self,
+        id: impl Into<String>,
+        timeout_ms: u64,
+    ) -> anyhow::Result<Response> {
+        self.call(Request::OperationWait(eoka_protocol::OperationWaitArgs {
+            id: id.into(),
+            timeout_ms,
+        }))
+        .await
+    }
+    pub async fn cancel_operation(&self, id: impl Into<String>) -> anyhow::Result<Response> {
+        self.call(Request::OperationCancel(eoka_protocol::OperationIdArgs {
+            id: id.into(),
+        }))
+        .await
+    }
     pub async fn open(&self, args: OpenArgs) -> anyhow::Result<Response> {
         self.call(Request::Open(args)).await
     }
@@ -382,9 +411,33 @@ impl EokaClient {
 }
 pub async fn send_command(
     session_name: &str,
-    request: Request,
+    mut request: Request,
     spec: LaunchSpec,
 ) -> anyhow::Result<Response> {
+    if let Request::DownloadStart(args) = &mut request {
+        args.operation_id
+            .get_or_insert_with(|| uuid::Uuid::new_v4().to_string());
+    }
+    if matches!(
+        request.cmd(),
+        "click"
+            | "dblclick"
+            | "fill"
+            | "select"
+            | "hover"
+            | "key"
+            | "back"
+            | "forward"
+            | "reload"
+            | "action_perform"
+            | "action_command"
+            | "operation_get"
+            | "operation_list"
+            | "operation_wait"
+            | "operation_cancel"
+    ) {
+        return send_operation(session_name, request, &spec).await;
+    }
     if matches!(
         request,
         Request::DownloadStart(_)
@@ -393,7 +446,7 @@ pub async fn send_command(
             | Request::DownloadWait(_)
             | Request::DownloadCancel(_)
     ) {
-        return Ok(send_download(session_name, &request).await);
+        return Ok(send_download(session_name, &request, &spec).await);
     }
     if let Request::CaptchaDatadome(args) = request {
         return Ok(send_datadome(session_name, args).await);
@@ -415,9 +468,10 @@ fn non_retryable_error(code: &str, message: &str) -> Response {
     Response::err_detail(eoka_protocol::ErrorDetail::new(code, message).retryable(false))
 }
 
-async fn send_download(session_name: &str, request: &Request) -> Response {
+async fn send_download(session_name: &str, request: &Request, spec: &LaunchSpec) -> Response {
     use eoka_protocol::{ActionStatus, ErrorContext};
     let id = match request {
+        Request::DownloadStart(args) => args.operation_id.as_deref(),
         Request::DownloadWait(args) => Some(args.id.as_str()),
         Request::DownloadGet(args) | Request::DownloadCancel(args) => Some(args.id.as_str()),
         _ => None,
@@ -433,14 +487,41 @@ async fn send_download(session_name: &str, request: &Request) -> Response {
                 }),
         )
     };
-    let Ok(stream) = UnixStream::connect(session::socket_path(session_name)).await else {
-        return disconnected(
+    let stream = match UnixStream::connect(session::socket_path(session_name)).await {
+        Ok(stream) => stream,
+        Err(_) if !matches!(request, Request::DownloadStart(_)) => {
+            match async {
+                launch_daemon(session_name, spec)?;
+                wait_for_socket(session_name).await
+            }
+            .await
+            {
+                Ok(stream) => stream,
+                Err(_) => {
+                    return disconnected(
+                        "session_unavailable",
+                        "Could not open the download history service",
+                        ActionStatus::NotAttempted,
+                    )
+                }
+            }
+        }
+        Err(_) => return disconnected(
             "session_unavailable",
             "Existing session unavailable; open the intended page first. No daemon was launched.",
             ActionStatus::NotAttempted,
-        );
+        ),
     };
-    let mut response = match exchange_request(stream, request).await {
+    let wire = if let Request::DownloadStart(args) = request {
+        Request::ActionCommand(eoka_protocol::ActionCommandArgs {
+            operation_id: args.operation_id.clone().unwrap_or_default(),
+            command: "download_start".into(),
+            arguments: request.args_json(),
+        })
+    } else {
+        request.clone()
+    };
+    let mut response = match exchange_request(stream, &wire).await {
         Ok(response) if response.error.as_deref().is_some_and(|message| {
             message.contains("unknown variant") || message.contains("unknown eoka protocol command")
         }) => disconnected(
@@ -635,7 +716,8 @@ pub fn kill_daemon(session_name: &str) -> anyhow::Result<bool> {
         drop(stream);
     }
     let pid_path = session::pid_path(session_name);
-    let killed = if let Ok(pid_str) = std::fs::read_to_string(&pid_path) {
+    let original_pid = std::fs::read_to_string(&pid_path).ok();
+    let killed = if let Some(pid_str) = &original_pid {
         if let Ok(pid) = pid_str.trim().parse::<u32>() {
             StdCommand::new("kill")
                 .arg(pid.to_string())
@@ -648,9 +730,73 @@ pub fn kill_daemon(session_name: &str) -> anyhow::Result<bool> {
     } else {
         false
     };
-    let _ = std::fs::remove_file(&sock);
-    let _ = std::fs::remove_file(&pid_path);
+    if killed {
+        let deadline = std::time::Instant::now() + Duration::from_secs(15);
+        while std::fs::read_to_string(&pid_path).ok() == original_pid {
+            if let Some(pid) = original_pid.as_deref() {
+                let alive = StdCommand::new("kill")
+                    .args(["-0", pid.trim()])
+                    .output()?
+                    .status
+                    .success();
+                if !alive {
+                    break;
+                }
+            }
+            if std::time::Instant::now() >= deadline {
+                anyhow::bail!("Daemon is still shutting down; its socket was retained");
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+    }
+    if std::fs::read_to_string(&pid_path).ok() == original_pid {
+        let _ = std::fs::remove_file(&sock);
+        let _ = std::fs::remove_file(&pid_path);
+    }
     Ok(killed)
+}
+
+async fn send_operation(
+    session_name: &str,
+    request: Request,
+    spec: &LaunchSpec,
+) -> anyhow::Result<Response> {
+    let args = request.args_json();
+    let id = args["operation_id"]
+        .as_str()
+        .map(str::to_owned)
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let mut wire = serde_json::to_value(&request)?;
+    if matches!(
+        request.cmd(),
+        "click" | "dblclick" | "fill" | "select" | "hover" | "key" | "back" | "forward" | "reload"
+    ) {
+        wire = serde_json::json!({"cmd":"action_command","args":{"operation_id":id,"command":request.cmd(),"arguments":args}});
+    }
+    wire["operation_id"] = serde_json::json!(id);
+    let stream = match UnixStream::connect(session::socket_path(session_name)).await {
+        Ok(stream) => stream,
+        Err(_) if request.cmd().starts_with("operation_") => {
+            launch_daemon(session_name, spec)?;
+            wait_for_socket(session_name).await?
+        }
+        Err(_) => {
+            return Ok(non_retryable_error(
+                "session_unavailable",
+                &format!("Existing session unavailable; operation {id} was not sent"),
+            ))
+        }
+    };
+    let (mut reader, mut writer) = stream.into_split();
+    let result: anyhow::Result<Response> = async {
+        write_msg(&mut writer, &wire).await?;
+        Ok(read_msg(&mut reader).await?)
+    }
+    .await;
+    Ok(match result {
+        Ok(response)=>response,
+        Err(_)=>non_retryable_error("operation_transport_error",&format!("Connection lost; inspect operation {id}. Its outcome is unknown. No action was replayed.")),
+    })
 }
 
 #[cfg(test)]
@@ -818,23 +964,18 @@ mod tests {
     #[tokio::test]
     async fn downloads_require_existing_sessions_and_never_replay() {
         let name = format!("download-missing-{}", std::process::id());
-        let response = test_client(&name).download_list().await.unwrap();
-        assert_eq!(response.error_detail.unwrap().code, "session_unavailable");
         let response = test_client(&name)
-            .download_wait(eoka_protocol::DownloadWaitArgs {
-                id: "known-job".into(),
-                timeout_ms: 1,
+            .download_start(eoka_protocol::DownloadStartArgs {
+                operation_id: None,
+                click: Some("css:#download".into()),
+                url: None,
+                output: "/tmp/not-created".into(),
+                expect_bytes: None,
+                start_timeout_ms: 1000,
             })
             .await
             .unwrap();
-        let error = response.error_detail.unwrap();
-        assert_eq!(error.code, "session_unavailable");
-        let context = error.context.unwrap();
-        assert_eq!(context.download_id.as_deref(), Some("known-job"));
-        assert_eq!(
-            context.action_status,
-            Some(eoka_protocol::ActionStatus::NotAttempted)
-        );
+        assert_eq!(response.error_detail.unwrap().code, "session_unavailable");
         assert!(!session::pid_path(&name).exists());
         for (index, error) in [
             None,
@@ -851,7 +992,9 @@ mod tests {
                 let (stream, _) = listener.accept().await.unwrap();
                 let (mut reader, mut writer) = stream.into_split();
                 let request: Request = read_msg(&mut reader).await.unwrap();
-                assert!(matches!(request, Request::DownloadStart(_)));
+                assert!(
+                    matches!(request,Request::ActionCommand(ref a) if a.command=="download_start" && !a.operation_id.is_empty())
+                );
                 if let Some(message) = error {
                     write_msg(&mut writer, &Response::err(message))
                         .await
@@ -867,6 +1010,7 @@ mod tests {
             });
             let response = test_client(&name)
                 .download_start(eoka_protocol::DownloadStartArgs {
+                    operation_id: None,
                     click: Some("css:#download".into()),
                     url: None,
                     output: "/tmp/not-created".into(),
