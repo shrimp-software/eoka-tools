@@ -17,7 +17,7 @@ Existing record fields and the durable store format are preserved.
 
 The old and new binaries ran the same local download task with the same Pi
 model and unchanged task, system and tool prompts. Execution order alternated
-by pair. Each binary was frozen before the runs; no case was retried.
+by pair. Each binary was frozen before the runs; the runner did not repeat any case.
 
 | Pair | Before calls | After calls | Before seconds | After seconds |
 |---|---:|---:|---:|---:|
@@ -30,6 +30,10 @@ All six runs saved exactly one correct file, with no duplicate server effects,
 false success claims or prohibited HTTP/file shortcuts. Total tool calls fell
 from 12 to 7. The new version still made one extra observation in its first run;
 the other two ended after `view` and `download --wait`.
+
+In pair 2, the old agent attempted the download again after it had completed.
+Eoka rejected the existing destination before another transfer began. The new
+runs each requested the download once.
 
 Median download-command time was 279 ms before and 248 ms after. No transfer
 engine code changed, so that difference is not evidence of faster downloading.
