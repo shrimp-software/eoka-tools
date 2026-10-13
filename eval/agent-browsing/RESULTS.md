@@ -1,5 +1,8 @@
 # Local agent comparison: 2026-10-12
 
+This is the original six-task baseline. The later download receipt improvement
+and its controlled before/after trials are in [DOWNLOAD-RESULTS.md](DOWNLOAD-RESULTS.md).
+
 Both backends completed all six tasks. Eoka used 29 tool calls; Browser Use used
 81. Neither produced duplicate server effects or a false success declaration.
 This is one trial per task with one model, not a general website success rate.

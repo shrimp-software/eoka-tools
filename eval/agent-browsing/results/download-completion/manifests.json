@@ -1,0 +1,134 @@
+[
+  {
+    "pair": 0,
+    "version": "before",
+    "model": {
+      "defaultProvider": "openrouter",
+      "defaultModel": "deepseek/deepseek-v4-flash",
+      "defaultThinkingLevel": "high"
+    },
+    "pi_version": "1.0.2",
+    "chrome": "Google Chrome 152.0.7977.13 beta",
+    "eoka_sha256": "f6d4b09106cadde4aa39be94421108323ee7be308a46bc3487c8da2894f6087e",
+    "browser_use_cli_version": "0.1.13",
+    "browser_use_packages": {
+      "browser-use": "0.13.11",
+      "browser-harness": "0.1.13"
+    },
+    "task_source_sha256": "4b299b53fffd71add4b7fd949e7e1353a93019111f3f07e87bcaa033b27f7f22",
+    "runner_sha256": "4ff1189efefed2b4afb21b301f7236c8137ef5d6744607d8b51cbdaf5d176d59",
+    "extension_sha256": "541a6d2cc1c8b8d3b74f38093e1633ddee09f93f214e4d8cf05156598a8c4878",
+    "repeats": 1,
+    "scope": "Controlled local fixtures, text tools, one configured model; not production or broad benchmark evidence"
+  },
+  {
+    "pair": 0,
+    "version": "after",
+    "model": {
+      "defaultProvider": "openrouter",
+      "defaultModel": "deepseek/deepseek-v4-flash",
+      "defaultThinkingLevel": "high"
+    },
+    "pi_version": "1.0.2",
+    "chrome": "Google Chrome 152.0.7977.13 beta",
+    "eoka_sha256": "42bd78e53108f7cdd29a95860d4e34e7dd1b3a9c0391dfde72db4ce7066a366b",
+    "browser_use_cli_version": "0.1.13",
+    "browser_use_packages": {
+      "browser-use": "0.13.11",
+      "browser-harness": "0.1.13"
+    },
+    "task_source_sha256": "4b299b53fffd71add4b7fd949e7e1353a93019111f3f07e87bcaa033b27f7f22",
+    "runner_sha256": "4ff1189efefed2b4afb21b301f7236c8137ef5d6744607d8b51cbdaf5d176d59",
+    "extension_sha256": "541a6d2cc1c8b8d3b74f38093e1633ddee09f93f214e4d8cf05156598a8c4878",
+    "repeats": 1,
+    "scope": "Controlled local fixtures, text tools, one configured model; not production or broad benchmark evidence"
+  },
+  {
+    "pair": 1,
+    "version": "after",
+    "model": {
+      "defaultProvider": "openrouter",
+      "defaultModel": "deepseek/deepseek-v4-flash",
+      "defaultThinkingLevel": "high"
+    },
+    "pi_version": "1.0.2",
+    "chrome": "Google Chrome 152.0.7977.13 beta",
+    "eoka_sha256": "42bd78e53108f7cdd29a95860d4e34e7dd1b3a9c0391dfde72db4ce7066a366b",
+    "browser_use_cli_version": "0.1.13",
+    "browser_use_packages": {
+      "browser-use": "0.13.11",
+      "browser-harness": "0.1.13"
+    },
+    "task_source_sha256": "4b299b53fffd71add4b7fd949e7e1353a93019111f3f07e87bcaa033b27f7f22",
+    "runner_sha256": "4ff1189efefed2b4afb21b301f7236c8137ef5d6744607d8b51cbdaf5d176d59",
+    "extension_sha256": "541a6d2cc1c8b8d3b74f38093e1633ddee09f93f214e4d8cf05156598a8c4878",
+    "repeats": 1,
+    "scope": "Controlled local fixtures, text tools, one configured model; not production or broad benchmark evidence"
+  },
+  {
+    "pair": 1,
+    "version": "before",
+    "model": {
+      "defaultProvider": "openrouter",
+      "defaultModel": "deepseek/deepseek-v4-flash",
+      "defaultThinkingLevel": "high"
+    },
+    "pi_version": "1.0.2",
+    "chrome": "Google Chrome 152.0.7977.13 beta",
+    "eoka_sha256": "f6d4b09106cadde4aa39be94421108323ee7be308a46bc3487c8da2894f6087e",
+    "browser_use_cli_version": "0.1.13",
+    "browser_use_packages": {
+      "browser-use": "0.13.11",
+      "browser-harness": "0.1.13"
+    },
+    "task_source_sha256": "4b299b53fffd71add4b7fd949e7e1353a93019111f3f07e87bcaa033b27f7f22",
+    "runner_sha256": "4ff1189efefed2b4afb21b301f7236c8137ef5d6744607d8b51cbdaf5d176d59",
+    "extension_sha256": "541a6d2cc1c8b8d3b74f38093e1633ddee09f93f214e4d8cf05156598a8c4878",
+    "repeats": 1,
+    "scope": "Controlled local fixtures, text tools, one configured model; not production or broad benchmark evidence"
+  },
+  {
+    "pair": 2,
+    "version": "before",
+    "model": {
+      "defaultProvider": "openrouter",
+      "defaultModel": "deepseek/deepseek-v4-flash",
+      "defaultThinkingLevel": "high"
+    },
+    "pi_version": "1.0.2",
+    "chrome": "Google Chrome 152.0.7977.13 beta",
+    "eoka_sha256": "f6d4b09106cadde4aa39be94421108323ee7be308a46bc3487c8da2894f6087e",
+    "browser_use_cli_version": "0.1.13",
+    "browser_use_packages": {
+      "browser-use": "0.13.11",
+      "browser-harness": "0.1.13"
+    },
+    "task_source_sha256": "4b299b53fffd71add4b7fd949e7e1353a93019111f3f07e87bcaa033b27f7f22",
+    "runner_sha256": "4ff1189efefed2b4afb21b301f7236c8137ef5d6744607d8b51cbdaf5d176d59",
+    "extension_sha256": "541a6d2cc1c8b8d3b74f38093e1633ddee09f93f214e4d8cf05156598a8c4878",
+    "repeats": 1,
+    "scope": "Controlled local fixtures, text tools, one configured model; not production or broad benchmark evidence"
+  },
+  {
+    "pair": 2,
+    "version": "after",
+    "model": {
+      "defaultProvider": "openrouter",
+      "defaultModel": "deepseek/deepseek-v4-flash",
+      "defaultThinkingLevel": "high"
+    },
+    "pi_version": "1.0.2",
+    "chrome": "Google Chrome 152.0.7977.13 beta",
+    "eoka_sha256": "42bd78e53108f7cdd29a95860d4e34e7dd1b3a9c0391dfde72db4ce7066a366b",
+    "browser_use_cli_version": "0.1.13",
+    "browser_use_packages": {
+      "browser-use": "0.13.11",
+      "browser-harness": "0.1.13"
+    },
+    "task_source_sha256": "4b299b53fffd71add4b7fd949e7e1353a93019111f3f07e87bcaa033b27f7f22",
+    "runner_sha256": "4ff1189efefed2b4afb21b301f7236c8137ef5d6744607d8b51cbdaf5d176d59",
+    "extension_sha256": "541a6d2cc1c8b8d3b74f38093e1633ddee09f93f214e4d8cf05156598a8c4878",
+    "repeats": 1,
+    "scope": "Controlled local fixtures, text tools, one configured model; not production or broad benchmark evidence"
+  }
+]
