@@ -266,6 +266,17 @@ async fn main() {
         timeout_ms: cli.action_timeout_ms,
     };
     match &mut request {
+        eoka_protocol::Request::AgentStep(args) => {
+            if settings.operation_id.is_some() {
+                args.operation_id = settings.operation_id;
+            }
+            if settings.expect.is_some() {
+                args.expect = settings.expect;
+            }
+            if let Some(timeout) = settings.timeout_ms {
+                args.action_timeout_ms = timeout;
+            }
+        }
         eoka_protocol::Request::Click(args)
         | eoka_protocol::Request::DblClick(args)
         | eoka_protocol::Request::Hover(args) => args.operation = settings,

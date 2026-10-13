@@ -31,6 +31,19 @@ fn parse_headers_json(raw: &str) -> serde_json::Value {
 
 pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
     match cmd {
+        Command::View {
+            max_controls,
+            timeout_ms,
+        } => Request::AgentObserve(eoka_protocol::AgentObserveArgs {
+            max_controls: *max_controls,
+            timeout_ms: *timeout_ms,
+        }),
+        Command::Step { request } => {
+            Request::AgentStep(serde_json::from_str(request).unwrap_or_else(|error| {
+                eprintln!("Invalid step request: {error}");
+                std::process::exit(1)
+            }))
+        }
         Command::Action { request } => {
             Request::ActionPerform(serde_json::from_str(request).unwrap_or_else(|e| {
                 eprintln!("Invalid action request: {e}");

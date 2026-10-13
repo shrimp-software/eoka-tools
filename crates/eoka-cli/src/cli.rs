@@ -126,6 +126,15 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
+    #[command(about = "Compact agent page state with scoped control references")]
+    View {
+        #[arg(long, default_value_t = 40)]
+        max_controls: usize,
+        #[arg(long, default_value_t = 3000)]
+        timeout_ms: u64,
+    },
+    #[command(about = "Perform one agent action and return its outcome and fresh page state")]
+    Step { request: String },
     #[command(about = "Submit a typed action with an operation ID")]
     Action { request: String },
     #[command(about = "Inspect durable action records")]

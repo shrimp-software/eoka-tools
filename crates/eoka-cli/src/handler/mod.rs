@@ -1,3 +1,4 @@
+mod agent;
 mod captcha;
 mod downloads;
 mod eval;
@@ -41,6 +42,7 @@ use target::{
 };
 
 pub struct Handler {
+    agent: eoka_server::agent::AgentSession,
     operations: eoka_server::operations::OperationManager,
     downloads: eoka_server::downloads::DownloadManager,
     state: Option<BrowserState>,
@@ -76,6 +78,7 @@ impl Handler {
             LaunchSpec::Connect { .. } => ScriptPolicyState::default(),
         };
         Self {
+            agent: Default::default(),
             operations: Default::default(),
             downloads: Default::default(),
             state: None,
@@ -176,6 +179,9 @@ impl Handler {
     }
 
     pub async fn handle(&mut self, cmd: &str, args: &Value) -> Response {
+        if matches!(cmd, "agent_observe" | "agent_step") {
+            return self.handle_agent(cmd, args).await;
+        }
         if cmd == "action_command" {
             let command = args["command"].as_str().unwrap_or_default();
             if (!eoka_server::operations::commands::is_action(command)

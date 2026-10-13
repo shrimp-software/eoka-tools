@@ -48,6 +48,15 @@ impl AXValue {
             .map(|v| v.as_bool().unwrap_or(false) || v.as_str() == Some("true"))
             .unwrap_or(false)
     }
+
+    fn as_bool(&self) -> Option<bool> {
+        match self.value.as_ref()? {
+            serde_json::Value::Bool(value) => Some(*value),
+            serde_json::Value::String(value) if value == "true" => Some(true),
+            serde_json::Value::String(value) if value == "false" => Some(false),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -63,6 +72,9 @@ pub struct SnapshotRef {
     pub backend_node_id: i64,
     pub role: String,
     pub name: String,
+    pub disabled: bool,
+    pub checked: Option<bool>,
+    pub expanded: Option<bool>,
 }
 
 #[derive(Debug)]
@@ -172,6 +184,20 @@ impl<'a> Walker<'a> {
                     backend_node_id: id,
                     role: role.to_string(),
                     name: name.to_string(),
+                    disabled: node
+                        .properties
+                        .iter()
+                        .any(|p| p.name == "disabled" && p.value.is_truthy()),
+                    checked: node
+                        .properties
+                        .iter()
+                        .find(|p| p.name == "checked")
+                        .and_then(|p| p.value.as_bool()),
+                    expanded: node
+                        .properties
+                        .iter()
+                        .find(|p| p.name == "expanded")
+                        .and_then(|p| p.value.as_bool()),
                 });
                 Some(label)
             }

@@ -9,6 +9,49 @@ pub async fn dispatch(
     method: &str,
     params: Value,
 ) -> Result<Value, ServerError> {
+    if matches!(method, "agent.observe" | "agent.step") {
+        let browser = state.browser()?.clone();
+        let page = state
+            .page(
+                params["pageId"]
+                    .as_str()
+                    .ok_or_else(|| ServerError::invalid_params("pageId required"))?,
+            )?
+            .clone();
+        let mut args = params;
+        if let Some(object) = args.as_object_mut() {
+            object.remove("pageId");
+        }
+        let result = if method == "agent.observe" {
+            serde_json::to_value(
+                state
+                    .agent
+                    .observe(
+                        &browser,
+                        &page,
+                        serde_json::from_value(args)
+                            .map_err(|e| ServerError::invalid_params(e.to_string()))?,
+                    )
+                    .await
+                    .map_err(|e| ServerError::internal(format!("{e:#}")))?,
+            )
+        } else {
+            serde_json::to_value(
+                state
+                    .agent
+                    .step(
+                        &browser,
+                        &page,
+                        &state.operations,
+                        serde_json::from_value(args)
+                            .map_err(|e| ServerError::invalid_params(e.to_string()))?,
+                    )
+                    .await
+                    .map_err(|e| ServerError::internal(format!("{e:#}")))?,
+            )
+        };
+        return result.map_err(|e| ServerError::internal(e.to_string()));
+    }
     if let Some(result) = crate::operations::sidecar::dispatch(state, method, &params).await {
         return result;
     }

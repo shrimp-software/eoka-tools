@@ -133,7 +133,7 @@ these queries do not launch Chrome.
 
 ## Paired release
 
-This branch requires eoka 0.6.0. Build against a local core checkout with a
+This branch requires eoka 0.6.1. Build against a local core checkout with a
 command-line Cargo patch; no path override is committed. Publish core first,
 then protocol, SDK, server, runner, MCP/Tack and CLI (and the updated DataDome
 adapter before CLI). Normal conformance and release checks remain required.

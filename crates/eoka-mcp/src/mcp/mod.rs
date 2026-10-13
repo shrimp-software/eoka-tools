@@ -1,3 +1,4 @@
+mod agent;
 mod error;
 mod helpers;
 mod operations;
@@ -27,6 +28,8 @@ use state::BrowserState;
 use types::*;
 
 const MCP_PROTOCOL_TOOL_ROUTES: &[(&str, &str)] = &[
+    ("agent_observe", "agent_observe"),
+    ("agent_step", "agent_step"),
     ("action_perform", "action_perform"),
     ("operation_get", "operation_get"),
     ("operation_list", "operation_list"),
@@ -79,6 +82,7 @@ fn apply_protocol_tool_metadata(router: &mut ToolRouter<EokaServer>) {
 
 #[derive(Clone)]
 pub struct EokaServer {
+    agent: Arc<Mutex<eoka_server::agent::AgentSession>>,
     state: Arc<Mutex<Option<BrowserState>>>,
     headless: bool,
     tool_router: ToolRouter<EokaServer>,
@@ -153,12 +157,34 @@ impl EokaServer {
         let mut tool_router = Self::tool_router();
         apply_protocol_tool_metadata(&mut tool_router);
         Self {
+            agent: Default::default(),
             state: Arc::new(Mutex::new(None)),
             headless,
             tool_router,
             downloads: Default::default(),
             operations: Default::default(),
         }
+    }
+
+    #[tool]
+    async fn agent_observe(
+        &self,
+        req: Parameters<eoka_protocol::AgentObserveArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.agent_command(
+            "agent_observe",
+            serde_json::to_value(req.0).map_err(internal)?,
+        )
+        .await
+    }
+
+    #[tool]
+    async fn agent_step(
+        &self,
+        req: Parameters<eoka_protocol::AgentStepArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.agent_command("agent_step", serde_json::to_value(req.0).map_err(internal)?)
+            .await
     }
 
     #[tool]
