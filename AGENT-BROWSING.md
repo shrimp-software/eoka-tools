@@ -93,6 +93,6 @@ uses the same existing Pi agent/model with Eoka and the installed Browser Use
 CLI. Fixtures independently count submissions/downloads and verify output files.
 Treat its results as a controlled pilot, not proof about arbitrary websites.
 
-This release requires core eoka 0.6.1. Publish core first, then regenerate the
-tools lockfile from the registry and run registry-only release checks. Development
-checks may use `--config 'patch.crates-io.eoka.path="/path/to/eoka"'`.
+This release uses core eoka 0.6.1 from crates.io. The committed lockfile includes
+its registry checksum. Run `mise run conformance` and `mise run release-check`
+without a local core override before release.
