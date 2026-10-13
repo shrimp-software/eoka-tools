@@ -997,6 +997,7 @@ async fn durable_actions_survive_client_disconnect_and_completed_downloads_survi
     let completed = cli.ok(&["download", "wait", download]).await;
     assert_eq!(completed["state"], "completed");
     assert_eq!(completed["native_complete"], true);
+    assert!(completed["completion"].as_str().is_some());
     assert_eq!(completed["sha256"].as_str().unwrap().len(), 64);
     assert!(completed["native_guid"].as_str().is_some());
     let bytes = std::fs::read(cli.directory.path().join("restart.bin")).unwrap();
@@ -1005,6 +1006,7 @@ async fn durable_actions_survive_client_disconnect_and_completed_downloads_survi
     let recovered = cli.ok(&["operations", "get", download]).await;
     assert_eq!(recovered["outcome"], "verified_complete");
     assert_eq!(history["state"], "completed");
+    assert_eq!(history["completion"], completed["completion"]);
     let duplicate = cli
         .ok(&[
             "download",
@@ -1018,6 +1020,7 @@ async fn durable_actions_survive_client_disconnect_and_completed_downloads_survi
         .await;
     assert_eq!(duplicate["id"], download_id);
     assert_eq!(duplicate["sha256"], completed["sha256"]);
+    assert_eq!(duplicate["completion"], completed["completion"]);
     assert_eq!(
         std::fs::read(cli.directory.path().join("restart.bin")).unwrap(),
         bytes

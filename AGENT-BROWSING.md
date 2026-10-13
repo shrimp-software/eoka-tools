@@ -42,6 +42,13 @@ Actions are `click`, `fill`, `type`, `select`, `hover`, `scroll_into_view`,
 screenshots and downloads retain their existing tools. Compact references also
 work with CLI/MCP download triggers after observing the page.
 
+`download --wait` and `download.wait` return a `completion` message after native
+completion, file verification and publication. The receipt's `published_path`,
+`received_bytes` and `sha256` are sufficient to confirm that the file was saved.
+Inspect contents only when the task asks for content analysis; confirming saving
+does not require navigating to a `file://` URL or downloading again. Pending,
+failed and canceled jobs have no completion message.
+
 The result contains `operation_id`, the latest available `operation`, and a fresh
 `observation`. Errors in admission/waiting or observation are reported separately
 as `operation_error` and `observation_error`. A failed observation does not erase

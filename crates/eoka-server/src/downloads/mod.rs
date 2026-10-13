@@ -589,7 +589,7 @@ async fn diagnose(
 }
 
 pub fn record_response(record: DownloadRecord) -> Response {
-    match serde_json::to_value(record) {
+    match serde_json::to_value(eoka_protocol::DownloadResult::from(record)) {
         Ok(record) => Response::ok(record),
         Err(error) => Response::err(error.to_string()),
     }
