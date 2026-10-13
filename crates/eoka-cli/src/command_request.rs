@@ -33,9 +33,11 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
     match cmd {
         Command::View {
             max_controls,
+            offset,
             timeout_ms,
         } => Request::AgentObserve(eoka_protocol::AgentObserveArgs {
             max_controls: *max_controls,
+            offset: *offset,
             timeout_ms: *timeout_ms,
         }),
         Command::Step { request } => {

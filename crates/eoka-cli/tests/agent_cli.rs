@@ -84,3 +84,29 @@ fn view_step_and_recovery_work_through_the_actual_cli() {
         .any(|control| control["target"] == target));
     assert_eq!(session.run(&["eval", "window.hits"]), "1");
 }
+
+#[test]
+#[ignore = "requires Chrome; CLI observation pagination"]
+fn view_continuation_and_step_keep_later_controls_reachable() {
+    let session = Session {
+        name: format!("agent-pages-{}", uuid::Uuid::new_v4()),
+        directory: tempfile::tempdir().unwrap(),
+    };
+    session.run(&["open", "about:blank"]);
+    session.run(&["eval", "document.body.innerHTML=Array.from({length:205},(_,i)=>`<button style='display:block' onclick='window.hits++'>Button ${i}</button>`).join('');window.hits=0"]);
+    let first = session.run(&["view", "--max-controls", "200"]);
+    assert_eq!(first["next_offset"], 200);
+    let last = session.run(&["view", "--offset", "200"]);
+    assert_eq!(last["controls"].as_array().unwrap().len(), 5);
+    assert!(last["next_offset"].is_null());
+    let request = json!({
+        "action":{"kind":"click","target":last["controls"][4]["target"]},
+        "offset":200
+    })
+    .to_string();
+    let result = session.run(&["step", &request]);
+    assert!(result["operation_error"].is_null(), "{result}");
+    assert_eq!(result["operation"]["receipt"]["dispatch"], "acknowledged");
+    assert_eq!(result["observation"]["controls"][4]["name"], "Button 204");
+    assert_eq!(session.run(&["eval", "window.hits"]), "1");
+}

@@ -133,8 +133,8 @@ these queries do not launch Chrome.
 
 ## Paired release
 
-This release uses eoka 0.6.1 from crates.io. The workspace lockfile records the
-registry source and checksum; no local core override is needed. Publish protocol,
+This release requires eoka 0.6.2. Publish core first and regenerate the workspace
+lockfile from crates.io without a local core override. Then publish protocol,
 SDK, server, runner, MCP/Tack and CLI in dependency order (and the updated
 DataDome adapter before CLI). Run `mise run conformance` and
 `mise run release-check` against registry dependencies before release.

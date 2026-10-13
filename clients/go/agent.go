@@ -8,6 +8,7 @@ import (
 
 type AgentObserveOptions struct {
 	MaxControls int    `json:"max_controls,omitempty"`
+	Offset      int    `json:"offset,omitempty"`
 	TimeoutMS   uint64 `json:"timeout_ms,omitempty"`
 }
 
@@ -19,6 +20,7 @@ type AgentStepRequest struct {
 	TimeoutMS       uint64         `json:"timeout_ms,omitempty"`
 	ActionTimeoutMS uint64         `json:"action_timeout_ms,omitempty"`
 	MaxControls     int            `json:"max_controls,omitempty"`
+	Offset          int            `json:"offset,omitempty"`
 }
 
 type AgentControl struct {
@@ -37,6 +39,7 @@ type AgentObservation struct {
 	Tabs          []json.RawMessage `json:"tabs"`
 	Controls      []AgentControl    `json:"controls"`
 	Truncated     bool              `json:"truncated"`
+	NextOffset    *int              `json:"next_offset"`
 	Warnings      []string          `json:"warnings"`
 }
 

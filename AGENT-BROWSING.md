@@ -15,8 +15,20 @@ Copy a control's exact `target` from the observation. References stay stable for
 unchanged controls in the same document and are never rebound to replacement
 elements. Navigation, closed tabs, replacement controls and controls omitted
 from the latest observation require a fresh observation. `max_controls` defaults
-to 40 and accepts 1–200; `truncated` tells you to request more. Normal snapshot
-and observation tools remain available.
+to 40 and accepts 1–200 per response. If `truncated` is true, pass the returned
+`next_offset` as `offset` to read the next page of controls:
+
+```sh
+eoka --agent --session research view --max-controls 200
+eoka --agent --session research view --offset 200
+```
+
+Offsets use the current document order. Scrolling does not advance them; restart
+at zero after page changes that can reorder controls. `next_offset: null` means
+there are no later controls. Only references in the latest observation are
+actionable, so act on a page's controls before advancing. `agent.step` also
+accepts `offset` for its refreshed observation, independently of action identity.
+Normal snapshot and observation tools remain available.
 
 Observations include the selected tab, open tabs, bounded visible page context,
 and controls with accessible names, roles and disabled/checked/expanded state.
@@ -74,7 +86,7 @@ You can supply `operation_id` (or CLI `--operation-id`) to keep your own durable
 identity. Repeating that ID with identical action/mode/expectation/deadline and
 tab binding returns the existing operation, even after its target disappears.
 Changing those inputs produces `operation_id_conflict`. Response budgets and
-observation limits can change on a repeated request.
+observation limits and offsets can change on a repeated request.
 
 Direct MCP callers may omit the ID; the server then generates it before
 dispatch. Supply a client-generated ID when exact recovery after a completely
@@ -93,6 +105,7 @@ uses the same existing Pi agent/model with Eoka and the installed Browser Use
 CLI. Fixtures independently count submissions/downloads and verify output files.
 Treat its results as a controlled pilot, not proof about arbitrary websites.
 
-This release uses core eoka 0.6.1 from crates.io. The committed lockfile includes
-its registry checksum. Run `mise run conformance` and `mise run release-check`
-without a local core override before release.
+This release requires core eoka 0.6.2 for scrolling, native temporal input and
+visibility fixes. Publish core first, regenerate the tools lockfile from crates.io,
+then run `mise run conformance` and `mise run release-check` without a local core
+override before release. Joint development can use a command-line Cargo patch.

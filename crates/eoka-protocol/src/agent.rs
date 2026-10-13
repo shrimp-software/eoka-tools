@@ -4,9 +4,16 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AgentObserveArgs {
-    #[schemars(description = "Maximum labeled controls, 1 through 200. Increase if truncated.")]
+    #[schemars(
+        description = "Maximum labeled controls per page, 1 through 200. Continue with next_offset when truncated."
+    )]
     #[serde(default = "control_limit")]
     pub max_controls: usize,
+    #[schemars(
+        description = "Zero-based control offset, normally the previous next_offset. Page changes can reorder controls; restart at zero after changes."
+    )]
+    #[serde(default)]
+    pub offset: usize,
     #[serde(default = "observe_timeout")]
     pub timeout_ms: u64,
 }
@@ -28,6 +35,7 @@ impl Default for AgentObserveArgs {
     fn default() -> Self {
         Self {
             max_controls: control_limit(),
+            offset: 0,
             timeout_ms: observe_timeout(),
         }
     }
@@ -81,6 +89,11 @@ pub struct AgentStepArgs {
     pub action_timeout_ms: u64,
     #[serde(default = "control_limit")]
     pub max_controls: usize,
+    #[schemars(
+        description = "Zero-based control offset for the refreshed observation. This affects only observation, not operation identity or execution."
+    )]
+    #[serde(default)]
+    pub offset: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -109,6 +122,8 @@ pub struct AgentObservation {
     pub tabs: Vec<AgentTab>,
     pub controls: Vec<AgentControl>,
     pub truncated: bool,
+    #[serde(default)]
+    pub next_offset: Option<usize>,
     pub warnings: Vec<String>,
 }
 
