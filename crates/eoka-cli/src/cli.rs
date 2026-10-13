@@ -130,6 +130,12 @@ pub enum Command {
     View {
         #[arg(long, default_value_t = 40)]
         max_controls: usize,
+        #[arg(
+            long,
+            default_value_t = 0,
+            help = "Continue from the previous observation's next_offset"
+        )]
+        offset: usize,
         #[arg(long, default_value_t = 3000)]
         timeout_ms: u64,
     },
