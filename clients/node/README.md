@@ -339,8 +339,10 @@ insufficient donor duration and unresolved cross-fragment timing collisions
 fail finalization without publishing a success-named file. Validation/repair uses the original
 staging descriptor under a five-second deadline; failure retains partial-file
 evidence. The core Rust raw-stream primitive remains unmodified Chrome output.
-Release checks require strictly increasing finalized packet DTS and empty
-decoder diagnostics, not merely a successful decoder exit.
+Release checks require strictly increasing finalized packet DTS and semantically
+verified diagnostics, not merely a successful decoder exit. The
+[qualification policy](#prerelease-qualification-and-publication) distinguishes
+proven frame-rate-estimation advisories from failures without retiming the video.
 
 `page.record` generates a UUID before dispatch, or accepts a caller-provided `recordingId`. There is one active recorder per target. A repeated start with the same ID and equivalent parameters recovers the existing record; changed parameters conflict instead of restarting. After a lost response use the ID rather than starting another recorder:
 
@@ -467,11 +469,18 @@ single-attempt native captures: four short/default-rate clips, two short
 120-fps clips, one 1-fps clip, two two-second clips, and one multi-fragment clip.
 Both artifact collection and publication independently require the actual running
 Chrome version to match the pin, the complete schedule, published MP4 records,
-strictly increasing packet DTS, and empty probe/decoder diagnostics. A `passed`
-summary alone is insufficient. No retry-to-pass or warning suppression is
-permitted. The private MP4 correction remains limited to the documented native
-timing defects; changing Chrome's container layout requires renewed qualification,
-not an implicit generic muxer or transcoder.
+strictly increasing packet DTS, and successful full decoding. A `passed` summary
+alone is insufficient. One known FFmpeg MOV input-rate-estimation diagnostic may
+be retained as a VFR advisory only when its adjacent packet indices and exact
+timestamps match the probe and the declared positive packet duration exactly
+reaches the next timestamp. Missing or inexact timing evidence, unknown
+diagnostics, and nonzero decoder exits remain fatal. Raw probe/decoder logs are
+preserved, and collection/publication independently recompute advisory
+classifications; labels alone cannot authorize release. Probe logging includes
+warnings. There is no retry-to-pass, hidden warning filtering, or retiming to
+satisfy a frame-rate heuristic. The private MP4 correction remains limited to
+the documented native timing defects; changing Chrome's container layout requires
+renewed qualification, not an implicit generic muxer or transcoder.
 
 `publish-node.yml` is manual, restricted to an exact current protected `main`
 commit, and publishes only `0.1.0-beta.1` under `next` with npm provenance.

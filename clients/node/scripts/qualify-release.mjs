@@ -5,7 +5,7 @@ import { access, cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'n
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import { assertRecordingQualification, recordingSchedule } from './recording-qualification.mjs';
+import { assertRecordingQualification, classifyRecordingDiagnostics, recordingSchedule } from './recording-qualification.mjs';
 
 const exec = promisify(execFile);
 const platforms = ['linux-x64-gnu', 'linux-arm64-gnu', 'darwin-x64', 'darwin-arm64', 'win32-x64'];
@@ -53,7 +53,7 @@ async function packStage(stage, output) {
   return { manifest, packages };
 }
 
-async function consumer(config) {
+async function consumer(config, classifyRecordingDiagnostics) {
   const assert = (await import('node:assert/strict')).default;
   const { createHash } = await import('node:crypto');
   const { execFile, spawn } = await import('node:child_process');
@@ -223,7 +223,7 @@ async function consumer(config) {
         assert.equal(entry.artifact.container, 'mp4');
         assert.equal(entry.artifact.mimeType, 'video/mp4');
         try {
-          const { stdout, stderr } = await command('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_streams', '-show_packets', '-show_data_hash', 'sha256', '-of', 'json', path], `${scheduled.name}-probe`);
+          const { stdout, stderr } = await command('ffprobe', ['-v', 'warning', '-select_streams', 'v:0', '-show_streams', '-show_packets', '-show_data_hash', 'sha256', '-of', 'json', path], `${scheduled.name}-probe`);
           entry.probeStderr = stderr;
           const probe = JSON.parse(stdout);
           entry.stream = probe.streams[0];
@@ -231,7 +231,6 @@ async function consumer(config) {
           entry.packetDts = probe.packets.map(packet => packet.dts);
           entry.packetDurations = probe.packets.map(packet => packet.duration ?? null);
           entry.terminalSamples = probe.packets.slice(-3);
-          assert.equal(stderr.trim(), '', 'Finalized SDK recording probe emitted diagnostics');
           assert.ok(probe.packets.length >= (scheduled.waitMs >= 1000 ? 2 : 1));
           assert.ok(entry.stream.width > 0 && entry.stream.width <= 800);
           assert.ok(entry.stream.height > 0 && entry.stream.height <= 600);
@@ -249,11 +248,11 @@ async function consumer(config) {
         try {
           const decoded = await command('ffmpeg', ['-nostdin', '-v', 'warning', '-xerror', '-i', path, '-map', '0:v:0', ...nativeTimeBase, '-f', 'null', '-'], `${scheduled.name}-decode`);
           entry.decodeStderr = decoded.stderr;
-          assert.equal(decoded.stderr.trim(), '', 'Finalized SDK recording decode emitted warnings; finalized artifact retained');
         } catch (error) {
           entry.decodeStderr = error.stderr ?? entry.decodeStderr;
           caseErrors.push(error);
         }
+        if (caseErrors.length === 0) entry.advisories = classifyRecordingDiagnostics(entry);
       } catch (error) {
         entry.recordingId ??= error.recordingId;
         entry.record = recording?.record ?? error.record;
@@ -301,7 +300,12 @@ async function consumer(config) {
     externalExit = once(external, 'exit');
     let port;
     for (let attempt = 0; attempt < 300; attempt++) {
-      try { port = (await readFile(join(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0]; break; } catch (error) { if (error.code !== 'ENOENT') throw error; }
+      try {
+        port = (await readFile(join(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0];
+        break;
+      } catch (error) {
+        if (error.code !== 'ENOENT' && !(process.platform === 'win32' && error.code === 'EBUSY')) throw error;
+      }
       assert.equal(external.exitCode, null, `External Chrome exited: ${externalStderr}`);
       await delay(100);
     }
@@ -436,7 +440,7 @@ if (options.aggregate) {
     await writeFile(join(options.output, 'npm-install.stdout'), install.stdout);
     await writeFile(join(options.output, 'npm-install.stderr'), install.stderr);
     const config = { scratch, cache: options.cache, output: options.output, sourceSha: env.EOKA_SOURCE_SHA ?? null, readiness, recordingSchedule, preview: options.preview === true, development: hostPin.development };
-    await writeFile(join(app, 'qualify.mjs'), `await (${consumer.toString()})(${JSON.stringify(config)});\n`);
+    await writeFile(join(app, 'qualify.mjs'), `await (${consumer.toString()})(${JSON.stringify(config)}, (${classifyRecordingDiagnostics.toString()}));\n`);
     try {
       const result = await exec(process.execPath, [join(app, 'qualify.mjs')], { cwd: app, env, maxBuffer: 32 * 1024 * 1024, timeout: 900000 });
       await writeFile(join(options.output, 'consumer.stdout'), result.stdout);

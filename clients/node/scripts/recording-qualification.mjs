@@ -13,6 +13,32 @@ export const recordingSchedule = [
   { name: 'native-2', fps: 30, waitMs: 6500 },
 ];
 
+export function classifyRecordingDiagnostics(recording) {
+  const advisories = [];
+  const integer = value => {
+    if (!(typeof value === 'string' || Number.isSafeInteger(value)) || !/^-?\d+$/.test(String(value))) throw new Error('Missing or inexact packet timing for diagnostic verification');
+    return BigInt(value);
+  };
+  for (const source of ['probe', 'decode']) {
+    const stderr = recording[`${source}Stderr`];
+    if (typeof stderr !== 'string') throw new Error(`Missing ${source} diagnostics`);
+    for (const line of stderr.trim().split(/\r?\n/)) {
+      if (!line) continue;
+      const match = /^\[(?:in#0\/)?mov,mp4,m4a,3gp,3g2,mj2 @ (?:0x)?[0-9a-fA-F]+\] DTS discontinuity in stream 0: packet (\d+) with DTS (-?\d+), packet (\d+) with DTS (-?\d+)$/.exec(line);
+      if (!match) throw new Error(`Unrecognized ${source} diagnostic: ${line}`);
+      const previous = Number(match[1]);
+      const next = Number(match[3]);
+      if (!Number.isSafeInteger(previous) || !Number.isSafeInteger(next) || next !== previous + 1 || !Array.isArray(recording.packetDts) || !Array.isArray(recording.packetDurations) || next >= recording.packetDts.length) throw new Error('Diagnostic does not identify adjacent recorded packets');
+      const previousDts = integer(recording.packetDts[previous]);
+      const nextDts = integer(recording.packetDts[next]);
+      const duration = integer(recording.packetDurations[previous]);
+      if (previousDts !== BigInt(match[2]) || nextDts !== BigInt(match[4]) || duration <= 0n || previousDts + duration !== nextDts) throw new Error('DTS discontinuity is not explained by the declared positive packet duration');
+      advisories.push({ source, kind: 'vfr-rate-estimation', previousPacket: previous, nextPacket: next });
+    }
+  }
+  return advisories;
+}
+
 export function assertRecordingQualification(evidence, chromeBuildId) {
   assert.equal(evidence?.readiness?.chromeBuildId, chromeBuildId, 'Recording readiness belongs to another Chrome build');
   assert.equal(evidence?.checks?.chrome?.buildId, chromeBuildId, 'Installed Chrome does not match recording qualification');
@@ -34,10 +60,7 @@ export function assertRecordingQualification(evidence, chromeBuildId) {
     assert.equal(actual.artifact?.container, 'mp4');
     assert.equal(actual.artifact?.mimeType, 'video/mp4');
     assert.deepEqual(actual.errors, [], 'Recording contains failure evidence');
-    assert.equal(typeof actual.probeStderr, 'string');
-    assert.equal(actual.probeStderr.trim(), '', 'Recording probe emitted diagnostics');
-    assert.equal(typeof actual.decodeStderr, 'string');
-    assert.equal(actual.decodeStderr.trim(), '', 'Recording decoder emitted diagnostics');
+    assert.deepEqual(actual.advisories, classifyRecordingDiagnostics(actual), 'Unverified recording diagnostic classification');
     assert.ok(Array.isArray(actual.packetDts));
     assert.equal(actual.sampleCount, actual.packetDts.length);
     assert.ok(actual.sampleCount >= (scheduled.waitMs >= 1000 ? 2 : 1), 'Insufficient recorded samples');

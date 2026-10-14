@@ -1169,7 +1169,7 @@ encoded video and public protocol remain unchanged.
   file staging. Only a new sidecar session resets capacity.
 - The MP4 parser remains private and narrowly scoped. Artifact collection and
   publication now validate actual running Chrome identity and all ten native
-  recording cases, published artifacts, exact strictly increasing DTS and empty
+  recording cases, published artifacts, exact strictly increasing DTS and verified
   decoder diagnostics instead of trusting a passing summary. Native builds run
   the entire recording suite on every architecture, including admission tests
   with platform-native paths. Chrome upgrades require fresh five-platform proof.
@@ -1186,6 +1186,37 @@ encoded video and public protocol remain unchanged.
   lifecycle scripts disabled. Prior passing native evidence was rejected because
   it lacked actual running Chrome identity; it is not reused as new qualification.
   Exact-source native results and artifacts are attached to draft PR #58.
+
+### Semantic VFR qualification
+
+- [Native run 38636518503](https://github.com/shrimp-software/eoka-tools/actions/runs/38636518503)
+  passed all five native builds and produced all 50 scheduled recording files,
+  but failed runtime qualification on Windows and macOS Intel. Windows raced
+  Chrome's temporarily locked `DevToolsActivePort`; the existing bounded startup
+  wait now treats Windows `EBUSY`, like absent-file `ENOENT`, as not ready.
+  Other filesystem errors still fail immediately.
+- The Mac artifact had DTS `0,1,2,3,3972` and durations `1,1,1,3969,999` at
+  `1/120000`, with an exact final endpoint of 4971. FFmpeg 9.0.1's
+  [input frame-rate estimator](https://github.com/FFmpeg/FFmpeg/blob/n9.0.1/libavformat/demux.c#L2834-L2871)
+  warned about the interval ratio despite duration 3969 exactly covering the
+  reported DTS advance. Independent reviews found no demonstrated parser defect.
+  The pre-repair timing was not retained, so no original zero-run attribution is
+  claimed for this file.
+- The user explicitly approved semantic VFR validation instead of blanket
+  diagnostic rejection. Only the recognized MOV estimation advisory is allowed,
+  after matching adjacent packet indices, exact DTS and positive declared
+  duration. Unknown diagnostics, missing/inexact timing and failed full decoding
+  remain fatal. Original logs are retained and advisory classification is
+  independently recomputed by collection and publication. FFmpeg decoding flags
+  are unchanged; ffprobe now records warnings too. No parser or media timing
+  change was made to appease the estimator.
+- Independent FFmpeg 8.1.2 smoke decoded all 50 unchanged retained artifacts into
+  1,482 frame hashes. The Mac case preserved both probe and decode advisories;
+  all media hashes stayed identical. A copy with corrupted AV1 payload failed
+  decoding. Six additional semantic regressions passed; the complete Node gate
+  passed 295 tests with two opt-in native skips and rejected all 22 invalid
+  TypeScript consumers. The failed native run remains evidence, not a successful
+  qualification; fresh exact-source native qualification is recorded in PR #58.
 
 ### Execution order and handoff rules
 
