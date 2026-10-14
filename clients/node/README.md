@@ -323,11 +323,22 @@ Direct file output bypasses the 16 MiB sidecar response limit, not Chrome's imag
 Capture dispatch requires negotiated methods and capabilities: `screenshotOptions`, `screenshotFile`, and `nativeRecording`. Native recording additionally requires a ready active page and an encoder supported by the actual Chrome build. Unsupported recording raises `RecordingUnsupported`; the SDK never switches engines/browser versions. Video is silent native MP4 with Chrome-selected codec, not a promise of H.264. FFmpeg is not an SDK runtime dependency. `fps` is an integral ceiling from 1 through 120, not deterministic fixed-rate playback; optional `maxWidth`/`maxHeight` are positive integers no greater than 2147483647. Screenshot crops/quality are not recording options.
 
 Chrome 155.0.8059.39 can emit duplicate terminal MP4 decoding timestamps when a
-short tail-frame interval becomes zero at the track timescale. Direct CDP capture
-reproduces this independently of Eoka. Native bytes are preserved, not normalized
-or transcoded; successful file publication does not guarantee valid timing.
-The npm prerelease is blocked on this known defect. Release checks inspect
-original packet DTS and decoder stderr, not merely a successful decoder exit.
+short tail-frame interval becomes zero at the track timescale. The sidecar
+validates the fragmented MP4 before publication and applies a bounded, lossless
+timing correction for this terminal defect. Encoded packets, sample count, file
+length and the final presentation endpoint are preserved; clean recordings stay
+byte-identical. The final sample advances by one track tick, with its duration
+reduced by the same tick. Matching fragment decode/index times are corrected
+when the tail starts a new fragment.
+
+This changes container timing metadata, not the codec or encoded frames. It
+requires neither a Chrome fork nor FFmpeg. Unsupported or malformed containers,
+nonterminal timing defects and insufficient final duration fail finalization
+without publishing a success-named file. Validation/repair uses the original
+staging descriptor under a five-second deadline; failure retains partial-file
+evidence. The core Rust raw-stream primitive remains unmodified Chrome output.
+Release checks require strictly increasing finalized packet DTS and empty
+decoder diagnostics, not merely a successful decoder exit.
 
 `page.record` generates a UUID before dispatch, or accepts a caller-provided `recordingId`. There is one active recorder per target. A repeated start with the same ID and equivalent parameters recovers the existing record; changed parameters conflict instead of restarting. After a lost response use the ID rather than starting another recorder:
 
@@ -407,7 +418,7 @@ packages remain private; `--publication` is a separate, fail-closed staging mode
 qualifies installed tarballs outside the repository. GNU builds use Ubuntu 22.04
 and enforce glibc ≤2.35; runtime checks use non-root hosted runners with Chrome's
 sandbox enabled. Evidence includes fresh/cache/offline installation, artifact
-rejection, verified input, image dimensions, original MP4 packet timestamps and
+rejection, verified input, image dimensions, finalized MP4 packet timestamps and
 decode diagnostics, headed launch, owned cleanup, and borrowed-browser survival.
 Failures retain recordings and diagnostics as workflow artifacts. FFmpeg/ffprobe
 are qualification tools, not consumer dependencies.
@@ -434,10 +445,12 @@ paired-core previews. Publication forbids a core override. Ordinary PR CI remain
 blocked until core `0.7.0` is published and `Cargo.lock` is regenerated against its
 real registry checksum; a local path-patched check is not registry proof.
 
-`scripts/publication-readiness.json` records unresolved release defects. Current
-runtime checks still execute but end blocked even if an individual recording is
-clean. Removing the blocker requires a real resolution and fresh qualification,
-not retries, timestamp rewriting, or suppression of decoder warnings.
+`scripts/publication-readiness.json` records unresolved release defects. Clearing
+a recording blocker requires deterministic repair/preservation regressions and
+fresh five-platform qualification, not passing samples alone. Each native build
+runs the repair regressions; runtime checks cover short/default/minimum/maximum
+frame-rate captures and a multi-fragment recording. No retry-to-pass or decoder
+warning suppression is permitted.
 
 `publish-node.yml` is manual, restricted to an exact current protected `main`
 commit, and publishes only `0.1.0-beta.1` under `next` with npm provenance.

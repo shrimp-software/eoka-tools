@@ -281,6 +281,19 @@ artifacts omit `container`; recording artifacts use `container:"mp4"` and
 No audio, FFmpeg runtime dependency, whole-video Buffer or video base64 response
 is promised.
 
+Before sealing a recording, the server validates its fragmented MP4 timing on
+the original staging descriptor. For the supported native AV1 terminal
+quantization defect, it advances the final sample by one track tick and reduces
+its duration by one tick, correcting fragment/index times when necessary.
+Encoded packets, sample count, file length and the final presentation endpoint
+are preserved. Already-valid native recordings remain byte-identical; this is
+container metadata repair, not re-encoding or a raw-byte identity guarantee.
+Unsupported/malformed containers, nonterminal defects or insufficient terminal
+duration fail without publication. Validation/repair has a five-second deadline;
+an interrupted correction can leave an incomplete retained partial, never a
+completed artifact. The subsequent flush/fsync/close and publication contract is
+unchanged.
+
 | Method | Parameters | Result |
 | --- | --- | --- |
 | `recording.start` | `{pageId,recordingId,path,maxWidth?,maxHeight?,fps?}` | Recording record |

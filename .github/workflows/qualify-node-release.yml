@@ -160,13 +160,16 @@ jobs:
             if [[ "$RUNNER_OS" == Windows ]]; then CORE_PATH="$(cygpath -m "$CORE_PATH")"; fi
             cargo --config "patch.crates-io.eoka.path='$CORE_PATH'" build --release --target "$TARGET" -p eoka-server
             cargo --config "patch.crates-io.eoka.path='$CORE_PATH'" metadata --format-version 1 > "dist/$PLATFORM-cargo.json"
+            cargo --config "patch.crates-io.eoka.path='$CORE_PATH'" test --release --target "$TARGET" -p eoka-server recordings::mp4::tests -- --nocapture 2>&1 | tee "dist/$PLATFORM-recording-repair-tests.log"
           else
             cargo build --release --locked --target "$TARGET" -p eoka-server
             cargo metadata --locked --format-version 1 > "dist/$PLATFORM-cargo.json"
+            cargo test --release --locked --target "$TARGET" -p eoka-server recordings::mp4::tests -- --nocapture 2>&1 | tee "dist/$PLATFORM-recording-repair-tests.log"
           fi
           cp "target/$TARGET/release/eoka-server$EXT" "dist/$ASSET"
           cp Cargo.lock "dist/$PLATFORM-Cargo.lock"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
         with:
           name: node-native-${{ matrix.platform }}
           path: dist/

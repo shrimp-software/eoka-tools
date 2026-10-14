@@ -91,7 +91,7 @@ impl StagedArtifact {
             }
             let partial = parent.join(format!(".eoka-capture-{}.partial", uuid::Uuid::new_v4()));
             let mut options = std::fs::OpenOptions::new();
-            options.write(true).create_new(true);
+            options.read(true).write(true).create_new(true);
             #[cfg(unix)]
             {
                 use std::os::unix::fs::OpenOptionsExt;
@@ -140,6 +140,16 @@ impl StagedArtifact {
         })?;
         self.bytes = bytes;
         Ok(())
+    }
+
+    pub(crate) fn recording_file(&mut self) -> Result<&mut tokio::fs::File, FileFailure> {
+        self.file.as_mut().ok_or_else(|| {
+            FileFailure::new(
+                RecordingFailureStage::Close,
+                "recording staging file is closed",
+                Some(&self.partial),
+            )
+        })
     }
 
     pub async fn seal(&mut self) -> Result<(), FileFailure> {
@@ -328,6 +338,38 @@ mod tests {
                 .await
                 .is_err());
         }
+    }
+
+    #[tokio::test]
+    async fn borrowed_recording_file_keeps_original_identity_when_path_is_replaced() {
+        use std::io::SeekFrom;
+        use tokio::io::{AsyncReadExt, AsyncSeekExt};
+
+        let root = tempfile::tempdir().unwrap();
+        let output = root.path().join("capture.mp4");
+        let retained = root.path().join("retained");
+        let mut stage = StagedArtifact::prepare(output.to_str().unwrap())
+            .await
+            .unwrap();
+        stage.write(b"original").await.unwrap();
+        stage.recording_file().unwrap().flush().await.unwrap();
+        std::fs::rename(&stage.partial, &retained).unwrap();
+        std::fs::write(&stage.partial, b"replaced").unwrap();
+        let file = stage.recording_file().unwrap();
+        file.seek(SeekFrom::Start(0)).await.unwrap();
+        let mut bytes = [0; 8];
+        file.read_exact(&mut bytes).await.unwrap();
+        assert_eq!(&bytes, b"original");
+        file.seek(SeekFrom::Start(0)).await.unwrap();
+        file.write_all(b"retained").await.unwrap();
+        stage.seal().await.unwrap();
+        assert!(stage.recording_file().is_err());
+        assert!(stage
+            .publish("video/mp4", Some(ArtifactContainer::Mp4))
+            .is_err());
+        assert_eq!(std::fs::read(&retained).unwrap(), b"retained");
+        assert_eq!(std::fs::read(&stage.partial).unwrap(), b"replaced");
+        assert!(!output.exists());
     }
 
     #[tokio::test]

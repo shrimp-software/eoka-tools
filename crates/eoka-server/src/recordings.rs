@@ -11,9 +11,12 @@ use eoka_protocol::sidecar::{
     RecordingRecord, RecordingStartParams, RecordingState, ServerError,
 };
 use serde_json::Value;
+use tokio::io::AsyncWriteExt;
 use tokio::sync::watch;
 
 use crate::artifacts::{FileFailure, StagedArtifact};
+
+mod mp4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Control {
@@ -710,6 +713,38 @@ impl RecordingSource for NativeRecording {
     }
 }
 
+async fn repair_stage(stage: &mut StagedArtifact) -> Result<(), RecordingFailure> {
+    let partial_path = Some(stage.partial.to_string_lossy().into_owned());
+    let file = stage.recording_file().map_err(file_failure)?;
+    let result = tokio::time::timeout(Duration::from_secs(5), async {
+        file.flush().await.map_err(|error| RecordingFailure {
+            stage: RecordingFailureStage::Flush,
+            code: ErrorCode::FileOutput,
+            message: error.to_string(),
+            partial_path: partial_path.clone(),
+            cleanup_uncertain: None,
+        })?;
+        mp4::repair(file).await.map_err(|error| RecordingFailure {
+            stage: RecordingFailureStage::Close,
+            code: ErrorCode::RecordingFailed,
+            message: format!("MP4 timing validation and repair failed: {error}"),
+            partial_path: partial_path.clone(),
+            cleanup_uncertain: None,
+        })
+    })
+    .await;
+    match result {
+        Ok(result) => result,
+        Err(_) => Err(RecordingFailure {
+            stage: RecordingFailureStage::Close,
+            code: ErrorCode::RecordingFailed,
+            message: "MP4 timing validation and repair exceeded its deadline; the retained partial may contain an incomplete timing correction".to_owned(),
+            partial_path,
+            cleanup_uncertain: None,
+        }),
+    }
+}
+
 async fn drain(
     native: &impl RecordingSource,
     stage: &mut StagedArtifact,
@@ -769,6 +804,7 @@ async fn drain(
             Some(stage.partial.to_string_lossy().into_owned()),
         )
     })?;
+    repair_stage(stage).await?;
     stage.seal().await.map_err(file_failure)
 }
 
@@ -888,7 +924,8 @@ mod tests {
             let mut stage = StagedArtifact::prepare(output.to_str().unwrap())
                 .await
                 .unwrap();
-            stage.write(b"completed").await.unwrap();
+            stage.write(mp4::VALID_MP4).await.unwrap();
+            repair_stage(&mut stage).await.unwrap();
             stage.seal().await.unwrap();
             if cancel_first {
                 entry.request(true);
@@ -909,28 +946,24 @@ mod tests {
                         .state,
                     RecordingState::Completed
                 );
-                assert_eq!(std::fs::read(&output).unwrap(), b"completed");
+                assert_eq!(std::fs::read(&output).unwrap(), mp4::VALID_MP4);
             }
         }
     }
 
     struct FakeSource {
         chunks: Mutex<std::collections::VecDeque<Result<eoka::RecordingChunk, RecordingError>>>,
-        calls: Mutex<Vec<&'static str>>,
         close_fails: bool,
     }
 
     impl RecordingSource for FakeSource {
         async fn stop(&self) -> Result<(), RecordingError> {
-            self.calls.lock().push("stop");
             Ok(())
         }
         async fn read_chunk(&self) -> Result<eoka::RecordingChunk, RecordingError> {
-            self.calls.lock().push("read");
             self.chunks.lock().pop_front().unwrap()
         }
         async fn close(&self) -> Result<(), RecordingError> {
-            self.calls.lock().push("close");
             if self.close_fails {
                 Err(RecordingError::Core(eoka::Error::cdp_msg(
                     "IO.close failed",
@@ -941,35 +974,172 @@ mod tests {
         }
     }
 
+    struct ClosingSource {
+        source: FakeSource,
+        entered: tokio::sync::Notify,
+    }
+
+    impl RecordingSource for ClosingSource {
+        async fn stop(&self) -> Result<(), RecordingError> {
+            self.source.stop().await
+        }
+
+        async fn read_chunk(&self) -> Result<eoka::RecordingChunk, RecordingError> {
+            self.source.read_chunk().await
+        }
+
+        async fn close(&self) -> Result<(), RecordingError> {
+            self.entered.notify_one();
+            std::future::pending().await
+        }
+    }
+
     #[tokio::test]
-    async fn drains_final_eof_bytes_and_closes_stream_before_publication() {
+    async fn cancellation_during_finalization_retains_unpublished_partial() {
+        let manager = RecordingManager::default();
         let root = tempfile::tempdir().unwrap();
-        let output = root.path().join("capture.mp4");
+        let output = root.path().join("cancelled.mp4");
+        let entry = manager
+            .reserve(params(output.to_string_lossy().into_owned()))
+            .unwrap();
+        entry.update(|state| {
+            state.started = true;
+            state.admitted = true;
+        });
         let mut stage = StagedArtifact::prepare(output.to_str().unwrap())
             .await
             .unwrap();
-        let source = FakeSource {
-            chunks: Mutex::new(std::collections::VecDeque::from([
-                Ok(eoka::RecordingChunk {
-                    data: b"first".to_vec(),
-                    eof: false,
-                }),
-                Ok(eoka::RecordingChunk {
-                    data: b"last".to_vec(),
-                    eof: true,
-                }),
-            ])),
-            calls: Mutex::new(Vec::new()),
-            close_fails: false,
+        entry.retain_partial_path(stage.partial.to_string_lossy().into_owned());
+        let mut control = entry.control.subscribe();
+        let source = ClosingSource {
+            source: FakeSource {
+                chunks: Mutex::new(std::collections::VecDeque::from([Ok(
+                    eoka::RecordingChunk {
+                        data: mp4::REPAIRABLE_MP4.to_vec(),
+                        eof: true,
+                    },
+                )])),
+                close_fails: false,
+            },
+            entered: tokio::sync::Notify::new(),
         };
-        drain(&source, &mut stage).await.unwrap();
-        assert_eq!(*source.calls.lock(), ["stop", "read", "read", "close"]);
+        let draining = async {
+            tokio::select! {
+                biased;
+                _ = cancellation(&mut control) => None,
+                result = drain(&source, &mut stage) => Some(result),
+            }
+        };
+        let cancelling = async {
+            source.entered.notified().await;
+            entry.request(true);
+        };
+        let (result, ()) = tokio::join!(draining, cancelling);
+        assert!(result.is_none());
+        finish_cancel(&entry, None, &mut stage, None).await;
+        assert!(!publish(&entry, &stage));
+        let result = entry.snapshot();
+        assert_eq!(result.state, RecordingState::Cancelled);
+        assert!(result.artifact.is_none());
+        let failure = result.failure.unwrap();
+        assert_eq!(
+            failure.partial_path.as_deref(),
+            Some(stage.partial.to_str().unwrap())
+        );
+        assert_eq!(failure.cleanup_uncertain, None);
         assert!(!output.exists());
-        let artifact = stage
-            .publish("video/mp4", Some(ArtifactContainer::Mp4))
-            .unwrap();
-        assert_eq!(artifact.bytes, 9);
-        assert_eq!(std::fs::read(output).unwrap(), b"firstlast");
+        assert_eq!(std::fs::read(&stage.partial).unwrap(), mp4::REPAIRABLE_MP4);
+    }
+
+    #[tokio::test]
+    async fn valid_and_repairable_eof_payloads_finalize_before_publication() {
+        for data in [mp4::VALID_MP4, mp4::REPAIRABLE_MP4] {
+            let manager = RecordingManager::default();
+            let root = tempfile::tempdir().unwrap();
+            let output = root.path().join("capture.mp4");
+            let entry = manager
+                .reserve(params(output.to_string_lossy().into_owned()))
+                .unwrap();
+            entry.update(|state| {
+                state.started = true;
+                state.admitted = true;
+            });
+            let mut stage = StagedArtifact::prepare(output.to_str().unwrap())
+                .await
+                .unwrap();
+            let source = FakeSource {
+                chunks: Mutex::new(std::collections::VecDeque::from([
+                    Ok(eoka::RecordingChunk {
+                        data: data[..data.len() - 16].to_vec(),
+                        eof: false,
+                    }),
+                    Ok(eoka::RecordingChunk {
+                        data: data[data.len() - 16..].to_vec(),
+                        eof: true,
+                    }),
+                ])),
+                close_fails: false,
+            };
+            drain(&source, &mut stage).await.unwrap();
+            assert!(!output.exists());
+            assert!(publish(&entry, &stage));
+            let result = entry.snapshot();
+            assert_eq!(result.state, RecordingState::Completed);
+            assert_eq!(result.artifact.unwrap().bytes, data.len() as u64);
+            assert!(!stage.partial.exists());
+            assert_eq!(std::fs::read(output).unwrap(), mp4::VALID_MP4);
+        }
+    }
+
+    #[tokio::test]
+    async fn invalid_native_containers_fail_without_sealing_or_publication() {
+        for data in [
+            &[][..],
+            &b"not an MP4 container"[..],
+            &mp4::VALID_MP4[..mp4::VALID_MP4.len() - 1],
+        ] {
+            let manager = RecordingManager::default();
+            let root = tempfile::tempdir().unwrap();
+            let output = root.path().join("invalid.mp4");
+            let entry = manager
+                .reserve(params(output.to_string_lossy().into_owned()))
+                .unwrap();
+            entry.update(|state| {
+                state.started = true;
+                state.admitted = true;
+            });
+            let mut stage = StagedArtifact::prepare(output.to_str().unwrap())
+                .await
+                .unwrap();
+            let source = FakeSource {
+                chunks: Mutex::new(std::collections::VecDeque::from([Ok(
+                    eoka::RecordingChunk {
+                        data: data.to_vec(),
+                        eof: true,
+                    },
+                )])),
+                close_fails: false,
+            };
+            let failure = drain(&source, &mut stage).await.unwrap_err();
+            assert_eq!(failure.stage, RecordingFailureStage::Close);
+            assert_eq!(failure.code, ErrorCode::RecordingFailed);
+            assert!(stage
+                .publish("video/mp4", Some(ArtifactContainer::Mp4))
+                .is_err());
+            finish_cancel(&entry, None, &mut stage, Some(failure)).await;
+            let result = entry.snapshot();
+            assert_eq!(result.state, RecordingState::Failed);
+            assert!(result.artifact.is_none());
+            let failure = result.failure.unwrap();
+            assert_eq!(
+                failure.partial_path.as_deref(),
+                Some(stage.partial.to_str().unwrap())
+            );
+            assert_eq!(failure.cleanup_uncertain, None);
+            assert!(!output.exists());
+            assert_eq!(std::fs::read(&stage.partial).unwrap(), data);
+            assert!(!publish(&entry, &stage));
+        }
     }
 
     #[tokio::test]
@@ -992,7 +1162,6 @@ mod tests {
             }
             let source = FakeSource {
                 chunks: Mutex::new(chunks),
-                calls: Mutex::new(Vec::new()),
                 close_fails,
             };
             let failure = drain(&source, &mut stage).await.unwrap_err();
@@ -1028,7 +1197,6 @@ mod tests {
                     eof: true,
                 },
             )])),
-            calls: Mutex::new(Vec::new()),
             close_fails: false,
         };
         assert_eq!(
@@ -1142,7 +1310,8 @@ mod tests {
             let mut stage = StagedArtifact::prepare(output.to_str().unwrap())
                 .await
                 .unwrap();
-            stage.write(b"completed").await.unwrap();
+            stage.write(mp4::VALID_MP4).await.unwrap();
+            repair_stage(&mut stage).await.unwrap();
             stage.seal().await.unwrap();
             entry.retain_partial_path(stage.partial.to_string_lossy().into_owned());
             let (ready, waiting) = std::sync::mpsc::channel();
@@ -1185,7 +1354,7 @@ mod tests {
                     RecordingState::Completed
                 }
             );
-            assert_eq!(std::fs::read(&output).unwrap(), b"completed");
+            assert_eq!(std::fs::read(&output).unwrap(), mp4::VALID_MP4);
             if expire {
                 let failure = result.failure.unwrap();
                 assert!(failure.partial_path.is_none());

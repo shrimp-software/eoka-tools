@@ -204,7 +204,7 @@ Core adds a target-bound owned recording handle around `Page.startScreenRecordin
 - Require a ready, active page. Detect unsupported commands and report `RecordingUnsupported`; do not silently switch algorithms, browser versions or quality modes. A protocol method being listed alone is not proof its encoder works.
 - Start has a caller-known request/recording ID so a lost response cannot justify blindly starting another recorder. Recovery is scoped to the live sidecar; no crash-resume claim.
 - Initial options: output path, max frame dimensions, maximum frame rate. Silent video is the baseline; audio is not promised until separately supported and verified across targets. Native frameRate is a ceiling, not deterministic fixed-fps playback.
-- `stop()` completes only after Chrome stops, all IO chunks reach a bounded-buffer staging file, the stream closes, and the artifact is atomically published without overwriting another file. No whole-video buffering or giant base64 JSON response.
+- `stop()` completes only after Chrome stops, all IO chunks reach a bounded-buffer staging file, the stream closes, fragmented MP4 timing is validated/corrected losslessly, and the artifact is atomically published without overwriting another file. Encoded packets, sample count, file length and the final presentation endpoint are preserved; already-valid native files remain byte-identical. No whole-video buffering or giant base64 JSON response.
 - Finalization runs as bounded background work so status/cancel/shutdown remain responsive. A cancelled waiter is not cancellation of finalization. An explicit cancellation stops capture and releases the stream; report any uncertain cleanup and never label a partial file complete.
 - If finalization fails, return stage/error information and any retained partial-file path. Browser/tab close cancels unfinished recording by default; callers explicitly stop to save. Disconnects invalidate recording handles and preserve honest failure outcomes.
 - Native output is MP4 with Chrome-selected codec; the observed build used AV1. Do not require FFmpeg for this path or label the output H.264. Verify container/decodability with ffprobe during release smoke, not as an implicit SDK runtime dependency.
@@ -1066,8 +1066,9 @@ The upstream defect reproduced in raw CDP (**2/40** short captures) and the SDK
 (**1/40**). Across 224 investigative captures, four defective originals were
 retained. A traced 21µs final-frame gap becomes 0.63 ticks at time base 1/30000
 and truncates to zero, producing duplicate terminal DTS. FFmpeg can exit zero
-while warning. This is not an Eoka stream-copy error and is not resolved by
-clean samples, transcoding, or timestamp normalization. See Chromium's
+while warning. This is not an Eoka stream-copy error; passing captures alone
+do not resolve it. The approved downstream resolution is lossless container
+timing repair, described below; Chromium's raw output remains affected. See
 [tail-frame insertion](https://github.com/chromium/chromium/blob/155.0.8059.39/content/services/devtools_media_encoding_service/devtools_media_encoding_service_impl.cc)
 and [timescale conversion](https://github.com/chromium/chromium/blob/155.0.8059.39/media/muxers/mp4_type_conversion.cc).
 
@@ -1078,6 +1079,50 @@ reviewer-protected environment (currently absent). Main is protected, but local
 npm authentication is absent. No tags, main merges, or packages were published.
 Existing Rust publishing workflows trigger on main, so merging the version
 changes is a release action, not merely PR cleanup.
+
+### Lossless recording finalization
+
+The user approved MP4 timing metadata correction instead of maintaining a
+Chrome fork or preserving defective output bytes. The official browser pin,
+encoded video and public protocol remain unchanged.
+
+- `crates/eoka-server/src/recordings/mp4.rs` validates single-track fragmented
+  native containers using bounded metadata storage and seeks past encoded
+  payloads. It validates all metadata before any correction.
+- A terminal `[0, N]` duration boundary becomes `[1, N-1]`. If the synthetic
+  tail starts a new keyframe fragment, its decode origin and matching index
+  timestamp advance by one tick while its duration decreases by one tick.
+  Neither form changes encoded packets, sample count, file length or the final
+  presentation endpoint. Already-valid files receive no writes.
+- The original staging descriptor is retained through validation and repair.
+  The five-second repair deadline and existing cancellation path precede
+  flush/fsync/close and atomic non-overwrite publication. Invalid or unsupported
+  corrections retain failure/partial evidence rather than claiming completion.
+- Independent FFprobe/FFmpeg smoke repaired all four retained defective Chrome
+  originals: packet hashes and exact durations stayed unchanged, DTS became
+  strictly increasing, decoding emitted no warnings, and a second repair made
+  no changes. All 15 retained clean five-platform originals remained identical.
+- Four reconstructed cross-fragment cases use genuine native keyframe packets,
+  with and without indexes and preceding samples. Independent FFprobe/FFmpeg
+  checks confirmed strictly increasing DTS, unchanged packet hashes/duration
+  and no decoder warnings. These are reconstructed cases, not claimed captures.
+- A security review found an unbounded default-only sample loop. A 256 MiB
+  sparse malformed input exceeded a two-second process limit before correction.
+  Checked aggregate processing now rejects it immediately. Default-only range,
+  timestamp-overflow and unchanged-valid-file regressions cover that path.
+- Local recording/parser tests passed (31), as did artifact tests (5) and the
+  complete paired-core `mise run release-check`. Actual managed SDK smoke
+  completed eight recordings spanning short clips, 1/30/120 fps and a 6.5-second
+  clip, with strict DTS, empty decoder diagnostics and owned-runtime cleanup.
+  Linux namespace and seccomp sandbox checks passed. Initial launches with long
+  runtime paths aborted; a short private `/tmp` runtime root worked without
+  disabling the sandbox or changing the system Chrome installation.
+- The full Node gate passed 264 tests with zero skips and both native gates
+  enabled; all 22 invalid TypeScript consumers were rejected. Actionlint and
+  qualification-script syntax checks passed.
+- Fresh architecture-native regression and packed-runtime qualification is
+  required before clearing the recording readiness blocker. No publication,
+  tags or main merges are authorized.
 
 ### Execution order and handoff rules
 

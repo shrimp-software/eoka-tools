@@ -199,41 +199,82 @@ async function consumer(config) {
     const ffmpegMajor = Number(ffmpegVersion.stdout.match(/^ffmpeg version (?:n)?(\d+)/)?.[1]);
     assert.ok(Number.isInteger(ffmpegMajor) && ffmpegMajor >= 4, 'Cannot establish supported ffmpeg version');
     const nativeTimeBase = ffmpegMajor >= 6 ? ['-fps_mode', 'passthrough', '-enc_time_base', 'demux'] : ffmpegMajor >= 5 ? ['-fps_mode', 'passthrough', '-enc_time_base', '-1'] : ['-vsync', '0', '-enc_time_base', '-1'];
-    for (let index = 0; index < 3; index++) {
-      const path = join(config.output, `native-${index}.mp4`);
-      const recording = await page.record({ path, maxWidth: 800, maxHeight: 600, fps: 30 });
-      const entry = { recordingId: recording.id, path };
+    const recordingSchedule = [
+      { name: 'short-default-67', waitMs: 67 },
+      { name: 'short-default-101', waitMs: 101 },
+      { name: 'short-default-167', waitMs: 167 },
+      { name: 'short-default-251', waitMs: 251 },
+      { name: 'short-120fps-67', fps: 120, waitMs: 67 },
+      { name: 'short-120fps-251', fps: 120, waitMs: 251 },
+      { name: 'short-1fps-1250', fps: 1, waitMs: 1250 },
+      ...Array.from({ length: 3 }, (_, index) => ({ name: `native-${index}`, fps: 30, waitMs: index === 2 ? 6500 : 2000 })),
+    ];
+    evidence.checks.nativeRecordings = { artifactKind: 'finalized SDK MP4', schedule: recordingSchedule, attemptsPerCase: 1, deterministicRepairProof: false };
+    const recordingErrors = [];
+    for (const scheduled of recordingSchedule) {
+      const path = join(config.output, `${scheduled.name}.mp4`);
+      const entry = { ...scheduled, path, artifactKind: 'finalized SDK MP4', status: 'failed' };
+      const caseErrors = [];
       evidence.recordings.push(entry);
-      await delay(2000);
+      let recording;
       try {
+        recording = await page.record({ path, maxWidth: 800, maxHeight: 600, ...(scheduled.fps === undefined ? {} : { fps: scheduled.fps }) });
+        entry.recordingId = recording.id;
+        const started = performance.now();
+        await delay(scheduled.waitMs);
+        entry.elapsedBeforeStopMs = performance.now() - started;
+        const stopping = performance.now();
         entry.artifact = await recording.stop({ timeoutMs: 60000 });
+        entry.finalizationMs = performance.now() - stopping;
         entry.record = recording.record;
+        assert.equal(entry.artifact.bytes, (await stat(path)).size);
+        assert.equal(entry.artifact.container, 'mp4');
+        assert.equal(entry.artifact.mimeType, 'video/mp4');
+        try {
+          const { stdout, stderr } = await command('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_streams', '-show_packets', '-show_data_hash', 'sha256', '-of', 'json', path], `${scheduled.name}-probe`);
+          entry.probeStderr = stderr;
+          const probe = JSON.parse(stdout);
+          entry.stream = probe.streams[0];
+          entry.sampleCount = probe.packets.length;
+          entry.packetDts = probe.packets.map(packet => packet.dts);
+          entry.packetDurations = probe.packets.map(packet => packet.duration ?? null);
+          entry.terminalSamples = probe.packets.slice(-3);
+          assert.equal(stderr.trim(), '', 'Finalized SDK recording probe emitted diagnostics');
+          assert.ok(probe.packets.length >= (scheduled.waitMs >= 1000 ? 2 : 1));
+          assert.ok(entry.stream.width > 0 && entry.stream.width <= 800);
+          assert.ok(entry.stream.height > 0 && entry.stream.height <= 600);
+          assert.ok(Number(entry.stream.duration) > 0);
+          const nonmonotonic = [];
+          for (let packet = 0; packet < probe.packets.length; packet++) {
+            assert.match(String(probe.packets[packet].dts), /^-?\d+$/);
+            if (packet && BigInt(probe.packets[packet].dts) <= BigInt(probe.packets[packet - 1].dts)) nonmonotonic.push(packet);
+          }
+          entry.nonmonotonicDts = nonmonotonic;
+          assert.deepEqual(nonmonotonic, [], 'Finalized SDK recording has duplicate or nonmonotonic packet DTS');
+        } catch (error) {
+          caseErrors.push(error);
+        }
+        try {
+          const decoded = await command('ffmpeg', ['-nostdin', '-v', 'warning', '-xerror', '-i', path, '-map', '0:v:0', ...nativeTimeBase, '-f', 'null', '-'], `${scheduled.name}-decode`);
+          entry.decodeStderr = decoded.stderr;
+          assert.equal(decoded.stderr.trim(), '', 'Finalized SDK recording decode emitted warnings; finalized artifact retained');
+        } catch (error) {
+          entry.decodeStderr = error.stderr ?? entry.decodeStderr;
+          caseErrors.push(error);
+        }
       } catch (error) {
-        entry.error = failure(error);
-        if (error.partialPath) await cp(error.partialPath, join(config.output, `native-${index}.partial.mp4`));
-        throw error;
+        entry.recordingId ??= error.recordingId;
+        entry.record = recording?.record ?? error.record;
+        caseErrors.push(error);
+        if (error.partialPath) {
+          entry.partialPath = join(config.output, `${scheduled.name}.partial.mp4`);
+          try { await cp(error.partialPath, entry.partialPath); } catch (copyError) { caseErrors.push(copyError); }
+        }
       }
-      assert.equal(entry.artifact.bytes, (await stat(path)).size);
-      assert.equal(entry.artifact.container, 'mp4');
-      assert.equal(entry.artifact.mimeType, 'video/mp4');
-      const { stdout } = await command('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_streams', '-show_packets', '-of', 'json', path], `native-${index}-probe`);
-      const probe = JSON.parse(stdout);
-      entry.stream = probe.streams[0];
-      assert.ok(probe.packets.length > 1);
-      assert.ok(entry.stream.width > 0 && entry.stream.width <= 800);
-      assert.ok(entry.stream.height > 0 && entry.stream.height <= 600);
-      assert.ok(Number(entry.stream.duration) > 0);
-      entry.packetDts = probe.packets.map(packet => packet.dts);
-      const nonmonotonic = [];
-      for (let packet = 0; packet < probe.packets.length; packet++) {
-        assert.match(String(probe.packets[packet].dts), /^-?\d+$/);
-        if (packet && BigInt(probe.packets[packet].dts) <= BigInt(probe.packets[packet - 1].dts)) nonmonotonic.push(packet);
-      }
-      entry.nonmonotonicDts = nonmonotonic;
-      const decoded = await command('ffmpeg', ['-nostdin', '-v', 'warning', '-xerror', '-i', path, '-map', '0:v:0', ...nativeTimeBase, '-f', 'null', '-'], `native-${index}-decode`);
-      entry.decodeStderr = decoded.stderr;
-      assert.deepEqual(nonmonotonic, [], 'Native recording has duplicate or nonmonotonic original packet DTS');
-      assert.equal(decoded.stderr.trim(), '', 'Native recording decode emitted warnings; original bytes retained');
+      entry.errors = caseErrors.map(failure);
+      if (caseErrors.length === 0) entry.status = 'passed';
+      else recordingErrors.push(...caseErrors);
+      await save('qualification.json', evidence);
     }
     evidence.checks.ownedCleanup = { pids: await closeOwned(), runtimeRemoved: true };
     if (process.platform === 'linux' && !process.env.DISPLAY) {
@@ -285,6 +326,7 @@ async function consumer(config) {
     assert.ok((await fetch(endpoint)).ok, 'Borrowed Chrome DevTools endpoint did not survive');
     evidence.checks.borrowedSurvival = { pid: external.pid, endpointSurvived: true };
     assert.equal((await installBrowser({ browserCacheDir: freshCache, download: 'never' })).source, 'cache', 'Launching copied external Chrome mutated the verified distribution');
+    if (recordingErrors.length > 0) throw new AggregateError(recordingErrors, 'Finalized SDK recording qualification failed; every scheduled case was attempted once');
     evidence.status = 'passed';
     if (config.readiness.status !== 'ready' || config.readiness.blockers.length !== 0) {
       evidence.status = 'blocked';
