@@ -3,7 +3,6 @@ package eoka
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 )
 
 type AgentObserveOptions struct {
@@ -72,6 +71,12 @@ func (p *Page) AgentStep(ctx context.Context, request AgentStepRequest) (AgentSt
 		request.OperationID = id
 	}
 	result.OperationID = request.OperationID
+	if err := p.b.t.requireCapability("durableActions"); err != nil {
+		return result, operationError(request.OperationID, OperationRecord{}, err)
+	}
+	if err := ctx.Err(); err != nil {
+		return result, &OperationError{OperationID: request.OperationID, Err: err}
+	}
 	params, err := json.Marshal(request)
 	if err != nil {
 		return result, err
@@ -81,7 +86,7 @@ func (p *Page) AgentStep(ctx context.Context, request AgentStepRequest) (AgentSt
 		return result, err
 	}
 	if err := p.call(ctx, "agent.step", input, &result); err != nil {
-		return result, fmt.Errorf("operation %s: outcome unknown: %w", request.OperationID, err)
+		return result, operationError(request.OperationID, OperationRecord{}, err)
 	}
 	return result, nil
 }

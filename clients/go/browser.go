@@ -5,20 +5,31 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
 	"time"
 )
 
-const closeTimeout = 5 * time.Second
+const closeTimeout = 45 * time.Second
 
 var ErrServerBinaryNotFound = errors.New("eoka: eoka-server binary not found (set EOKA_SERVER_BIN, pass eoka.WithServerPath, or add eoka-server to PATH)")
 
 type Browser struct {
-	cmd *exec.Cmd
-	t   *transport
+	cmd         *exec.Cmd
+	t           *transport
+	info        ServerInfo
+	session     BrowserSessionInfo
+	processDone chan struct{}
+	processErr  error
+	closeOnce   sync.Once
+	closeDone   chan struct{}
+	closeErr    error
 }
 
 type TabInfo struct {
@@ -28,53 +39,118 @@ type TabInfo struct {
 }
 
 type options struct {
-	headless       bool
-	userAgent      string
-	timezone       string
-	viewportWidth  int
-	viewportHeight int
-	proxy          string
-	userDataDir    string
-	serverPath     string
-	stderr         io.Writer
-	noAutoDownload bool
+	headless             bool
+	userAgent            string
+	timezone             string
+	viewportWidth        int
+	viewportHeight       int
+	proxy                string
+	userDataDir          string
+	serverPath           string
+	stderr               io.Writer
+	noAutoDownload       bool
+	executablePath       string
+	executablePathSet    bool
+	runtimeDir           string
+	runtimeDirSet        bool
+	sandbox              bool
+	deviceScaleFactor    float64
+	deviceScaleFactorSet bool
+	viewportSet          bool
+	launchOnly           bool
+}
+
+type BrowserOwnership string
+
+const (
+	BrowserOwnershipOwned    BrowserOwnership = "owned"
+	BrowserOwnershipBorrowed BrowserOwnership = "borrowed"
+)
+
+type BrowserSessionInfo struct {
+	Ownership      BrowserOwnership `json:"ownership"`
+	BrowserVersion string           `json:"browserVersion"`
+}
+
+func (b *Browser) SessionInfo() BrowserSessionInfo {
+	return b.session
 }
 
 type Option func(*options)
 
 func WithHeadless(headless bool) Option {
-	return func(o *options) { o.headless = headless }
+	return func(o *options) {
+		o.headless = headless
+		o.launchOnly = true
+	}
 }
 
 func WithUserAgent(userAgent string) Option {
-	return func(o *options) { o.userAgent = userAgent }
+	return func(o *options) {
+		o.userAgent = userAgent
+		o.launchOnly = true
+	}
 }
 
-// WithTimezone sets the browser's IANA timezone, for example
-// "America/Los_Angeles". Keep it coherent with the network used by the
-// browser instead of accepting a randomized stealth default.
 func WithTimezone(timezone string) Option {
-	return func(o *options) { o.timezone = timezone }
+	return func(o *options) {
+		o.timezone = timezone
+		o.launchOnly = true
+	}
 }
 
-// WithViewport sets the browser viewport and virtual screen dimensions. Both
-// values must be positive; invalid dimensions are rejected before launch.
 func WithViewport(width, height int) Option {
 	return func(o *options) {
 		o.viewportWidth = width
 		o.viewportHeight = height
+		o.viewportSet = true
+		o.launchOnly = true
 	}
 }
 
 func WithProxy(proxyURL string) Option {
-	return func(o *options) { o.proxy = proxyURL }
+	return func(o *options) {
+		o.proxy = proxyURL
+		o.launchOnly = true
+	}
 }
 
-// WithUserDataDir keeps a dedicated Chromium profile between launches. Use a
-// private, single-purpose directory; it contains browser state in addition to
-// any session file the caller manages separately.
 func WithUserDataDir(path string) Option {
-	return func(o *options) { o.userDataDir = path }
+	return func(o *options) {
+		o.userDataDir = path
+		o.launchOnly = true
+	}
+}
+
+func WithExecutablePath(path string) Option {
+	return func(o *options) {
+		o.executablePath = path
+		o.executablePathSet = true
+		o.launchOnly = true
+	}
+}
+
+func WithRuntimeDir(path string) Option {
+	return func(o *options) {
+		o.runtimeDir = path
+		o.runtimeDirSet = true
+		o.launchOnly = true
+	}
+}
+
+func WithSandbox(enabled bool) Option {
+	return func(o *options) {
+		o.sandbox = enabled
+		o.launchOnly = true
+	}
+}
+
+func WithDeviceScaleFactor(scale float64) Option {
+	return func(o *options) {
+		o.deviceScaleFactor = scale
+		o.deviceScaleFactorSet = true
+		o.launchOnly = true
+	}
 }
 
 func WithVisible() Option {
@@ -118,7 +194,25 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 	if err != nil {
 		return nil, err
 	}
+	return startBrowser(ctx, o, "browser.launch", launchParams)
+}
 
+func Connect(ctx context.Context, wsEndpoint string, opts ...Option) (*Browser, error) {
+	o := options{headless: true, stderr: io.Discard}
+	for _, opt := range opts {
+		opt(&o)
+	}
+	if o.launchOnly {
+		return nil, errors.New("eoka: Connect does not accept browser launch options")
+	}
+	endpoint, err := url.Parse(wsEndpoint)
+	if err != nil || endpoint.Scheme != "ws" || endpoint.Hostname() == "" || endpoint.User != nil || endpoint.RawQuery != "" || endpoint.ForceQuery || endpoint.Fragment != "" || !strings.HasPrefix(endpoint.Path, "/devtools/browser/") || strings.TrimPrefix(endpoint.Path, "/devtools/browser/") == "" || strings.Contains(strings.TrimPrefix(endpoint.Path, "/devtools/browser/"), "/") {
+		return nil, errors.New("eoka: Connect requires a ws:// browser DevTools endpoint; wss:// is not supported")
+	}
+	return startBrowser(ctx, o, "browser.connect", map[string]any{"wsEndpoint": wsEndpoint})
+}
+
+func startBrowser(ctx context.Context, o options, method string, params map[string]any) (*Browser, error) {
 	binPath, err := resolveServerPath(ctx, o.serverPath, !o.noAutoDownload)
 	if err != nil {
 		return nil, err
@@ -126,6 +220,7 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 
 	cmd := exec.Command(binPath)
 	cmd.Stderr = o.stderr
+	cmd.WaitDelay = time.Second
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -133,30 +228,57 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		_ = stdin.Close()
 		return nil, fmt.Errorf("eoka: creating stdout pipe: %w", err)
 	}
 
 	if err := cmd.Start(); err != nil {
+		_ = stdin.Close()
+		_ = stdout.Close()
 		return nil, fmt.Errorf("eoka: starting %s: %w", binPath, err)
 	}
 
 	t := newTransport(stdin, stdout)
 	go t.readLoop()
 
-	b := &Browser{cmd: cmd, t: t}
+	b := &Browser{cmd: cmd, t: t, processDone: make(chan struct{}), closeDone: make(chan struct{})}
 
-	if err := t.call(ctx, "browser.launch", launchParams, nil); err != nil {
-		t.shutdown()
-		b.killProcess()
-		_ = cmd.Wait()
+	if err := b.hello(ctx, method); err != nil {
+		_ = b.Close(context.Background())
 		return nil, err
+	}
+	if err := t.call(ctx, method, params, &b.session); err != nil {
+		_ = b.Close(context.Background())
+		return nil, err
+	}
+	if (b.session.Ownership != BrowserOwnershipOwned && b.session.Ownership != BrowserOwnershipBorrowed) || strings.TrimSpace(b.session.BrowserVersion) == "" || (method == "browser.connect" && b.session.Ownership != BrowserOwnershipBorrowed) {
+		_ = b.Close(context.Background())
+		return nil, &Error{Code: ErrCodeProtocolMismatch, Message: "invalid browser session ownership or browserVersion"}
 	}
 
 	return b, nil
 }
 
 func (o options) launchParams() (map[string]any, error) {
-	params := map[string]any{"headless": o.headless}
+	params := map[string]any{"headless": o.headless, "sandbox": o.sandbox}
+	if o.executablePathSet || o.executablePath != "" {
+		if !filepath.IsAbs(o.executablePath) {
+			return nil, errors.New("eoka: executable path must be absolute")
+		}
+		params["executablePath"] = o.executablePath
+	}
+	if o.runtimeDirSet || o.runtimeDir != "" {
+		if !filepath.IsAbs(o.runtimeDir) {
+			return nil, errors.New("eoka: runtime directory must be absolute")
+		}
+		params["runtimeDir"] = o.runtimeDir
+	}
+	if o.deviceScaleFactorSet {
+		if err := validateScale(o.deviceScaleFactor); err != nil {
+			return nil, err
+		}
+		params["deviceScaleFactor"] = o.deviceScaleFactor
+	}
 	if o.userAgent != "" {
 		params["userAgent"] = o.userAgent
 	}
@@ -166,9 +288,9 @@ func (o options) launchParams() (map[string]any, error) {
 	if o.userDataDir != "" {
 		params["userDataDir"] = o.userDataDir
 	}
-	if o.viewportWidth != 0 || o.viewportHeight != 0 {
-		if o.viewportWidth <= 0 || o.viewportHeight <= 0 {
-			return nil, fmt.Errorf("eoka: viewport dimensions must be positive")
+	if o.viewportSet || o.viewportWidth != 0 || o.viewportHeight != 0 {
+		if err := validateViewport(o.viewportWidth, o.viewportHeight); err != nil {
+			return nil, err
 		}
 		params["viewportWidth"] = o.viewportWidth
 		params["viewportHeight"] = o.viewportHeight
@@ -186,6 +308,20 @@ func (o options) launchParams() (map[string]any, error) {
 		"password": proxy.password,
 	}
 	return params, nil
+}
+
+func validateViewport(width, height int) error {
+	if width <= 0 || height <= 0 || int64(width) > math.MaxInt32 || int64(height) > math.MaxInt32 {
+		return errors.New("eoka: viewport dimensions must be positive and at most 2147483647")
+	}
+	return nil
+}
+
+func validateScale(scale float64) error {
+	if scale <= 0 || math.IsNaN(scale) || math.IsInf(scale, 0) {
+		return errors.New("eoka: device scale factor must be finite and positive")
+	}
+	return nil
 }
 
 type proxyConfig struct {
@@ -244,6 +380,10 @@ func (b *Browser) Tabs(ctx context.Context) ([]TabInfo, error) {
 	return res.Tabs, err
 }
 
+func (b *Browser) Page(pageID string) *Page {
+	return &Page{id: pageID, b: b}
+}
+
 func (b *Browser) CloseTab(ctx context.Context, pageID string) error {
 	var result struct {
 		CleanupError string `json:"cleanupError"`
@@ -258,27 +398,45 @@ func (b *Browser) CloseTab(ctx context.Context, pageID string) error {
 }
 
 func (b *Browser) Close(ctx context.Context) error {
-	callErr := b.t.call(ctx, "browser.close", map[string]any{}, nil)
-	t := time.NewTimer(closeTimeout)
-	defer t.Stop()
-
-	done := make(chan error, 1)
-	go func() { done <- b.cmd.Wait() }()
-
+	b.closeOnce.Do(func() {
+		if b.closeDone == nil {
+			b.closeDone = make(chan struct{})
+		}
+		go b.close(closeTimeout)
+	})
 	select {
-	case <-done:
+	case <-b.closeDone:
+		return b.closeErr
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (b *Browser) close(grace time.Duration) {
+	defer close(b.closeDone)
+	ctx, cancel := context.WithTimeout(context.Background(), grace)
+	defer cancel()
+	b.closeErr = b.t.call(ctx, "server.shutdown", map[string]any{}, nil)
+	b.t.shutdown()
+	if b.processDone == nil {
+		return
+	}
+	go func() {
+		b.processErr = b.cmd.Wait()
+		close(b.processDone)
+	}()
+	select {
+	case <-b.processDone:
+		if b.closeErr == nil {
+			b.closeErr = b.processErr
+		}
 	case <-ctx.Done():
 		b.killProcess()
-		<-done
-		if callErr == nil {
-			callErr = ctx.Err()
+		<-b.processDone
+		if b.closeErr == nil {
+			b.closeErr = fmt.Errorf("eoka: graceful shutdown exceeded %s: %w", grace, ctx.Err())
 		}
-	case <-t.C:
-		b.killProcess()
-		<-done
 	}
-
-	return callErr
 }
 
 func (b *Browser) killProcess() {

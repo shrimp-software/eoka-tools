@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"math"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -313,5 +315,98 @@ func TestPageErrorPropagation(t *testing.T) {
 	err := page.Click(context.Background(), "#hidden")
 	if !HasCode(err, ErrCodeElementNotVisible) {
 		t.Fatalf("expected ElementNotVisible, got %v", err)
+	}
+}
+
+func TestPageViewportSendsCSSDimensionsAndScaleAndReset(t *testing.T) {
+	var sets, resets atomic.Int32
+	page := newFakePage(t, func(id int64, method string, params json.RawMessage) (any, *rpcError) {
+		switch method {
+		case "page.set_viewport":
+			sets.Add(1)
+			var request struct {
+				PageID string  `json:"pageId"`
+				Width  int     `json:"width"`
+				Height int     `json:"height"`
+				Scale  float64 `json:"deviceScaleFactor"`
+			}
+			if err := json.Unmarshal(params, &request); err != nil || request.PageID != "P1" || request.Width != 640 || request.Height != 360 || request.Scale != 2 {
+				t.Errorf("viewport wire = %s, %v", params, err)
+			}
+		case "page.reset_viewport":
+			resets.Add(1)
+			if string(params) != `{"pageId":"P1"}` {
+				t.Errorf("reset wire = %s", params)
+			}
+		default:
+			return nil, &rpcError{Code: ErrCodeUnknownMethod, Message: method}
+		}
+		return map[string]any{}, nil
+	})
+	ctx := callContext(t)
+	if err := page.SetViewport(ctx, 640, 360, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := page.ResetViewport(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if sets.Load() != 1 || resets.Load() != 1 {
+		t.Fatalf("viewport dispatches = %d sets, %d resets", sets.Load(), resets.Load())
+	}
+}
+
+func TestPageViewportValidationPreventsDispatch(t *testing.T) {
+	var dispatched atomic.Int32
+	page := newFakePage(t, func(id int64, method string, params json.RawMessage) (any, *rpcError) {
+		dispatched.Add(1)
+		return map[string]any{}, nil
+	})
+	for _, dimensions := range [][2]int{{0, 360}, {640, 0}, {-1, 360}, {640, -1}} {
+		if err := page.SetViewport(callContext(t), dimensions[0], dimensions[1], 1); err == nil {
+			t.Fatalf("invalid dimensions accepted: %v", dimensions)
+		}
+	}
+	if maxInt := int(^uint(0) >> 1); int64(maxInt) > math.MaxInt32 {
+		if err := page.SetViewport(callContext(t), maxInt, 360, 1); err == nil {
+			t.Fatal("oversized width accepted")
+		}
+		if err := page.SetViewport(callContext(t), 640, maxInt, 1); err == nil {
+			t.Fatal("oversized height accepted")
+		}
+	}
+	for _, scale := range []float64{0, -1, math.NaN(), math.Inf(1), math.Inf(-1)} {
+		if err := page.SetViewport(callContext(t), 640, 360, scale); err == nil {
+			t.Fatalf("invalid scale accepted: %v", scale)
+		}
+	}
+	if dispatched.Load() != 0 {
+		t.Fatalf("invalid viewport dispatched %d requests", dispatched.Load())
+	}
+}
+
+func TestPageViewportRequiresAdvertisedMethods(t *testing.T) {
+	info := fakeServerInfo()
+	info.Methods = []string{"server.hello", "server.shutdown", "browser.launch"}
+	var dispatched atomic.Int32
+	b := &Browser{t: newFakeTransport(t, func(id int64, method string, params json.RawMessage) (any, *rpcError) {
+		if method == "server.hello" {
+			return info, nil
+		}
+		dispatched.Add(1)
+		return map[string]any{}, nil
+	})}
+	ctx := callContext(t)
+	if err := b.hello(ctx); err != nil {
+		t.Fatal(err)
+	}
+	page := b.Page("P1")
+	if err := page.SetViewport(ctx, 640, 360, 2); !HasCode(err, ErrCodeUnknownMethod) {
+		t.Fatalf("unadvertised set viewport = %v", err)
+	}
+	if err := page.ResetViewport(ctx); !HasCode(err, ErrCodeUnknownMethod) {
+		t.Fatalf("unadvertised reset viewport = %v", err)
+	}
+	if dispatched.Load() != 0 {
+		t.Fatalf("unadvertised viewport dispatched %d requests", dispatched.Load())
 	}
 }

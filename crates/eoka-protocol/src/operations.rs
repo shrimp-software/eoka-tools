@@ -21,6 +21,7 @@ pub struct OperationIdArgs {
 pub struct OperationWaitArgs {
     pub id: String,
     #[serde(default = "wait_timeout")]
+    #[schemars(range(max = 86400000))]
     pub timeout_ms: u64,
 }
 fn wait_timeout() -> u64 {
