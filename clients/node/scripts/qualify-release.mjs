@@ -157,6 +157,15 @@ async function consumer(config) {
     assert.equal(active.hello.serverVersion, releaseManifest.server.version);
     assert.equal(`${active.hello.protocol.major}.${active.hello.protocol.minor}`, releaseManifest.server.protocolVersion);
     evidence.checks.hello = active.hello;
+    if (platform.startsWith('linux-')) {
+      const sandboxPage = await active.newPage('chrome://sandbox');
+      const status = await sandboxPage.evaluate('document.body.innerText');
+      for (const field of ['PID namespaces', 'Network namespaces', 'Seccomp-BPF sandbox']) {
+        assert.match(status, new RegExp(`${field}\\s+Yes(?:\\r?\\n|$)`));
+      }
+      await sandboxPage.close();
+      evidence.checks.sandbox = { status };
+    }
     const scene = '<!doctype html><title>Qualification</title><style>html,body{margin:0;width:800px;height:1200px;background:#123;color:white}input{margin:20px}.box{width:80px;height:80px;background:orange;animation:move 1s alternate infinite linear}@keyframes move{from{transform:translateX(0)}to{transform:translateX(600px)}}</style><input id="field"><div class="box"></div>';
     const page = await active.newPage(`data:text/html,${encodeURIComponent(scene)}`);
     const receipt = await page.fill('#field', 'packed native qualification');

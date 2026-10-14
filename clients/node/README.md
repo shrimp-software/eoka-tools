@@ -97,6 +97,16 @@ The SDK does not install privileged OS packages. Chrome requires its host librar
 
 Sandboxing is enabled by default. Run as an unprivileged user with Chrome's sandbox requirements satisfied (including the host/container user-namespace and seccomp policy). A sandbox failure is an error; the SDK never retries with sandbox disabled. `sandbox: false` is an explicit security-reducing expert choice for a separately isolated environment, not the default container recipe.
 
+Ubuntu 23.10+ can deny unprivileged user namespaces through AppArmor even when
+Chrome itself is sandbox-enabled. An administrator must provide a narrowly
+scoped executable-path policy for the owned Chrome runtime, as described in
+[Chromium's AppArmor guidance](https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md).
+Any process able to replace an executable at an allowed path gains that
+permission; use a private runtime directory, not a broad `/tmp/**/chrome` rule.
+The SDK neither installs privileged policies nor disables the host restriction.
+ARM release CI uses a private per-job path exception, removes it afterward,
+and checks Chrome's actual PID/network namespace and seccomp status.
+
 For example, prepare a Linux x64 image with Node 24.21.0 and a distribution new enough for the **actual staged binary**. The following Debian trixie setup is a recipe to qualify, not a statement of completed container support. Supply the two locally staged tarballs described below as build inputs:
 
 ```dockerfile
