@@ -1,18 +1,7 @@
 {
   "schemaVersion": 1,
-  "status": "blocked",
+  "status": "ready",
   "sdkVersion": "0.1.0-beta.1",
   "chromeBuildId": "155.0.8059.39",
-  "blockers": [
-    {
-      "id": "native-recording-duplicate-terminal-dts",
-      "status": "unresolved",
-      "description": "Chrome 155 emits duplicate decoding timestamps from terminal and intermediate zero-duration samples. Lossless repair must cover retained failures and pass native qualification before readiness is cleared.",
-      "observed": {
-        "rawDirectCdp": { "failures": 2, "runs": 40 },
-        "sdk": { "failures": 1, "runs": 40 }
-      },
-      "resolutionRequirement": "Validate the approved lossless metadata repair against genuine defective recordings, preserve encoded packets and presentation endpoints, and pass fresh five-target qualification without retries, transcoding, or weakened strict-DTS and decoder checks."
-    }
-  ]
+  "blockers": []
 }

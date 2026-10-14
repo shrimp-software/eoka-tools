@@ -425,15 +425,18 @@ decode diagnostics, headed launch, owned cleanup, and borrowed-browser survival.
 Failures retain recordings and diagnostics as workflow artifacts. FFmpeg/ffprobe
 are qualification tools, not consumer dependencies.
 
-The [paired preview](https://github.com/shrimp-software/eoka-tools/actions/runs/38534451688)
-completed every runtime check on Ubuntu 22.04 x64, Ubuntu 24.04 ARM64, macOS 15
-x64/ARM64, and Windows 2025 x64. It produced 30 screenshots and 15 original AV1
-MP4s with strictly increasing packet timestamps and empty decoder diagnostics.
-Linux checks also observed active PID/network namespaces and seccomp.
-All five runs correctly ended **blocked** by the existing recording-readiness
-defect; these clean samples do not clear it. Live capture is not fixed-cadence
-export: the macOS samples contained 27–38 frames over about two seconds with
-30 fps requested.
+The [lossless-repair preview](https://github.com/shrimp-software/eoka-tools/actions/runs/38612635401)
+at tools `70b47e0ff27b271407c3073f5c1a389d87a5fd0a` and core
+`9bae96b9cefa02794a4058ae54b67273ad453490` completed every runtime check on
+Ubuntu 22.04 x64, Ubuntu 24.04 ARM64, macOS 15 x64/ARM64, and Windows 2025 x64.
+All 50 one-attempt finalized recordings passed strict packet DTS and empty
+decoder diagnostics; all 28 deterministic repair regressions passed on each
+architecture. Image, sandbox, headed-launch and ownership checks also passed.
+Those jobs ended **blocked** solely by the then-closed source readiness record.
+The recording blocker is now cleared using that native evidence plus retained
+defective-file repair/preservation proof, not passing live samples alone.
+Registry-backed qualification and npm publication prerequisites remain separate.
+Live recording still does not promise fixed-cadence export.
 
 For local host-development evidence, not release qualification:
 

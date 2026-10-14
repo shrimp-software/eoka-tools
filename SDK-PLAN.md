@@ -1073,10 +1073,10 @@ timing repair, described below; Chromium's raw output remains affected. See
 and [timescale conversion](https://github.com/chromium/chromium/blob/155.0.8059.39/media/muxers/mp4_type_conversion.cc).
 
 Remaining release prerequisites: actual core publication and registry-backed
-lockfile regeneration; a real recording-defect resolution and fresh five-target
-runtime evidence; npm scope/package bootstrap with trusted publishers; and the
-reviewer-protected environment (currently absent). Main is protected, but local
-npm authentication is absent. No tags, main merges, or packages were published.
+lockfile regeneration; npm scope/package bootstrap with trusted publishers; and
+the reviewer-protected environment (currently absent). Recording correctness is
+resolved by the lossless finalization evidence below. Main is protected, but
+local npm authentication is absent. No tags, main merges, or packages were published.
 Existing Rust publishing workflows trigger on main, so merging the version
 changes is a release action, not merely PR cleanup.
 
@@ -1138,9 +1138,19 @@ encoded video and public protocol remain unchanged.
 - After this extension, the complete paired-core release check and all 264 Node
   tests passed again with zero skips and both native gates enabled. Independent
   read-only timing and parser-security reviews reported no findings.
-- Fresh architecture-native regression and packed-runtime qualification is
-  required before clearing the recording readiness blocker. No publication,
-  tags or main merges are authorized.
+- The refreshed [native matrix 38612635401](https://github.com/shrimp-software/eoka-tools/actions/runs/38612635401)
+  used tools `70b47e0ff27b271407c3073f5c1a389d87a5fd0a` and core
+  `9bae96b9cefa02794a4058ae54b67273ad453490`. All 28 deterministic repair
+  regressions passed on each of the five architectures. All 50 scheduled live
+  recordings passed strict DTS and empty decoder diagnostics, without retries.
+  Every target completed image, headed-launch, owned-cleanup and borrowed-browser
+  checks; Linux sandbox checks remained enabled.
+- Those jobs ended `blocked` only because source readiness had not yet been
+  cleared. The recording blocker is now resolved by the causal repair,
+  deterministic retained-file preservation proof and fresh native matrix.
+  A ready-state preview must still complete artifact collection; publication
+  additionally requires the registry-backed core and npm prerequisites above.
+  No publication, tags or main merges are authorized.
 
 ### Execution order and handoff rules
 
