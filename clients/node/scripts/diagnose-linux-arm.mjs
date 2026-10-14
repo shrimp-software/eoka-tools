@@ -71,7 +71,9 @@ try {
   const installed = await command('npm-install', 'npm', ['install', '--ignore-scripts', '--omit=optional', '--no-audit', '--no-fund'], { cwd: app, timeoutMs: 300000 });
   assert.equal(installed.code, 0);
   const require = createRequire(join(app, 'package.json'));
-  const { Browser, installBrowser, releaseManifest } = await import(pathToFileURL(require.resolve('@cbxss/eoka')).href);
+  const sdkImport = join(app, 'sdk-import.mjs');
+  await writeFile(sdkImport, "export * from '@cbxss/eoka';\n");
+  const { Browser, installBrowser, releaseManifest } = await import(pathToFileURL(sdkImport).href);
   assert.equal(releaseManifest.chrome.buildId, '155.0.8059.39');
   const server = join(dirname(require.resolve(`${pin.packageName}/package.json`)), pin.executablePath);
   const serverBytes = await readFile(server);
