@@ -1,0 +1,9 @@
+{
+  "id": 2,
+  "result": {
+    "result": {
+      "answer": 42,
+      "items": [1, "two", null, { "nested": true }]
+    }
+  }
+}

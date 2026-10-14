@@ -1,3 +1,6 @@
+[tools]
+node = "24.21.0"
+
 [tasks.fmt]
 description = "Check Rust formatting"
 run = "cargo fmt --all -- --check"
@@ -40,3 +43,55 @@ run = ["bash scripts/check-server-release-trigger.sh", "bash scripts/release-che
 [tasks.install-cli]
 description = "Install the local eoka CLI"
 run = "CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$PWD/target} cargo install --path crates/eoka-cli --force"
+
+[tasks.sidecar-schema]
+description = "Export canonical sidecar request and result schemas"
+run = "cargo run --quiet --locked -p eoka-protocol --bin export-sidecar-schema"
+
+[tasks.node-generate]
+description = "Generate TypeScript sidecar protocol contracts"
+run = "npm --prefix clients/node run generate"
+
+[tasks.node-build]
+description = "Build the compiled ESM SDK and TypeScript declarations"
+run = "npm --prefix clients/node run build"
+
+[tasks.node-check]
+description = "Check generated contracts, SDK consumers and runtime regressions"
+run = "npm --prefix clients/node run check"
+
+[tasks.node-test]
+description = "Build and run Node SDK runtime and packaging tests"
+run = "npm --prefix clients/node test"
+
+[tasks.node-consumer]
+description = "Build, pack, install and exercise an external Node SDK consumer"
+run = "npm --prefix clients/node run test:consumer"
+
+[tasks.node-stage-release]
+description = "Stage SDK and platform packages from existing release server artifacts"
+run = "npm --prefix clients/node run stage:release --"
+
+[tasks.node-qualify-release]
+description = "Qualify packed native SDK artifacts outside the repository"
+run = "node clients/node/scripts/qualify-release.mjs"
+
+[tasks.node-install-browser]
+description = "Prepare and verify the pinned Chrome cache explicitly"
+run = "npm --prefix clients/node run example:install --"
+
+[tasks.node-offline]
+description = "Launch from the prepared Chrome cache without installer networking"
+run = "npm --prefix clients/node run example:offline --"
+
+[tasks.sidecar-check]
+description = "Check sidecar protocol, runtime and Go contracts"
+run = [
+  "cargo test --locked -p eoka-protocol -p eoka-server",
+  "mise run go-check",
+  "mise run node-check",
+]
+
+[tasks.go-check]
+description = "Check Go sidecar client behavior and races"
+run = "go -C clients/go test -race ./..."

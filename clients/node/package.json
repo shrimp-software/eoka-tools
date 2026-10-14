@@ -1,0 +1,59 @@
+{
+  "name": "@cbxss/eoka",
+  "version": "0.1.0-beta.1",
+  "private": true,
+  "type": "module",
+  "description": "Node.js SDK with pinned Chrome installation and verified eoka sidecar resolution",
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./protocol": {
+      "types": "./dist/generated/protocol.d.ts",
+      "import": "./dist/generated/protocol.js"
+    },
+    "./release-manifest.json": "./dist/release-manifest.json"
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "dist/generated/schema-bundle.json",
+    "dist/release-manifest.json",
+    "dist/LICENSE",
+    "README.md",
+    "examples/*.mjs"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": "^24.21.0"
+  },
+  "scripts": {
+    "generate": "node scripts/generate-protocol.mjs",
+    "generate:check": "node scripts/generate-protocol.mjs --check",
+    "build": "node scripts/build.mjs",
+    "check": "npm run generate:check && npm run build && node scripts/typecheck.mjs && node --test tests/*.test.mjs",
+    "typecheck": "npm run build && node scripts/typecheck.mjs",
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "test:consumer": "npm run build && node --test tests/package-consumer.test.mjs",
+    "stage:release": "node scripts/stage-release.mjs",
+    "example": "node examples/explicit-paths.mjs",
+    "example:install": "node examples/install-browser.mjs",
+    "example:offline": "node examples/offline.mjs",
+    "example:schema": "node examples/consume-schema.mjs",
+    "example:capture": "node examples/capture.mjs"
+  },
+  "dependencies": {
+    "@puppeteer/browsers": "3.2.4",
+    "ajv": "8.17.1",
+    "proxy-agent": "8.0.1",
+    "yauzl": "3.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "typescript": "5.9.3"
+  }
+}
