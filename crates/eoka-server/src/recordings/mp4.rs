@@ -370,7 +370,9 @@ struct Sample {
 #[derive(Default)]
 struct Timeline {
     last: Option<Sample>,
-    zero: Option<Sample>,
+    last_dts: Option<u64>,
+    zero_count: u64,
+    zero_runs: bool,
     boundary: Option<Sample>,
     boundary_index: Option<TimeField>,
     samples: u64,
@@ -379,7 +381,7 @@ struct Timeline {
 }
 
 impl Timeline {
-    fn sample(&mut self, mut sample: Sample) -> Result<()> {
+    fn sample(&mut self, mut sample: Sample) -> Result<Option<u32>> {
         self.samples = add(self.samples, 1)?;
         sample.ordinal = self.samples;
         add(sample.dts, u64::from(sample.duration))?;
@@ -394,7 +396,12 @@ impl Timeline {
         if sample.composition != 0 {
             self.supported = false;
         }
+        let corrected_dts = add(sample.dts, self.zero_count)?;
         if let Some(previous) = self.last {
+            require(
+                self.zero_count == 0 || sample.fragment == previous.fragment,
+                "Zero MP4 duration run crosses a fragment boundary",
+            )?;
             if sample.dts == previous.dts && sample.fragment != previous.fragment {
                 require(
                     previous.duration != 0
@@ -402,6 +409,10 @@ impl Timeline {
                         && sample.sync
                         && self.boundary.replace(sample).is_none(),
                     "Unsupported duplicate MP4 fragment timestamp",
+                )?;
+                require(
+                    add(sample.dts, 1)? > self.last_dts.unwrap(),
+                    "Non-increasing repaired MP4 decode timestamps",
                 )?;
             } else {
                 require(
@@ -411,16 +422,38 @@ impl Timeline {
                             && sample.fragment == previous.fragment),
                     "Non-increasing MP4 decode timestamps",
                 )?;
+                require(
+                    corrected_dts > self.last_dts.unwrap(),
+                    "Non-increasing repaired MP4 decode timestamps",
+                )?;
             }
         }
-        if sample.duration == 0 {
+        let correction = if sample.duration == 0 {
             require(
-                self.zero.replace(sample).is_none(),
-                "Multiple zero MP4 sample durations",
+                sample.duration_position.is_some(),
+                "Zero MP4 duration is not explicit",
             )?;
-        }
+            self.zero_count = add(self.zero_count, 1)?;
+            self.zero_runs = true;
+            Some(1)
+        } else if self.zero_count != 0 {
+            require(
+                u64::from(sample.duration) > self.zero_count,
+                "Insufficient MP4 duration for zero-run repair",
+            )?;
+            require(
+                sample.duration_position.is_some(),
+                "MP4 zero-run donor duration is not explicit",
+            )?;
+            let duration = sample.duration - self.zero_count as u32;
+            self.zero_count = 0;
+            Some(duration)
+        } else {
+            None
+        };
         self.last = Some(sample);
-        Ok(())
+        self.last_dts = Some(corrected_dts);
+        Ok(correction)
     }
 }
 
@@ -434,6 +467,7 @@ async fn inspect_fragment(
     moof: BoxHeader,
     track: &Track,
     timeline: &mut Timeline,
+    apply: bool,
 ) -> Result<Fragment> {
     let mut cursor = moof.body;
     let mut traf = None;
@@ -636,7 +670,7 @@ async fn inspect_fragment(
                     require(sample_size != 0, "Empty MP4 encoded sample")?;
                     data = add(data, u64::from(sample_size))?;
                     require(data <= reader.length, "MP4 sample data exceeds file")?;
-                    timeline.sample(Sample {
+                    let correction = timeline.sample(Sample {
                         dts,
                         duration: sample_duration,
                         duration_position,
@@ -651,6 +685,15 @@ async fn inspect_fragment(
                         sync: sample_flags & 0x01010000 == 0
                             && sample_flags & 0x03000000 == 0x02000000,
                     })?;
+                    if apply {
+                        if let Some(value) = correction {
+                            reader
+                                .file
+                                .seek(SeekFrom::Start(duration_position.unwrap()))
+                                .await?;
+                            reader.file.write_all(&value.to_be_bytes()).await?;
+                        }
+                    }
                     dts = add(dts, u64::from(sample_duration))?;
                     if stride == 0 && count - index > 2 {
                         let skipped = u64::from(count - index - 2);
@@ -879,7 +922,8 @@ pub(super) async fn repair(file: &mut File) -> Result<()> {
                 let track = track
                     .as_ref()
                     .ok_or_else(|| invalid("Missing MP4 movie metadata"))?;
-                pending = Some(inspect_fragment(&mut reader, header, track, &mut timeline).await?);
+                pending =
+                    Some(inspect_fragment(&mut reader, header, track, &mut timeline, false).await?);
             }
             b"mdat" => {
                 let fragment = pending
@@ -910,52 +954,18 @@ pub(super) async fn repair(file: &mut File) -> Result<()> {
         ftyp_seen && track.is_some() && timeline.samples != 0 && pending.is_none(),
         "Incomplete MP4 recording",
     )?;
-    if timeline.zero.is_some() || timeline.boundary.is_some() {
+    require(
+        timeline.zero_count == 0,
+        "Unterminated zero MP4 duration run",
+    )?;
+    if timeline.zero_runs || timeline.boundary.is_some() {
         let track = track.as_ref().unwrap();
         require(
             track.supported && track.video && track.av1 && timeline.supported,
             "Unsupported metadata for MP4 timing repair",
         )?;
-        require(
-            !(timeline.zero.is_some() && timeline.boundary.is_some()),
-            "Multiple MP4 timing defects",
-        )?;
     }
-    if let Some(zero) = timeline.zero {
-        let last = timeline.last.unwrap();
-        require(timeline.boundary.is_none(), "Multiple MP4 timing defects")?;
-        require(
-            add(zero.ordinal, 1)? == last.ordinal
-                && zero.fragment == last.fragment
-                && zero.dts == last.dts
-                && zero.composition == 0
-                && last.composition == 0,
-            "Zero duration is not the terminal MP4 boundary",
-        )?;
-        require(
-            last.duration >= 2,
-            "Insufficient terminal MP4 duration for repair",
-        )?;
-        let zero_position = zero
-            .duration_position
-            .ok_or_else(|| invalid("Zero MP4 duration is not explicit"))?;
-        let last_position = last
-            .duration_position
-            .ok_or_else(|| invalid("Terminal MP4 duration is not explicit"))?;
-        require(
-            zero_position < last_position,
-            "Unordered MP4 duration fields",
-        )?;
-        add(last.dts, 1)?;
-        reader.file.seek(SeekFrom::Start(zero_position)).await?;
-        reader.file.write_all(&1u32.to_be_bytes()).await?;
-        reader.file.seek(SeekFrom::Start(last_position)).await?;
-        reader
-            .file
-            .write_all(&(last.duration - 1).to_be_bytes())
-            .await?;
-    }
-    if let Some(boundary) = timeline.boundary {
+    let terminal = if let Some(boundary) = timeline.boundary {
         let last = timeline.last.unwrap();
         require(
             boundary.ordinal == last.ordinal && last.duration >= 2 && last.composition == 0,
@@ -972,12 +982,35 @@ pub(super) async fn repair(file: &mut File) -> Result<()> {
         let duration_position = last
             .duration_position
             .ok_or_else(|| invalid("Terminal MP4 duration is not explicit"))?;
+        Some((origin, duration_position, last.duration - 1, index))
+    } else {
+        None
+    };
+    if timeline.zero_runs {
+        let mut apply_timeline = Timeline {
+            supported: true,
+            ..Timeline::default()
+        };
+        cursor = 0;
+        while cursor < length {
+            let header = reader.header(cursor, length).await?;
+            if header.kind == *b"moof" {
+                inspect_fragment(
+                    &mut reader,
+                    header,
+                    track.as_ref().unwrap(),
+                    &mut apply_timeline,
+                    true,
+                )
+                .await?;
+            }
+            cursor = header.end;
+        }
+    }
+    if let Some((origin, duration_position, duration, index)) = terminal {
         origin.write(reader.file).await?;
         reader.file.seek(SeekFrom::Start(duration_position)).await?;
-        reader
-            .file
-            .write_all(&(last.duration - 1).to_be_bytes())
-            .await?;
+        reader.file.write_all(&duration.to_be_bytes()).await?;
         if let Some(index) = index {
             index.write(reader.file).await?;
         }

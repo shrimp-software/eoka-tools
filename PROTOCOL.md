@@ -282,14 +282,17 @@ No audio, FFmpeg runtime dependency, whole-video Buffer or video base64 response
 is promised.
 
 Before sealing a recording, the server validates its fragmented MP4 timing on
-the original staging descriptor. For the supported native AV1 terminal
-quantization defect, it advances the final sample by one track tick and reduces
-its duration by one tick, correcting fragment/index times when necessary.
+the original staging descriptor. For supported native AV1 zero-duration runs,
+`k` explicit zeros within one fragment become `k` one-tick durations, borrowing
+those ticks from the following duration only if it remains positive. Each run's
+endpoint and later timestamps stay unchanged. A duplicate terminal sample in a
+new fragment advances by one tick, reducing its duration and correcting the
+matching fragment/index times.
 Encoded packets, sample count, file length and the final presentation endpoint
 are preserved. Already-valid native recordings remain byte-identical; this is
 container metadata repair, not re-encoding or a raw-byte identity guarantee.
-Unsupported/malformed containers, nonterminal defects or insufficient terminal
-duration fail without publication. Validation/repair has a five-second deadline;
+Unsupported/malformed containers, insufficient donor duration or unresolved
+cross-fragment collisions fail without publication. Validation/repair has a five-second deadline;
 an interrupted correction can leave an incomplete retained partial, never a
 completed artifact. The subsequent flush/fsync/close and publication contract is
 unchanged.

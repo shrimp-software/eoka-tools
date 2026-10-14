@@ -322,19 +322,21 @@ Direct file output bypasses the 16 MiB sidecar response limit, not Chrome's imag
 
 Capture dispatch requires negotiated methods and capabilities: `screenshotOptions`, `screenshotFile`, and `nativeRecording`. Native recording additionally requires a ready active page and an encoder supported by the actual Chrome build. Unsupported recording raises `RecordingUnsupported`; the SDK never switches engines/browser versions. Video is silent native MP4 with Chrome-selected codec, not a promise of H.264. FFmpeg is not an SDK runtime dependency. `fps` is an integral ceiling from 1 through 120, not deterministic fixed-rate playback; optional `maxWidth`/`maxHeight` are positive integers no greater than 2147483647. Screenshot crops/quality are not recording options.
 
-Chrome 155.0.8059.39 can emit duplicate terminal MP4 decoding timestamps when a
-short tail-frame interval becomes zero at the track timescale. The sidecar
-validates the fragmented MP4 before publication and applies a bounded, lossless
-timing correction for this terminal defect. Encoded packets, sample count, file
-length and the final presentation endpoint are preserved; clean recordings stay
-byte-identical. The final sample advances by one track tick, with its duration
-reduced by the same tick. Matching fragment decode/index times are corrected
-when the tail starts a new fragment.
+Chrome 155.0.8059.39 can emit duplicate MP4 decoding timestamps, including
+zero-duration prefixes and terminal tails. The sidecar validates the fragmented
+MP4 before publication and applies bounded, lossless timing corrections.
+Within a fragment, a run of `k` explicit zero durations becomes `k` one-tick
+durations; the following duration decreases by `k` and must remain positive.
+The run endpoint and later timestamps remain unchanged. A duplicate final sample
+starting a new fragment advances by one tick, with its duration reduced by one
+tick and matching fragment decode/index times corrected.
+Encoded packets, sample count, file length and the final presentation endpoint
+are preserved; clean recordings stay byte-identical.
 
 This changes container timing metadata, not the codec or encoded frames. It
 requires neither a Chrome fork nor FFmpeg. Unsupported or malformed containers,
-nonterminal timing defects and insufficient final duration fail finalization
-without publishing a success-named file. Validation/repair uses the original
+insufficient donor duration and unresolved cross-fragment timing collisions
+fail finalization without publishing a success-named file. Validation/repair uses the original
 staging descriptor under a five-second deadline; failure retains partial-file
 evidence. The core Rust raw-stream primitive remains unmodified Chrome output.
 Release checks require strictly increasing finalized packet DTS and empty

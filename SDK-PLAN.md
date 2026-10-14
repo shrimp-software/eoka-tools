@@ -1089,11 +1089,14 @@ encoded video and public protocol remain unchanged.
 - `crates/eoka-server/src/recordings/mp4.rs` validates single-track fragmented
   native containers using bounded metadata storage and seeks past encoded
   payloads. It validates all metadata before any correction.
-- A terminal `[0, N]` duration boundary becomes `[1, N-1]`. If the synthetic
-  tail starts a new keyframe fragment, its decode origin and matching index
-  timestamp advance by one tick while its duration decreases by one tick.
-  Neither form changes encoded packets, sample count, file length or the final
-  presentation endpoint. Already-valid files receive no writes.
+- Within-fragment runs of `k` explicit zero durations become `k` one-tick
+  durations, borrowing `k` ticks from the next duration only when it remains
+  positive. Each run endpoint and subsequent timestamps stay unchanged. A
+  duplicate terminal sample starting a new keyframe fragment instead advances
+  its decode origin and matching index by one tick, reducing its duration by
+  one tick. Corrected DTS is validated across fragment boundaries before writes.
+  Encoded packets, sample count, file length and the final presentation endpoint
+  remain unchanged. Already-valid files receive no writes.
 - The original staging descriptor is retained through validation and repair.
   The five-second repair deadline and existing cancellation path precede
   flush/fsync/close and atomic non-overwrite publication. Invalid or unsupported
@@ -1120,6 +1123,21 @@ encoded video and public protocol remain unchanged.
 - The full Node gate passed 264 tests with zero skips and both native gates
   enabled; all 22 invalid TypeScript consumers were rejected. Actionlint and
   qualification-script syntax checks passed.
+- The first repair matrix, [38608946086](https://github.com/shrimp-software/eoka-tools/actions/runs/38608946086),
+  exposed nine additional native failures: intermediate/consecutive zero
+  durations on Linux x64 and both macOS targets. All 50 scheduled cases ran
+  once; 41 completed, and all lifecycle checks completed. Linux ARM and Windows
+  completed every runtime check but remained blocked by source readiness.
+- Those nine unchanged originals are now regression fixtures. The generalized
+  two-pass repair passed independent FFprobe/FFmpeg checks on all 13 retained
+  defective files, preserving packet hashes, length and exact duration, with
+  strict DTS, no decoder diagnostics and idempotence. All 41 already-valid
+  finalized files from that matrix stayed byte-identical. The recording/parser
+  suite now passes 41 tests, including late-invalid metadata, insufficient room,
+  multiple runs, cross-trun runs and corrected cross-fragment collisions.
+- After this extension, the complete paired-core release check and all 264 Node
+  tests passed again with zero skips and both native gates enabled. Independent
+  read-only timing and parser-security reviews reported no findings.
 - Fresh architecture-native regression and packed-runtime qualification is
   required before clearing the recording readiness blocker. No publication,
   tags or main merges are authorized.

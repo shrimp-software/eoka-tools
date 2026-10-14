@@ -7,12 +7,12 @@
     {
       "id": "native-recording-duplicate-terminal-dts",
       "status": "unresolved",
-      "description": "Chrome 155 emitted duplicate terminal decoding timestamps in native MP4 output. A single passing capture does not resolve the known defect.",
+      "description": "Chrome 155 emits duplicate decoding timestamps from terminal and intermediate zero-duration samples. Lossless repair must cover retained failures and pass native qualification before readiness is cleared.",
       "observed": {
         "rawDirectCdp": { "failures": 2, "runs": 40 },
         "sdk": { "failures": 1, "runs": 40 }
       },
-      "resolutionRequirement": "Fix or establish a real native recording correctness resolution, record the evidence in source, and pass fresh five-target qualification without retries, transcoding, or metadata-only substitution."
+      "resolutionRequirement": "Validate the approved lossless metadata repair against genuine defective recordings, preserve encoded packets and presentation endpoints, and pass fresh five-target qualification without retries, transcoding, or weakened strict-DTS and decoder checks."
     }
   ]
 }

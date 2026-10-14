@@ -17,6 +17,18 @@ const CLEAN: [&[u8]; 5] = [
     include_bytes!("../../../tests/fixtures/recordings/clean-win32-x64.mp4"),
 ];
 
+const ZERO_PREFIX: [&[u8]; 9] = [
+    include_bytes!("../../../tests/fixtures/recordings/zero-prefix-linux-x64-gnu-120fps-67.mp4"),
+    include_bytes!("../../../tests/fixtures/recordings/zero-prefix-darwin-x64-default-251.mp4"),
+    include_bytes!("../../../tests/fixtures/recordings/zero-prefix-darwin-x64-120fps-67.mp4"),
+    include_bytes!("../../../tests/fixtures/recordings/zero-prefix-darwin-arm64-default-167.mp4"),
+    include_bytes!("../../../tests/fixtures/recordings/zero-prefix-darwin-arm64-default-101.mp4"),
+    include_bytes!("../../../tests/fixtures/recordings/zero-prefix-darwin-arm64-120fps-67.mp4"),
+    include_bytes!("../../../tests/fixtures/recordings/zero-prefix-darwin-arm64-120fps-251.mp4"),
+    include_bytes!("../../../tests/fixtures/recordings/zero-prefix-darwin-arm64-native-0.mp4"),
+    include_bytes!("../../../tests/fixtures/recordings/zero-prefix-darwin-arm64-native-2.mp4"),
+];
+
 #[derive(Clone, Copy)]
 struct BoxRange {
     start: usize,
@@ -95,6 +107,7 @@ struct Demuxed {
     durations: Vec<u32>,
     payload: Vec<Vec<u8>>,
     duration_positions: Vec<usize>,
+    fragments: Vec<std::ops::Range<usize>>,
 }
 
 fn demux(bytes: &[u8]) -> Demuxed {
@@ -103,8 +116,10 @@ fn demux(bytes: &[u8]) -> Demuxed {
         durations: Vec::new(),
         payload: Vec::new(),
         duration_positions: Vec::new(),
+        fragments: Vec::new(),
     };
     for moof in descendants(bytes, b"moof") {
+        let first_sample = output.dts.len();
         let traf = boxes(bytes, moof.body, moof.end)
             .into_iter()
             .find(|header| header.kind == *b"traf")
@@ -120,14 +135,19 @@ fn demux(bytes: &[u8]) -> Demuxed {
             u64::from(u32_at(bytes, tfdt.body + 4))
         };
         for run in children.iter().filter(|header| header.kind == *b"trun") {
-            assert_eq!(u32_at(bytes, run.body) & 0xffffff, 0x305);
+            let flags = u32_at(bytes, run.body) & 0xffffff;
+            assert!(flags == 0x305 || flags == 0xb05);
+            let stride = if flags & 0x800 == 0 { 8 } else { 12 };
             let count = u32_at(bytes, run.body + 4) as usize;
             let offset = u32_at(bytes, run.body + 8) as i32;
             let mut data = usize::try_from((moof.start as i64) + i64::from(offset)).unwrap();
             for index in 0..count {
-                let position = run.body + 16 + index * 8;
+                let position = run.body + 16 + index * stride;
                 let duration = u32_at(bytes, position);
                 let size = u32_at(bytes, position + 4) as usize;
+                if flags & 0x800 != 0 {
+                    assert_eq!(u32_at(bytes, position + 8), 0);
+                }
                 output.dts.push(dts);
                 output.durations.push(duration);
                 output.payload.push(bytes[data..data + size].to_vec());
@@ -136,6 +156,7 @@ fn demux(bytes: &[u8]) -> Demuxed {
                 data += size;
             }
         }
+        output.fragments.push(first_sample..output.dts.len());
     }
     output
 }
@@ -190,20 +211,47 @@ async fn repaired_losslessly(bytes: &[u8]) {
     );
     assert_eq!(bytes.len(), output.len());
     assert_eq!(before.dts.len(), after.dts.len());
-    let penultimate = before.duration_positions[before.duration_positions.len() - 2];
-    let last = *before.duration_positions.last().unwrap();
-    assert_eq!(u32_at(&output, penultimate), 1);
-    assert_eq!(u32_at(&output, last), u32_at(bytes, last) - 1);
-    for position in 0..bytes.len() {
-        if !(penultimate..penultimate + 4).contains(&position)
-            && !(last..last + 4).contains(&position)
-        {
-            assert_eq!(
-                bytes[position], output[position],
-                "unexpected mutation at {position}"
+    assert_eq!(
+        before.dts.last().unwrap() + u64::from(*before.durations.last().unwrap()),
+        after.dts.last().unwrap() + u64::from(*after.durations.last().unwrap())
+    );
+    let mut expected = bytes.to_vec();
+    for fragment in &before.fragments {
+        let mut index = fragment.start;
+        while index < fragment.end {
+            if before.durations[index] != 0 {
+                assert_eq!(before.dts[index], after.dts[index]);
+                index += 1;
+                continue;
+            }
+            let first_zero = index;
+            while index < fragment.end && before.durations[index] == 0 {
+                index += 1;
+            }
+            assert!(index < fragment.end);
+            let zeros = u32::try_from(index - first_zero).unwrap();
+            assert!(before.durations[index] > zeros);
+            for zero in first_zero..index {
+                put_u32(&mut expected, before.duration_positions[zero], 1);
+                assert_eq!(
+                    after.dts[zero],
+                    before.dts[first_zero] + (zero - first_zero) as u64
+                );
+            }
+            put_u32(
+                &mut expected,
+                before.duration_positions[index],
+                before.durations[index] - zeros,
             );
+            assert_eq!(after.dts[index], before.dts[index] + u64::from(zeros));
+            assert_eq!(
+                before.dts[index] + u64::from(before.durations[index]),
+                after.dts[index] + u64::from(after.durations[index])
+            );
+            index += 1;
         }
     }
+    assert_eq!(output, expected);
     let (result, repeated) = apply(&output).await;
     result.unwrap();
     assert_eq!(output, repeated);
@@ -212,6 +260,13 @@ async fn repaired_losslessly(bytes: &[u8]) {
 #[tokio::test]
 async fn retained_native_originals_receive_only_two_duration_writes() {
     for fixture in DEFECTIVE {
+        repaired_losslessly(fixture).await;
+    }
+}
+
+#[tokio::test]
+async fn hosted_intermediate_and_consecutive_zero_originals_preserve_packets_and_endpoints() {
+    for fixture in ZERO_PREFIX {
         repaired_losslessly(fixture).await;
     }
 }
@@ -274,16 +329,271 @@ async fn extended_file_type_and_media_box_sizes_are_supported() {
     }
 }
 
+fn native_duration_runs(runs: &[&[u32]]) -> Vec<u8> {
+    let packet = demux(REPAIRABLE_MP4).payload.remove(0);
+    let moof = descendants(REPAIRABLE_MP4, b"moof")[0];
+    let traf = descendants(REPAIRABLE_MP4, b"traf")[0];
+    let template = descendants(REPAIRABLE_MP4, b"trun")[0];
+    let mut output = REPAIRABLE_MP4[..template.start].to_vec();
+    let mut offsets = Vec::new();
+    let mut sample_count = 0;
+    for durations in runs {
+        assert!(!durations.is_empty());
+        let start = output.len();
+        output.extend_from_slice(&REPAIRABLE_MP4[template.start..template.body + 16]);
+        put_u32(&mut output, start, 24 + durations.len() as u32 * 8);
+        put_u32(&mut output, start + 12, durations.len() as u32);
+        offsets.push((start + 16, sample_count * packet.len()));
+        for &duration in *durations {
+            output.extend_from_slice(&duration.to_be_bytes());
+            output.extend_from_slice(&(packet.len() as u32).to_be_bytes());
+        }
+        sample_count += durations.len();
+    }
+    let fragment_end = output.len();
+    put_u32(&mut output, moof.start, (fragment_end - moof.start) as u32);
+    put_u32(&mut output, traf.start, (fragment_end - traf.start) as u32);
+    for (position, payload_offset) in offsets {
+        put_u32(
+            &mut output,
+            position,
+            (fragment_end - moof.start + 8 + payload_offset) as u32,
+        );
+    }
+    output.extend_from_slice(&(8 + sample_count as u32 * packet.len() as u32).to_be_bytes());
+    output.extend_from_slice(b"mdat");
+    for _ in 0..sample_count {
+        output.extend_from_slice(&packet);
+    }
+    output
+}
+
+fn append_native_fragment(bytes: &mut Vec<u8>, durations: &[u32], origin: u64) {
+    let mut fragment = native_duration_runs(&[durations]);
+    let moof = descendants(&fragment, b"moof")[0];
+    let tfdt = descendants(&fragment, b"tfdt")[0];
+    let mfhd = descendants(&fragment, b"mfhd")[0];
+    put_u64(&mut fragment, tfdt.body + 4, origin);
+    put_u32(&mut fragment, mfhd.body + 4, 2);
+    bytes.extend_from_slice(&fragment[moof.start..]);
+}
+
+fn implicit_duration_run(bytes: &mut Vec<u8>, run_index: usize, duration: u32) {
+    let moof = descendants(bytes, b"moof")[0];
+    let traf = descendants(bytes, b"traf")[0];
+    let trex = descendants(bytes, b"trex")[0];
+    let runs = descendants(bytes, b"trun");
+    let run = runs[run_index];
+    let count = u32_at(bytes, run.body + 4) as usize;
+    let removed = count as u32 * 4;
+    put_u32(bytes, trex.body + 12, duration);
+    put_u32(bytes, moof.start, (moof.end - moof.start) as u32 - removed);
+    put_u32(bytes, traf.start, (traf.end - traf.start) as u32 - removed);
+    put_u32(bytes, run.start, (run.end - run.start) as u32 - removed);
+    put_u32(bytes, run.body, 0x205);
+    for header in &runs {
+        let offset = u32_at(bytes, header.body + 8);
+        put_u32(bytes, header.body + 8, offset - removed);
+    }
+    for index in (0..count).rev() {
+        let position = run.body + 16 + index * 8;
+        bytes.drain(position..position + 4);
+    }
+}
+
+fn composition_offset_run(version: u32, composition: u32) -> Vec<u8> {
+    let mut fixture = native_duration_runs(&[&[0, 0, 3, 17]]);
+    let moof = descendants(&fixture, b"moof")[0];
+    let traf = descendants(&fixture, b"traf")[0];
+    let run = descendants(&fixture, b"trun")[0];
+    let count = u32_at(&fixture, run.body + 4) as usize;
+    let added = count as u32 * 4;
+    put_u32(
+        &mut fixture,
+        moof.start,
+        (moof.end - moof.start) as u32 + added,
+    );
+    put_u32(
+        &mut fixture,
+        traf.start,
+        (traf.end - traf.start) as u32 + added,
+    );
+    put_u32(
+        &mut fixture,
+        run.start,
+        (run.end - run.start) as u32 + added,
+    );
+    put_u32(&mut fixture, run.body, (version << 24) | 0xb05);
+    let offset = u32_at(&fixture, run.body + 8);
+    put_u32(&mut fixture, run.body + 8, offset + added);
+    for index in (0..count).rev() {
+        let position = run.body + 16 + (index + 1) * 8;
+        let value = if index + 1 == count { composition } else { 0 };
+        fixture.splice(position..position, value.to_be_bytes());
+    }
+    fixture
+}
+
 #[tokio::test]
-async fn multiple_nonterminal_and_terminal_zeros_are_rejected_without_writes() {
+async fn explicit_nonterminal_and_consecutive_zero_runs_are_repaired() {
     let parsed = demux(REPAIRABLE_MP4);
-    for values in [[0, 0, 999], [0, 499, 999], [499, 1, 0]] {
+    for values in [[0, 0, 999], [0, 499, 999]] {
         let mut fixture = REPAIRABLE_MP4.to_vec();
         for (&position, value) in parsed.duration_positions.iter().zip(values) {
             put_u32(&mut fixture, position, value);
         }
+        repaired_losslessly(&fixture).await;
+    }
+}
+
+#[tokio::test]
+async fn multiple_explicit_runs_and_runs_across_truns_preserve_later_timestamps() {
+    for runs in [
+        vec![&[0, 0, 3, 17, 0, 5, 19, 0, 0, 0, 4, 23][..]],
+        vec![
+            &[0][..],
+            &[0, 3, 17, 0][..],
+            &[5, 19, 0, 0][..],
+            &[0, 4, 23][..],
+        ],
+        vec![&[17, 0, 0, 3, 0, u32::MAX, 23][..]],
+    ] {
+        repaired_losslessly(&native_duration_runs(&runs)).await;
+    }
+}
+
+#[tokio::test]
+async fn explicit_zero_runs_with_insufficient_room_or_no_donor_are_rejected_without_writes() {
+    for durations in [
+        &[0, 1, 999][..],
+        &[0, 0, 1, 999][..],
+        &[0, 0, 2, 999][..],
+        &[0, 0, 0, 3, 999][..],
+        &[499, 1, 0][..],
+        &[499, 0, 0][..],
+        &[0, 0, 0][..],
+        &[0, 3, 17, 0, 0, 2][..],
+    ] {
+        unchanged_error(&native_duration_runs(&[durations])).await;
+    }
+}
+
+#[tokio::test]
+async fn explicit_zero_run_crossing_fragment_boundary_is_rejected_before_writes() {
+    let mut fixture = ZERO_PREFIX[8].to_vec();
+    let parsed = demux(&fixture);
+    let boundary = parsed.fragments[0].end - 1;
+    put_u32(&mut fixture, parsed.duration_positions[boundary], 0);
+    unchanged_error(&fixture).await;
+}
+
+#[tokio::test]
+async fn correctable_early_run_does_not_mutate_before_late_metadata_is_validated() {
+    let original = ZERO_PREFIX[8];
+    let last_run = *descendants(original, b"trun").last().unwrap();
+    let last_origin = *descendants(original, b"tfdt").last().unwrap();
+    for (position, value) in [(last_run.body + 4, u32::MAX), (last_run.body + 8, 0)] {
+        let mut fixture = original.to_vec();
+        put_u32(&mut fixture, position, value);
         unchanged_error(&fixture).await;
     }
+    let mut fixture = REPAIRABLE_MP4.to_vec();
+    let parsed = demux(&fixture);
+    put_u32(&mut fixture, parsed.duration_positions[0], 0);
+    put_u32(&mut fixture, parsed.duration_positions[1], 499);
+    let index = descendants(&fixture, b"tfra")[0];
+    put_u32(&mut fixture, index.body + 8, u32::MAX);
+    unchanged_error(&fixture).await;
+    let mut fixture = original.to_vec();
+    put_u64(&mut fixture, last_origin.body + 4, 0);
+    unchanged_error(&fixture).await;
+    let mut fixture = original.to_vec();
+    fixture.extend_from_slice(&[0, 0, 0, 8, b's', b'i', b'd', b'x']);
+    unchanged_error(&fixture).await;
+    let mut fixture = original.to_vec();
+    let parsed = demux(&fixture);
+    let count = parsed.duration_positions.len();
+    put_u32(&mut fixture, parsed.duration_positions[count - 2], 0);
+    put_u32(&mut fixture, parsed.duration_positions[count - 1], 1);
+    unchanged_error(&fixture).await;
+}
+
+#[tokio::test]
+async fn corrected_fragment_tail_cannot_collide_with_the_next_decode_origin() {
+    for origin in [1, 2] {
+        let mut fixture = native_duration_runs(&[&[0, 0, 999]]);
+        append_native_fragment(&mut fixture, &[999], origin);
+        unchanged_error(&fixture).await;
+    }
+    let mut safe_overlap = native_duration_runs(&[&[0, 0, 999]]);
+    append_native_fragment(&mut safe_overlap, &[999], 3);
+    repaired_losslessly(&safe_overlap).await;
+}
+
+#[tokio::test]
+async fn zero_run_and_duplicate_terminal_fragment_cannot_produce_a_decode_collision() {
+    for durations in [&[0, 999][..], &[0, 0, 999][..], &[499, 0, 999][..]] {
+        let mut fixture = native_duration_runs(&[durations]);
+        let original_tail = *demux(&fixture).dts.last().unwrap();
+        append_native_fragment(&mut fixture, &[999], original_tail);
+        unchanged_error(&fixture).await;
+    }
+}
+
+#[tokio::test]
+async fn independent_zero_run_and_terminal_fragment_repairs_preserve_the_presentation_end() {
+    let mut fixture = native_duration_runs(&[&[0, 3, 499, 999]]);
+    append_native_fragment(&mut fixture, &[999], 502);
+    let before = demux(&fixture);
+    let (result, output) = apply(&fixture).await;
+    result.unwrap();
+    let after = demux(&output);
+    assert!(strict_dts(&after.dts));
+    assert_eq!(after.dts, [0, 1, 3, 502, 503]);
+    assert_eq!(after.durations, [1, 2, 499, 999, 998]);
+    assert_eq!(before.payload, after.payload);
+    assert_eq!(before.dts.len(), after.dts.len());
+    assert_eq!(fixture.len(), output.len());
+    assert_eq!(
+        before.dts.last().unwrap() + u64::from(*before.durations.last().unwrap()),
+        after.dts.last().unwrap() + u64::from(*after.durations.last().unwrap())
+    );
+    let origin = *descendants(&fixture, b"tfdt").last().unwrap();
+    let mut expected = fixture.clone();
+    put_u32(&mut expected, before.duration_positions[0], 1);
+    put_u32(&mut expected, before.duration_positions[1], 2);
+    put_u32(
+        &mut expected,
+        *before.duration_positions.last().unwrap(),
+        998,
+    );
+    put_u64(&mut expected, origin.body + 4, 503);
+    assert_eq!(output, expected);
+    let (result, repeated) = apply(&output).await;
+    result.unwrap();
+    assert_eq!(output, repeated);
+}
+
+#[tokio::test]
+async fn implicit_zero_and_implicit_donor_runs_are_rejected_before_any_writes() {
+    let mut implicit_zero = native_duration_runs(&[&[0, 3, 19], &[0, 0]]);
+    implicit_duration_run(&mut implicit_zero, 1, 0);
+    unchanged_error(&implicit_zero).await;
+    let mut implicit_donor = native_duration_runs(&[&[0, 0], &[5, 19]]);
+    implicit_duration_run(&mut implicit_donor, 1, 5);
+    unchanged_error(&implicit_donor).await;
+}
+
+#[tokio::test]
+async fn zero_run_repair_requires_zero_composition_offsets_and_av1() {
+    for version in [0, 1] {
+        repaired_losslessly(&composition_offset_run(version, 0)).await;
+        unchanged_error(&composition_offset_run(version, 1)).await;
+    }
+    unchanged_error(&composition_offset_run(1, u32::MAX)).await;
+    let mut unsupported_codec = native_duration_runs(&[&[0, 0, 3, 17]]);
+    unsupported_codec[534..538].copy_from_slice(b"vp09");
+    unchanged_error(&unsupported_codec).await;
 }
 
 #[tokio::test]
