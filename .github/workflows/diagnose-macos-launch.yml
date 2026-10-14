@@ -1,4 +1,4 @@
-name: Diagnose macOS launch
+name: Verify macOS signing cache
 
 on:
   pull_request:
@@ -61,7 +61,7 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
       - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db
-      - name: Build two immutable diagnostic sidecars and SDK
+      - name: Verify signing cache behavior with separate build directories
         env:
           BEFORE: ${{ inputs.before_core_ref }}
           FIXED: ${{ inputs.fixed_core_ref }}
@@ -74,16 +74,12 @@ jobs:
           for variant in before fixed; do
             core_path="$RUNNER_TEMP/diagnostic-core-$variant"
             mv ".diagnostic-core-$variant" "$core_path"
-            cargo --config "patch.crates-io.eoka.path='$core_path'" build --release -p eoka-server
-            cp target/release/eoka-server "diagnostic/eoka-server-$variant"
-            cargo --config "patch.crates-io.eoka.path='$core_path'" metadata --format-version 1 > "diagnostic/$variant-cargo.json"
-            cp Cargo.lock "diagnostic/$variant-Cargo.lock"
             cp clients/node/scripts/signing-cache-probe.rs "$core_path/examples/signing_cache_probe.rs"
             mkdir "$RUNNER_TEMP/signing-cache-$variant"
-            TMPDIR="$RUNNER_TEMP/signing-cache-$variant" cargo run --manifest-path "$core_path/Cargo.toml" --target-dir target --release --locked --example signing_cache_probe > "diagnostic/$variant-signing-cache.json"
+            TMPDIR="$RUNNER_TEMP/signing-cache-$variant" cargo run --manifest-path "$core_path/Cargo.toml" --target-dir "$RUNNER_TEMP/probe-target-$variant" --release --locked --example signing_cache_probe > "diagnostic/$variant-signing-cache.json"
             rm "$core_path/examples/signing_cache_probe.rs"
           done
-          cargo test --manifest-path "$core_path/Cargo.toml" --target-dir target --release --lib --locked stealth::patcher::macos_bundle_tests
+          cargo test --manifest-path "$core_path/Cargo.toml" --target-dir "$RUNNER_TEMP/probe-target-fixed" --release --lib --locked stealth::patcher::macos_bundle_tests
           mise exec -- node --input-type=module -e '
             import assert from "node:assert/strict";
             import { readFileSync } from "node:fs";
@@ -93,15 +89,6 @@ jobs:
             assert.equal(before.secondError, false);
             assert.deepEqual(fixed, { firstError: true, cacheAccepted: false, secondError: true, originalUnchanged: true });
           '
-          mise exec -- npm --prefix clients/node ci --ignore-scripts --omit=optional
-          mise exec -- npm --prefix clients/node run build
-      - name: Diagnose raw and managed launch without retries
-        env:
-          BEFORE_CORE_REF: ${{ inputs.before_core_ref }}
-          FIXED_CORE_REF: ${{ inputs.fixed_core_ref }}
-          TOOLS_SOURCE_SHA: ${{ github.sha }}
-        run: |
-          mise exec -- node clients/node/scripts/diagnose-macos-launch.mjs --before diagnostic/eoka-server-before --fixed diagnostic/eoka-server-fixed --output diagnostic/evidence
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
