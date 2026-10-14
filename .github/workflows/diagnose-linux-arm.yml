@@ -1,6 +1,9 @@
 name: diagnose-linux-arm
 
 on:
+  pull_request:
+    paths:
+      - '.github/workflows/diagnose-linux-arm.yml'
   workflow_dispatch:
     inputs:
       candidate_run_id:
@@ -18,6 +21,7 @@ permissions:
 
 jobs:
   diagnose:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
     defaults:
