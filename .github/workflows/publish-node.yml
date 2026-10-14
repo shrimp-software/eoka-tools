@@ -1,0 +1,110 @@
+name: Publish Node prerelease
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact 40-character commit currently at protected main; publishes only 0.1.0-beta.1 to next
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-prerelease-publication
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Verify protected source and environment
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      actions: read
+    env:
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db
+      - name: Fail closed before qualification or deployment
+        run: mise exec -- node clients/node/scripts/publish-release.mjs gate
+
+  qualify:
+    name: Qualify exact publication payload
+    needs: gate
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/qualify-node-release.yml
+    with:
+      source_ref: ${{ github.sha }}
+      core_ref: ''
+      publication: true
+
+  publish:
+    name: Publish platform packages then SDK to next
+    needs: [gate, qualify]
+    runs-on: ubuntu-22.04
+    environment:
+      name: npm-prerelease
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    env:
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      GH_TOKEN: ${{ github.token }}
+      QUALIFICATION_ARTIFACT_ID: ${{ needs.qualify.outputs.artifact-id }}
+      QUALIFICATION_ARTIFACT_DIGEST: ${{ needs.qualify.outputs.artifact-digest }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db
+      - name: Recheck approved source and protections
+        run: mise exec -- node clients/node/scripts/publish-release.mjs gate
+      - name: Install SDK build dependencies without scripts
+        run: mise exec -- npm --prefix clients/node ci --ignore-scripts --omit=optional
+      - name: Build source metadata verifier
+        run: mise exec -- npm --prefix clients/node run build
+      - name: Verify exact same-run qualification artifact and all package hashes
+        run: mise exec -- node clients/node/scripts/publish-release.mjs download
+      - name: Publish using trusted OIDC only
+        run: mise exec -- node clients/node/scripts/publish-release.mjs publish
+
+  registry-smoke:
+    name: Clean registry install and browser smoke
+    needs: [qualify, publish]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      actions: read
+    env:
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      GH_TOKEN: ${{ github.token }}
+      QUALIFICATION_ARTIFACT_ID: ${{ needs.qualify.outputs.artifact-id }}
+      QUALIFICATION_ARTIFACT_DIGEST: ${{ needs.qualify.outputs.artifact-digest }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db
+      - name: Install Chrome runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libasound2 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libgbm1 libgtk-3-0 libnss3 libx11-xcb1 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 fonts-liberation
+      - name: Install SDK build dependencies without scripts
+        run: mise exec -- npm --prefix clients/node ci --ignore-scripts --omit=optional
+      - name: Build source metadata verifier
+        run: mise exec -- npm --prefix clients/node run build
+      - name: Verify exact same-run qualification payload again
+        run: mise exec -- node clients/node/scripts/publish-release.mjs download
+      - name: Verify registry integrity and provenance then run browser smoke
+        run: mise exec -- node clients/node/scripts/publish-release.mjs smoke

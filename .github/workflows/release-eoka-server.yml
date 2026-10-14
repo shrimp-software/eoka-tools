@@ -32,6 +32,47 @@ jobs:
             echo "tag=$TAG"
           } >> "$GITHUB_OUTPUT"
 
+  build-linux:
+    name: Build ${{ matrix.target }} (glibc 2.35)
+    needs: parse
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+            asset: eoka-server-linux-amd64
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+            asset: eoka-server-linux-arm64
+    runs-on: ${{ matrix.os }}
+    container: ubuntu:22.04
+    permissions:
+      contents: read
+    steps:
+      - name: Install baseline build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential pkg-config libssl-dev ca-certificates curl git
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+        with:
+          key: glibc-2.35-${{ matrix.target }}-eoka-server
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }} -p eoka-server
+      - name: Stage asset
+        run: |
+          mkdir dist
+          cp "target/${{ matrix.target }}/release/eoka-server" "dist/${{ matrix.asset }}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+          if-no-files-found: error
+
   build-hosted:
     name: Build ${{ matrix.target }}
     needs: parse
@@ -39,12 +80,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-            asset: eoka-server-linux-amd64
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-24.04-arm
-            asset: eoka-server-linux-arm64
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             asset: eoka-server-windows-amd64.exe
@@ -125,7 +160,7 @@ jobs:
 
   release:
     name: Publish release
-    needs: [parse, build-hosted, build-macos]
+    needs: [parse, build-linux, build-hosted, build-macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write
