@@ -253,6 +253,17 @@ jobs:
         with:
           ref: ${{ needs.source.outputs.sha }}
           persist-credentials: false
+      - name: Permit sandbox namespaces only for isolated ARM qualification Chrome
+        if: matrix.platform == 'linux-arm64-gnu'
+        run: |
+          set -euo pipefail
+          root="$(mktemp -d /tmp/eq.XXXXXX)"
+          printf 'TMPDIR=%s\nEOKA_QUALIFICATION_TEMP=%s\n' "$root" "$root" >> "$GITHUB_ENV"
+          printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile eoka-qualification "%s/eq-*/{r,c}/**/chrome" flags=(unconfined) {\n  userns,\n}\n' "$root" > "$RUNNER_TEMP/eoka-qualification.apparmor"
+          sudo apparmor_parser -r "$RUNNER_TEMP/eoka-qualification.apparmor"
+          mkdir -p evidence/linux-arm64-gnu
+          cp "$RUNNER_TEMP/eoka-qualification.apparmor" evidence/linux-arm64-gnu/apparmor-profile.txt
+          cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns > evidence/linux-arm64-gnu/apparmor-userns-setting.txt
       - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db
       - name: Install macOS decoder
         if: startsWith(matrix.platform, 'darwin-')
@@ -270,6 +281,16 @@ jobs:
           PLATFORM: ${{ matrix.platform }}
         run: |
           mise exec -- node clients/node/scripts/qualify-release.mjs --packages packages --cache "$RUNNER_TEMP/b" --output "evidence/$PLATFORM"
+      - name: Remove isolated ARM qualification policy and scratch root
+        if: always() && matrix.platform == 'linux-arm64-gnu'
+        run: |
+          status=0
+          if [[ -f "$RUNNER_TEMP/eoka-qualification.apparmor" ]]; then
+            sudo apparmor_parser -R "$RUNNER_TEMP/eoka-qualification.apparmor" || status=$?
+          fi
+          if [[ -n "${EOKA_QUALIFICATION_TEMP:-}" ]]; then rm -rf -- "$EOKA_QUALIFICATION_TEMP"; fi
+          printf 'TMPDIR=/tmp\n' >> "$GITHUB_ENV"
+          exit "$status"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
