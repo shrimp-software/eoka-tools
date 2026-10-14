@@ -360,6 +360,15 @@ try {
 
 Recovery is scoped to the live sidecar session, not crash resume. `Recording.status()` returns the current `RecordingRecord`; `.record` retains the latest observed evidence. States are `running`, `finalizing`, `completed`, `cancelled`, and `failed`. Unknown IDs fail explicitly. `stop()` shares server-side finalization and fulfills only with a completed, published native artifact. Repeated/concurrent stop calls do not stop Chrome twice. Each local waiter has its own signal/deadline; aborting or timing out a waiter does **not** cancel the recorder or finalizer. Recover status or wait again. `cancel()` explicitly releases capture/stream resources and returns a terminal record, including `completed` if publication won the race or `failed` if cleanup failed.
 
+A sidecar retains at most 1,024 distinct recording IDs and 16 MiB of cumulative
+UTF-8 `recordingId`, `pageId`, and resolved `path` bytes. The byte limit bounds
+retained start parameters, not exact process memory. Completed, cancelled, and
+failed records keep their capacity; IDs are never evicted or reused. At capacity,
+new IDs fail with `ServerBusy` before recording or file staging starts. Existing
+IDs still recover, and changed parameters still conflict. Start a new
+`Browser`/sidecar session for fresh capacity; stopping or cancelling does not
+reset history.
+
 `RecordingError` preserves `recordingId`, `record`, `failure`, `path`, `partialPath`, and `cleanupUncertain`, plus the normal request state/ID, cause, server data, and stderr evidence. Failed/cancelled stop outcomes are errors, never completed artifacts. A retained partial file is not the destination success name. Closing a tab/browser cancels unfinished recordings by default; explicitly await stop to save first. Disconnect/target-loss outcomes preserve honest failure/cleanup uncertainty; closing a borrowed session never kills the borrowed browser.
 
 Error-carried recording records receive the same identity, output-path and completed-artifact checks as successful responses. Inconsistent records raise `Protocol`, retain the rejected wire evidence, and do not replace a handle's known record. Valid later evidence for the same failed terminal recording may still add partial-file or publication details.
@@ -452,10 +461,17 @@ real registry checksum; a local path-patched check is not registry proof.
 
 `scripts/publication-readiness.json` records unresolved release defects. Clearing
 a recording blocker requires deterministic repair/preservation regressions and
-fresh five-platform qualification, not passing samples alone. Each native build
-runs the repair regressions; runtime checks cover short/default/minimum/maximum
-frame-rate captures and a multi-fragment recording. No retry-to-pass or decoder
-warning suppression is permitted.
+fresh five-platform qualification, not passing samples alone. Every Chrome pin
+update must pass the complete recording suite on each architecture and ten
+single-attempt native captures: four short/default-rate clips, two short
+120-fps clips, one 1-fps clip, two two-second clips, and one multi-fragment clip.
+Both artifact collection and publication independently require the actual running
+Chrome version to match the pin, the complete schedule, published MP4 records,
+strictly increasing packet DTS, and empty probe/decoder diagnostics. A `passed`
+summary alone is insufficient. No retry-to-pass or warning suppression is
+permitted. The private MP4 correction remains limited to the documented native
+timing defects; changing Chrome's container layout requires renewed qualification,
+not an implicit generic muxer or transcoder.
 
 `publish-node.yml` is manual, restricted to an exact current protected `main`
 commit, and publishes only `0.1.0-beta.1` under `next` with npm provenance.
@@ -466,8 +482,24 @@ configured for this repository, workflow, and environment. Bootstrap ownership
 and environment setup are external prerequisites; this workflow does not
 create them or fall back to an npm token.
 
-The publish job accepts only same-run, same-source qualified artifacts, verifies
-their hashes and complete platform evidence, publishes native packages before
-the SDK, then checks a credential-free registry installation and provenance.
+The publish job accepts only same-run, same-source qualified artifacts and
+preflights all six registry versions before writing anything. Existing versions
+are skipped only when their SHA-512 integrity matches the qualified tarball,
+`next` already points at that version, npm registry signatures verify, and
+keyless Sigstore provenance binds the exact artifact, source commit, protected
+main workflow, manual event, and original workflow run. The pinned public Sigstore
+verifier is release-tooling-only, not an SDK runtime dependency. Registry signature
+checks use isolated installs with lifecycle scripts disabled; foreign-platform
+packages are installed only for verification, never executed.
+
+After a partial publication or lost publish response, rerun the failed jobs of
+the **same workflow run**, retaining its qualified artifacts and unchanged current
+`main` source. Verified existing uploads are preserved; only missing native
+packages are published, followed by the SDK. Mismatched integrity, provenance,
+tags, source, or unavailable registry evidence abort before any new upload.
+There is no automatic publish retry or retagging. If source or artifacts changed,
+do not bypass these checks: use a separately reviewed roll-forward release.
+The final smoke checks a credential-free registry installation and provenance.
+
 No tag, merge, or publication is part of PR preparation. Existing Rust publishing
 workflows trigger on `main`; merging the version changes is a release action.

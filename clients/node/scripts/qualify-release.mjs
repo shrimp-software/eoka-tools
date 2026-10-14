@@ -5,6 +5,7 @@ import { access, cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'n
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
+import { assertRecordingQualification, recordingSchedule } from './recording-qualification.mjs';
 
 const exec = promisify(execFile);
 const platforms = ['linux-x64-gnu', 'linux-arm64-gnu', 'darwin-x64', 'darwin-arm64', 'win32-x64'];
@@ -199,17 +200,8 @@ async function consumer(config) {
     const ffmpegMajor = Number(ffmpegVersion.stdout.match(/^ffmpeg version (?:n)?(\d+)/)?.[1]);
     assert.ok(Number.isInteger(ffmpegMajor) && ffmpegMajor >= 4, 'Cannot establish supported ffmpeg version');
     const nativeTimeBase = ffmpegMajor >= 6 ? ['-fps_mode', 'passthrough', '-enc_time_base', 'demux'] : ffmpegMajor >= 5 ? ['-fps_mode', 'passthrough', '-enc_time_base', '-1'] : ['-vsync', '0', '-enc_time_base', '-1'];
-    const recordingSchedule = [
-      { name: 'short-default-67', waitMs: 67 },
-      { name: 'short-default-101', waitMs: 101 },
-      { name: 'short-default-167', waitMs: 167 },
-      { name: 'short-default-251', waitMs: 251 },
-      { name: 'short-120fps-67', fps: 120, waitMs: 67 },
-      { name: 'short-120fps-251', fps: 120, waitMs: 251 },
-      { name: 'short-1fps-1250', fps: 1, waitMs: 1250 },
-      ...Array.from({ length: 3 }, (_, index) => ({ name: `native-${index}`, fps: 30, waitMs: index === 2 ? 6500 : 2000 })),
-    ];
-    evidence.checks.nativeRecordings = { artifactKind: 'finalized SDK MP4', schedule: recordingSchedule, attemptsPerCase: 1, deterministicRepairProof: false };
+    const recordingSchedule = config.recordingSchedule;
+    evidence.checks.nativeRecordings = { artifactKind: 'finalized SDK MP4', browserVersion: active.browserVersion, schedule: recordingSchedule, attemptsPerCase: 1 };
     const recordingErrors = [];
     for (const scheduled of recordingSchedule) {
       const path = join(config.output, `${scheduled.name}.mp4`);
@@ -390,6 +382,7 @@ if (options.aggregate) {
     assert.equal(result.preview, false, 'Local preview cannot qualify a publication');
     assert.equal(result.development, false, 'Host-development artifact cannot qualify a publication');
     assert.equal(result.sandbox, true);
+    assertRecordingQualification(result, manifest.chrome.buildId);
     assert.deepEqual(result.packages, packages);
     await cp(join(options.evidence, platform), join(options.output, 'evidence', platform), { recursive: true });
     evidence.push({ platform, filename, sha256: digest(await readFile(source)) });
@@ -442,7 +435,7 @@ if (options.aggregate) {
     const install = await npm(['install', '--ignore-scripts', '--omit=optional', '--no-audit', '--no-fund'], app);
     await writeFile(join(options.output, 'npm-install.stdout'), install.stdout);
     await writeFile(join(options.output, 'npm-install.stderr'), install.stderr);
-    const config = { scratch, cache: options.cache, output: options.output, sourceSha: env.EOKA_SOURCE_SHA ?? null, readiness, preview: options.preview === true, development: hostPin.development };
+    const config = { scratch, cache: options.cache, output: options.output, sourceSha: env.EOKA_SOURCE_SHA ?? null, readiness, recordingSchedule, preview: options.preview === true, development: hostPin.development };
     await writeFile(join(app, 'qualify.mjs'), `await (${consumer.toString()})(${JSON.stringify(config)});\n`);
     try {
       const result = await exec(process.execPath, [join(app, 'qualify.mjs')], { cwd: app, env, maxBuffer: 32 * 1024 * 1024, timeout: 900000 });

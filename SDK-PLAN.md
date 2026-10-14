@@ -1152,6 +1152,41 @@ encoded video and public protocol remain unchanged.
   additionally requires the registry-backed core and npm prerequisites above.
   No publication, tags or main merges are authorized.
 
+### Review hardening: bounded history and verified publication recovery
+
+- Partial npm publication now preflights all six packages and resumes only exact
+  same-version artifacts from the original workflow run. Existing uploads require
+  matching SHA-512, registry signatures, keyless provenance bound to the protected
+  main source/workflow/event/run, and the existing `next` tag. Missing native
+  packages precede the SDK; no automatic retry, overwrite, or retag is allowed.
+  `sigstore@4.1.1` is a pinned release-tooling development dependency; verification
+  uses its public API and standard isolated `npm audit signatures`, not npm
+  internal modules. No registry publication was performed.
+- Recording history retains at most 1,024 distinct IDs and 16 MiB of UTF-8 start
+  parameters per sidecar. Admission checks both limits atomically with O(1)
+  accounting. Terminal entries are not evicted; recovery/conflict semantics take
+  precedence over capacity. New IDs fail with `ServerBusy` before dispatch or
+  file staging. Only a new sidecar session resets capacity.
+- The MP4 parser remains private and narrowly scoped. Artifact collection and
+  publication now validate actual running Chrome identity and all ten native
+  recording cases, published artifacts, exact strictly increasing DTS and empty
+  decoder diagnostics instead of trusting a passing summary. Native builds run
+  the entire recording suite on every architecture, including admission tests
+  with platform-native paths. Chrome upgrades require fresh five-platform proof.
+- Local checks passed: 47 recording tests; Node schema generation/build/types
+  and 289 passing tests, with two opt-in native tests skipped; Rust formatting
+  and server Clippy with warnings denied. The 27 new release-tooling tests cover
+  partial/lost-response recovery, trust failures, the public Sigstore verifier
+  and recording-evidence rejection.
+- Actual sidecar smoke compared the prior qualified binary with the new binary:
+  the old process admitted past both limits; the new process rejected overflow
+  without reserving IDs or writing files, preserved existing-ID recovery and
+  conflicts, and reset capacity in a fresh session. A real read-only npm smoke
+  installed and signature-verified a foreign macOS ARM package on Linux with
+  lifecycle scripts disabled. Prior passing native evidence was rejected because
+  it lacked actual running Chrome identity; it is not reused as new qualification.
+  Exact-source native results and artifacts are attached to draft PR #58.
+
 ### Execution order and handoff rules
 
 - Phases 1–5 are implemented. Next: phase 6 native-platform/release qualification; publication remains separately authorized.

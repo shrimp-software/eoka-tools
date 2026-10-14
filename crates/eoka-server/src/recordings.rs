@@ -18,6 +18,9 @@ use crate::artifacts::{FileFailure, StagedArtifact};
 
 mod mp4;
 
+const MAX_SESSION_RECORDINGS: usize = 1024;
+const MAX_SESSION_RECORDING_PARAMETER_BYTES: usize = 16 * 1024 * 1024;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Control {
     Run,
@@ -210,14 +213,20 @@ impl Entry {
     }
 }
 
+#[derive(Default)]
+struct RecordingHistory {
+    entries: HashMap<String, Arc<Entry>>,
+    retained_parameter_bytes: usize,
+}
+
 #[derive(Clone, Default)]
 pub struct RecordingManager {
-    entries: Arc<Mutex<HashMap<String, Arc<Entry>>>>,
+    history: Arc<Mutex<RecordingHistory>>,
 }
 
 impl RecordingManager {
     fn entry(&self, id: &str) -> Result<Arc<Entry>, ServerError> {
-        let entry = self.entries.lock().get(id).cloned();
+        let entry = self.history.lock().entries.get(id).cloned();
         entry.ok_or_else(|| {
             let mut error = ServerError::new(
                 ErrorCode::RecordingNotFound,
@@ -229,9 +238,9 @@ impl RecordingManager {
     }
 
     fn reserve(&self, params: RecordingStartParams) -> Result<Arc<Entry>, ServerError> {
-        let mut entries = self.entries.lock();
-        if let Some(entry) = entries.get(&params.recording_id).cloned() {
-            drop(entries);
+        let mut history = self.history.lock();
+        if let Some(entry) = history.entries.get(&params.recording_id).cloned() {
+            drop(history);
             if entry.params != params {
                 return Err(entry.error(
                     ErrorCode::RecordingConflict,
@@ -239,6 +248,36 @@ impl RecordingManager {
                 ));
             }
             return Ok(entry);
+        }
+        let retained_parameter_bytes = params
+            .recording_id
+            .len()
+            .checked_add(params.page_id.len())
+            .and_then(|bytes| bytes.checked_add(params.path.len()))
+            .and_then(|bytes| bytes.checked_add(history.retained_parameter_bytes))
+            .filter(|bytes| *bytes <= MAX_SESSION_RECORDING_PARAMETER_BYTES);
+        let capacity_limit = if history.entries.len() >= MAX_SESSION_RECORDINGS {
+            Some(format!(
+                "session recording history limit of {MAX_SESSION_RECORDINGS} distinct IDs reached"
+            ))
+        } else if retained_parameter_bytes.is_none() {
+            Some(format!(
+                "session recording history limit of {MAX_SESSION_RECORDING_PARAMETER_BYTES} retained start-parameter bytes exceeded"
+            ))
+        } else {
+            None
+        };
+        if let Some(limit) = capacity_limit {
+            let mut error = ServerError::new(
+                ErrorCode::ServerBusy,
+                format!(
+                    "{limit}; completed, cancelled, and failed recordings retain their slots and parameter bytes for the sidecar lifetime; start a new Browser/session to reset recording history"
+                ),
+            );
+            let data = error.data.get_or_insert_with(Default::default);
+            data.recording_id = Some(params.recording_id);
+            data.path = Some(params.path);
+            return Err(error);
         }
         let (changed, _) = watch::channel(0);
         let (control, _) = watch::channel(Control::Run);
@@ -262,7 +301,11 @@ impl RecordingManager {
             changed,
             control,
         });
-        entries.insert(entry.params.recording_id.clone(), entry.clone());
+        history.retained_parameter_bytes =
+            retained_parameter_bytes.expect("recording parameter bytes passed admission");
+        history
+            .entries
+            .insert(entry.params.recording_id.clone(), entry.clone());
         Ok(entry)
     }
 
@@ -324,8 +367,9 @@ impl RecordingManager {
 
     pub async fn cancel_page(&self, page_id: &str) -> Result<(), ServerError> {
         let entries: Vec<_> = self
-            .entries
+            .history
             .lock()
+            .entries
             .values()
             .filter(|entry| entry.params.page_id == page_id && !entry.is_terminal())
             .cloned()
@@ -334,13 +378,13 @@ impl RecordingManager {
     }
 
     pub fn request_shutdown(&self) {
-        for entry in self.entries.lock().values() {
+        for entry in self.history.lock().entries.values() {
             entry.request(true);
         }
     }
 
     pub fn shutdown_timeout_error(&self) -> Option<ServerError> {
-        let entries: Vec<_> = self.entries.lock().values().cloned().collect();
+        let entries: Vec<_> = self.history.lock().entries.values().cloned().collect();
         let mut failure = None;
         for entry in entries {
             entry.request(true);
@@ -369,8 +413,9 @@ impl RecordingManager {
 
     pub async fn shutdown(&self) -> Result<(), ServerError> {
         let entries: Vec<_> = self
-            .entries
+            .history
             .lock()
+            .entries
             .values()
             .filter(|entry| !entry.is_terminal())
             .cloned()
@@ -823,6 +868,316 @@ mod tests {
         }
     }
 
+    fn indexed_params(index: usize) -> RecordingStartParams {
+        let path = std::env::temp_dir().join(format!("recording-{index}.mp4"));
+        let mut params = params(path.to_string_lossy().into_owned());
+        params.recording_id = format!("{index:08x}-1111-4111-8111-111111111111");
+        params
+    }
+
+    fn parameter_bytes(params: &RecordingStartParams) -> usize {
+        params.recording_id.len() + params.page_id.len() + params.path.len()
+    }
+
+    fn sized_params(index: usize, bytes: usize) -> RecordingStartParams {
+        let mut params = indexed_params(index);
+        let fixed_bytes = params.recording_id.len() + params.path.len();
+        params.page_id = "é".to_owned();
+        params
+            .page_id
+            .push_str(&"x".repeat(bytes - fixed_bytes - params.page_id.len()));
+        assert_eq!(parameter_bytes(&params), bytes);
+        params
+    }
+
+    #[test]
+    fn distinct_id_limit_preserves_recovery_and_conflict_precedence() {
+        let manager = RecordingManager::default();
+        for index in 0..MAX_SESSION_RECORDINGS {
+            manager.admit(indexed_params(index)).unwrap();
+        }
+        let existing = indexed_params(MAX_SESSION_RECORDINGS - 1);
+        let entry = manager.entry(&existing.recording_id).unwrap();
+        manager.admit(existing.clone()).unwrap();
+        assert!(Arc::ptr_eq(
+            &entry,
+            &manager.reserve(existing.clone()).unwrap()
+        ));
+        let mut different = existing.clone();
+        different.fps = Some(30);
+        assert_eq!(
+            manager.admit(different).unwrap_err().code,
+            ErrorCode::RecordingConflict
+        );
+        let rejected = indexed_params(MAX_SESSION_RECORDINGS);
+        let error = manager.admit(rejected.clone()).unwrap_err();
+        assert_eq!(error.code, ErrorCode::ServerBusy);
+        assert!(error.message.contains("1024 distinct IDs"));
+        assert!(error.message.contains("completed, cancelled, and failed"));
+        assert!(error.message.contains("sidecar lifetime"));
+        assert!(error.message.contains("new Browser/session"));
+        let data = error.data.unwrap();
+        assert_eq!(
+            data.recording_id.as_deref(),
+            Some(rejected.recording_id.as_str())
+        );
+        assert_eq!(data.path.as_deref(), Some(rejected.path.as_str()));
+        assert!(data.recording.is_none());
+        assert_eq!(manager.history.lock().entries.len(), MAX_SESSION_RECORDINGS);
+        assert!(manager.entry(&rejected.recording_id).is_err());
+        RecordingManager::default().admit(rejected).unwrap();
+    }
+
+    #[test]
+    fn retained_parameter_budget_has_exact_utf8_boundary_without_consuming_rejections() {
+        let manager = RecordingManager::default();
+        let last = indexed_params(1);
+        let last_bytes = parameter_bytes(&last);
+        let first = sized_params(0, MAX_SESSION_RECORDING_PARAMETER_BYTES - last_bytes);
+        manager.admit(first).unwrap();
+        let before = manager.history.lock().retained_parameter_bytes;
+        let oversized = sized_params(2, MAX_SESSION_RECORDING_PARAMETER_BYTES + 1);
+        assert_eq!(
+            manager.admit(oversized).unwrap_err().code,
+            ErrorCode::ServerBusy
+        );
+        let over_budget = sized_params(3, last_bytes + 1);
+        let error = manager.admit(over_budget).unwrap_err();
+        assert_eq!(error.code, ErrorCode::ServerBusy);
+        assert!(error
+            .message
+            .contains("16777216 retained start-parameter bytes"));
+        assert_eq!(manager.history.lock().retained_parameter_bytes, before);
+        assert_eq!(manager.history.lock().entries.len(), 1);
+        assert!(manager.entry(&indexed_params(2).recording_id).is_err());
+        assert!(manager.entry(&indexed_params(3).recording_id).is_err());
+        manager.admit(last.clone()).unwrap();
+        assert_eq!(
+            manager.history.lock().retained_parameter_bytes,
+            MAX_SESSION_RECORDING_PARAMETER_BYTES
+        );
+        manager.admit(last.clone()).unwrap();
+        let mut different = last.clone();
+        different.page_id.push('x');
+        assert_eq!(
+            manager.admit(different).unwrap_err().code,
+            ErrorCode::RecordingConflict
+        );
+        assert_eq!(
+            manager.admit(indexed_params(4)).unwrap_err().code,
+            ErrorCode::ServerBusy
+        );
+        assert_eq!(manager.history.lock().entries.len(), 2);
+        assert_eq!(
+            manager.history.lock().retained_parameter_bytes,
+            MAX_SESSION_RECORDING_PARAMETER_BYTES
+        );
+    }
+
+    #[test]
+    fn invalid_parameters_do_not_consume_history_capacity() {
+        let manager = RecordingManager::default();
+        for index in 0..MAX_SESSION_RECORDINGS - 1 {
+            manager.admit(indexed_params(index)).unwrap();
+        }
+        let bytes = manager.history.lock().retained_parameter_bytes;
+        let mut invalid = indexed_params(MAX_SESSION_RECORDINGS);
+        invalid.fps = Some(0);
+        assert_eq!(
+            manager.admit(invalid).unwrap_err().code,
+            ErrorCode::InvalidParams
+        );
+        assert_eq!(manager.history.lock().retained_parameter_bytes, bytes);
+        assert_eq!(
+            manager.history.lock().entries.len(),
+            MAX_SESSION_RECORDINGS - 1
+        );
+        manager
+            .admit(indexed_params(MAX_SESSION_RECORDINGS))
+            .unwrap();
+        assert_eq!(
+            manager
+                .admit(indexed_params(MAX_SESSION_RECORDINGS + 1))
+                .unwrap_err()
+                .code,
+            ErrorCode::ServerBusy
+        );
+    }
+
+    #[tokio::test]
+    async fn terminal_outcomes_retain_slots_and_remain_recoverable_at_capacity() {
+        let manager = RecordingManager::default();
+        let root = tempfile::tempdir().unwrap();
+        let mut completed = indexed_params(0);
+        completed.path = root
+            .path()
+            .join("completed.mp4")
+            .to_string_lossy()
+            .into_owned();
+        let entry = manager.reserve(completed.clone()).unwrap();
+        entry.update(|state| {
+            state.started = true;
+            state.admitted = true;
+        });
+        let mut stage = StagedArtifact::prepare(&completed.path).await.unwrap();
+        stage.write(mp4::VALID_MP4).await.unwrap();
+        repair_stage(&mut stage).await.unwrap();
+        stage.seal().await.unwrap();
+        assert!(publish(&entry, &stage));
+        let cancelled = indexed_params(1);
+        manager.admit(cancelled.clone()).unwrap();
+        manager.cancel(&cancelled.recording_id).await.unwrap();
+        for index in 3..MAX_SESSION_RECORDINGS {
+            manager.admit(indexed_params(index)).unwrap();
+        }
+        let failed = indexed_params(2);
+        assert_eq!(
+            manager
+                .start(failed.clone(), Err(ServerError::invalid_page("missing")))
+                .await
+                .unwrap_err()
+                .code,
+            ErrorCode::InvalidPage
+        );
+        assert_eq!(
+            manager
+                .admit(indexed_params(MAX_SESSION_RECORDINGS))
+                .unwrap_err()
+                .code,
+            ErrorCode::ServerBusy
+        );
+        let bytes = manager.history.lock().retained_parameter_bytes;
+        manager.shutdown().await.unwrap();
+        assert_eq!(manager.history.lock().entries.len(), MAX_SESSION_RECORDINGS);
+        assert_eq!(manager.history.lock().retained_parameter_bytes, bytes);
+        for (params, state) in [
+            (completed, RecordingState::Completed),
+            (cancelled, RecordingState::Cancelled),
+            (failed, RecordingState::Failed),
+        ] {
+            manager.admit(params.clone()).unwrap();
+            assert_eq!(
+                manager.get(&params.recording_id).await.unwrap().state,
+                state
+            );
+            assert_eq!(
+                manager
+                    .start(
+                        params.clone(),
+                        Err(ServerError::internal("must not restart"))
+                    )
+                    .await
+                    .unwrap()
+                    .state,
+                state
+            );
+            let mut different = params;
+            different.fps = Some(30);
+            assert_eq!(
+                manager.admit(different).unwrap_err().code,
+                ErrorCode::RecordingConflict
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn capacity_rejection_does_not_reserve_launch_or_stage() {
+        let manager = RecordingManager::default();
+        for index in 0..MAX_SESSION_RECORDINGS {
+            manager.admit(indexed_params(index)).unwrap();
+        }
+        let root = tempfile::tempdir().unwrap();
+        let mut rejected = indexed_params(MAX_SESSION_RECORDINGS);
+        rejected.path = root
+            .path()
+            .join("rejected.mp4")
+            .to_string_lossy()
+            .into_owned();
+        let bytes = manager.history.lock().retained_parameter_bytes;
+        assert_eq!(
+            manager
+                .start(
+                    rejected.clone(),
+                    Err(ServerError::internal("worker must not run"))
+                )
+                .await
+                .unwrap_err()
+                .code,
+            ErrorCode::ServerBusy
+        );
+        tokio::task::yield_now().await;
+        assert_eq!(
+            manager.get(&rejected.recording_id).await.unwrap_err().code,
+            ErrorCode::RecordingNotFound
+        );
+        assert_eq!(manager.history.lock().entries.len(), MAX_SESSION_RECORDINGS);
+        assert_eq!(manager.history.lock().retained_parameter_bytes, bytes);
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+        assert_eq!(
+            manager
+                .entry(&indexed_params(0).recording_id)
+                .unwrap()
+                .snapshot()
+                .state,
+            RecordingState::Running
+        );
+    }
+
+    #[test]
+    fn concurrent_new_ids_cannot_exceed_count_or_parameter_byte_limits() {
+        for byte_limited in [false, true] {
+            let manager = RecordingManager::default();
+            let contender_bytes = 16 * 1024;
+            if byte_limited {
+                manager
+                    .admit(sized_params(
+                        0,
+                        MAX_SESSION_RECORDING_PARAMETER_BYTES - 8 * contender_bytes,
+                    ))
+                    .unwrap();
+            } else {
+                for index in 0..MAX_SESSION_RECORDINGS - 8 {
+                    manager.admit(indexed_params(index)).unwrap();
+                }
+            }
+            let barrier = Arc::new(std::sync::Barrier::new(16));
+            let results = std::thread::scope(|scope| {
+                let mut jobs = Vec::new();
+                for index in MAX_SESSION_RECORDINGS..MAX_SESSION_RECORDINGS + 16 {
+                    let manager = manager.clone();
+                    let barrier = barrier.clone();
+                    jobs.push(scope.spawn(move || {
+                        let params = if byte_limited {
+                            sized_params(index, contender_bytes)
+                        } else {
+                            indexed_params(index)
+                        };
+                        barrier.wait();
+                        manager.admit(params)
+                    }));
+                }
+                jobs.into_iter()
+                    .map(|job| job.join().unwrap())
+                    .collect::<Vec<_>>()
+            });
+            assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 8);
+            for error in results.into_iter().filter_map(Result::err) {
+                assert_eq!(error.code, ErrorCode::ServerBusy);
+            }
+            let history = manager.history.lock();
+            if byte_limited {
+                assert_eq!(history.entries.len(), 9);
+                assert_eq!(
+                    history.retained_parameter_bytes,
+                    MAX_SESSION_RECORDING_PARAMETER_BYTES
+                );
+            } else {
+                assert_eq!(history.entries.len(), MAX_SESSION_RECORDINGS);
+                assert!(history.retained_parameter_bytes < MAX_SESSION_RECORDING_PARAMETER_BYTES);
+            }
+        }
+    }
+
     #[tokio::test]
     async fn failed_admission_is_recoverable_and_same_id_never_restarts() {
         let manager = RecordingManager::default();
@@ -1211,7 +1566,7 @@ mod tests {
     #[tokio::test]
     async fn reserved_admission_can_be_cancelled_without_starting_a_recorder() {
         let manager = RecordingManager::default();
-        let params = params("/tmp/never-started.mp4".to_owned());
+        let params = indexed_params(0);
         manager.admit(params.clone()).unwrap();
         assert_eq!(
             manager.cancel(&params.recording_id).await.unwrap().state,

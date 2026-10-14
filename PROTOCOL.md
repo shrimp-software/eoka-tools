@@ -318,6 +318,16 @@ equivalent start parameters; a mismatch returns `RecordingConflict` without
 restarting. Unknown IDs return `RecordingNotFound`. Recovery by `recording.get`
 is session-scoped, not persistent crash recovery or automatic restart.
 
+One sidecar admits at most 1,024 distinct recording IDs and 16 MiB of cumulative
+UTF-8 bytes across admitted `recordingId`, `pageId`, and `path` values. This is a
+retained-parameter budget, not an exact process-memory ceiling. Completed,
+cancelled, and failed entries remain recoverable and keep their capacity.
+Admission atomically checks both limits before reserving a new ID, starting a
+worker, or staging a file; rejection returns `ServerBusy` with no new record.
+Invalid parameters and capacity rejections consume no history capacity. Existing-ID recovery and
+`RecordingConflict` take precedence over either limit. Nothing is evicted or
+recycled; a new sidecar session provides fresh capacity.
+
 Stop shares one background finalization across requests and waits for a terminal
 record while get/cancel/shutdown remain responsive. `completed` requires the
 published destination MP4 artifact and no failure; other states cannot contain
@@ -342,7 +352,7 @@ an artifact; retained path/message evidence reports the uncertain commit outcome
 Errors preserve optional `data.recordingId`, `data.recording`, `data.path` and
 `data.partialPath`; `RecordingFailed`, `RecordingUnsupported`,
 `RecordingAlreadyActive`, `RecordingInvalidState`, `RecordingConflict`,
-`RecordingNotFound`, `FileOutput` and `ScreenshotTooLarge` are stable codes.
+`RecordingNotFound`, `ServerBusy`, `FileOutput` and `ScreenshotTooLarge` are stable codes.
 Page/browser close cancels unfinished recordings by default; disconnect and
 target loss retain honest failure and uncertain-cleanup evidence. Owned recording
 cleanup never terminates a borrowed browser.

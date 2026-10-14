@@ -6,6 +6,8 @@ import { lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
+import { resumePublication, verifyExistingPackage } from './publication-recovery.mjs';
+import { assertRecordingQualification } from './recording-qualification.mjs';
 
 const exec = promisify(execFile);
 const root = resolve(import.meta.dirname, '..');
@@ -203,6 +205,7 @@ async function verify() {
     assert.equal(evidence.platform, item.platform);
     assert.equal(evidence.sourceSha, sha);
     assert.equal(evidence.status, 'passed');
+    assertRecordingQualification(evidence, source.chrome.buildId);
   }
   const expectedNames = ['@cbxss/eoka', ...platforms.map(id => source.server.platforms[id].packageName)];
   assert.equal(qualification.packages.length, 6);
@@ -281,34 +284,83 @@ async function npmEnvironment(directory) {
   await writeFile(globalconfig, '');
   const env = { ...process.env };
   for (const key of Object.keys(env)) if (/^npm_config_/i.test(key)) delete env[key];
-  return { ...env, NPM_CONFIG_USERCONFIG: userconfig, NPM_CONFIG_GLOBALCONFIG: globalconfig, NPM_CONFIG_REGISTRY: registry, NPM_CONFIG_CACHE: join(directory, 'npm-cache') };
+  return { ...env, NPM_CONFIG_USERCONFIG: userconfig, NPM_CONFIG_GLOBALCONFIG: globalconfig, NPM_CONFIG_REGISTRY: registry, NPM_CONFIG_CACHE: join(directory, 'npm-cache'), NPM_CONFIG_FETCH_RETRIES: '0' };
+}
+
+async function registryBoundary(directory, env) {
+  const readJson = async url => {
+    const response = await fetch(url, { headers: { Accept: 'application/json', 'Cache-Control': 'no-cache' }, redirect: 'error', signal: AbortSignal.timeout(120000) });
+    assert.equal(response.status, 200, `Registry read failed; existing scoped packages and trusted publishers are required (${response.status}): ${url}`);
+    return response.json();
+  };
+  let verifier;
+  const loadVerifier = async () => {
+    const sigstore = await import('sigstore');
+    assert.equal((await json(join(root, 'package.json'))).devDependencies.sigstore, '4.1.1', 'The fixed public Sigstore verifier must be pinned');
+    const verifySignatures = async item => {
+      const consumer = join(directory, `signature-${item.name.replace(/[@/]/g, '-')}`);
+      await mkdir(consumer);
+      await writeFile(join(consumer, 'package.json'), JSON.stringify({ name: 'eoka-signature-verification', version: '1.0.0', private: true }));
+      await exec('npm', ['install', `${item.name}@${item.version}`, '--ignore-scripts', '--omit=optional', '--no-audit', '--no-fund', '--force', '--registry', registry, '--fetch-retries', '0'], { cwd: consumer, env, timeout: 180000, maxBuffer: 8 * 1024 * 1024 });
+      const lock = await json(join(consumer, 'package-lock.json'));
+      assert.equal(lock.packages?.[`node_modules/${item.name}`]?.integrity, item.integrity, `Installed registry tarball differs from qualification: ${item.name}`);
+      const installed = await json(join(consumer, 'node_modules', item.name, 'package.json'));
+      assert.equal(installed.name, item.name);
+      assert.equal(installed.version, item.version);
+      const { stdout } = await exec('npm', ['audit', 'signatures', '--json', '--ignore-scripts', '--registry', registry, '--fetch-retries', '0'], { cwd: consumer, env, timeout: 180000, maxBuffer: 8 * 1024 * 1024 });
+      const result = JSON.parse(stdout);
+      assert.deepEqual(result.invalid, []);
+      assert.deepEqual(result.missing, []);
+    };
+    return {
+      verifySignatures,
+      sigstore,
+      options: { registry, tufCache: join(directory, 'tuf-cache') },
+      readJson,
+      identity: { repository, sourceSha: sha, workflowPath: '.github/workflows/publish-node.yml', runId: process.env.GITHUB_RUN_ID },
+    };
+  };
+  return {
+    readPackage: name => readJson(`${registry}${encodeURIComponent(name)}`),
+    verifyExisting: async (item, metadata) => {
+      verifier ??= loadVerifier();
+      await verifyExistingPackage(item, metadata, await verifier);
+    },
+    publish: async item => {
+      const result = await exec('npm', ['publish', join(payload, item.filename), '--ignore-scripts', '--access', 'public', '--tag', 'next', '--provenance', '--registry', registry, '--fetch-retries', '0'], { cwd: directory, env, timeout: 180000, maxBuffer: 8 * 1024 * 1024 });
+      process.stdout.write(result.stdout);
+      process.stderr.write(result.stderr);
+    },
+  };
+}
+
+async function recoveryPackages(qualification) {
+  return Promise.all(qualification.packages.map(async item => ({
+    ...item,
+    integrity: `sha512-${await hash(join(payload, item.filename), 'sha512', 'base64')}`,
+  })));
 }
 
 async function publish() {
   const qualification = await verify();
   assert.ok(process.env.ACTIONS_ID_TOKEN_REQUEST_URL && process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN, 'Trusted OIDC is required; token fallback is forbidden');
-  const { stdout } = await exec('npm', ['--version']);
-  const [major, minor, patch] = stdout.trim().split('.').map(Number);
-  assert.ok(major > 11 || (major === 11 && (minor > 5 || (minor === 5 && patch >= 1))), 'npm >=11.5.1 is required for trusted publishing');
-  for (const item of qualification.packages) {
-    const response = await fetch(`${registry}${encodeURIComponent(item.name)}`);
-    assert.ok(response.ok, `Scoped package ${item.name} must already exist with its trusted publisher configured; bootstrap is an out-of-band prerequisite (${response.status})`);
-    const metadata = await response.json();
-    assert.equal(metadata.name, item.name);
-    assert.equal(metadata.versions?.[item.version], undefined, `Refusing to publish an already existing version: ${item.name}@${item.version}`);
-  }
+  assert.match(process.env.GITHUB_RUN_ID ?? '', /^[1-9][0-9]*$/);
   const temporary = await mkdtemp(join(tmpdir(), 'eoka-publish-'));
   try {
     const env = await npmEnvironment(temporary);
-    const native = qualification.packages.filter(item => item.name !== '@cbxss/eoka').sort((a, b) => a.name.localeCompare(b.name));
-    const sdk = qualification.packages.find(item => item.name === '@cbxss/eoka');
-    for (const item of [...native, sdk]) {
-      await sourceGate();
-      assert.equal(await hash(join(payload, item.filename)), item.sha256);
-      const result = await exec('npm', ['publish', join(payload, item.filename), '--ignore-scripts', '--access', 'public', '--tag', 'next', '--provenance', '--registry', registry], { cwd: temporary, env, timeout: 180000, maxBuffer: 8 * 1024 * 1024 });
-      process.stdout.write(result.stdout);
-      process.stderr.write(result.stderr);
-    }
+    const { stdout } = await exec('npm', ['--version'], { cwd: temporary, env });
+    const [major, minor, patch] = stdout.trim().split('.').map(Number);
+    assert.ok(major > 11 || (major === 11 && (minor > 5 || (minor === 5 && patch >= 1))), 'npm >=11.5.1 is required for trusted publishing');
+    const result = await resumePublication({
+      packages: await recoveryPackages(qualification),
+      sdkName: '@cbxss/eoka',
+      boundary: await registryBoundary(temporary, env),
+      beforePublish: async item => {
+        await sourceGate();
+        assert.equal(await hash(join(payload, item.filename)), item.sha256);
+      },
+    });
+    process.stdout.write(`${JSON.stringify(result)}\n`);
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }
@@ -325,15 +377,13 @@ async function smoke() {
     env.EOKA_RUNTIME_DIR = join(temporary, 'runtime');
     env.EOKA_STATE_DIR = join(temporary, 'state');
     await mkdir(env.HOME);
-    for (const item of qualification.packages) {
-      const { stdout } = await exec('npm', ['view', `${item.name}@${item.version}`, '--json', '--registry', registry], { cwd: temporary, env, timeout: 120000 });
-      const metadata = JSON.parse(stdout);
-      assert.equal(metadata.name, item.name);
-      assert.equal(metadata.version, item.version);
-      assert.equal(metadata['dist-tags'].next, item.version);
-      assert.equal(metadata.dist.integrity, `sha512-${await hash(join(payload, item.filename), 'sha512', 'base64')}`);
-      assert.equal(metadata.dist.attestations?.provenance?.predicateType, 'https://slsa.dev/provenance/v1');
-    }
+    const boundary = await registryBoundary(temporary, env);
+    await resumePublication({
+      packages: await recoveryPackages(qualification),
+      sdkName: '@cbxss/eoka',
+      boundary: { ...boundary, publish: async () => { throw new Error('Registry smoke cannot publish'); } },
+      beforePublish: async item => { throw new Error(`Qualified version is missing from registry: ${item.name}@${item.version}`); },
+    });
     const consumer = join(temporary, 'consumer');
     await mkdir(consumer);
     await writeFile(join(consumer, 'package.json'), JSON.stringify({ name: 'eoka-registry-smoke', version: '1.0.0', private: true, type: 'module' }));
