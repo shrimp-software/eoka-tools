@@ -6,9 +6,9 @@ The Node.js SDK for the eoka NDJSON browser sidecar. The source package remains 
 
 The SDK provides correlated subprocess transport, typed browser/page operations, durable operation handles, pinned full Chrome for Testing installation, verified native server resolution, PNG/JPEG/WebP capture, native MP4 recording, and bounded disposal. It does not provide deterministic scenario replay or video transcoding. Importing the package and installing with `--ignore-scripts` do not launch processes, download Chrome, or create a browser cache. There are no install lifecycle scripts, Cargo requirements, or package command-line binaries.
 
-Managed targets are `linux-x64-gnu`, `linux-arm64-gnu`, `darwin-x64`, `darwin-arm64`, and `win32-x64`. These are configured packaging targets, **not a claim that all five have passed native launch, attach, sandbox, and cleanup gates**. Linux managed selection requires glibc >= 2.35 and rejects musl/Alpine; Windows arm64 and unknown combinations are rejected before downloads. The selector's glibc floor is not proof that any source-built binary meets that ABI. The Linux x64 artifact exercised locally was built on Ubuntu 22.04 and measured at GLIBC 2.34, plus OpenSSL 3; the host development binary required GLIBC 2.39 and was not used for this gate. Release binaries must be built and qualified against their declared baseline before publication.
+Managed targets are `linux-x64-gnu`, `linux-arm64-gnu`, `darwin-x64`, `darwin-arm64`, and `win32-x64`. Paired-core preview builds and runtime checks have completed on all five; **publication remains blocked**, as described below. Linux managed selection requires glibc >= 2.35 and rejects musl/Alpine; Windows arm64 and unknown combinations are rejected before downloads. GNU release artifacts are built on Ubuntu 22.04 and checked for GLIBC requirements no higher than 2.35. Arbitrary source-built or host-development binaries are not qualified by that result.
 
-Both explicit server and Chrome paths are an expert override for managed platform checks, not a new support guarantee. Node.js support does not imply Bun, Deno, browser-side JavaScript, or drop-in Puppeteer compatibility. npm local consumption is the current gate; pnpm/Yarn and cross-platform runtime support must be qualified separately.
+Both explicit server and Chrome paths are an expert override for managed platform checks, not a new support guarantee. Node.js support does not imply Bun, Deno, browser-side JavaScript, or drop-in Puppeteer compatibility. Packed npm consumption is verified; pnpm/Yarn and registry-backed publication remain separate gates.
 
 ## Managed launch and explicit preparation
 
@@ -313,6 +313,9 @@ console.log(screenshot.path, screenshot.bytes, video.path, video.container);
 
 Create destination directories first. Relative paths resolve once in the Node caller, not in the sidecar's working directory. File output stages privately beside the destination, flushes/closes, and publishes without overwriting an existing file; there is no overwrite option. An `Artifact` contains `path`, `bytes`, and `mimeType`; completed videos also report `container: "mp4"`. No video Buffer/base64 API is offered.
 
+Returned artifact paths are canonical and may use Windows' `\\?\` namespace
+prefix. Compare filesystem identity, not the spelling of the requested path.
+
 `screenshot()` returns a PNG Buffer by default and still accepts the original `{signal, timeoutMs}` call options. `format` supports `png`, `jpeg`, and `webp` where Chrome supports them. `quality` is an integer from 0 through 100 for JPEG/WebP and is invalid for PNG. `clip` uses nonnegative CSS-pixel positions and positive sizes. `fullPage` and `clip` are mutually exclusive. Viewport `deviceScaleFactor` is the only render-scale control. Full-page dimensions depend on current layout and Chrome's image limits; prefer a fixed viewport/crop for deterministic output. In-memory screenshots are bounded to 16 MiB raw bytes; `ScreenshotTooLarge` directs callers to `screenshotToFile`, with no automatic retry or fallback.
 
 Direct file output bypasses the 16 MiB sidecar response limit, not Chrome's image limits or the core's 64 MiB CDP message/frame budget (which includes base64 encoding and JSON). It is not an unbounded streaming screenshot API.
@@ -408,6 +411,16 @@ rejection, verified input, image dimensions, original MP4 packet timestamps and
 decode diagnostics, headed launch, owned cleanup, and borrowed-browser survival.
 Failures retain recordings and diagnostics as workflow artifacts. FFmpeg/ffprobe
 are qualification tools, not consumer dependencies.
+
+The [paired preview](https://github.com/shrimp-software/eoka-tools/actions/runs/38534451688)
+completed every runtime check on Ubuntu 22.04 x64, Ubuntu 24.04 ARM64, macOS 15
+x64/ARM64, and Windows 2025 x64. It produced 30 screenshots and 15 original AV1
+MP4s with strictly increasing packet timestamps and empty decoder diagnostics.
+Linux checks also observed active PID/network namespaces and seccomp.
+All five runs correctly ended **blocked** by the existing recording-readiness
+defect; these clean samples do not clear it. Live capture is not fixed-cadence
+export: the macOS samples contained 27–38 frames over about two seconds with
+30 fps requested.
 
 For local host-development evidence, not release qualification:
 

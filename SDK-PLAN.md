@@ -971,9 +971,10 @@ This sample does not resolve the earlier intermittent native timestamp caveat. N
 ### Phase 6 — Release workflows and draft review
 
 Core review: [eoka#31](https://github.com/shrimp-software/eoka/pull/31), revision
-`bb84ce8c232810089e2d971700616c0688e9fd98`. Reserved versions are core `0.7.0`,
+`9bae96b9cefa02794a4058ae54b67273ad453490`. Reserved versions are core `0.7.0`,
 server/protocol crates `0.5.0`, Rust SDK `0.6.0`, runner/datadome `0.3.0`, and npm
 SDK/native packages `0.1.0-beta.1`. Wire protocol remains `1.3`.
+Tools review: [eoka-tools#58](https://github.com/shrimp-software/eoka-tools/pull/58).
 
 Implemented release infrastructure:
 
@@ -1016,18 +1017,50 @@ error classification. The classifier now uses portable `StorageFull` and
 `QuotaExceeded` error kinds, preserving `download_no_space` without depending on
 raw OS errno values. Its regression failed before and passed after the fix;
 all four filesystem regressions, server clippy, formatting, and a Rust 1.85
-capacity-error smoke passed locally. Full native runtime qualification remains
-required; a successful cross-platform build is not browser evidence.
+capacity-error smoke passed locally. Those build results alone did not qualify
+the browser runtime.
 
-The corrected preview built and staged all five native targets. Linux x64
-completed the runtime checks and remains blocked by recording readiness.
+The next preview built and staged all five native targets. Linux x64 completed
+the runtime checks and remained blocked by recording readiness.
 The Windows run reached verified interaction and the first screenshot, exposing
 an assertion against path spelling rather than filesystem identity. Screenshot
 qualification now compares real paths. Recording identity validation accepts
 equivalent absolute Windows namespace paths while still rejecting different or
 relative destinations; a Windows-path smoke failed before and passed after, and
-all 15 capture regressions passed. macOS and ARM Linux launch failures remain
-under diagnosis; these builds are not yet five-platform runtime qualification.
+all 15 capture regressions passed. macOS and ARM Linux launch failures prompted
+native diagnostics rather than removing either platform.
+
+Hosted paired-source evidence:
+
+- [Run 38534451688](https://github.com/shrimp-software/eoka-tools/actions/runs/38534451688),
+  tools `3cf6a75881958a3fed47650b4d3309b44a8c27f7` with the core revision above,
+  built/staged all five native targets and completed every runtime check:
+  fresh/cache/offline installation, artifact rejection, verified input, six
+  screenshots per platform, three original AV1 MP4s per platform, headed launch,
+  owned cleanup, and borrowed-browser survival. All 15 recordings had strictly
+  increasing packet DTS and empty decoder stderr. Native frames were inspected.
+  The macOS samples had 27–38 frames over roughly two seconds; live capture does
+  not promise fixed cadence.
+- ARM's original failure also occurred with unmodified Chrome. Full stderr and
+  kernel audit logs identified AppArmor user-namespace denial, not patching or
+  missing CPU-frequency files. CI now permits only Chrome in a private per-job
+  directory and removes the policy afterward. The global restriction remained
+  enabled, and both Linux runs observed active PID/network namespaces and seccomp.
+- The verified ARM Chrome archive's eight ELF images were inspected separately;
+  their highest GLIBC requirement was 2.25. This is static ABI evidence, not an
+  Ubuntu 22.04 ARM runtime claim. GNU server artifacts passed the 2.35 ABI ceiling.
+- macOS now copies bundle files into owned storage, rejects escaping symlinks,
+  preserves signing metadata, and requires strict signature verification.
+  Four native regressions passed on each Mac architecture. The
+  [isolated cache probe](https://github.com/shrimp-software/eoka-tools/actions/runs/38536488877)
+  demonstrated failed-signature cache acceptance before the fix and rejection
+  afterward on both architectures, without changing the source file. An earlier
+  shared-target diagnostic produced contradictory results; independently built
+  probes resolved them.
+- [Core CI](https://github.com/shrimp-software/eoka/actions/runs/38533767068)
+  passed all five jobs, including the full Chrome integration gate and Rust 1.85.
+  All five packed runtime runs still correctly ended **blocked** by the recorded
+  Chrome timestamp defect. No readiness flag was cleared and nothing was published.
 
 The upstream defect reproduced in raw CDP (**2/40** short captures) and the SDK
 (**1/40**). Across 224 investigative captures, four defective originals were
