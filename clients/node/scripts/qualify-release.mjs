@@ -57,7 +57,7 @@ async function consumer(config) {
   const { createHash } = await import('node:crypto');
   const { execFile, spawn } = await import('node:child_process');
   const { once } = await import('node:events');
-  const { cp, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } = await import('node:fs/promises');
+  const { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } = await import('node:fs/promises');
   const { createRequire } = await import('node:module');
   const { dirname, join, resolve } = await import('node:path');
   const { setTimeout: delay } = await import('node:timers/promises');
@@ -170,7 +170,7 @@ async function consumer(config) {
         const name = `${format}-${fullPage ? 'full' : 'clip'}`;
         const path = join(config.output, `${name}.${format}`);
         const artifact = await page.screenshotToFile({ path, format, ...(fullPage ? { fullPage: true } : { clip: { x: 0, y: 0, width: 400, height: 300 } }) });
-        assert.equal(artifact.path, path);
+        assert.equal(await realpath(artifact.path), await realpath(path));
         assert.equal(artifact.bytes, (await stat(path)).size);
         assert.equal(artifact.mimeType, { png: 'image/png', jpeg: 'image/jpeg', webp: 'image/webp' }[format]);
         const { stdout } = await command('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=codec_name,width,height', '-of', 'json', path], name);

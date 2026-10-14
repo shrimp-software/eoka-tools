@@ -1019,6 +1019,16 @@ all four filesystem regressions, server clippy, formatting, and a Rust 1.85
 capacity-error smoke passed locally. Full native runtime qualification remains
 required; a successful cross-platform build is not browser evidence.
 
+The corrected preview built and staged all five native targets. Linux x64
+completed the runtime checks and remains blocked by recording readiness.
+The Windows run reached verified interaction and the first screenshot, exposing
+an assertion against path spelling rather than filesystem identity. Screenshot
+qualification now compares real paths. Recording identity validation accepts
+equivalent absolute Windows namespace paths while still rejecting different or
+relative destinations; a Windows-path smoke failed before and passed after, and
+all 15 capture regressions passed. macOS and ARM Linux launch failures remain
+under diagnosis; these builds are not yet five-platform runtime qualification.
+
 The upstream defect reproduced in raw CDP (**2/40** short captures) and the SDK
 (**1/40**). Across 224 investigative captures, four defective originals were
 retained. A traced 21µs final-frame gap becomes 0.63 ticks at time base 1/30000

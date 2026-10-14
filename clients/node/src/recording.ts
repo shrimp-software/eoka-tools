@@ -1,3 +1,4 @@
+import { isAbsolute, toNamespacedPath } from 'node:path';
 import type { CallOptions, InvokeClient } from './client.js';
 import { EokaError, type ErrorDetails } from './errors.js';
 import type { Artifact, ErrorData, RecordingFailure, RecordingRecord } from './generated/protocol.js';
@@ -63,8 +64,13 @@ export function recordingFailure(error: unknown, id: string, record?: RecordingR
 }
 
 export function validateRecordingRecord(record: RecordingRecord, id: string, pageId?: string, path?: string): void {
-  if (record.recordingId !== id || (pageId !== undefined && record.pageId !== pageId) || (path !== undefined && record.path !== path)
-    || (record.state === 'completed' && (record.artifact == null || record.artifact.path !== record.path || record.artifact.container !== 'mp4'
+  if (record.recordingId !== id || (pageId !== undefined && record.pageId !== pageId)
+    || (path !== undefined && record.path !== path
+      && (!isAbsolute(record.path) || !isAbsolute(path) || toNamespacedPath(record.path) !== toNamespacedPath(path)))
+    || (record.state === 'completed' && (record.artifact == null
+      || (record.artifact.path !== record.path
+        && (!isAbsolute(record.artifact.path) || !isAbsolute(record.path) || toNamespacedPath(record.artifact.path) !== toNamespacedPath(record.path)))
+      || record.artifact.container !== 'mp4'
       || record.artifact.mimeType !== 'video/mp4' || !Number.isSafeInteger(record.artifact.bytes) || record.artifact.bytes <= 0 || record.failure != null))
     || (record.state !== 'completed' && record.artifact != null)) {
     throw new RecordingError('Protocol', `Received an inconsistent recording record for ${id}.`, id, record, { requestState: 'acknowledged' });
