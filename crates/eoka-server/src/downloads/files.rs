@@ -252,8 +252,8 @@ pub fn safe_guid(guid: &str) -> bool {
 pub fn io_failure(error: std::io::Error) -> ErrorDetail {
     failure(
         if matches!(
-            error.raw_os_error(),
-            Some(libc::ENOSPC) | Some(libc::EDQUOT)
+            error.kind(),
+            std::io::ErrorKind::StorageFull | std::io::ErrorKind::QuotaExceeded
         ) {
             "download_no_space"
         } else {
@@ -294,6 +294,19 @@ pub fn ensure_space(_path: &Path, _needed: u64) -> Result<(), ErrorDetail> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn capacity_errors_without_os_errno_keep_the_no_space_code() {
+        use std::io::{Error, ErrorKind};
+
+        for kind in [ErrorKind::StorageFull, ErrorKind::QuotaExceeded] {
+            assert_eq!(io_failure(Error::from(kind)).code, "download_no_space");
+        }
+        assert_eq!(
+            io_failure(Error::from(ErrorKind::PermissionDenied)).code,
+            "download_io_error"
+        );
+    }
 
     #[test]
     fn publication_verifies_size_and_never_replaces_existing_files() {

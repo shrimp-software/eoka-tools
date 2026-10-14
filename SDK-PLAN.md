@@ -1010,6 +1010,15 @@ Fresh local evidence:
   remains unresolved. Publication smoke rejected both host-only staging and the
   recorded readiness blocker before creating output. No publication command ran.
 
+The first hosted paired-core preview built both Linux and both macOS targets.
+Windows exposed an unconditional Unix-only `libc::EDQUOT` reference in download
+error classification. The classifier now uses portable `StorageFull` and
+`QuotaExceeded` error kinds, preserving `download_no_space` without depending on
+raw OS errno values. Its regression failed before and passed after the fix;
+all four filesystem regressions, server clippy, formatting, and a Rust 1.85
+capacity-error smoke passed locally. Full native runtime qualification remains
+required; a successful cross-platform build is not browser evidence.
+
 The upstream defect reproduced in raw CDP (**2/40** short captures) and the SDK
 (**1/40**). Across 224 investigative captures, four defective originals were
 retained. A traced 21µs final-frame gap becomes 0.63 ticks at time base 1/30000
