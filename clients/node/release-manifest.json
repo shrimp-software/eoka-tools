@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "sdkVersion": "0.1.0-beta.1",
+  "installerVersion": "3.2.4",
+  "server": {
+    "version": "0.5.0",
+    "protocolVersion": "1.3",
+    "platforms": {
+      "linux-x64-gnu": { "packageName": "@cbxss/eoka-server-linux-x64-gnu", "packageVersion": "0.1.0-beta.1", "target": "x86_64-unknown-linux-gnu", "asset": "eoka-server-linux-amd64", "executablePath": "bin/eoka-server", "sha256": null, "size": null, "minimumGlibc": "2.35", "development": false },
+      "linux-arm64-gnu": { "packageName": "@cbxss/eoka-server-linux-arm64-gnu", "packageVersion": "0.1.0-beta.1", "target": "aarch64-unknown-linux-gnu", "asset": "eoka-server-linux-arm64", "executablePath": "bin/eoka-server", "sha256": null, "size": null, "minimumGlibc": "2.35", "development": false },
+      "darwin-x64": { "packageName": "@cbxss/eoka-server-darwin-x64", "packageVersion": "0.1.0-beta.1", "target": "x86_64-apple-darwin", "asset": "eoka-server-darwin-amd64", "executablePath": "bin/eoka-server", "sha256": null, "size": null, "minimumGlibc": null, "development": false },
+      "darwin-arm64": { "packageName": "@cbxss/eoka-server-darwin-arm64", "packageVersion": "0.1.0-beta.1", "target": "aarch64-apple-darwin", "asset": "eoka-server-darwin-arm64", "executablePath": "bin/eoka-server", "sha256": null, "size": null, "minimumGlibc": null, "development": false },
+      "win32-x64": { "packageName": "@cbxss/eoka-server-win32-x64", "packageVersion": "0.1.0-beta.1", "target": "x86_64-pc-windows-msvc", "asset": "eoka-server-windows-amd64.exe", "executablePath": "bin/eoka-server.exe", "sha256": null, "size": null, "minimumGlibc": null, "development": false }
+    }
+  },
+  "chrome": {
+    "buildId": "155.0.8059.39",
+    "platforms": {
+      "linux-x64-gnu": { "platform": "linux", "url": "https://storage.googleapis.com/chrome-for-testing-public/155.0.8059.39/linux64/chrome-linux64.zip", "sha256": "55672d1f392fd3e7b7a08621b6e804e6bcb39d40cf155504abb74b3a021ea8ea", "executablePath": "chrome-linux64/chrome" },
+      "linux-arm64-gnu": { "platform": "linux_arm", "url": "https://storage.googleapis.com/chrome-for-testing-public/155.0.8059.39/linux-arm64/chrome-linux-arm64.zip", "sha256": "b9d44e5d183260ca941a4c4d8d21c8a437d81ef778a489047ef98968b0475dc5", "executablePath": "chrome-linux-arm64/chrome" },
+      "darwin-x64": { "platform": "mac", "url": "https://storage.googleapis.com/chrome-for-testing-public/155.0.8059.39/mac-x64/chrome-mac-x64.zip", "sha256": "9e4da7961d4a426078f02e89ecfa569a7926ada2dc88aa53c0bd9ed0d46c3bb7", "executablePath": "chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing" },
+      "darwin-arm64": { "platform": "mac_arm", "url": "https://storage.googleapis.com/chrome-for-testing-public/155.0.8059.39/mac-arm64/chrome-mac-arm64.zip", "sha256": "529a71bd61aaa2ef266a4d4bd300ae9572ba6a3468a8d55c3023ffeffb5b6b4e", "executablePath": "chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing" },
+      "win32-x64": { "platform": "win64", "url": "https://storage.googleapis.com/chrome-for-testing-public/155.0.8059.39/win64/chrome-win64.zip", "sha256": "59ab2a6e99bde9c0bc180414988394f9f5355a0d3764c704151ee8ecea235c7e", "executablePath": "chrome-win64/chrome.exe" }
+    }
+  }
+}

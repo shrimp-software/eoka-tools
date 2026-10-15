@@ -25,6 +25,7 @@ for CLI, MCP, Rust/Go and runner migration, retention and download recovery.
 | [**eoka-protocol**](crates/eoka-protocol) | Shared daemon protocol types and tool catalog metadata |
 | [**eoka-sdk**](crates/eoka-sdk) | Rust SDK for typed Eoka browser sessions |
 | [**eoka-tack**](crates/eoka-tack) | Tack `ToolSet` adapter generated from the Eoka protocol catalog |
+| [**@cbxss/eoka**](clients/node) | Node/TypeScript SDK for private sidecar sessions; source-only, not published |
 | [**eoka-runner**](crates/eoka-runner) | Declarative YAML automation runner |
 | [**eoka-captcha**](crates/captcha) | Optional Anti-Captcha integrations |
 | [**eoka-datadome**](crates/datadome) | Experimental local DataDome slider solver |
@@ -39,11 +40,12 @@ for CLI, MCP, Rust/Go and runner migration, retention and download recovery.
   against the active browser session.
 - Use `eoka-runner` for versioned, repeatable YAML workflows.
 - Use the Go client and `eoka-server` when embedding browser automation in a Go service.
+- Use the Node SDK for typed JavaScript/TypeScript automation with explicit
+  server and Chrome paths.
 
 ## Local DataDome on the current CLI tab
 
-Build/install with `mise run install-cli`. Core Eoka is fetched from crates.io;
-no sibling checkout is required. On a challenged page in an existing session:
+Build/install with `mise run install-cli`. On a challenged page in an existing session:
 
 ```sh
 eoka --session demo captcha datadome
@@ -236,9 +238,63 @@ eoka-runner automation.yaml
 go get github.com/shrimp-software/eoka-tools/clients/go
 ```
 
-The client starts `eoka-server` and can download a verified prebuilt server binary automatically. See the [Go client README](clients/go/README.md) for usage and supported platforms.
+The client negotiates the `eoka-server` protocol before launching Chrome and
+preserves durable operation IDs and structured errors. For this source checkout,
+build the matching server and pass `WithServerPath`; previously published servers
+without `server.hello` are rejected before browser work. See the
+[Go client README](clients/go/README.md) for binary resolution and lifecycle rules.
+
+## Node / TypeScript SDK
+
+[`clients/node`](clients/node) provides the unpublished `@cbxss/eoka` SDK:
+compiled ESM/declarations for Node 24 LTS (`^24.21.0`), one private sidecar per Browser,
+owned launch or borrowed attachment, verified actions, durable operation recovery,
+page reads, bounded text fetch, PNG/JPEG/WebP screenshots and native MP4 recording.
+
+`Browser.launch()` resolves an exact optional server package and installs pinned
+full Chrome for Testing 155.0.8059.39 on demand. `installBrowser()` supports explicit
+preparation, progress, cancellation and verified offline/read-only cache reuse.
+Explicit `serverPath`/`executablePath` and environment overrides remain available;
+there is no PATH, Cargo, server-download or system-browser fallback.
+Import and npm installation have no browser/process side effects. Sandboxing is
+enabled by default, without an unsandboxed retry. Local managed consumption requires
+staging the SDK and native package together from actual release artifacts; the
+source manifest deliberately leaves unbuilt server hashes unset. Phase 5 capture
+and recording are implemented; no npm package has been published.
+
+`page.screenshot()` returns a bounded Buffer; `page.screenshotToFile()` publishes
+without replacing existing files. Capture supports CSS-pixel crops, full-page
+output and viewport DPR. `page.record()` returns a recoverable recording handle;
+`stop()` resolves only after publishing the complete native MP4 artifact.
+Cancellation and local waiter deadlines are distinct. Chrome selects the codec;
+H.264, audio, deterministic replay and transcoding are not promised. See the
+[capture contract](clients/node/README.md#screenshots-and-native-recording) and
+[SDK release plan](SDK-PLAN.md).
+
+```sh
+npm --prefix clients/node ci --ignore-scripts --omit=optional
+mise run node-generate
+cargo build --locked -p eoka-server
+mise run node-build
+mise run sidecar-check
+```
+
+The sidecar registry is separate from the CLI tool catalog. See
+[PROTOCOL.md](PROTOCOL.md) for negotiation, message bounds, shutdown and action
+outcome guarantees.
+
+See the package README for release staging, managed/explicit launch, offline and
+container examples, cache/runtime paths, proxy settings, deadlines, caller-owned
+profiles, bounded disposal and uncertain action outcomes.
+Protocol schemas remain canonical in `eoka-protocol::sidecar`; the SDK's typed
+`invoke` covers that actual sidecar registry, not all CLI/MCP/Tack operations.
 
 ## Development
+
+Builds use published eoka `0.7.0` from crates.io. The workspace lockfile pins its
+registry source and checksum
+`447a498ec28c34b2020be583617c70f89dc718228bb02db5750f72e4da333a1e`;
+no sibling core checkout or Cargo patch is required.
 
 ```sh
 mise run conformance

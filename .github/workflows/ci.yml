@@ -74,3 +74,25 @@ jobs:
 
       - name: Test
         run: go test ./... -race
+
+  node:
+    name: Node SDK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db
+
+      - name: Install SDK dependencies
+        run: mise exec -- npm --prefix clients/node ci --ignore-scripts --omit=optional
+
+      - name: Check committed schema projection
+        run: mise exec -- node clients/node/scripts/generate-protocol.mjs --check --schema clients/node/src/generated/schema-bundle.json
+
+      - name: Build SDK
+        run: mise run node-build
+
+      - name: Check SDK consumers and runtime
+        run: |
+          mise exec -- node clients/node/scripts/typecheck.mjs
+          mise exec -- node --test clients/node/tests/*.test.mjs

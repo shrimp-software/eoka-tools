@@ -393,9 +393,22 @@ preserve the same durable operation and outcome evidence as the other adapters.
 
 ## Type generation and clients
 
-The Rust schema exporter provides canonical request/result maps, including
-dynamic JSON and operation arrays. Consumers must not flatten every method into
-an object-only result contract.
+The Rust schema exporter drives the generated TypeScript contracts under
+`clients/node`. The unpublished Node SDK builds compiled ESM/declarations and
+uses one private sidecar. Managed installation resolves a verified optional server
+package and pinned Chrome before sending the existing explicit-path launch
+request; installation policy is local to the SDK, not a new wire capability.
+Explicit paths and borrowed attachment remain available. Generated request/result
+maps include dynamic JSON and operation arrays; consumers must not flatten every
+method into an object-only result contract.
+
+Node import/install starts no process and writes no browser cache. Launch defaults
+to sandboxing; borrowed connections preserve external Chrome. Local abort/deadline
+does not roll back dispatched work. Durable operation IDs are allocated before
+dispatch; strict action conveniences require verified receipts. Close is shared,
+bounded and uncanceled by abandoned request waiters. If both work and cleanup
+fail, AggregateError retains the primary error as `cause`, including operation
+identity for recovery. See [the Node SDK README](clients/node/README.md).
 
 Go errors preserve structured server data and caller-known operation IDs.
 Go launch negotiates compatibility before opening Chrome, and close requests
