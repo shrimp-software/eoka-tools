@@ -68,6 +68,22 @@ func (p *Page) call(ctx context.Context, method string, params map[string]any, r
 	return p.b.t.call(ctx, method, params, result)
 }
 
+func (p *Page) SetViewport(ctx context.Context, width, height int, scale float64) error {
+	if err := validateViewport(width, height); err != nil {
+		return err
+	}
+	if err := validateScale(scale); err != nil {
+		return err
+	}
+	return p.call(ctx, "page.set_viewport", map[string]any{
+		"width": width, "height": height, "deviceScaleFactor": scale,
+	}, nil)
+}
+
+func (p *Page) ResetViewport(ctx context.Context) error {
+	return p.call(ctx, "page.reset_viewport", nil, nil)
+}
+
 func (p *Page) Goto(ctx context.Context, url string, options ...ActionOptions) error {
 	return p.performLegacy(ctx, "page.goto", map[string]any{"url": url}, options)
 }

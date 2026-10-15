@@ -6,8 +6,10 @@ use serde::{Deserialize, Serialize};
 pub struct AgentObserveArgs {
     #[schemars(description = "Maximum labeled controls, 1 through 200. Increase if truncated.")]
     #[serde(default = "control_limit")]
+    #[schemars(range(min = 1, max = 200))]
     pub max_controls: usize,
     #[serde(default = "observe_timeout")]
+    #[schemars(range(min = 50, max = 60000))]
     pub timeout_ms: u64,
 }
 
@@ -73,13 +75,16 @@ pub struct AgentStepArgs {
     #[serde(default)]
     pub expect: Option<Expectation>,
     #[serde(default = "step_timeout")]
+    #[schemars(range(min = 50, max = 60000))]
     pub timeout_ms: u64,
     #[schemars(
         description = "Independent action deadline, 1 through 300000 milliseconds. A shorter response wait never cancels or repeats the action."
     )]
     #[serde(default = "action_timeout")]
+    #[schemars(range(min = 1, max = 300000))]
     pub action_timeout_ms: u64,
     #[serde(default = "control_limit")]
+    #[schemars(range(min = 1, max = 200))]
     pub max_controls: usize,
 }
 

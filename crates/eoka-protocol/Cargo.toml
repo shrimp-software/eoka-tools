@@ -16,4 +16,4 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 
-eoka = { version = "0.6.1", features = ["schema"] }
+eoka = { version = "0.7.0", features = ["schema"] }
