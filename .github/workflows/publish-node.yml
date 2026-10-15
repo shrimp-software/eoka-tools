@@ -7,9 +7,17 @@ on:
         description: Exact 40-character commit currently at protected main; publishes only 0.1.0-beta.1 to next
         required: true
         type: string
+      bootstrap:
+        description: First publication using the approved NPM_BOOTSTRAP_TOKEN environment secret; retains provenance
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
+
+env:
+  NPM_BOOTSTRAP: ${{ inputs.bootstrap && 'true' || 'false' }}
 
 concurrency:
   group: npm-prerelease-publication
@@ -75,6 +83,12 @@ jobs:
       - name: Verify exact same-run qualification artifact and all package hashes
         run: mise exec -- node clients/node/scripts/publish-release.mjs download
       - name: Publish using trusted OIDC only
+        if: ${{ !inputs.bootstrap }}
+        run: mise exec -- node clients/node/scripts/publish-release.mjs publish
+      - name: Bootstrap package names with token and provenance
+        if: ${{ inputs.bootstrap }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
         run: mise exec -- node clients/node/scripts/publish-release.mjs publish
 
   registry-smoke:

@@ -490,12 +490,32 @@ renewed qualification, not an implicit generic muxer or transcoder.
 
 `publish-node.yml` is manual, restricted to an exact current protected `main`
 commit, and publishes only `0.1.0-beta.1` under `next` with npm provenance.
-It requires an existing `npm-prerelease` environment with required reviewers,
-self-review disabled, and a single allowed deployment branch, `main`.
-All six scoped package names must first exist and have npm trusted publishers
-configured for this repository, workflow, and environment. Bootstrap ownership
-and environment setup are external prerequisites; this workflow does not
-create them or fall back to an npm token.
+It requires an existing `npm-prerelease` environment with required reviewers
+and a single allowed deployment branch, `main`. By default it uses only npm
+trusted publishing through OIDC, requires self-review to be disabled, and
+requires all six scoped package names to exist with trusted publishers configured
+for this repository, workflow, and environment. There is no automatic token fallback.
+
+For the first release, explicitly dispatch with `bootstrap: true` and an
+environment-scoped `NPM_BOOTSTRAP_TOKEN` secret. Use a short-lived npm granular
+token authorized to create and publish these scoped packages, with the permissions
+required for unattended publication under the account's 2FA policy. Never commit
+the token or pass it as a workflow input. Bootstrap still requires environment
+reviewer approval, but permits the owner to approve their own deployment; this
+exception does not apply to normal OIDC publication.
+
+Only the bootstrap publish step receives the token. Its temporary private npm
+configuration contains an environment-variable reference, not the token value.
+Package verification and the final registry installation remain credential-free.
+Bootstrap accepts an absent name only when both public and authenticated registry
+reads return 404; an existing private package or an authorization failure aborts.
+Both modes retain GitHub OIDC provenance and the same qualification checks.
+
+After the first successful release, configure npm trusted publishers for all six
+packages, remove the bootstrap environment secret, revoke its npm token, and
+restore `prevent_self_review: true` with an independent environment reviewer before
+using normal publication. A bootstrap rerun after a partial upload still needs
+the token and must follow the same-run recovery procedure below.
 
 The publish job accepts only same-run, same-source qualified artifacts and
 preflights all six registry versions before writing anything. Existing versions
