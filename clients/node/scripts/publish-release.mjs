@@ -374,13 +374,13 @@ async function publish() {
 
 async function smoke() {
   const qualification = await verify();
-  const temporary = await mkdtemp(join(tmpdir(), 'eoka-registry-'));
+  const temporary = await mkdtemp(join(tmpdir(), 'e-'));
   try {
     const env = await npmEnvironment(temporary);
     for (const key of Object.keys(env)) if (/^(?:EOKA_|ACTIONS_ID_TOKEN_|GH_TOKEN$|GITHUB_TOKEN$)/.test(key)) delete env[key];
     env.HOME = join(temporary, 'home');
     env.XDG_CACHE_HOME = join(temporary, 'cache');
-    env.EOKA_RUNTIME_DIR = join(temporary, 'runtime');
+    env.EOKA_RUNTIME_DIR = temporary;
     env.EOKA_STATE_DIR = join(temporary, 'state');
     await mkdir(env.HOME);
     const boundary = await registryBoundary(temporary, env);

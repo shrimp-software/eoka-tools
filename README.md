@@ -25,7 +25,7 @@ for CLI, MCP, Rust/Go and runner migration, retention and download recovery.
 | [**eoka-protocol**](crates/eoka-protocol) | Shared daemon protocol types and tool catalog metadata |
 | [**eoka-sdk**](crates/eoka-sdk) | Rust SDK for typed Eoka browser sessions |
 | [**eoka-tack**](crates/eoka-tack) | Tack `ToolSet` adapter generated from the Eoka protocol catalog |
-| [**@cbxss/eoka**](clients/node) | Node/TypeScript SDK for private sidecar sessions; source-only, not published |
+| [**@cbxss/eoka**](clients/node) | Node/TypeScript SDK for private sidecar sessions; npm beta available under `next` |
 | [**eoka-runner**](crates/eoka-runner) | Declarative YAML automation runner |
 | [**eoka-captcha**](crates/captcha) | Optional Anti-Captcha integrations |
 | [**eoka-datadome**](crates/datadome) | Experimental local DataDome slider solver |
@@ -246,7 +246,7 @@ without `server.hello` are rejected before browser work. See the
 
 ## Node / TypeScript SDK
 
-[`clients/node`](clients/node) provides the unpublished `@cbxss/eoka` SDK:
+[`clients/node`](clients/node) provides the published `@cbxss/eoka@0.1.0-beta.1` SDK:
 compiled ESM/declarations for Node 24 LTS (`^24.21.0`), one private sidecar per Browser,
 owned launch or borrowed attachment, verified actions, durable operation recovery,
 page reads, bounded text fetch, PNG/JPEG/WebP screenshots and native MP4 recording.
@@ -257,10 +257,10 @@ preparation, progress, cancellation and verified offline/read-only cache reuse.
 Explicit `serverPath`/`executablePath` and environment overrides remain available;
 there is no PATH, Cargo, server-download or system-browser fallback.
 Import and npm installation have no browser/process side effects. Sandboxing is
-enabled by default, without an unsandboxed retry. Local managed consumption requires
-staging the SDK and native package together from actual release artifacts; the
-source manifest deliberately leaves unbuilt server hashes unset. Phase 5 capture
-and recording are implemented; no npm package has been published.
+enabled by default, without an unsandboxed retry. Install the published beta with
+`npm install @cbxss/eoka@next`. Local source consumption still requires staging the
+SDK and native package together from release artifacts; the source manifest
+deliberately leaves unbuilt server hashes unset.
 
 `page.screenshot()` returns a bounded Buffer; `page.screenshotToFile()` publishes
 without replacing existing files. Capture supports CSS-pixel crops, full-page

@@ -334,7 +334,7 @@ fn recover_abandoned(connection: &mut Connection, path: &Path) -> Result<()> {
                 tx.commit()?;
                 crate::downloads::durable::recover(connection, &owner)?;
             }
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+            Err(e) if e.raw_os_error() == fs2::lock_contended_error().raw_os_error() => {}
             Err(e) => return Err(e.into()),
         }
     }
