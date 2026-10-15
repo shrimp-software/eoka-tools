@@ -1,6 +1,6 @@
 [package]
 name = "eoka-sdk"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 license = "MIT"
 description = "Rust SDK for controlling eoka browser automation sessions"
@@ -13,7 +13,7 @@ authors = ["cbxss"]
 [dependencies]
 anyhow = { workspace = true }
 eoka = "0.7.0"
-eoka-protocol = { path = "../eoka-protocol", version = "0.4.0" }
+eoka-protocol = { path = "../eoka-protocol", version = "0.5.0" }
 tokio = { workspace = true }
 
 serde = { workspace = true }
