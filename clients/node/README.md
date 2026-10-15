@@ -1,6 +1,10 @@
 # @cbxss/eoka
 
-The Node.js SDK for the eoka NDJSON browser sidecar. The source package remains private and unpublished; npm version `0.1.0-beta.1` is reserved for the qualified beta release and can be built and packed locally for integration testing. It supports **Node.js 24 LTS, starting at 24.21.0** (`^24.21.0`) and exports compiled ESM and TypeScript declarations. Node 22 and Current/non-LTS lines are outside the support policy. CommonJS `require` is not an export.
+The Node.js SDK for the eoka NDJSON browser sidecar. Beta `0.1.0-beta.1` is published under the npm `next` tag; the repository source package remains private, with public artifacts staged by the release workflow. It supports **Node.js 24 LTS, starting at 24.21.0** (`^24.21.0`) and exports compiled ESM and TypeScript declarations. Node 22 and Current/non-LTS lines are outside the support policy. CommonJS `require` is not an export.
+
+```sh
+npm install @cbxss/eoka@next
+```
 
 ## Current scope and platform qualification
 
@@ -8,7 +12,7 @@ The SDK provides correlated subprocess transport, typed browser/page operations,
 
 Managed targets are `linux-x64-gnu`, `linux-arm64-gnu`, `darwin-x64`, `darwin-arm64`, and `win32-x64`. Linux managed selection requires glibc >= 2.35 and rejects musl/Alpine; Windows arm64 and unknown combinations are rejected before downloads. GNU release artifacts are built on Ubuntu 22.04 and checked for GLIBC requirements no higher than 2.35. Arbitrary source-built or host-development binaries are not qualified by that result.
 
-Both explicit server and Chrome paths are an expert override for managed platform checks, not a new support guarantee. Node.js support does not imply Bun, Deno, browser-side JavaScript, or drop-in Puppeteer compatibility. Packed npm consumption is verified; pnpm/Yarn and registry-backed publication remain separate gates.
+Both explicit server and Chrome paths are an expert override for managed platform checks, not a new support guarantee. Node.js support does not imply Bun, Deno, browser-side JavaScript, or drop-in Puppeteer compatibility. Packed npm consumption and credential-free registry installation with a Linux Chrome smoke are verified; pnpm/Yarn remain unqualified.
 
 ## Managed launch and explicit preparation
 
@@ -535,6 +539,8 @@ tags, source, or unavailable registry evidence abort before any new upload.
 There is no automatic publish retry or retagging. If source or artifacts changed,
 do not bypass these checks: use a separately reviewed roll-forward release.
 The final smoke checks a credential-free registry installation and provenance.
+Its private runtime root stays short for Chrome's POSIX socket-path limits;
+cache/state isolation and sandboxing remain enabled.
 
 No tag, merge, or publication is part of PR preparation. Existing Rust publishing
 workflows trigger on `main`; merging the version changes is a release action.
