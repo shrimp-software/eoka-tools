@@ -152,6 +152,11 @@ async function consumer(config, classifyRecordingDiagnostics) {
       }
       return pids;
     };
+    // Navigation verifies a commit, not completion of HTML parsing.
+    const waitForDocument = page => page.evaluate(`new Promise(resolve => {
+      if (document.readyState !== 'loading') resolve(true);
+      else document.addEventListener('DOMContentLoaded', () => resolve(true), { once: true });
+    })`);
     const launch = headless => Browser.launch({ browserCacheDir: freshCache, download: 'never', headless, runtimeDir: runtime, viewport: { width: 800, height: 600, deviceScaleFactor: 1 }, timeoutMs: 60000 });
     active = await launch(true);
     assert.equal(active.ownership, 'owned');
@@ -160,6 +165,7 @@ async function consumer(config, classifyRecordingDiagnostics) {
     evidence.checks.hello = active.hello;
     if (platform.startsWith('linux-')) {
       const sandboxPage = await active.newPage('chrome://sandbox');
+      await waitForDocument(sandboxPage);
       const status = await sandboxPage.evaluate('document.body.innerText');
       for (const field of ['PID namespaces', 'Network namespaces', 'Seccomp-BPF sandbox']) {
         assert.match(status, new RegExp(`${field}\\s+Yes(?:\\r?\\n|$)`));
@@ -283,6 +289,7 @@ async function consumer(config, classifyRecordingDiagnostics) {
     }
     active = await launch(false);
     const headed = await active.newPage('data:text/html,<title>Headed qualification</title>');
+    await waitForDocument(headed);
     assert.equal(await headed.evaluate('document.title'), 'Headed qualification');
     evidence.checks.headed = { passed: true, pids: await closeOwned(), display: process.env.DISPLAY ?? null };
     const chromePin = releaseManifest.chrome.platforms[platform];
@@ -315,6 +322,7 @@ async function consumer(config, classifyRecordingDiagnostics) {
     active = await Browser.connect({ browserWSEndpoint: version.webSocketDebuggerUrl, timeoutMs: 60000 });
     assert.equal(active.ownership, 'borrowed');
     const borrowed = await active.newPage('data:text/html,<title>Borrowed qualification</title>');
+    await waitForDocument(borrowed);
     assert.equal(await borrowed.evaluate('document.title'), 'Borrowed qualification');
     await active.close();
     active = undefined;

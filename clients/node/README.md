@@ -215,6 +215,8 @@ try {
 
 `fill`, `goto`, `select`, `hover`, and the other action conveniences resolve with an actual canonical `ActionReceipt` only after terminal verified completion. Admission is not completion. `click`, `type`, `pressKey`, `submit`, `drag`, and consequential actions passed to `perform` require an explicit `actionOptions.expect` before dispatch. Locator strings mean CSS selectors; generated `LocatorSpec` objects retain the canonical query/frame/index semantics.
 
+`newPage(url)` and `goto(url)` verify a navigation commit, not DOM parsing or application readiness. Before parser-dependent reads, use `evaluate` to await `DOMContentLoaded` only while `document.readyState === "loading"`; resolve the promise to a JSON-compatible value such as `true`. `goto` accepts an explicit `actionOptions.expect` when navigation must also establish application readiness.
+
 Run the included example after building:
 
 ```sh
