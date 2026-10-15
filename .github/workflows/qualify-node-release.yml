@@ -127,6 +127,7 @@ jobs:
           cargo build --release --locked --target "$TARGET" -p eoka-server
           cargo metadata --locked --format-version 1 > "dist/$PLATFORM-cargo.json"
           cargo test --release --locked --target "$TARGET" -p eoka-server recordings:: -- --nocapture 2>&1 | tee "dist/$PLATFORM-recording-tests.log"
+          cargo test --release --locked --target "$TARGET" -p eoka-server operations::tests::live_runtime_is_not_recovered_by_a_second_owner -- --exact --nocapture 2>&1 | tee "dist/$PLATFORM-operation-lock-tests.log"
           cp "target/$TARGET/release/eoka-server$EXT" "dist/$ASSET"
           cp Cargo.lock "dist/$PLATFORM-Cargo.lock"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
