@@ -40,3 +40,18 @@ run = ["bash scripts/check-server-release-trigger.sh", "bash scripts/release-che
 [tasks.install-cli]
 description = "Install the local eoka CLI"
 run = "CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$PWD/target} cargo install --path crates/eoka-cli --force"
+
+[tasks.sidecar-schema]
+description = "Export canonical sidecar request and result schemas"
+run = "cargo run --quiet --locked -p eoka-protocol --bin export-sidecar-schema"
+
+[tasks.sidecar-check]
+description = "Check sidecar protocol, runtime and Go contracts"
+run = [
+  "cargo test --locked -p eoka-protocol -p eoka-server",
+  "mise run go-check",
+]
+
+[tasks.go-check]
+description = "Check Go sidecar client behavior and races"
+run = "go -C clients/go test -race ./..."

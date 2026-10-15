@@ -20,7 +20,7 @@ eoka-sdk = { version = "0.5.0", path = "../eoka-sdk" }
 eoka-tack = { version = "0.4.0", path = "../eoka-tack" }
 captcha = { package = "eoka-captcha", version = "0.1.1", path = "../captcha" }
 eoka-datadome = { version = "0.2.1", path = "../datadome" }
-eoka = "0.6.1"
+eoka = "0.7.0"
 tack-core = { workspace = true }
 tack-runtime-quickjs = { workspace = true }
 clap = { workspace = true }

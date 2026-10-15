@@ -68,6 +68,17 @@ New clients send a distinct action command, including for download starts, so
 older daemons reject unsupported durable requests before input. Restart daemons
 explicitly after upgrading.
 
+The stdio sidecar negotiates its own protocol with `server.hello`; its method
+list is not the CLI tool catalog. Operation waits, list snapshots and get/cancel
+for admitted IDs run independently of ordinary page requests. Unknown-ID
+get/cancel requests retain ordering behind prior queued admissions; list is
+a current snapshot rather than a barrier. Controls still consume the advertised
+in-flight budget. Replies may arrive out of order, and timing out a local waiter
+does not cancel the stored operation. Sidecar errors preserve structured data and caller-known
+operation IDs. `server.shutdown` and stdin EOF request bounded cleanup, not
+rollback of browser actions. Inspect the durable outcome after interruption;
+never start a replacement action merely because the sidecar connection ended.
+
 Runner YAML accepts `perform` with the same request shape. Existing click,
 fill, type, select, key and navigation steps use the operation manager; click,
 type and key steps require `expect`. Optional `operation_id` and `timeout_ms`
@@ -131,10 +142,55 @@ replayed. Completed files/history remain available after daemon restart.
 Download status/list/wait can start a history daemon when the old daemon is gone;
 these queries do not launch Chrome.
 
-## Paired release
+## Sidecar capture and recording
 
-This release uses eoka 0.6.1 from crates.io. The workspace lockfile records the
-registry source and checksum; no local core override is needed. Publish protocol,
+`page.screenshot` returns at most 16 MiB of image bytes as base64; larger captures
+must use `page.screenshot_to_file`. Both support PNG, JPEG and WebP, CSS-pixel
+clips and full-page capture. Viewport DPR is the only scale multiplier. File
+paths must be absolute and their parent directory must already exist.
+
+Screenshot files and native recordings use exclusive, private staging files in
+the destination directory. The server flushes, synchronizes and closes the file
+before linking it atomically without replacing an existing destination. A
+failed write, close or publication retains a `.partial` path as failure evidence
+instead of claiming a completed output. Native output is silent MP4 with
+Chrome-selected codec; there is no whole-video Buffer or base64 response.
+
+Choose a UUID before `recording.start` and retain it if the response is lost.
+`recording.get` recovers the live sidecar's record; repeating start with the same
+ID and parameters returns that record without restarting Chrome. Different
+parameters conflict. This history is session-scoped, not crash-resumable.
+Unsupported native recording yields a failed record and explicit error, never
+an alternate recorder.
+
+`recording.stop` shares background stop/drain/close/publication and waits for a
+terminal record. Only `completed` with an artifact means saved output; inspect
+failure stage, retained path and cleanup uncertainty otherwise. Aborting a
+waiter does not cancel recording. `recording.cancel` prevents publication before
+its short commit claim. After that claim, cancellation waits for the commit's
+outcome. Filesystem work runs outside the status/control mutex, and control
+requests bypass the ordinary dispatch queue while finalization drains bounded
+64 KiB chunks.
+
+Tab/browser close, stdin EOF and shutdown cancel unfinished recordings before
+detaching. A borrowed browser is disconnected, never terminated. Target or
+transport loss records failure and releases local resources. Native admission
+has a 20-second deadline. Shutdown signals all cancellations concurrently and
+waits at most 3 seconds for recording cleanup within the existing 5-second
+overall browser-cleanup deadline. Native and local-file cleanup remain owned
+when an acknowledgement deadline expires. A publication already claimed may
+still finish after shutdown expiry; the failed record reports publish-stage
+uncertainty and possible output path, then incorporates late outcome evidence
+without changing into a completed record. Unacknowledged cleanup is uncertain,
+not complete. Retained partials, including late-created staging paths, remain
+inspectable and are not automatically deleted.
+
+## Release dependencies
+
+This release uses published eoka `0.7.0` from crates.io. The workspace lockfile
+records registry checksum
+`447a498ec28c34b2020be583617c70f89dc718228bb02db5750f72e4da333a1e`.
+Publish protocol,
 SDK, server, runner, MCP/Tack and CLI in dependency order (and the updated
 DataDome adapter before CLI). Run `mise run conformance` and
 `mise run release-check` against registry dependencies before release.

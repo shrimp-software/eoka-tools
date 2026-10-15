@@ -1,12 +1,18 @@
 use base64::Engine;
 use captcha::{build_captcha_inject_js, AntiCaptcha, CaptchaInjectionKind};
+use eoka_protocol::sidecar::{
+    AttributeResult, BoundedFetchParams, BoundedFetchResult, CaptureStateResult, ContentResult,
+    ErrorCode, EvaluateResult, ExistsResult, FetchParams, FetchResult, GetAttributeParams,
+    HeldKeyParams, JsParams, MouseButtonParams, MouseMoveParams, RestoreStateParams,
+    ScreenshotParams, ScreenshotToFileParams, SelectorParams, ServerError, SetViewportParams,
+    SolveCaptchaParams, SolveCaptchaResult, TextResult, TitleResult, UrlResult, WaitForParams,
+    WaitForTextParams,
+};
 use serde::Deserialize;
-use serde_json::{json, Map, Value};
-use std::collections::BTreeMap;
+use serde_json::{json, Value};
 
 use super::browser::close_tab_impl;
 use super::{parse_params, PageIdParams};
-use crate::protocol::ServerError;
 use crate::state::AppState;
 
 fn core_mouse_button(button: eoka_protocol::MouseButton) -> eoka::MouseButton {
@@ -19,247 +25,81 @@ fn core_mouse_button(button: eoka_protocol::MouseButton) -> eoka::MouseButton {
     }
 }
 
-fn single(key: &'static str, value: impl Into<Value>) -> Value {
-    let mut map = Map::with_capacity(1);
-    map.insert(key.to_string(), value.into());
-    Value::Object(map)
+fn encode(value: impl serde::Serialize) -> Result<Value, ServerError> {
+    serde_json::to_value(value).map_err(|error| ServerError::internal(error.to_string()))
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SelectorParams {
-    page_id: String,
-    selector: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct TextParams {
-    page_id: String,
-    text: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct GotoParams {
-    page_id: String,
-    url: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct FillParams {
-    page_id: String,
-    selector: String,
-    value: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct TypeIntoParams {
-    page_id: String,
-    selector: String,
-    text: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct GetAttributeParams {
-    page_id: String,
-    selector: String,
-    name: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct WaitForParams {
-    page_id: String,
-    selector: String,
-    timeout_ms: u64,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct WaitForTextParams {
-    page_id: String,
-    text: String,
-    timeout_ms: u64,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct JsParams {
-    page_id: String,
-    js: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct FetchParams {
-    page_id: String,
-    url: String,
-    #[serde(default = "default_fetch_method")]
-    method: String,
-    #[serde(default)]
-    headers: BTreeMap<String, String>,
-    #[serde(default)]
-    body: Option<String>,
-    #[serde(default = "default_fetch_redirect")]
-    redirect: String,
-}
-
-fn default_fetch_method() -> String {
-    "GET".into()
-}
-
-fn default_fetch_redirect() -> String {
-    "follow".into()
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PressKeyParams {
-    page_id: String,
-    key: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct MouseButtonParams {
-    page_id: String,
-    #[serde(flatten)]
-    mouse: eoka_protocol::MouseButtonArgs,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct MouseMoveParams {
-    page_id: String,
-    #[serde(flatten)]
-    mouse: eoka_protocol::MouseMoveArgs,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct HeldKeyParams {
-    page_id: String,
-    #[serde(flatten)]
-    key: eoka_protocol::KeyArgs,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RestoreStateParams {
-    page_id: String,
-    state: eoka::BrowserState,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SolveCaptchaParams {
-    page_id: String,
-    api_key: String,
-    captcha_type: String,
-    captcha_mode: String,
-    #[serde(rename = "websiteURL")]
-    website_url: String,
-    website_key: String,
-    #[serde(default)]
-    enterprise_payload: Option<Value>,
-    #[serde(default)]
-    api_domain: Option<String>,
-    #[serde(default)]
-    callback: Option<String>,
-}
-
-pub async fn goto(state: &AppState, params: Value) -> Result<Value, ServerError> {
-    let params: GotoParams = parse_params(params)?;
-    state.page(&params.page_id)?.goto(&params.url).await?;
-    Ok(json!({}))
-}
-
-pub async fn click(state: &AppState, params: Value) -> Result<Value, ServerError> {
-    let params: SelectorParams = parse_params(params)?;
-    state.page(&params.page_id)?.click(&params.selector).await?;
-    Ok(json!({}))
-}
-
-pub async fn click_text(state: &AppState, params: Value) -> Result<Value, ServerError> {
-    let params: TextParams = parse_params(params)?;
+pub async fn set_viewport(state: &AppState, params: Value) -> Result<Value, ServerError> {
+    let params: SetViewportParams = parse_params(params)?;
+    eoka_protocol::sidecar::validate_viewport(
+        params.width,
+        params.height,
+        params.device_scale_factor,
+    )?;
     state
         .page(&params.page_id)?
-        .click_by_text(&params.text)
+        .set_viewport(params.width, params.height, params.device_scale_factor)
         .await?;
     Ok(json!({}))
 }
 
-pub async fn human_click(state: &AppState, params: Value) -> Result<Value, ServerError> {
-    let params: SelectorParams = parse_params(params)?;
-    state
-        .page(&params.page_id)?
-        .human_click(&params.selector)
-        .await?;
+pub async fn reset_viewport(state: &AppState, params: Value) -> Result<Value, ServerError> {
+    let params: PageIdParams = parse_params(params)?;
+    state.page(&params.page_id)?.reset_viewport().await?;
     Ok(json!({}))
 }
 
-pub async fn human_click_text(state: &AppState, params: Value) -> Result<Value, ServerError> {
-    let params: TextParams = parse_params(params)?;
-    state
-        .page(&params.page_id)?
-        .human_click_by_text(&params.text)
+pub async fn fetch_bounded(state: &AppState, params: Value) -> Result<Value, ServerError> {
+    let params: BoundedFetchParams = parse_params(params)?;
+    params.validate()?;
+    let request = params.request;
+    let response = state
+        .page(&request.page_id)?
+        .fetch_bounded(&eoka::BoundedFetchRequest {
+            url: request.url,
+            method: request.method,
+            headers: request.headers.into_iter().collect(),
+            body: request.body,
+            redirect: request.redirect,
+            max_bytes: params.max_bytes,
+        })
         .await?;
-    Ok(json!({}))
-}
-
-pub async fn fill(state: &AppState, params: Value) -> Result<Value, ServerError> {
-    let params: FillParams = parse_params(params)?;
-    state
-        .page(&params.page_id)?
-        .fill(&params.selector, &params.value)
-        .await?;
-    Ok(json!({}))
-}
-
-pub async fn human_fill(state: &AppState, params: Value) -> Result<Value, ServerError> {
-    let params: FillParams = parse_params(params)?;
-    state
-        .page(&params.page_id)?
-        .human_fill(&params.selector, &params.value)
-        .await?;
-    Ok(json!({}))
-}
-
-pub async fn type_into(state: &AppState, params: Value) -> Result<Value, ServerError> {
-    let params: TypeIntoParams = parse_params(params)?;
-    state
-        .page(&params.page_id)?
-        .type_into(&params.selector, &params.text)
-        .await?;
-    Ok(json!({}))
+    encode(BoundedFetchResult {
+        url: response.url,
+        status: response.status,
+        status_text: response.status_text,
+        r#type: response.r#type,
+        redirected: response.redirected,
+        headers: response.headers,
+        body: response.body,
+        truncated: response.truncated,
+        bytes_read: response.bytes_read,
+        body_omitted: response.body_omitted,
+    })
 }
 
 pub async fn text(state: &AppState, params: Value) -> Result<Value, ServerError> {
     let params: PageIdParams = parse_params(params)?;
     let text = state.page(&params.page_id)?.text().await?;
-    Ok(single("text", text))
+    encode(TextResult { text })
 }
 
 pub async fn content(state: &AppState, params: Value) -> Result<Value, ServerError> {
     let params: PageIdParams = parse_params(params)?;
     let html = state.page(&params.page_id)?.content().await?;
-    Ok(single("html", html))
+    encode(ContentResult { html })
 }
 
 pub async fn title(state: &AppState, params: Value) -> Result<Value, ServerError> {
     let params: PageIdParams = parse_params(params)?;
     let title = state.page(&params.page_id)?.title().await?;
-    Ok(single("title", title))
+    encode(TitleResult { title })
 }
 
 pub async fn url(state: &AppState, params: Value) -> Result<Value, ServerError> {
     let params: PageIdParams = parse_params(params)?;
     let url = state.page(&params.page_id)?.url().await?;
-    Ok(single("url", url))
+    encode(UrlResult { url })
 }
 
 pub async fn get_text(state: &AppState, params: Value) -> Result<Value, ServerError> {
@@ -267,7 +107,7 @@ pub async fn get_text(state: &AppState, params: Value) -> Result<Value, ServerEr
     let page = state.page(&params.page_id)?;
     let element = page.find(&params.selector).await?;
     let text = element.text().await?;
-    Ok(single("text", text))
+    encode(TextResult { text })
 }
 
 pub async fn get_attribute(state: &AppState, params: Value) -> Result<Value, ServerError> {
@@ -275,13 +115,13 @@ pub async fn get_attribute(state: &AppState, params: Value) -> Result<Value, Ser
     let page = state.page(&params.page_id)?;
     let element = page.find(&params.selector).await?;
     let value = element.get_attribute(&params.name).await?;
-    Ok(single("value", value))
+    encode(AttributeResult { value })
 }
 
 pub async fn exists(state: &AppState, params: Value) -> Result<Value, ServerError> {
     let params: SelectorParams = parse_params(params)?;
     let exists = state.page(&params.page_id)?.exists(&params.selector).await;
-    Ok(json!({ "exists": exists }))
+    encode(ExistsResult { exists })
 }
 
 pub async fn wait_for(state: &AppState, params: Value) -> Result<Value, ServerError> {
@@ -313,8 +153,15 @@ pub async fn wait_for_text(state: &AppState, params: Value) -> Result<Value, Ser
 
 pub async fn evaluate(state: &AppState, params: Value) -> Result<Value, ServerError> {
     let params: JsParams = parse_params(params)?;
-    let result: Value = state.page(&params.page_id)?.evaluate(&params.js).await?;
-    Ok(single("result", result))
+    let script = build_json_evaluation_js(&params.js)?;
+    let result: BrowserEvaluation = state.page(&params.page_id)?.evaluate(&script).await?;
+    let BrowserEvaluation::Value { value: result } = result else {
+        return Err(ServerError::new(
+            ErrorCode::MessageTooLarge,
+            format!("evaluation result exceeds the {MAX_EVALUATION_BYTES} byte CDP payload limit"),
+        ));
+    };
+    encode(EvaluateResult { result })
 }
 
 pub async fn execute(state: &AppState, params: Value) -> Result<Value, ServerError> {
@@ -323,17 +170,71 @@ pub async fn execute(state: &AppState, params: Value) -> Result<Value, ServerErr
     Ok(json!({}))
 }
 
-/// Performs a request from the current page's browser context.
-///
-/// Unlike an external HTTP client, this uses the page's live cookies,
-/// browser fingerprint, and same-origin policy. The response body is returned
-/// verbatim so callers can decode JSON or another API format themselves.
+const MAX_EVALUATION_BYTES: usize = 16 * 1024 * 1024 - 4096;
+
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum BrowserEvaluation {
+    Value { value: Value },
+    TooLarge,
+}
+
+fn build_json_evaluation_js(expression: &str) -> Result<String, ServerError> {
+    let expression = serde_json::to_string(expression)
+        .map_err(|error| ServerError::internal(error.to_string()))?;
+    Ok(format!(
+        r#"(async () => {{
+            const value = await (0, eval)({expression});
+            const ancestors = new WeakSet();
+            const normalize = (value) => {{
+                if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+                if (typeof value === "number") {{
+                    if (!Number.isFinite(value) || (Number.isInteger(value) && !Number.isSafeInteger(value))) {{
+                        throw new TypeError("Evaluation result contains a non-finite or unsafe number");
+                    }}
+                    return value;
+                }}
+                if (typeof value !== "object") throw new TypeError("Evaluation result is not JSON-compatible");
+                const prototype = Object.getPrototypeOf(value);
+                if (!Array.isArray(value) && prototype !== Object.prototype && prototype !== null) {{
+                    throw new TypeError("Evaluation result contains a non-JSON object");
+                }}
+                if (Object.getOwnPropertySymbols(value).length !== 0) {{
+                    throw new TypeError("Evaluation result contains symbol keys");
+                }}
+                if (ancestors.has(value)) throw new TypeError("Evaluation result contains a cycle");
+                ancestors.add(value);
+                const normalized = Array.isArray(value) ? [] : Object.create(null);
+                if (Array.isArray(value)) {{
+                    for (let index = 0; index < value.length; index++) {{
+                        if (!Object.hasOwn(value, index)) throw new TypeError("Evaluation result contains an array hole");
+                        normalized.push(normalize(value[index]));
+                    }}
+                }} else {{
+                    for (const key of Object.keys(value)) normalized[key] = normalize(value[key]);
+                }}
+                ancestors.delete(value);
+                return normalized;
+            }};
+            const normalized = normalize(value);
+            const serialized = JSON.stringify(normalized);
+            if (serialized.length > {MAX_EVALUATION_BYTES} ||
+                new TextEncoder().encode(serialized).byteLength > {MAX_EVALUATION_BYTES}) {{
+                return {{kind: "too_large"}};
+            }}
+            return {{kind: "value", value: normalized}};
+        }})()"#
+    ))
+}
+
 pub async fn fetch(state: &AppState, params: Value) -> Result<Value, ServerError> {
     let params: FetchParams = parse_params(params)?;
     let script = build_browser_fetch_js(&params)?;
     let body: String = state.page(&params.page_id)?.evaluate(&script).await?;
-    serde_json::from_str(&body)
-        .map_err(|error| ServerError::internal(format!("invalid browser fetch response: {error}")))
+    let result: FetchResult = serde_json::from_str(&body).map_err(|error| {
+        ServerError::internal(format!("invalid browser fetch response: {error}"))
+    })?;
+    encode(result)
 }
 
 fn build_browser_fetch_js(params: &FetchParams) -> Result<String, ServerError> {
@@ -377,46 +278,85 @@ fn build_browser_fetch_js(params: &FetchParams) -> Result<String, ServerError> {
 pub async fn capture_state(state: &AppState, params: Value) -> Result<Value, ServerError> {
     let params: PageIdParams = parse_params(params)?;
     let state = state.page(&params.page_id)?.capture_state().await?;
-    let state =
-        serde_json::to_value(state).map_err(|error| ServerError::internal(error.to_string()))?;
-    Ok(single("state", state))
+    encode(CaptureStateResult {
+        state: state.into(),
+    })
 }
 
 pub async fn restore_state(state: &AppState, params: Value) -> Result<Value, ServerError> {
     let params: RestoreStateParams = parse_params(params)?;
+    let browser_state = params.state.into();
     state
         .page(&params.page_id)?
-        .restore_state(&params.state)
+        .restore_state(&browser_state)
         .await?;
     Ok(json!({}))
+}
+
+fn screenshot_bytes(bytes: &[u8]) -> Result<Value, ServerError> {
+    if bytes.len() > eoka_protocol::sidecar::MAX_SCREENSHOT_BYTES {
+        return Err(ServerError::new(
+            ErrorCode::ScreenshotTooLarge,
+            "screenshot exceeds the 16 MiB in-memory limit; use page.screenshot_to_file instead",
+        ));
+    }
+    let mut result = json!({ "dataBase64": null });
+    result["dataBase64"] = Value::String(base64::engine::general_purpose::STANDARD.encode(bytes));
+    Ok(result)
 }
 
 pub async fn screenshot(state: &AppState, params: Value) -> Result<Value, ServerError> {
-    let params: PageIdParams = parse_params(params)?;
-    let png = state.page(&params.page_id)?.screenshot().await?;
-    let data_base64 = base64::engine::general_purpose::STANDARD.encode(png);
-    Ok(single("dataBase64", data_base64))
-}
-
-pub async fn select(state: &AppState, params: Value) -> Result<Value, ServerError> {
-    let params: FillParams = parse_params(params)?;
-    state
+    let params: ScreenshotParams = parse_params(params)?;
+    params.validate()?;
+    let bytes = state
         .page(&params.page_id)?
-        .select(&params.selector, &params.value)
+        .screenshot_with_options(&params.options())
         .await?;
-    Ok(json!({}))
+    screenshot_bytes(&bytes)
 }
 
-pub async fn hover(state: &AppState, params: Value) -> Result<Value, ServerError> {
-    let params: SelectorParams = parse_params(params)?;
-    state.page(&params.page_id)?.hover(&params.selector).await?;
-    Ok(json!({}))
-}
-
-pub async fn press_key(state: &AppState, params: Value) -> Result<Value, ServerError> {
-    let params: PressKeyParams = parse_params(params)?;
-    state.page(&params.page_id)?.press_key(&params.key).await?;
-    Ok(json!({}))
+pub async fn screenshot_to_file(state: &AppState, params: Value) -> Result<Value, ServerError> {
+    let params: ScreenshotToFileParams = parse_params(params)?;
+    params.validate()?;
+    let page = state.page(&params.page_id)?;
+    let mut staging = crate::artifacts::StagedArtifact::prepare(&params.path)
+        .await
+        .map_err(|error| error.server_error())?;
+    let bytes = match page.screenshot_with_options(&params.options()).await {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            let mut error = ServerError::from(error);
+            error.data.get_or_insert_with(Default::default).partial_path =
+                Some(staging.partial.to_string_lossy().into_owned());
+            if let Err(cleanup) = staging.abandon().await {
+                error
+                    .message
+                    .push_str(&format!("; local file cleanup failed: {}", cleanup.message));
+            }
+            return Err(error);
+        }
+    };
+    for chunk in bytes.chunks(65_536) {
+        staging
+            .write(chunk)
+            .await
+            .map_err(|error| error.server_error())?;
+    }
+    drop(bytes);
+    staging.seal().await.map_err(|error| error.server_error())?;
+    let mime_type = match params
+        .format
+        .unwrap_or(eoka_protocol::sidecar::ScreenshotFormat::Png)
+    {
+        eoka_protocol::sidecar::ScreenshotFormat::Png => "image/png",
+        eoka_protocol::sidecar::ScreenshotFormat::Jpeg => "image/jpeg",
+        eoka_protocol::sidecar::ScreenshotFormat::Webp => "image/webp",
+    };
+    let artifact = tokio::task::spawn_blocking(move || staging.publish(mime_type, None))
+        .await
+        .map_err(|error| ServerError::internal(error.to_string()))?
+        .map_err(|error| error.server_error())?;
+    encode(artifact)
 }
 
 pub async fn mouse_down(state: &AppState, params: Value) -> Result<Value, ServerError> {
@@ -475,10 +415,6 @@ pub async fn release_all_inputs(state: &AppState, params: Value) -> Result<Value
     Ok(json!({}))
 }
 
-/// Solve a supported CAPTCHA and apply its token inside the current page.
-///
-/// The token intentionally never crosses the server protocol boundary. It is
-/// both sensitive and only useful in the browser session that requested it.
 pub async fn solve_captcha(state: &AppState, params: Value) -> Result<Value, ServerError> {
     let params: SolveCaptchaParams = parse_params(params)?;
     if params.captcha_mode != "anti_captcha_proxyless" {
@@ -520,9 +456,6 @@ pub async fn solve_captcha(state: &AppState, params: Value) -> Result<Value, Ser
         .get("callbacks")
         .and_then(Value::as_array)
         .map_or(0, Vec::len);
-    // reCAPTCHA widgets can attach their callback client just after a token is
-    // first delivered. Re-scan once; the injection script de-duplicates
-    // already-delivered callbacks by token and path.
     if callback_count <= 1 {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         let settled = captcha_injection_result(page, &script).await?;
@@ -534,12 +467,12 @@ pub async fn solve_captcha(state: &AppState, params: Value) -> Result<Value, Ser
             result = settled;
         }
     }
-    // Preserve non-secret solver metadata for callers that need to diagnose
-    // identity consistency. The CAPTCHA token never leaves this process.
     if let Some(user_agent) = solver_user_agent {
         result["solverUserAgent"] = Value::String(user_agent);
     }
-    Ok(single("injection", result))
+    let result: SolveCaptchaResult = serde_json::from_value(json!({ "injection": result }))
+        .map_err(|error| ServerError::internal(format!("invalid CAPTCHA result: {error}")))?;
+    encode(result)
 }
 
 async fn captcha_injection_result(page: &eoka::Page, script: &str) -> Result<Value, ServerError> {
@@ -552,45 +485,86 @@ async fn captcha_injection_result(page: &eoka::Page, script: &str) -> Result<Val
 pub async fn close(state: &mut AppState, params: Value) -> Result<Value, ServerError> {
     let params: PageIdParams = parse_params(params)?;
     if let Some(error) = close_tab_impl(state, &params.page_id).await? {
-        return Err(error.into());
+        return Err(error);
     }
     Ok(json!({}))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{build_browser_fetch_js, FetchParams};
-    use std::collections::BTreeMap;
-
     #[test]
-    fn browser_fetch_uses_page_credentials_and_encodes_values() {
-        let script = build_browser_fetch_js(&FetchParams {
-            page_id: "page-1".into(),
-            url: "https://example.test/api?x=\"quoted\"".into(),
-            method: "POST".into(),
-            headers: BTreeMap::from([("Content-Type".into(), "application/json".into())]),
-            body: Some(r#"{"value":"quoted"}"#.into()),
-            redirect: "follow".into(),
-        })
-        .unwrap();
-
-        assert!(script.contains("credentials: \"include\""));
-        assert!(script.contains("\"POST\""));
-        assert!(script.contains("\\\"quoted\\\""));
+    fn screenshot_bound_is_checked_before_base64_expansion() {
+        let bytes = vec![0; eoka_protocol::sidecar::MAX_SCREENSHOT_BYTES + 1];
+        let error = super::screenshot_bytes(&bytes).unwrap_err();
+        assert_eq!(
+            error.code,
+            eoka_protocol::sidecar::ErrorCode::ScreenshotTooLarge
+        );
+        assert!(error.message.contains("screenshot_to_file"));
+        let value = super::screenshot_bytes(&bytes[..eoka_protocol::sidecar::MAX_SCREENSHOT_BYTES])
+            .unwrap();
+        use base64::Engine;
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(value["dataBase64"].as_str().unwrap())
+            .unwrap();
+        assert_eq!(decoded.len(), eoka_protocol::sidecar::MAX_SCREENSHOT_BYTES);
     }
 
-    #[test]
-    fn browser_fetch_rejects_unknown_redirect_mode() {
-        let error = build_browser_fetch_js(&FetchParams {
-            page_id: "page-1".into(),
-            url: "https://example.test".into(),
-            method: "GET".into(),
-            headers: BTreeMap::new(),
-            body: None,
-            redirect: "somewhere".into(),
-        })
-        .unwrap_err();
-
-        assert!(error.message.contains("redirect"));
+    #[tokio::test]
+    #[ignore = "requires Chrome"]
+    async fn evaluation_preserves_json_and_rejects_non_json_values() {
+        let browser = eoka::Browser::launch().await.unwrap();
+        let page = browser.new_blank_page().await.unwrap();
+        for (expression, expected) in [
+            ("null", serde_json::Value::Null),
+            ("false", serde_json::json!(false)),
+            ("0", serde_json::json!(0)),
+            ("''", serde_json::json!("")),
+            (
+                "Promise.resolve({items:[1,null,true],nested:{value:'ok'}})",
+                serde_json::json!({"items":[1,null,true],"nested":{"value":"ok"}}),
+            ),
+            (
+                "(() => { const child = {n:1}; return [child,child]; })()",
+                serde_json::json!([{"n":1},{"n":1}]),
+            ),
+            (
+                "({['__proto__']:{safe:true}})",
+                serde_json::json!({"__proto__":{"safe":true}}),
+            ),
+        ] {
+            let script = super::build_json_evaluation_js(expression).unwrap();
+            let result: super::BrowserEvaluation = page.evaluate(&script).await.unwrap();
+            let super::BrowserEvaluation::Value { value } = result else {
+                panic!("small JSON value exceeded the evaluation limit");
+            };
+            assert_eq!(value, expected);
+        }
+        for expression in [
+            "undefined",
+            "NaN",
+            "Infinity",
+            "9007199254740992",
+            "1n",
+            "() => 1",
+            "Symbol('x')",
+            "({nested:undefined})",
+            "[1,,2]",
+            "new Date()",
+            "new Map()",
+            "({[Symbol('key')]:1})",
+            "(() => { const value = {}; value.self = value; return value; })()",
+        ] {
+            let script = super::build_json_evaluation_js(expression).unwrap();
+            assert!(
+                page.evaluate::<super::BrowserEvaluation>(&script)
+                    .await
+                    .is_err(),
+                "{expression}"
+            );
+        }
+        page.execute("undefined").await.unwrap();
+        drop(page);
+        browser.close().await.unwrap();
     }
 }

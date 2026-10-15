@@ -1,19 +1,23 @@
 pub mod agent;
 pub mod annotate;
+pub mod artifacts;
 pub mod browser;
 pub mod browser_fetch;
 pub mod captcha;
 pub mod dispatch;
 pub mod downloads;
+mod file_publication;
 mod methods;
 pub mod observe;
 pub mod operations;
 pub mod page_context;
-pub mod protocol;
+pub mod recordings;
+pub mod runtime;
 pub mod snapshot;
 pub mod spa;
 pub mod state;
 pub mod target;
+pub mod transport;
 
 pub use browser::{InteractiveElement, ObserveConfig, ObserveDiff, Session};
 pub use eoka;

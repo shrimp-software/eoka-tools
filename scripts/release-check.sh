@@ -51,7 +51,7 @@ cat <<'MSG'
 Release check passed.
 
 Publish order:
-  0. publish eoka 0.6.1 from the core repository first
+  0. use the published eoka 0.7.0 registry dependency
   1. publish tack-rs 0.0.2 crates first
   2. cargo publish -p eoka-captcha
   3. cargo publish -p eoka-proxy

@@ -111,7 +111,7 @@ impl Destination {
                 "Download canceled before publication",
             ));
         }
-        std::fs::hard_link(&path, &self.output).map_err(|error| {
+        crate::file_publication::publish_no_replace(&path, &self.output).map_err(|error| {
             if error.kind() == std::io::ErrorKind::AlreadyExists {
                 failure(
                     "download_destination_exists",
@@ -130,8 +130,8 @@ impl Destination {
         std::fs::File::open(parent)
             .and_then(|parent| parent.sync_all())
             .map_err(io_failure)?;
-        let (_, published_device, published_inode) =
-            verify(&self.output, received, total, expected)?;
+        let (published_device, published_inode) =
+            verify_file(&self.output, received, total, expected, None)?;
         if (device, inode) != (published_device, published_inode) {
             return Err(failure(
                 "download_invalid_file",
@@ -173,6 +173,19 @@ pub(super) fn verify(
     expected: Option<u64>,
 ) -> Result<(String, u64, u64), ErrorDetail> {
     use sha2::{Digest, Sha256};
+    let mut hash = Sha256::new();
+    let (device, inode) = verify_file(path, received, total, expected, Some(&mut hash))?;
+    Ok((format!("{:x}", hash.finalize()), device, inode))
+}
+
+fn verify_file(
+    path: &Path,
+    received: u64,
+    total: Option<u64>,
+    expected: Option<u64>,
+    mut hash: Option<&mut sha2::Sha256>,
+) -> Result<(u64, u64), ErrorDetail> {
+    use sha2::Digest;
     use std::io::Read;
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
@@ -193,7 +206,6 @@ pub(super) fn verify(
             "Artifact is not a regular file with the recorded size",
         ));
     }
-    let mut hash = Sha256::new();
     let mut buffer = [0u8; 65536];
     let mut read = 0u64;
     loop {
@@ -201,7 +213,9 @@ pub(super) fn verify(
         if n == 0 {
             break;
         }
-        hash.update(&buffer[..n]);
+        if let Some(hash) = hash.as_deref_mut() {
+            hash.update(&buffer[..n]);
+        }
         read += n as u64;
     }
     if read != received {
@@ -218,7 +232,7 @@ pub(super) fn verify(
     };
     #[cfg(not(unix))]
     let identity = (0, 0);
-    Ok((format!("{:x}", hash.finalize()), identity.0, identity.1))
+    Ok(identity)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -237,7 +251,10 @@ pub fn safe_guid(guid: &str) -> bool {
 
 pub fn io_failure(error: std::io::Error) -> ErrorDetail {
     failure(
-        if error.raw_os_error() == Some(libc::ENOSPC) {
+        if matches!(
+            error.kind(),
+            std::io::ErrorKind::StorageFull | std::io::ErrorKind::QuotaExceeded
+        ) {
             "download_no_space"
         } else {
             "download_io_error"
@@ -277,6 +294,19 @@ pub fn ensure_space(_path: &Path, _needed: u64) -> Result<(), ErrorDetail> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn capacity_errors_without_os_errno_keep_the_no_space_code() {
+        use std::io::{Error, ErrorKind};
+
+        for kind in [ErrorKind::StorageFull, ErrorKind::QuotaExceeded] {
+            assert_eq!(io_failure(Error::from(kind)).code, "download_no_space");
+        }
+        assert_eq!(
+            io_failure(Error::from(ErrorKind::PermissionDenied)).code,
+            "download_io_error"
+        );
+    }
 
     #[test]
     fn publication_verifies_size_and_never_replaces_existing_files() {

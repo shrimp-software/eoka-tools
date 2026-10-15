@@ -9,6 +9,7 @@ mod download;
 mod io;
 mod metadata;
 mod response;
+pub mod sidecar;
 
 pub use args::*;
 pub use context::*;

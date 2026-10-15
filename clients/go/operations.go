@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 )
 
@@ -24,6 +25,51 @@ type OperationRecord struct {
 	ErrorCode         string          `json:"error_code"`
 }
 
+type OperationError struct {
+	OperationID string
+	Uncertain   bool
+	Record      OperationRecord
+	Err         error
+	Receipt     json.RawMessage
+}
+
+func (e *OperationError) Error() string {
+	if e.Uncertain {
+		return fmt.Sprintf("operation %s: outcome unknown: %v", e.OperationID, e.Err)
+	}
+	return fmt.Sprintf("operation %s: %v", e.OperationID, e.Err)
+}
+
+func (e *OperationError) Unwrap() error {
+	return e.Err
+}
+
+func operationError(id string, record OperationRecord, err error) error {
+	var serverError *Error
+	operationErr := &OperationError{OperationID: id, Record: record, Receipt: record.Receipt, Uncertain: !errors.As(err, &serverError), Err: err}
+	var transportErr *transportFailure
+	if errors.As(err, &transportErr) {
+		operationErr.Uncertain = true
+	}
+	if serverError != nil {
+		var data struct {
+			Receipt json.RawMessage `json:"receipt"`
+			Detail  struct {
+				Code string `json:"code"`
+			} `json:"detail"`
+		}
+		if json.Unmarshal(serverError.Data, &data) == nil {
+			operationErr.Receipt = data.Receipt
+			var receipt struct {
+				Outcome string `json:"outcome"`
+			}
+			_ = json.Unmarshal(data.Receipt, &receipt)
+			operationErr.Uncertain = operationErr.Uncertain || receipt.Outcome == "outcome_unknown" || data.Detail.Code == "outcome_unknown"
+		}
+	}
+	return operationErr
+}
+
 func NewOperationID() (string, error) {
 	var id [16]byte
 	if _, err := rand.Read(id[:]); err != nil {
@@ -36,25 +82,40 @@ func NewOperationID() (string, error) {
 
 func (p *Page) Perform(ctx context.Context, id string, action map[string]any, options ActionOptions) (OperationRecord, error) {
 	var record OperationRecord
+	if err := p.b.t.requireCapability("durableActions"); err != nil {
+		return record, operationError(id, record, err)
+	}
+	if err := ctx.Err(); err != nil {
+		return record, &OperationError{OperationID: id, Err: err}
+	}
 	err := p.call(ctx, "actions.perform", map[string]any{"operation_id": id, "action": action, "options": options}, &record)
 	if err != nil {
-		return record, fmt.Errorf("operation %s: outcome unknown: %w", id, err)
+		return record, operationError(id, record, err)
 	}
 	return record, nil
 }
 
 func (b *Browser) Operation(ctx context.Context, id string) (OperationRecord, error) {
 	var record OperationRecord
+	if err := b.t.requireCapability("durableActions"); err != nil {
+		return record, err
+	}
 	err := b.t.call(ctx, "operations.get", map[string]any{"id": id}, &record)
 	return record, err
 }
 func (b *Browser) WaitOperation(ctx context.Context, id string, timeoutMS uint64) (OperationRecord, error) {
 	var record OperationRecord
+	if err := b.t.requireCapability("durableActions"); err != nil {
+		return record, err
+	}
 	err := b.t.call(ctx, "operations.wait", map[string]any{"id": id, "timeout_ms": timeoutMS}, &record)
 	return record, err
 }
 func (b *Browser) CancelOperation(ctx context.Context, id string) (OperationRecord, error) {
 	var record OperationRecord
+	if err := b.t.requireCapability("operationCancellation"); err != nil {
+		return record, err
+	}
 	err := b.t.call(ctx, "operations.cancel", map[string]any{"id": id}, &record)
 	return record, err
 }
@@ -97,16 +158,17 @@ func (p *Page) performLegacy(ctx context.Context, method string, params map[stri
 		return err
 	}
 	if record.ID != id {
-		return fmt.Errorf("operation %s: server lacks durable action support; restart explicitly", id)
+		return &OperationError{OperationID: id, Record: record, Receipt: record.Receipt, Uncertain: true, Err: errors.New("server returned a different operation ID; recover explicitly")}
 	}
 	for record.State == "running" {
-		record, err = p.b.WaitOperation(ctx, id, 30000)
-		if err != nil {
-			return fmt.Errorf("operation %s: outcome unknown: %w", id, err)
+		next, waitErr := p.b.WaitOperation(ctx, id, 30000)
+		if waitErr != nil {
+			return &OperationError{OperationID: id, Record: record, Receipt: record.Receipt, Uncertain: true, Err: waitErr}
 		}
+		record = next
 	}
 	if record.Outcome != "verified_complete" {
-		return fmt.Errorf("operation %s: %s (%s)", id, record.Outcome, record.ErrorCode)
+		return &OperationError{OperationID: id, Record: record, Receipt: record.Receipt, Uncertain: record.Outcome == "outcome_unknown", Err: fmt.Errorf("%s (%s)", record.Outcome, record.ErrorCode)}
 	}
 	return nil
 }

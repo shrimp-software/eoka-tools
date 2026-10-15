@@ -3,6 +3,8 @@ package eoka
 import (
 	"context"
 	"encoding/json"
+	"math"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -162,5 +164,92 @@ func TestBrowserNewPageTabsCloseTab(t *testing.T) {
 	}
 	if err := b.CloseTab(ctx, "NOPE"); !HasCode(err, ErrCodeInvalidPage) {
 		t.Fatalf("expected InvalidPage error, got %v", err)
+	}
+}
+
+func TestLaunchRejectsInvalidManagedOptionsBeforeStartingSidecar(t *testing.T) {
+	cases := []struct {
+		name string
+		opt  Option
+		want string
+	}{
+		{"relative executable", WithExecutablePath("chrome"), "executable path"},
+		{"empty executable", WithExecutablePath(""), "executable path"},
+		{"relative runtime", WithRuntimeDir("runtime"), "runtime directory"},
+		{"empty runtime", WithRuntimeDir(""), "runtime directory"},
+		{"empty viewport", WithViewport(0, 0), "viewport"},
+		{"negative viewport", WithViewport(-1, 360), "viewport"},
+		{"incomplete viewport", WithViewport(640, 0), "viewport"},
+		{"zero scale", WithDeviceScaleFactor(0), "scale factor"},
+		{"negative scale", WithDeviceScaleFactor(-2), "scale factor"},
+		{"nan scale", WithDeviceScaleFactor(math.NaN()), "scale factor"},
+		{"positive infinite scale", WithDeviceScaleFactor(math.Inf(1)), "scale factor"},
+		{"negative infinite scale", WithDeviceScaleFactor(math.Inf(-1)), "scale factor"},
+	}
+	if maxInt := int(^uint(0) >> 1); int64(maxInt) > math.MaxInt32 {
+		cases = append(cases, struct {
+			name string
+			opt  Option
+			want string
+		}{"oversized viewport", WithViewport(maxInt, 360), "viewport"})
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			b, err := Launch(context.Background(), WithServerPath(filepath.Join(t.TempDir(), "missing-sidecar")), tc.opt)
+			if b != nil || err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("invalid option reached sidecar startup: browser=%v error=%v", b, err)
+			}
+		})
+	}
+}
+
+func TestConnectRejectsLaunchOnlyOptionsBeforeStartingSidecar(t *testing.T) {
+	for name, opt := range map[string]Option{
+		"headless":         WithHeadless(true),
+		"visible":          WithVisible(),
+		"user agent":       WithUserAgent(""),
+		"timezone":         WithTimezone(""),
+		"viewport":         WithViewport(640, 360),
+		"proxy":            WithProxy(""),
+		"profile":          WithUserDataDir(""),
+		"executable":       WithExecutablePath(""),
+		"runtime":          WithRuntimeDir(""),
+		"sandbox enabled":  WithSandbox(true),
+		"sandbox disabled": WithSandbox(false),
+		"scale":            WithDeviceScaleFactor(1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			b, err := Connect(context.Background(), "ws://localhost:9222/devtools/browser/id",
+				WithServerPath(filepath.Join(t.TempDir(), "missing-sidecar")), opt)
+			if b != nil || err == nil || !strings.Contains(err.Error(), "launch options") {
+				t.Fatalf("Connect accepted launch-only option: browser=%v error=%v", b, err)
+			}
+		})
+	}
+}
+
+func TestConnectRejectsInvalidEndpointsBeforeStartingSidecar(t *testing.T) {
+	for _, endpoint := range []string{
+		"", "http://localhost:9222/devtools/browser/id", "ws://localhost:9222",
+		"ws://localhost:9222/devtools/page/id", "ws://localhost:9222/devtools/browser/",
+		"ws://localhost:9222/devtools/browser/id/extra", "ws:///devtools/browser/id",
+		"ws://user:password@localhost:9222/devtools/browser/id",
+		"ws://localhost:9222/devtools/browser/id?token=secret",
+		"ws://localhost:9222/devtools/browser/id#fragment",
+	} {
+		t.Run(endpoint, func(t *testing.T) {
+			b, err := Connect(context.Background(), endpoint, WithServerPath(filepath.Join(t.TempDir(), "missing-sidecar")))
+			if b != nil || err == nil || !strings.Contains(err.Error(), "DevTools endpoint") {
+				t.Fatalf("invalid endpoint reached sidecar startup: browser=%v error=%v", b, err)
+			}
+		})
+	}
+}
+
+func TestConnectRejectsUnsupportedTLSBeforeStartingSidecar(t *testing.T) {
+	b, err := Connect(context.Background(), "wss://localhost:9222/devtools/browser/id",
+		WithServerPath(filepath.Join(t.TempDir(), "missing-sidecar")))
+	if b != nil || err == nil || !strings.Contains(err.Error(), "wss:// is not supported") {
+		t.Fatalf("TLS endpoint reached sidecar startup: browser=%v error=%v", b, err)
 	}
 }

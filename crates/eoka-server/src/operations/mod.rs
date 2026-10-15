@@ -266,6 +266,14 @@ impl OperationManager {
     }
     pub async fn cancel(&self, id: &str) -> Result<OperationRecord> {
         let record = self.get(id).await?;
+        self.cancel_admitted(id, record)
+    }
+
+    pub(crate) fn cancel_admitted(
+        &self,
+        id: &str,
+        record: OperationRecord,
+    ) -> Result<OperationRecord> {
         if matches!(record.state, OperationState::Running) {
             let jobs = self
                 .inner
