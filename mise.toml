@@ -68,6 +68,14 @@ run = "npm --prefix clients/node test"
 description = "Build, pack, install and exercise an external Node SDK consumer"
 run = "npm --prefix clients/node run test:consumer"
 
+[tasks.node-stage-release]
+description = "Stage SDK and platform packages from existing release server artifacts"
+run = "npm --prefix clients/node run stage:release --"
+
+[tasks.node-qualify-release]
+description = "Qualify packed native SDK artifacts outside the repository"
+run = "node clients/node/scripts/qualify-release.mjs"
+
 [tasks.node-install-browser]
 description = "Prepare and verify the pinned Chrome cache explicitly"
 run = "npm --prefix clients/node run example:install --"

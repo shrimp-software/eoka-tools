@@ -419,18 +419,102 @@ EOKA_BROWSER_CACHE_DIR=/absolute/path/to/cache npm run test:consumer
 
 Without both variables the staged native/browser test is skipped; import/type tests are not evidence of a native browser launch. The native test packs/installs only local staged SDK/platform tarballs and launches with `download: "never"`. It exercises PNG/JPEG/WebP, DPR/crop/full-page dimensions, equivalent Buffer/file images, existing-file protection, native MP4 stop/recovery/repeated stop, and explicit cancel with no success-named partial. A deterministic 2500×2500 RGB-noise scene verifies that screenshots larger than 16 MiB raise `ScreenshotTooLarge` with direct-file guidance, remain usable through `screenshotToFile`, and do not disconnect the page. Container decoding/observed codec and duration require the separate ffprobe/ffmpeg release smoke; those tools are not SDK runtime dependencies. Actual no-network enforcement, sandbox, container, and all-platform qualification remain separate release gates.
 
-From the repository root use `mise run node-build`, `node-check`, or `node-consumer`; `node-install-browser -- CACHE` and `node-offline -- CACHE` expose the browser preparation/offline workflows. `npm run example:schema` retains the generated-schema example.
+From the repository root use `mise run node-build`, `node-check`, or `node-consumer`; `node-stage-release -- --artifacts DIR --output NEWDIR --host-only`, `node-install-browser -- CACHE`, and `node-offline -- CACHE` expose the preparation/offline workflows. `npm run example:schema` retains the generated-schema example.
 
-`mise.toml` pins the development and CI runtime to Node 24.21.0; CI reads that configuration rather than maintaining another Node version. Node types are pinned to `@types/node` 24.19.2. SDK and consumer fixtures target ES2024. The Node CI job checks the committed schema projection, accepted/rejected consumers, runtime regressions, and packed imports without requiring Rust or Chrome; the full local `node-check` additionally checks the schema against the Rust exporter. Native gates still require the explicit environment above.
+`mise.toml` pins the development and CI runtime to Node 24.21.0; CI reads that configuration rather than maintaining another Node version. Node types are pinned to `@types/node` 24.19.2. SDK and consumer fixtures target ES2024. Native-package staging inherits the SDK's `engines` field. The Node CI job checks the committed schema projection, accepted/rejected consumers, runtime regressions, and packed imports without requiring Rust or Chrome; the full local `node-check` additionally checks the schema against the Rust exporter. Native gates still require the explicit environment above.
 
 ## Prerelease qualification and publication
 
-The source SDK is private and reserves npm version `0.1.0-beta.1` and native
-server version `0.5.0`. Core `0.7.0` is published on crates.io. Rust workspace
-package versions remain unchanged until the coordinated release change.
+Core `0.7.0` is published on crates.io. Reserved prerelease versions are
+server/protocol crates `0.5.0`, wire protocol `1.3`, and SDK/native npm packages
+`0.1.0-beta.1`. Source and ordinary staged packages remain private;
+`--publication` is a separate, fail-closed staging mode.
 
-Use the explicit-path example with this workspace's built sidecar for source
-development. Native package staging, five-platform qualification, and protected
-publication are separate release changes. They are required before publishing
-a managed distribution; packing the source SDK alone does not supply native
-server packages.
+`.github/workflows/qualify-node-release.yml` builds all five native targets and
+qualifies installed tarballs outside the repository. GNU builds use Ubuntu 22.04
+and enforce glibc ≤2.35; runtime checks use non-root hosted runners with Chrome's
+sandbox enabled. Evidence includes fresh/cache/offline installation, artifact
+rejection, verified input, image dimensions, finalized MP4 packet timestamps and
+decode diagnostics, headed launch, owned cleanup, and borrowed-browser survival.
+Failures retain recordings and diagnostics as workflow artifacts. FFmpeg/ffprobe
+are qualification tools, not consumer dependencies.
+
+The [lossless-repair preview](https://github.com/shrimp-software/eoka-tools/actions/runs/38612635401)
+at tools `70b47e0ff27b271407c3073f5c1a389d87a5fd0a` and core
+`9bae96b9cefa02794a4058ae54b67273ad453490` completed every runtime check on
+Ubuntu 22.04 x64, Ubuntu 24.04 ARM64, macOS 15 x64/ARM64, and Windows 2025 x64.
+All 50 one-attempt finalized recordings passed strict packet DTS and empty
+decoder diagnostics; all 28 deterministic repair regressions passed on each
+architecture. Image, sandbox, headed-launch and ownership checks also passed.
+Those jobs ended **blocked** solely by the then-closed source readiness record.
+The recording blocker is now cleared using that native evidence plus retained
+defective-file repair/preservation proof, not passing live samples alone.
+Registry-backed qualification and npm publication prerequisites remain separate.
+Live recording still does not promise fixed-cadence export.
+
+For local host-development evidence, not release qualification:
+
+```sh
+mise run node-qualify-release -- --stage /absolute/stage \
+  --cache /absolute/cache --output /absolute/evidence --preview
+```
+
+The workflow resolves `source_ref` to an immutable tools revision and builds
+against published registry core `0.7.0`, without a sibling checkout or Cargo
+patch. It checks every native build's core identity and exact source lockfile,
+including registry checksum
+`447a498ec28c34b2020be583617c70f89dc718228bb02db5750f72e4da333a1e`.
+Local host-development staging and `--preview` remain separate from release
+qualification and cannot authorize publication.
+
+`scripts/publication-readiness.json` records unresolved release defects. Clearing
+a recording blocker requires deterministic repair/preservation regressions and
+fresh five-platform qualification, not passing samples alone. Every Chrome pin
+update must pass the complete recording suite on each architecture and ten
+single-attempt native captures: four short/default-rate clips, two short
+120-fps clips, one 1-fps clip, two two-second clips, and one multi-fragment clip.
+Both artifact collection and publication independently require the actual running
+Chrome version to match the pin, the complete schedule, published MP4 records,
+strictly increasing packet DTS, and successful full decoding. A `passed` summary
+alone is insufficient. One known FFmpeg MOV input-rate-estimation diagnostic may
+be retained as a VFR advisory only when its adjacent packet indices and exact
+timestamps match the probe and the declared positive packet duration exactly
+reaches the next timestamp. Missing or inexact timing evidence, unknown
+diagnostics, and nonzero decoder exits remain fatal. Raw probe/decoder logs are
+preserved, and collection/publication independently recompute advisory
+classifications; labels alone cannot authorize release. Probe logging includes
+warnings. There is no retry-to-pass, hidden warning filtering, or retiming to
+satisfy a frame-rate heuristic. The private MP4 correction remains limited to
+the documented native timing defects; changing Chrome's container layout requires
+renewed qualification, not an implicit generic muxer or transcoder.
+
+`publish-node.yml` is manual, restricted to an exact current protected `main`
+commit, and publishes only `0.1.0-beta.1` under `next` with npm provenance.
+It requires an existing `npm-prerelease` environment with required reviewers,
+self-review disabled, and a single allowed deployment branch, `main`.
+All six scoped package names must first exist and have npm trusted publishers
+configured for this repository, workflow, and environment. Bootstrap ownership
+and environment setup are external prerequisites; this workflow does not
+create them or fall back to an npm token.
+
+The publish job accepts only same-run, same-source qualified artifacts and
+preflights all six registry versions before writing anything. Existing versions
+are skipped only when their SHA-512 integrity matches the qualified tarball,
+`next` already points at that version, npm registry signatures verify, and
+keyless Sigstore provenance binds the exact artifact, source commit, protected
+main workflow, manual event, and original workflow run. The pinned public Sigstore
+verifier is release-tooling-only, not an SDK runtime dependency. Registry signature
+checks use isolated installs with lifecycle scripts disabled; foreign-platform
+packages are installed only for verification, never executed.
+
+After a partial publication or lost publish response, rerun the failed jobs of
+the **same workflow run**, retaining its qualified artifacts and unchanged current
+`main` source. Verified existing uploads are preserved; only missing native
+packages are published, followed by the SDK. Mismatched integrity, provenance,
+tags, source, or unavailable registry evidence abort before any new upload.
+There is no automatic publish retry or retagging. If source or artifacts changed,
+do not bypass these checks: use a separately reviewed roll-forward release.
+The final smoke checks a credential-free registry installation and provenance.
+
+No tag, merge, or publication is part of PR preparation. Existing Rust publishing
+workflows trigger on `main`; merging the version changes is a release action.

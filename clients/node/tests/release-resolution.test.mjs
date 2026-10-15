@@ -9,6 +9,7 @@ import { promisify } from 'node:util';
 import { detectPlatform, platformIds, selectPlatform } from '../dist/platform.js';
 import { releaseManifest, validateReleaseManifest } from '../dist/release.js';
 import { resolveServerBinary } from '../dist/server-binary.js';
+import { stageRelease } from '../scripts/stage-release.mjs';
 
 const exec = promisify(execFile);
 
@@ -201,3 +202,64 @@ test('group/world-writable package executable fails closed', { skip: process.pla
   await chmod(binary, 0o777);
   assert.equal((await probe()).code, 'ServerPackageMismatch');
 }));
+
+test('release commands reject removed core override options before staging or qualification', async () => {
+  for (const script of ['stage-release.mjs', 'qualify-release.mjs']) {
+    for (const option of ['--core-ref', '--core-path']) {
+      await assert.rejects(
+        exec(process.execPath, [join(import.meta.dirname, '..', 'scripts', script), option, 'unused']),
+        error => {
+          assert.notEqual(error.code, 0);
+          assert.ok(error.stderr.includes(`Unknown argument: ${option}`));
+          return true;
+        },
+      );
+    }
+  }
+});
+
+test('controlled staging rejects absent and non-native artifacts without publishing output', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'eoka-stage-reject-'));
+  try {
+    const artifacts = join(directory, 'artifacts');
+    const output = join(directory, 'output');
+    await mkdir(artifacts);
+    await assert.rejects(stageRelease({ artifacts, output }), /ENOENT/);
+    const pin = releaseManifest.server.platforms[detectPlatform()];
+    await writeFile(join(artifacts, pin.asset), '#!/bin/sh\n' + 'fake binary'.repeat(10));
+    await assert.rejects(stageRelease({ artifacts, output, hostOnly: true }), /architecture mismatch|not PE/);
+    await assert.rejects(readFile(join(output, 'sdk', 'dist', 'release-manifest.json')), { code: 'ENOENT' });
+    await assert.rejects(stageRelease({ artifacts, output, platforms: ['linux-x64-gnu'] }), /all five/);
+    await assert.rejects(stageRelease({ artifacts, output, hostOnly: true, publication: true }), /Publication cannot use host-only/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('real host artifact staging binds SDK and platform pins to identical copied bytes', { skip: !process.env.EOKA_SERVER_ARTIFACTS_DIR }, async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'eoka-real-stage-'));
+  try {
+    const output = join(directory, 'prepared');
+    const platform = detectPlatform();
+    const result = await stageRelease({ artifacts: process.env.EOKA_SERVER_ARTIFACTS_DIR, output, hostOnly: true });
+    assert.deepEqual(result.platforms, [platform]);
+    assert.equal(result.development, true);
+    const manifest = validateReleaseManifest(JSON.parse(await readFile(join(output, 'sdk', 'dist', 'release-manifest.json'), 'utf8')));
+    const pin = manifest.server.platforms[platform];
+    const metadata = JSON.parse(await readFile(join(output, 'platforms', platform, 'release-metadata.json'), 'utf8'));
+    const binary = await readFile(join(output, 'platforms', platform, pin.executablePath));
+    assert.equal(pin.sha256, createHash('sha256').update(binary).digest('hex'));
+    assert.equal(metadata.binary.sha256, pin.sha256);
+    assert.equal(metadata.binary.size, binary.length);
+    assert.equal(metadata.minimumGlibc, pin.minimumGlibc);
+    assert.equal(pin.development, true);
+    for (const id of platformIds.filter((id) => id !== platform)) assert.equal(manifest.server.platforms[id].sha256, null);
+    await mkdir(join(output, 'sdk', 'node_modules', '@cbxss'), { recursive: true });
+    await cp(join(output, 'platforms', platform), join(output, 'sdk', 'node_modules', pin.packageName), { recursive: true });
+    const probe = await exec(process.execPath, ['--input-type=module', '--eval', 'const {resolveServerBinary}=await import("./dist/server-binary.js");console.log(JSON.stringify(await resolveServerBinary({env:{}})))'], { cwd: join(output, 'sdk') });
+    assert.equal(JSON.parse(probe.stdout).expectedServerVersion, manifest.server.version);
+    await assert.rejects(stageRelease({ artifacts: process.env.EOKA_SERVER_ARTIFACTS_DIR, output, hostOnly: true }), /Refusing to replace/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

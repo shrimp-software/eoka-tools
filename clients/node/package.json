@@ -39,6 +39,7 @@
     "typecheck": "npm run build && node scripts/typecheck.mjs",
     "test": "npm run build && node --test tests/*.test.mjs",
     "test:consumer": "npm run build && node --test tests/package-consumer.test.mjs",
+    "stage:release": "node scripts/stage-release.mjs",
     "example": "node examples/explicit-paths.mjs",
     "example:install": "node examples/install-browser.mjs",
     "example:offline": "node examples/offline.mjs",
@@ -53,6 +54,7 @@
   },
   "devDependencies": {
     "@types/node": "24.19.2",
+    "sigstore": "4.1.1",
     "typescript": "5.9.3"
   }
 }
