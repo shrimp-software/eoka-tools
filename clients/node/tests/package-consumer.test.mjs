@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { detectPlatform } from "../dist/index.js";
+import { detectPlatform, releaseManifest } from "../dist/index.js";
 
 const exec = promisify(execFile);
 const root = fileURLToPath(new URL("../", import.meta.url));
@@ -17,6 +17,7 @@ test("packed SDK installs without scripts, imports silently, and runs an externa
   try {
     const packed = await exec(npm, ["pack", "--ignore-scripts", "--json", "--pack-destination", directory], { cwd: root });
     const [archive] = JSON.parse(packed.stdout);
+    assert.equal(archive.version, releaseManifest.sdkVersion);
     assert.ok(archive.files.every((file) => file.path.startsWith("dist/") || file.path.startsWith("examples/") || ["package.json", "README.md", "LICENSE"].includes(file.path)));
     const consumer = join(directory, "consumer");
     const home = join(directory, "home");
