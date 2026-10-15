@@ -471,6 +471,11 @@ including registry checksum
 Local host-development staging and `--preview` remain separate from release
 qualification and cannot authorize publication.
 
+Every native build runs the live-runtime recovery regression, including Windows.
+A held owner lock must preserve running operations; releasing it permits
+interruption recovery. Only the platform's lock-contention error means the owner
+is still alive; other lock failures remain errors.
+
 `scripts/publication-readiness.json` records unresolved release defects. Clearing
 a recording blocker requires deterministic repair/preservation regressions and
 fresh five-platform qualification, not passing samples alone. Every Chrome pin
