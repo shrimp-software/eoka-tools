@@ -8,6 +8,7 @@ import { basename, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { resumePublication, verifyExistingPackage } from './publication-recovery.mjs';
 import { assertRecordingQualification } from './recording-qualification.mjs';
+import { npmEnvironment, validatePublicationAuth, validatePublicationReview } from './publication-auth.mjs';
 
 const exec = promisify(execFile);
 const root = resolve(import.meta.dirname, '..');
@@ -16,6 +17,8 @@ const registry = 'https://registry.npmjs.org/';
 const platforms = ['linux-x64-gnu', 'linux-arm64-gnu', 'darwin-x64', 'darwin-arm64', 'win32-x64'];
 const payload = resolve(process.env.QUALIFICATION_DIRECTORY ?? join(process.env.RUNNER_TEMP ?? root, 'qualified-release'));
 const sha = process.env.SOURCE_SHA;
+const publicationEnvironment = { ...process.env };
+delete process.env.NODE_AUTH_TOKEN;
 const json = async path => JSON.parse(await readFile(path, 'utf8'));
 const hash = async (path, algorithm = 'sha256', encoding = 'hex') => {
   const digest = createHash(algorithm);
@@ -32,6 +35,7 @@ async function api(path) {
 }
 
 async function sourceGate() {
+  const bootstrap = validatePublicationAuth(publicationEnvironment, process.argv[2]);
   assert.match(sha ?? '', /^[a-f0-9]{40}$/);
   assert.equal(process.version, 'v24.21.0');
   assert.equal(process.env.GITHUB_REPOSITORY, repository);
@@ -47,8 +51,7 @@ async function sourceGate() {
   assert.equal(branch.commit.sha, sha, 'Only the current exact protected main commit may publish');
   const environment = await (await api('environments/npm-prerelease')).json();
   const reviewers = environment.protection_rules?.find(rule => rule.type === 'required_reviewers');
-  assert.ok(reviewers?.reviewers?.length > 0, 'npm-prerelease must already require reviewer approval');
-  assert.equal(reviewers.prevent_self_review, true, 'npm-prerelease must prevent self-review');
+  validatePublicationReview(reviewers, bootstrap);
   assert.equal(environment.deployment_branch_policy?.protected_branches, false);
   assert.equal(environment.deployment_branch_policy?.custom_branch_policies, true);
   const policy = await (await api('environments/npm-prerelease/deployment-branch-policies?per_page=100')).json();
@@ -78,9 +81,6 @@ async function sourceGate() {
     assert.equal(pin.development, false);
     assert.equal(pin.sha256, null);
     assert.equal(pin.size, null);
-  }
-  for (const [name, value] of Object.entries(process.env)) {
-    if (value && /^(?:EOKA_(?:CORE_(?:REF|PATH)|SERVER_BIN|CHROME_PATH)|CARGO_PATCH_|CARGO_SOURCE_|CARGO_BUILD_RUSTFLAGS$|RUSTFLAGS$|NODE_AUTH_TOKEN$|NPM_TOKEN$|NPM_AUTH_TOKEN$|npm_config_.*auth|NPM_CONFIG_.*AUTH)/.test(name)) throw new Error(`Publication override or token is forbidden: ${name}`);
   }
   return { manifest, metadata };
 }
@@ -276,19 +276,17 @@ async function verify() {
   return qualification;
 }
 
-async function npmEnvironment(directory) {
-  const userconfig = join(directory, 'npmrc');
-  const globalconfig = join(directory, 'global-npmrc');
-  await writeFile(userconfig, '');
-  await writeFile(globalconfig, '');
-  const env = { ...process.env };
-  for (const key of Object.keys(env)) if (/^npm_config_/i.test(key)) delete env[key];
-  return { ...env, NPM_CONFIG_USERCONFIG: userconfig, NPM_CONFIG_GLOBALCONFIG: globalconfig, NPM_CONFIG_REGISTRY: registry, NPM_CONFIG_CACHE: join(directory, 'npm-cache'), NPM_CONFIG_FETCH_RETRIES: '0' };
-}
-
-async function registryBoundary(directory, env) {
-  const readJson = async url => {
-    const response = await fetch(url, { headers: { Accept: 'application/json', 'Cache-Control': 'no-cache' }, redirect: 'error', signal: AbortSignal.timeout(120000) });
+async function registryBoundary(directory, env, { bootstrap = false, publishEnv = env } = {}) {
+  const readJson = async (url, allowMissing = false) => {
+    const options = { headers: { Accept: 'application/json', 'Cache-Control': 'no-cache' }, redirect: 'error', signal: AbortSignal.timeout(120000) };
+    const response = await fetch(url, options);
+    if (allowMissing && response.status === 404) {
+      await response.body?.cancel();
+      const authenticated = await fetch(url, { ...options, headers: { ...options.headers, Authorization: `Bearer ${publicationEnvironment.NODE_AUTH_TOKEN}` } });
+      await authenticated.body?.cancel();
+      assert.equal(authenticated.status, 404, `Bootstrap requires a public or unregistered package name: ${url} (${authenticated.status})`);
+      return null;
+    }
     assert.equal(response.status, 200, `Registry read failed; existing scoped packages and trusted publishers are required (${response.status}): ${url}`);
     return response.json();
   };
@@ -320,13 +318,13 @@ async function registryBoundary(directory, env) {
     };
   };
   return {
-    readPackage: name => readJson(`${registry}${encodeURIComponent(name)}`),
+    readPackage: name => readJson(`${registry}${encodeURIComponent(name)}`, bootstrap),
     verifyExisting: async (item, metadata) => {
       verifier ??= loadVerifier();
       await verifyExistingPackage(item, metadata, await verifier);
     },
     publish: async item => {
-      const result = await exec('npm', ['publish', join(payload, item.filename), '--ignore-scripts', '--access', 'public', '--tag', 'next', '--provenance', '--registry', registry, '--fetch-retries', '0'], { cwd: directory, env, timeout: 180000, maxBuffer: 8 * 1024 * 1024 });
+      const result = await exec('npm', ['publish', join(payload, item.filename), '--ignore-scripts', '--access', 'public', '--tag', 'next', '--provenance', '--registry', registry, '--fetch-retries', '0'], { cwd: directory, env: publishEnv, timeout: 180000, maxBuffer: 8 * 1024 * 1024 });
       process.stdout.write(result.stdout);
       process.stderr.write(result.stderr);
     },
@@ -342,18 +340,27 @@ async function recoveryPackages(qualification) {
 
 async function publish() {
   const qualification = await verify();
-  assert.ok(process.env.ACTIONS_ID_TOKEN_REQUEST_URL && process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN, 'Trusted OIDC is required; token fallback is forbidden');
+  const bootstrap = validatePublicationAuth(publicationEnvironment, 'publish');
+  assert.ok(process.env.ACTIONS_ID_TOKEN_REQUEST_URL && process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN, 'GitHub OIDC is required for npm provenance in both publication modes');
   assert.match(process.env.GITHUB_RUN_ID ?? '', /^[1-9][0-9]*$/);
   const temporary = await mkdtemp(join(tmpdir(), 'eoka-publish-'));
   try {
     const env = await npmEnvironment(temporary);
+    let publishEnv = env;
+    if (bootstrap) {
+      const authenticated = join(temporary, 'authenticated');
+      await mkdir(authenticated);
+      publishEnv = await npmEnvironment(authenticated, { environment: publicationEnvironment, authenticated: true });
+      await exec('npm', ['whoami', '--registry', registry], { cwd: temporary, env: publishEnv, timeout: 120000 });
+    }
     const { stdout } = await exec('npm', ['--version'], { cwd: temporary, env });
     const [major, minor, patch] = stdout.trim().split('.').map(Number);
     assert.ok(major > 11 || (major === 11 && (minor > 5 || (minor === 5 && patch >= 1))), 'npm >=11.5.1 is required for trusted publishing');
     const result = await resumePublication({
       packages: await recoveryPackages(qualification),
       sdkName: '@cbxss/eoka',
-      boundary: await registryBoundary(temporary, env),
+      boundary: await registryBoundary(temporary, env, { bootstrap, publishEnv }),
+      allowMissingPackages: bootstrap,
       beforePublish: async item => {
         await sourceGate();
         assert.equal(await hash(join(payload, item.filename)), item.sha256);

@@ -50,7 +50,7 @@ function provenanceBundle(item, change = value => value) {
   };
 }
 
-async function isolatedRegistry() {
+async function isolatedRegistry({ absentPackages = false } = {}) {
   const versions = new Map();
   const attestations = new Map();
   const next = new Map();
@@ -111,7 +111,7 @@ async function isolatedRegistry() {
     if (path.startsWith('attestations/')) document = attestations.get(decodeURIComponent(path.slice('attestations/'.length)));
     else {
       const name = decodeURIComponent(path);
-      if (packages.some(item => item.name === name)) document = { name, versions: versions.has(name) ? { [versions.get(name).version]: versions.get(name) } : {}, 'dist-tags': next.has(name) ? { next: next.get(name) } : {} };
+      if (packages.some(item => item.name === name) && (!absentPackages || versions.has(name))) document = { name, versions: versions.has(name) ? { [versions.get(name).version]: versions.get(name) } : {}, 'dist-tags': next.has(name) ? { next: next.get(name) } : {} };
     }
     if (!document) {
       response.writeHead(404).end('{}');
@@ -123,12 +123,13 @@ async function isolatedRegistry() {
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   registry = `http://127.0.0.1:${server.address().port}/`;
-  const readJson = async url => {
+  const readJson = async (url, allowMissing = false) => {
     const response = await fetch(url);
+    if (allowMissing && response.status === 404) return null;
     assert.equal(response.status, 200);
     return response.json();
   };
-  const readPackage = name => readJson(`${registry}${encodeURIComponent(name)}`);
+  const readPackage = name => readJson(`${registry}${encodeURIComponent(name)}`, absentPackages);
   const options = { registry, tufCache: 'isolated-trust-boundary' };
   const verifySignatures = async item => {
     const metadata = (await readPackage(item.name)).versions[item.version];
@@ -167,14 +168,56 @@ async function isolatedRegistry() {
   return {
     versions, attestations, next, writes, checks, requests, seed,
     fail: (name, mode) => { failure = name ? { name, mode } : undefined; },
-    resume: beforePublish => resumePublication({ packages, sdkName, boundary, beforePublish: beforePublish ?? (async () => {}) }),
+    resume: (beforePublish, { allowMissingPackages = false } = {}) => resumePublication({ packages, sdkName, boundary, beforePublish: beforePublish ?? (async () => {}), allowMissingPackages }),
     close: async () => { server.closeAllConnections(); await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve())); },
   };
 }
 
-async function withRegistry(run) {
-  const registry = await isolatedRegistry();
+async function withRegistry(run, options) {
+  const registry = await isolatedRegistry(options);
   try { await run(registry); } finally { await registry.close(); }
+}
+
+test('bootstrap publishes all six absent registry names only after whole-batch preflight', async () => {
+  await withRegistry(async registry => {
+    const gates = [];
+    const result = await registry.resume(async item => {
+      assert.deepEqual(registry.requests.slice(0, 6), ordered.map(item => `GET /${encodeURIComponent(item.name)}`));
+      assert.deepEqual(registry.writes, gates);
+      gates.push(item.name);
+    }, { allowMissingPackages: true });
+    assert.deepEqual(result, { skipped: [], published: ordered.map(item => item.name) });
+    assert.deepEqual(registry.writes, ordered.map(item => item.name));
+    assert.deepEqual(gates, ordered.map(item => item.name));
+    assert.deepEqual(registry.checks, []);
+    assert.equal(registry.writes.at(-1), sdkName);
+  }, { absentPackages: true });
+});
+
+test('absent registry names are rejected without explicit bootstrap and never reach write gates', async () => {
+  for (const options of [undefined, { allowMissingPackages: false }, { allowMissingPackages: 'true' }]) {
+    await withRegistry(async registry => {
+      await assert.rejects(registry.resume(async () => { assert.fail('No write gate should run'); }, options), /Registry package is missing; explicit bootstrap is required/);
+      assert.deepEqual(registry.writes, []);
+      assert.equal(registry.requests.some(request => request.startsWith('POST ')), false);
+    }, { absentPackages: true });
+  }
+});
+
+for (const [name, seed, alter, message] of [
+  ['incompatible existing tarball', registry => registry.seed(packages[0]), registry => { registry.versions.get(sdkName).dist.integrity = packages[1].integrity; }, /Existing tarball differs/],
+  ['existing provenance from another run', registry => registry.seed(packages[0], value => { value.predicate.runDetails.metadata.invocationId = `https://github.com/${identity.repository}/actions/runs/999/attempts/1`; }), () => {}, /did not match/],
+]) {
+  test(`bootstrap preflights absent native names before rejecting ${name} without any writes`, async () => {
+    await withRegistry(async registry => {
+      seed(registry);
+      alter(registry);
+      await assert.rejects(registry.resume(async () => { assert.fail('No write gate should run'); }, { allowMissingPackages: true }), message);
+      assert.deepEqual(registry.requests.slice(0, 6), ordered.map(item => `GET /${encodeURIComponent(item.name)}`));
+      assert.deepEqual(registry.writes, []);
+      assert.equal(registry.requests.some(request => request.startsWith('POST ')), false);
+    }, { absentPackages: true });
+  });
 }
 
 test('partial six-package publication resumes exact artifacts without reuploading completed packages', async () => {

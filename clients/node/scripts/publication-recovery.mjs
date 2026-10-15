@@ -64,7 +64,7 @@ export async function verifyExistingPackage(item, metadata, { verifySignatures, 
   assert.match(invocation ?? '', new RegExp(`^https://github\\.com/${identity.repository}/actions/runs/${identity.runId}/attempts/[1-9][0-9]*$`));
 }
 
-export async function resumePublication({ packages, sdkName, boundary, beforePublish }) {
+export async function resumePublication({ packages, sdkName, boundary, beforePublish, allowMissingPackages = false }) {
   assert.ok(Array.isArray(packages) && packages.length === 6, 'All six qualified packages are required');
   assert.equal(new Set(packages.map(item => item.name)).size, packages.length);
   const sdk = packages.find(item => item.name === sdkName);
@@ -75,6 +75,11 @@ export async function resumePublication({ packages, sdkName, boundary, beforePub
   for (const item of ordered) {
     assert.match(item.integrity, /^sha512-[A-Za-z0-9+/]{86}==$/);
     const packument = await boundary.readPackage(item.name);
+    if (packument === null) {
+      assert.equal(allowMissingPackages, true, `Registry package is missing; explicit bootstrap is required: ${item.name}`);
+      missing.push(item);
+      continue;
+    }
     assert.equal(packument.name, item.name);
     assert.ok(packument.versions && typeof packument.versions === 'object' && !Array.isArray(packument.versions), `Invalid registry versions: ${item.name}`);
     assert.ok(packument['dist-tags'] && typeof packument['dist-tags'] === 'object', `Invalid registry tags: ${item.name}`);
