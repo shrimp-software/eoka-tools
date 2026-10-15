@@ -1,3 +1,6 @@
+[tools]
+node = "24.21.0"
+
 [tasks.fmt]
 description = "Check Rust formatting"
 run = "cargo fmt --all -- --check"
@@ -45,11 +48,40 @@ run = "CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$PWD/target} cargo install --path cr
 description = "Export canonical sidecar request and result schemas"
 run = "cargo run --quiet --locked -p eoka-protocol --bin export-sidecar-schema"
 
+[tasks.node-generate]
+description = "Generate TypeScript sidecar protocol contracts"
+run = "npm --prefix clients/node run generate"
+
+[tasks.node-build]
+description = "Build the compiled ESM SDK and TypeScript declarations"
+run = "npm --prefix clients/node run build"
+
+[tasks.node-check]
+description = "Check generated contracts, SDK consumers and runtime regressions"
+run = "npm --prefix clients/node run check"
+
+[tasks.node-test]
+description = "Build and run Node SDK runtime and packaging tests"
+run = "npm --prefix clients/node test"
+
+[tasks.node-consumer]
+description = "Build, pack, install and exercise an external Node SDK consumer"
+run = "npm --prefix clients/node run test:consumer"
+
+[tasks.node-install-browser]
+description = "Prepare and verify the pinned Chrome cache explicitly"
+run = "npm --prefix clients/node run example:install --"
+
+[tasks.node-offline]
+description = "Launch from the prepared Chrome cache without installer networking"
+run = "npm --prefix clients/node run example:offline --"
+
 [tasks.sidecar-check]
 description = "Check sidecar protocol, runtime and Go contracts"
 run = [
   "cargo test --locked -p eoka-protocol -p eoka-server",
   "mise run go-check",
+  "mise run node-check",
 ]
 
 [tasks.go-check]

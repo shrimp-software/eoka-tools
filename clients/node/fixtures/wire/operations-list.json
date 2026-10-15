@@ -1,0 +1,32 @@
+{
+  "id": 1,
+  "result": [
+    {
+      "id": "operation-1",
+      "runtime_id": "runtime-1",
+      "target_id": "page-1",
+      "action": "navigate",
+      "state": "finished",
+      "outcome": "verified_complete",
+      "dispatch_intent": true,
+      "preparation_intent": false,
+      "started_at_ms": 1700000000000,
+      "finished_at_ms": 1700000000100,
+      "receipt": {
+        "started_at_ms": 1700000000000,
+        "finished_at_ms": 1700000000100,
+        "download_guid": null,
+        "action": "navigate",
+        "target_id": "page-1",
+        "outcome": "verified_complete",
+        "dispatch": "acknowledged",
+        "preparation_may_have_executed": false,
+        "verification": "url",
+        "elapsed_ms": 100,
+        "already_satisfied": false,
+        "cleanup_pending": false
+      },
+      "error_code": null
+    }
+  ]
+}
