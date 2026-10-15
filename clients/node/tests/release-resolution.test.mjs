@@ -54,7 +54,7 @@ test('manifest rejects mutable URLs, incomplete or malformed pins and dishonest 
   }
 });
 
-for (const version of ['0.1.0-beta.1', '1.0.0-rc.0', '1.2.3-alpha-beta.2+build.001', '1.2.3']) {
+for (const version of ['0.1.0-beta.2', '1.0.0-rc.0', '1.2.3-alpha-beta.2+build.001', '1.2.3']) {
   test(`manifest accepts exact npm version ${version}`, () => {
     const manifest = structuredClone(releaseManifest);
     manifest.sdkVersion = version;
@@ -72,7 +72,7 @@ for (const version of ['9007199254740992.0.0', '0.9007199254740992.0', '0.0.9007
   });
 }
 
-for (const version of ['latest', 'next', '^0.1.0-beta.1', '~1.2.3', '1.2', '1.2.x', 'v1.2.3', '01.2.3', '1.02.3', '1.2.03', '1.2.3-beta.01', '1.2.3-', '1.2.3-beta..1', '1.2.3+', '1.2.3+build..1', '1.2.3\n', ' 1.2.3']) {
+for (const version of ['latest', 'next', '^0.1.0-beta.2', '~1.2.3', '1.2', '1.2.x', 'v1.2.3', '01.2.3', '1.02.3', '1.2.03', '1.2.3-beta.01', '1.2.3-', '1.2.3-beta..1', '1.2.3+', '1.2.3+build..1', '1.2.3\n', ' 1.2.3']) {
   test(`manifest rejects invalid or floating npm version ${JSON.stringify(version)}`, () => {
     const manifest = structuredClone(releaseManifest);
     manifest.sdkVersion = version;

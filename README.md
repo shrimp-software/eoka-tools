@@ -251,6 +251,12 @@ compiled ESM/declarations for Node 24 LTS (`^24.21.0`), one private sidecar per 
 owned launch or borrowed attachment, verified actions, durable operation recovery,
 page reads, bounded text fetch, PNG/JPEG/WebP screenshots and native MP4 recording.
 
+The source checkout prepares `0.1.0-beta.2`, which is not yet published. It wraps
+the existing native server's Windows operation-lock fix and release registry-smoke
+path fix from [PR #63](https://github.com/shrimp-software/eoka-tools/pull/63).
+Fresh five-platform qualification and publication approval remain pending;
+the npm `next` tag still selects beta.1.
+
 `Browser.launch()` resolves an exact optional server package and installs pinned
 full Chrome for Testing 155.0.8059.39 on demand. `installBrowser()` supports explicit
 preparation, progress, cancellation and verified offline/read-only cache reuse.
