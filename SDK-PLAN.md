@@ -15,9 +15,10 @@ Historical native runs below do not qualify newly changed source.
 
 ## Documentation ownership
 
-- [Node SDK README](clients/node/README.md): public API, runtime/platform policy,
-  installer and cache usage, examples, staging, qualification, and npm release
-  procedure. It owns exact options, dependency pins, artifact names, and commands.
+- [Node SDK README](clients/node/README.md): public API, options, platforms
+  and examples.
+- [Node SDK releasing](clients/node/RELEASING.md): versions, staging,
+  qualification and the npm release procedure.
 - [PROTOCOL.md](PROTOCOL.md): wire negotiation, methods, schemas, numeric/size
   limits, recording states, and lifecycle semantics.
 - [OPERATIONS.md](OPERATIONS.md): consequential-action evidence, operation
