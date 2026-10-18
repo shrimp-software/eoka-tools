@@ -4883,6 +4883,41 @@
         "type": "object"
       }
     },
+    "page.evaluate_in_frame": {
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "frameId": {
+            "type": "string"
+          },
+          "js": {
+            "description": "JavaScript expression evaluated in the frame's isolated world. Frame IDs come from `page.frames`; detached or unrelated IDs are rejected.",
+            "type": "string"
+          },
+          "pageId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "pageId",
+          "frameId",
+          "js"
+        ],
+        "title": "FrameJsParams",
+        "type": "object"
+      },
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "result": true
+        },
+        "required": [
+          "result"
+        ],
+        "title": "EvaluateResult",
+        "type": "object"
+      }
+    },
     "page.execute": {
       "params": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -5749,6 +5784,52 @@
         ],
         "title": "OperationRecord",
         "type": "object"
+      }
+    },
+    "page.frames": {
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "pageId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "pageId"
+        ],
+        "title": "FramesParams",
+        "type": "object"
+      },
+      "result": {
+        "$defs": {
+          "FrameInfo": {
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "url"
+            ],
+            "type": "object"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "items": {
+          "$ref": "#/$defs/FrameInfo"
+        },
+        "title": "Array_of_FrameInfo",
+        "type": "array"
       }
     },
     "page.get_attribute": {

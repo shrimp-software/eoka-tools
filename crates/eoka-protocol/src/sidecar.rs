@@ -750,6 +750,20 @@ impl RecordingRecord {
     }
 }
 dto!(PageIdParams { page_id: String });
+dto!(FramesParams { page_id: String });
+dto!(FrameJsParams {
+    page_id: String,
+    frame_id: String,
+    #[schemars(
+        description = "JavaScript expression evaluated in the frame's isolated world. Frame IDs come from `page.frames`; detached or unrelated IDs are rejected."
+    )]
+    js: String,
+});
+dto!(FrameInfo {
+    id: String,
+    url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")] name: Option<String>,
+});
 dto!(SelectorParams {
     page_id: String,
     selector: String
@@ -1147,6 +1161,8 @@ methods! {
     "page.wait_for_text" => WaitForTextParams => Empty,
     "page.evaluate" => JsParams => EvaluateResult,
     "page.execute" => JsParams => Empty,
+    "page.frames" => FramesParams => Vec<FrameInfo>,
+    "page.evaluate_in_frame" => FrameJsParams => EvaluateResult,
     "page.fetch" => FetchParams => FetchResult,
     "page.fetch_bounded" => BoundedFetchParams, BoundedFetchParams::validate => BoundedFetchResult,
     "page.capture_state" => PageIdParams => CaptureStateResult,

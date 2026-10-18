@@ -2,11 +2,11 @@ use base64::Engine;
 use captcha::{build_captcha_inject_js, AntiCaptcha, CaptchaInjectionKind};
 use eoka_protocol::sidecar::{
     AttributeResult, BoundedFetchParams, BoundedFetchResult, CaptureStateResult, ContentResult,
-    ErrorCode, EvaluateResult, ExistsResult, FetchParams, FetchResult, GetAttributeParams,
-    HeldKeyParams, JsParams, MouseButtonParams, MouseMoveParams, RestoreStateParams,
-    ScreenshotParams, ScreenshotToFileParams, SelectorParams, ServerError, SetViewportParams,
-    SolveCaptchaParams, SolveCaptchaResult, TextResult, TitleResult, UrlResult, WaitForParams,
-    WaitForTextParams,
+    ErrorCode, EvaluateResult, ExistsResult, FetchParams, FetchResult, FrameInfo, FrameJsParams,
+    FramesParams, GetAttributeParams, HeldKeyParams, JsParams, MouseButtonParams, MouseMoveParams,
+    RestoreStateParams, ScreenshotParams, ScreenshotToFileParams, SelectorParams, ServerError,
+    SetViewportParams, SolveCaptchaParams, SolveCaptchaResult, TextResult, TitleResult, UrlResult,
+    WaitForParams, WaitForTextParams,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -168,6 +168,34 @@ pub async fn execute(state: &AppState, params: Value) -> Result<Value, ServerErr
     let params: JsParams = parse_params(params)?;
     state.page(&params.page_id)?.execute(&params.js).await?;
     Ok(json!({}))
+}
+
+/// List every frame in the page, including cross-origin OOPIFs.
+pub async fn frames(state: &AppState, params: Value) -> Result<Value, ServerError> {
+    let params: FramesParams = parse_params(params)?;
+    let frames: Vec<FrameInfo> = state
+        .page(&params.page_id)?
+        .frames()
+        .await?
+        .into_iter()
+        .map(|frame| FrameInfo {
+            id: frame.id,
+            url: frame.url,
+            name: frame.name,
+        })
+        .collect();
+    encode(frames)
+}
+
+/// Evaluate JavaScript in a frame's isolated world. Runtime.enable is not
+/// used, matching `page.evaluate`.
+pub async fn evaluate_in_frame(state: &AppState, params: Value) -> Result<Value, ServerError> {
+    let params: FrameJsParams = parse_params(params)?;
+    let result: Value = state
+        .page(&params.page_id)?
+        .evaluate_in_frame_id(&params.frame_id, &params.js)
+        .await?;
+    encode(EvaluateResult { result })
 }
 
 const MAX_EVALUATION_BYTES: usize = 16 * 1024 * 1024 - 4096;
