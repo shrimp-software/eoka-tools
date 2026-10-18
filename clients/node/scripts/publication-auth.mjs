@@ -23,7 +23,11 @@ export function validatePublicationReview(reviewers, bootstrap = false) {
   if (typeof bootstrap !== 'boolean') throw new Error('NPM_BOOTSTRAP review opt-in must be boolean');
   if (reviewers?.type !== 'required_reviewers' || !Array.isArray(reviewers.reviewers) || reviewers.reviewers.length === 0) throw new Error('npm-prerelease must require reviewer approval');
   if (typeof reviewers.prevent_self_review !== 'boolean') throw new Error('npm-prerelease prevent_self_review must be boolean');
-  if (!bootstrap && !reviewers.prevent_self_review) throw new Error('npm-prerelease must prevent self-review');
+  // A sole required reviewer can only ever approve their own runs, so blocking
+  // self-review would make normal publication impossible. With more than one
+  // reviewer (or a team), independent approval stays mandatory.
+  const soleUser = reviewers.reviewers.length === 1 && reviewers.reviewers[0]?.type === 'User';
+  if (!bootstrap && !reviewers.prevent_self_review && !soleUser) throw new Error('npm-prerelease must prevent self-review unless a single user is the sole required reviewer');
 }
 
 export async function npmEnvironment(directory, { environment = process.env, authenticated = false } = {}) {
