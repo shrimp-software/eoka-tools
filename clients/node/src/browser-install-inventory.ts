@@ -34,7 +34,17 @@ function inside(root: string, target: string): boolean {
   return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
 }
 
-export async function inventoryTree(root: string): Promise<InventoryEntry[]> {
+export interface InventoryOptions {
+  /**
+   * Root-relative, `/`-separated directory to skip while it is empty. Chrome
+   * creates `extensions/` next to its executable on every startup
+   * (component-extension staging) even with `--disable-component-update`; it
+   * is not part of the pinned archive, so it must not read as tampering.
+   */
+  ignoreEmptyDirectory?: string;
+}
+
+export async function inventoryTree(root: string, options: InventoryOptions = {}): Promise<InventoryEntry[]> {
   const rootInfo = await lstat(root);
   if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) throw new InstallationError('IntegrityMismatch', 'Browser installation root is not a regular directory');
   const resolvedRoot = await realpath(root);
@@ -47,6 +57,7 @@ export async function inventoryTree(root: string): Promise<InventoryEntry[]> {
       const absolute = path.join(directory, name);
       const info = await lstat(absolute);
       const mode = info.mode & 0o555;
+      if (relative === options.ignoreEmptyDirectory && info.isDirectory() && (await readdir(absolute)).length === 0) continue;
       if (info.isSymbolicLink()) {
         const target = await readlink(absolute);
         try {
@@ -100,7 +111,11 @@ export async function verifyInstallation(root: string, buildId: string, platform
     const marker = JSON.parse(await readFile(markerPath, 'utf8')) as InstallationMarker;
     if (marker.schema !== 1 || marker.buildId !== buildId || marker.platform !== platform || marker.archiveSha256 !== pin.sha256 || marker.archiveUrl !== pin.url || marker.executablePath !== executablePath || !Array.isArray(marker.inventory) || marker.inventorySha256 !== fingerprint(marker.inventory)) throw new Error('Installation inventory does not match the pinned release');
     await validateExecutable(root, executablePath);
-    const actual = await inventoryTree(root);
+    // The marker is always written from a strict inventory (createMarker).
+    // Chrome's archive never ships `extensions/`; the leniency only covers the
+    // empty directory it creates beside the executable after the first launch.
+    const runtimeExtensions = path.posix.join(path.posix.dirname(executablePath), 'extensions');
+    const actual = await inventoryTree(root, { ignoreEmptyDirectory: runtimeExtensions });
     if (fingerprint(actual) !== marker.inventorySha256) throw new Error('Browser distribution resources have changed');
     return true;
   } catch (cause) {

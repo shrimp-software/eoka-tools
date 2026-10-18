@@ -32,6 +32,11 @@ pub async fn launch(state: &mut AppState, params: Value) -> Result<Value, Server
         config.chrome_path = params.executable_path;
         config.runtime_dir = params.runtime_dir;
         config.sandbox = params.sandbox;
+        config.aggressive_cdp_evasion = params.aggressive_cdp_evasion;
+        config.geo_align = params.geo_align;
+        if !params.extra_args.is_empty() {
+            config.extra_args = params.extra_args;
+        }
         config.device_scale_factor = params.device_scale_factor.unwrap_or(1.0);
         if let Some(width) = params.viewport_width {
             config.viewport_width = width;
