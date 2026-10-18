@@ -1,6 +1,6 @@
 # @cbxss/eoka
 
-The Node.js SDK for the eoka NDJSON browser sidecar. Beta `0.1.0-beta.1` is published under the npm `next` tag; this source checkout prepares **`0.1.0-beta.2`, not yet published or qualified**. The repository source package remains private, with public artifacts staged only by the publication workflow. It supports **Node.js 24 LTS, starting at 24.21.0** (`^24.21.0`) and exports compiled ESM and TypeScript declarations. Node 22 and Current/non-LTS lines are outside the support policy. CommonJS `require` is not an export.
+The Node.js SDK for the eoka NDJSON browser sidecar. Beta `0.1.0-beta.2` is published under the npm `next` tag; this source checkout prepares **`0.1.0-beta.3`, not yet published or qualified**. The repository source package remains private, with public artifacts staged only by the publication workflow. It supports **Node.js 24 LTS, starting at 24.21.0** (`^24.21.0`) and exports compiled ESM and TypeScript declarations. Node 22 and Current/non-LTS lines are outside the support policy. CommonJS `require` is not an export.
 
 ```sh
 npm install @cbxss/eoka@next
@@ -12,7 +12,7 @@ The SDK provides correlated subprocess transport, typed browser/page operations,
 
 Managed targets are `linux-x64-gnu`, `linux-arm64-gnu`, `darwin-x64`, `darwin-arm64`, and `win32-x64`. Linux managed selection requires glibc >= 2.35 and rejects musl/Alpine; Windows arm64 and unknown combinations are rejected before downloads. GNU release artifacts are built on Ubuntu 22.04 and checked for GLIBC requirements no higher than 2.35. Arbitrary source-built or host-development binaries are not qualified by that result.
 
-Both explicit server and Chrome paths are an expert override for managed platform checks, not a new support guarantee. Node.js support does not imply Bun, Deno, browser-side JavaScript, or drop-in Puppeteer compatibility. Packed npm consumption and credential-free registry installation with a Linux Chrome smoke are verified for beta.1; beta.2 requires fresh qualification. pnpm/Yarn remain unqualified.
+Both explicit server and Chrome paths are an expert override for managed platform checks, not a new support guarantee. Node.js support does not imply Bun, Deno, browser-side JavaScript, or drop-in Puppeteer compatibility. Packed npm consumption and credential-free registry installation with a Linux Chrome smoke are verified for beta.2; beta.3 requires fresh qualification. pnpm/Yarn remain unqualified.
 
 ## Managed launch and explicit preparation
 
@@ -123,10 +123,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 RUN chown node:node /app
-COPY --chown=node:node cbxss-eoka-0.1.0-beta.2.tgz cbxss-eoka-server-linux-x64-gnu-0.1.0-beta.2.tgz ./
+COPY --chown=node:node cbxss-eoka-0.1.0-beta.3.tgz cbxss-eoka-server-linux-x64-gnu-0.1.0-beta.3.tgz ./
 USER node
 RUN npm init -y && npm install --ignore-scripts --omit=optional --no-audit --no-fund \
-    ./cbxss-eoka-server-linux-x64-gnu-0.1.0-beta.2.tgz ./cbxss-eoka-0.1.0-beta.2.tgz
+    ./cbxss-eoka-server-linux-x64-gnu-0.1.0-beta.3.tgz ./cbxss-eoka-0.1.0-beta.3.tgz
 ENV EOKA_BROWSER_CACHE_DIR=/app/browser-cache
 ENV EOKA_RUNTIME_DIR=/tmp/eoka
 RUN node node_modules/@cbxss/eoka/examples/install-browser.mjs
@@ -137,7 +137,7 @@ Network is needed during image preparation for npm dependencies and the pinned C
 
 ## Build, source staging, and local consumption
 
-This SDK and its five native packages share reserved npm version `0.1.0-beta.2`. The native server is pinned separately to `0.6.0`, published registry core to `0.7.0`, and the protocol to `1.3`; npm version equality is not wire compatibility. Release manifests accept exact semantic versions, including prereleases, but reject floating ranges, tags, and malformed versions. Packaged servers are checked against their name/version/platform, staged release metadata, actual binary digest, and expected handshake version. Explicit servers still must pass the protocol handshake.
+This SDK and its five native packages share reserved npm version `0.1.0-beta.3`. The native server is pinned separately to `0.6.1`, published registry core to `0.7.2`, and the protocol to `1.3`; npm version equality is not wire compatibility. Release manifests accept exact semantic versions, including prereleases, but reject floating ranges, tags, and malformed versions. Packaged servers are checked against their name/version/platform, staged release metadata, actual binary digest, and expected handshake version. Explicit servers still must pass the protocol handshake.
 
 The source manifest intentionally has no fabricated hashes for unprepared native artifacts. The source package omits native optional dependencies so a clean `npm ci` does not need unpublished packages. Staging derives all five exact native dependencies from the validated release manifest and adds them to the staged SDK's package metadata. Packing the source SDK alone is useful for import/type gates, but is **not** a ready managed server distribution. Missing native packages (including after `--omit=optional`) raise `ServerPackageMissing`; a present package with an unstaged SDK pin raises `ReleaseNotPrepared`. There is no compile/download fallback.
 
@@ -170,8 +170,8 @@ In a separate ESM application, install the matching native tarball as a direct d
 
 ```sh
 npm install --ignore-scripts --omit=optional \
-  /absolute/path/to/cbxss-eoka-server-linux-x64-gnu-0.1.0-beta.2.tgz \
-  /absolute/path/to/cbxss-eoka-0.1.0-beta.2.tgz
+  /absolute/path/to/cbxss-eoka-server-linux-x64-gnu-0.1.0-beta.3.tgz \
+  /absolute/path/to/cbxss-eoka-0.1.0-beta.3.tgz
 npm install --save-dev typescript@5.9.3 @types/node@24.19.2
 ```
 
@@ -429,26 +429,27 @@ From the repository root use `mise run node-build`, `node-check`, or `node-consu
 
 ## Prerelease qualification and publication
 
-Core `0.7.0` is published on crates.io. Reserved prerelease versions are
-server/protocol crates `0.6.0`, wire protocol `1.3`, and SDK/native npm packages
-`0.1.0-beta.2`. Source and ordinary staged packages remain private;
+Core `0.7.2` is published on crates.io. Reserved prerelease versions are
+server crate `0.6.1`, protocol crate `0.6.0`, wire protocol `1.3`, and SDK/native
+npm packages `0.1.0-beta.3`. Source and ordinary staged packages remain private;
 `--publication` is a separate, fail-closed staging mode.
 
-### Pending beta.2
+### Pending beta.3
 
-Beta.1 remains published under `next`. Beta.2 repackages the existing native server
-with the Windows operation-lock contention fix and shorter registry-smoke runtime
-paths merged in [PR #63](https://github.com/shrimp-software/eoka-tools/pull/63)
-at `c72892066bb12c51c084166e54059cae3854f0e6`. No Rust, core, protocol, Chrome,
-or dependency version changes are required. Native binaries must be rebuilt from
-the new release source; repacking beta.1 binaries would omit the lock fix.
+Beta.2 was published under `next` on 2026-10-18 from
+`bd346b47d907ba9b71c603c4c94e77024c9f0fdd` (server `0.6.0`, core `0.7.0`).
+Beta.3 rebuilds the native server as `0.6.1` against published core `0.7.2`,
+which removes reflection-visible headless and platform leaks
+([eoka#37](https://github.com/shrimp-software/eoka/pull/37)). No protocol, Chrome,
+or SDK API changes are required. Native binaries must be rebuilt from the new
+release source; repacking beta.2 binaries would omit the core fixes.
 
-Beta.2 has not been published. Release authorization requires local SDK checks
+Beta.3 has not been published. Release authorization requires local SDK checks
 and fresh five-platform native qualification (including Windows live-owner
 recovery) in the publication workflow at the exact current protected `main` commit.
 The readiness record's `ready` status means no recorded source defect blocks
-qualification; it is not beta.2 runtime evidence or permission to publish.
-The historical evidence below is retained and does not qualify beta.2.
+qualification; it is not beta.3 runtime evidence or permission to publish.
+The historical evidence below is retained and does not qualify beta.3.
 
 `.github/workflows/qualify-node-release.yml` builds all five native targets and
 qualifies installed tarballs outside the repository. GNU builds use Ubuntu 22.04
@@ -480,10 +481,10 @@ mise run node-qualify-release -- --stage /absolute/stage \
 ```
 
 The workflow resolves `source_ref` to an immutable tools revision and builds
-against published registry core `0.7.0`, without a sibling checkout or Cargo
+against published registry core `0.7.2`, without a sibling checkout or Cargo
 patch. It checks every native build's core identity and exact source lockfile,
 including registry checksum
-`447a498ec28c34b2020be583617c70f89dc718228bb02db5750f72e4da333a1e`.
+`bb088753bbef0585bcbaa1e868e4e59b5ee99db40844ba9cb3ec4822ca95e019`.
 Local host-development staging and `--preview` remain separate from release
 qualification and cannot authorize publication.
 
@@ -514,7 +515,7 @@ the documented native timing defects; changing Chrome's container layout require
 renewed qualification, not an implicit generic muxer or transcoder.
 
 `publish-node.yml` is manual, restricted to an exact current protected `main`
-commit, and publishes only `0.1.0-beta.2` under `next` with npm provenance.
+commit, and publishes only `0.1.0-beta.3` under `next` with npm provenance.
 It requires an existing `npm-prerelease` environment with required reviewers
 and a single allowed deployment branch, `main`. By default it uses only npm
 trusted publishing through OIDC, requires self-review to be disabled, and
@@ -539,7 +540,7 @@ Both modes retain GitHub OIDC provenance and the same qualification checks.
 Normal trusted publication still requires operator setup. On 2026-10-15, the
 GitHub `npm-prerelease` environment allowed only branch `main`, but its sole
 required reviewer was `cbxss` and `prevent_self_review` was `false`. The normal
-publication gate therefore rejects that configuration. Before beta.2 publication,
+publication gate therefore rejects that configuration. Before beta.3 publication,
 an operator must enable `prevent_self_review: true`, arrange an independent
 required reviewer, and confirm npm trusted publishers on all six existing packages
 for owner `shrimp-software`, repository `eoka-tools`, workflow `publish-node.yml`,
@@ -550,7 +551,7 @@ secret and revoke its token after confirming the migration. No environment,
 secret, token, or npm setting is changed by this release preparation.
 
 The bootstrap procedure above is historical first-publication guidance, not the
-normal beta.2 release path or an automatic fallback. A bootstrap rerun after a
+normal beta.3 release path or an automatic fallback. A bootstrap rerun after a
 partial upload still needs the token and must follow same-run recovery below.
 
 The publish job accepts only same-run, same-source qualified artifacts and

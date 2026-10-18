@@ -251,11 +251,11 @@ compiled ESM/declarations for Node 24 LTS (`^24.21.0`), one private sidecar per 
 owned launch or borrowed attachment, verified actions, durable operation recovery,
 page reads, bounded text fetch, PNG/JPEG/WebP screenshots and native MP4 recording.
 
-The source checkout prepares `0.1.0-beta.2`, which is not yet published. It wraps
-the existing native server's Windows operation-lock fix and release registry-smoke
-path fix from [PR #63](https://github.com/shrimp-software/eoka-tools/pull/63).
+The source checkout prepares `0.1.0-beta.3`, which is not yet published. It
+rebuilds the native server as `0.6.1` against eoka `0.7.2`, picking up the core's
+stealth reflection-leak fixes ([eoka#37](https://github.com/shrimp-software/eoka/pull/37)).
 Fresh five-platform qualification and publication approval remain pending;
-the npm `next` tag still selects beta.1.
+the npm `next` tag selects beta.2.
 
 `Browser.launch()` resolves an exact optional server package and installs pinned
 full Chrome for Testing 155.0.8059.39 on demand. `installBrowser()` supports explicit
@@ -297,9 +297,9 @@ Protocol schemas remain canonical in `eoka-protocol::sidecar`; the SDK's typed
 
 ## Development
 
-Builds use published eoka `0.7.0` from crates.io. The workspace lockfile pins its
+Builds use published eoka `0.7.2` from crates.io. The workspace lockfile pins its
 registry source and checksum
-`447a498ec28c34b2020be583617c70f89dc718228bb02db5750f72e4da333a1e`;
+`bb088753bbef0585bcbaa1e868e4e59b5ee99db40844ba9cb3ec4822ca95e019`;
 no sibling core checkout or Cargo patch is required.
 
 ```sh

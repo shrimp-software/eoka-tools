@@ -10,7 +10,7 @@ const identity = { repository: 'shrimp-software/eoka-tools', workflowPath: '.git
 const names = [sdkName, ...['linux-x64-gnu', 'linux-arm64-gnu', 'darwin-x64', 'darwin-arm64', 'win32-x64'].map(id => `@cbxss/eoka-server-${id}`)];
 const packages = names.map(name => {
   const bytes = Buffer.from(`qualified immutable tarball for ${name}`);
-  return { name, version: '0.1.0-beta.2', filename: `${name.replace(/[@/]/g, '-')}.tgz`, bytes, integrity: `sha512-${createHash('sha512').update(bytes).digest('base64')}` };
+  return { name, version: '0.1.0-beta.3', filename: `${name.replace(/[@/]/g, '-')}.tgz`, bytes, integrity: `sha512-${createHash('sha512').update(bytes).digest('base64')}` };
 });
 const ordered = [...packages.slice(1).sort((a, b) => a.name.localeCompare(b.name)), packages[0]];
 const { publicKey, privateKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
@@ -266,7 +266,7 @@ for (const [name, alter, message] of [
   ['unsigned provenance', registry => { registry.attestations.get(sdkName).attestations[0].bundle.dsseEnvelope.signatures = []; }, undefined],
   ['no provenance bundle', registry => { registry.attestations.get(sdkName).attestations = []; }, /Exactly one verified/],
   ['untrusted certificate', registry => { registry.attestations.get(sdkName).attestations[0].bundle.verificationMaterial.certificate.rawBytes = 'untrusted'; }, /Untrusted isolated certificate/],
-  ['next tag mismatch', registry => { registry.next.set(sdkName, '0.1.0-beta.1'); }, /refusing silent retag/],
+  ['next tag mismatch', registry => { registry.next.set(sdkName, '0.1.0-beta.2'); }, /refusing silent retag/],
 ]) {
   test(`${name} in the final package aborts before any missing native package is published`, async () => {
     await withRegistry(async registry => {

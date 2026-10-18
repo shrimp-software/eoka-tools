@@ -163,12 +163,12 @@ jobs:
             assert.equal(coreLock.length, 1);
             assert.match(coreLock[0], /^version = "0\.7\.0"$/m);
             assert.match(coreLock[0], /^source = "registry\+https:\/\/github\.com\/rust-lang\/crates\.io-index"$/m);
-            assert.match(coreLock[0], /^checksum = "447a498ec28c34b2020be583617c70f89dc718228bb02db5750f72e4da333a1e"$/m);
+            assert.match(coreLock[0], /^checksum = "bb088753bbef0585bcbaa1e868e4e59b5ee99db40844ba9cb3ec4822ca95e019"$/m);
             for (const platform of ["linux-x64-gnu","linux-arm64-gnu","darwin-x64","darwin-arm64","win32-x64"]) {
               const metadata = JSON.parse(await readFile(`native/${platform}-cargo.json`, "utf8"));
               const cores = metadata.packages.filter(p => p.name === "eoka");
               assert.equal(cores.length, 1);
-              assert.equal(cores[0].version, "0.7.0");
+              assert.equal(cores[0].version, "0.7.2");
               assert.equal(cores[0].source, "registry+https://github.com/rust-lang/crates.io-index");
               assert.equal((await readFile(`native/${platform}-Cargo.lock`, "utf8")).replaceAll("\r\n", "\n"), lock);
             }

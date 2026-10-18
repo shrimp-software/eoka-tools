@@ -70,7 +70,7 @@ export function validateReleaseManifest(value: unknown): ReleaseManifest {
     const chrome = object(manifest.chrome);
     const servers = object(server.platforms);
     const browsers = object(chrome.platforms);
-    if (manifest.schemaVersion !== 1 || !exactNpmVersion(manifest.sdkVersion) || manifest.installerVersion !== '3.2.4' || server.version !== '0.6.0' || server.protocolVersion !== `${protocolVersion.major}.${protocolVersion.minor}` || chrome.buildId !== '155.0.8059.39') throw new Error('Incompatible release versions');
+    if (manifest.schemaVersion !== 1 || !exactNpmVersion(manifest.sdkVersion) || manifest.installerVersion !== '3.2.4' || server.version !== '0.6.1' || server.protocolVersion !== `${protocolVersion.major}.${protocolVersion.minor}` || chrome.buildId !== '155.0.8059.39') throw new Error('Incompatible release versions');
     if (Object.keys(servers).length !== platformIds.length || Object.keys(browsers).length !== platformIds.length) throw new Error('Incomplete platform mapping');
     for (const id of platformIds) {
       const pin = object(servers[id]);
