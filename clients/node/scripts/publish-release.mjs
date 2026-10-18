@@ -372,8 +372,26 @@ async function publish() {
   }
 }
 
+// npm acknowledges a publish before its packument and dist-tags are served.
+// Wait until every qualified package exposes its version under `next`, so the
+// smoke verifies what was published instead of racing registry propagation.
+async function awaitRegistry(packages, { timeoutMs = 900000, intervalMs = 15000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  for (const item of packages) {
+    for (;;) {
+      const response = await fetch(`${registry}${encodeURIComponent(item.name)}`, { headers: { Accept: 'application/json', 'Cache-Control': 'no-cache' }, redirect: 'error', signal: AbortSignal.timeout(120000) });
+      const metadata = response.status === 200 ? await response.json() : (await response.body?.cancel(), null);
+      if (metadata?.versions?.[item.version] && metadata['dist-tags']?.next === item.version) break;
+      assert.ok(Date.now() < deadline, `Registry did not serve ${item.name}@${item.version} under next within ${timeoutMs / 1000}s`);
+      await new Promise(resolve => setTimeout(resolve, intervalMs));
+    }
+  }
+}
+
 async function smoke() {
   const qualification = await verify();
+  const packages = await recoveryPackages(qualification);
+  await awaitRegistry(packages);
   const temporary = await mkdtemp(join(tmpdir(), 'e-'));
   try {
     const env = await npmEnvironment(temporary);
@@ -385,7 +403,7 @@ async function smoke() {
     await mkdir(env.HOME);
     const boundary = await registryBoundary(temporary, env);
     await resumePublication({
-      packages: await recoveryPackages(qualification),
+      packages,
       sdkName: '@cbxss/eoka',
       boundary: { ...boundary, publish: async () => { throw new Error('Registry smoke cannot publish'); } },
       beforePublish: async item => { throw new Error(`Qualified version is missing from registry: ${item.name}@${item.version}`); },
