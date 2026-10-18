@@ -66,7 +66,7 @@ async function sourceGate() {
   assert.equal(metadata.private, true);
   assert.equal(metadata.optionalDependencies, undefined);
   assert.equal(metadata.engines.node, '^24.21.0');
-  assert.equal(manifest.server.version, '0.5.0');
+  assert.equal(manifest.server.version, '0.6.0');
   assert.equal(manifest.server.protocolVersion, '1.3');
   const readiness = await json(join(root, 'scripts', 'publication-readiness.json'));
   assert.equal(readiness.schemaVersion, 1);

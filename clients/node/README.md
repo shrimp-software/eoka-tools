@@ -137,7 +137,7 @@ Network is needed during image preparation for npm dependencies and the pinned C
 
 ## Build, source staging, and local consumption
 
-This SDK and its five native packages share reserved npm version `0.1.0-beta.2`. The native server is pinned separately to `0.5.0`, published registry core to `0.7.0`, and the protocol to `1.3`; npm version equality is not wire compatibility. Release manifests accept exact semantic versions, including prereleases, but reject floating ranges, tags, and malformed versions. Packaged servers are checked against their name/version/platform, staged release metadata, actual binary digest, and expected handshake version. Explicit servers still must pass the protocol handshake.
+This SDK and its five native packages share reserved npm version `0.1.0-beta.2`. The native server is pinned separately to `0.6.0`, published registry core to `0.7.0`, and the protocol to `1.3`; npm version equality is not wire compatibility. Release manifests accept exact semantic versions, including prereleases, but reject floating ranges, tags, and malformed versions. Packaged servers are checked against their name/version/platform, staged release metadata, actual binary digest, and expected handshake version. Explicit servers still must pass the protocol handshake.
 
 The source manifest intentionally has no fabricated hashes for unprepared native artifacts. The source package omits native optional dependencies so a clean `npm ci` does not need unpublished packages. Staging derives all five exact native dependencies from the validated release manifest and adds them to the staged SDK's package metadata. Packing the source SDK alone is useful for import/type gates, but is **not** a ready managed server distribution. Missing native packages (including after `--omit=optional`) raise `ServerPackageMissing`; a present package with an unstaged SDK pin raises `ReleaseNotPrepared`. There is no compile/download fallback.
 
@@ -430,7 +430,7 @@ From the repository root use `mise run node-build`, `node-check`, or `node-consu
 ## Prerelease qualification and publication
 
 Core `0.7.0` is published on crates.io. Reserved prerelease versions are
-server/protocol crates `0.5.0`, wire protocol `1.3`, and SDK/native npm packages
+server/protocol crates `0.6.0`, wire protocol `1.3`, and SDK/native npm packages
 `0.1.0-beta.2`. Source and ordinary staged packages remain private;
 `--publication` is a separate, fail-closed staging mode.
 
