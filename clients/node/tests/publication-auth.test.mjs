@@ -202,7 +202,7 @@ test('npm configuration files have restrictive POSIX modes even when replacing e
 });
 
 test('review policy always requires approval and defaults to independent approval', () => {
-  const reviewers = { type: 'required_reviewers', reviewers: [{ type: 'User', reviewer: { login: 'owner' } }], prevent_self_review: true };
+  const reviewers = { type: 'required_reviewers', reviewers: [{ type: 'User', reviewer: { login: 'owner' } }, { type: 'User', reviewer: { login: 'second' } }], prevent_self_review: true };
   validatePublicationReview(reviewers);
   validatePublicationReview(reviewers, false);
   validatePublicationReview(reviewers, true);
@@ -220,4 +220,16 @@ test('review policy always requires approval and defaults to independent approva
       assert.throws(() => validatePublicationReview({ ...reviewers, prevent_self_review }, bootstrap), /prevent_self_review/);
     }
   }
+});
+
+test('a single user as sole required reviewer may self-review in normal mode', () => {
+  const sole = { type: 'required_reviewers', reviewers: [{ type: 'User', reviewer: { login: 'owner' } }], prevent_self_review: false };
+  validatePublicationReview(sole);
+  validatePublicationReview(sole, false);
+  validatePublicationReview(sole, true);
+  validatePublicationReview({ ...sole, prevent_self_review: true });
+  // A team, even a single one, has several possible approvers.
+  const team = { ...sole, reviewers: [{ type: 'Team', reviewer: { slug: 'maintainers' } }] };
+  assert.throws(() => validatePublicationReview(team), /prevent self-review/);
+  assert.throws(() => validatePublicationReview({ ...sole, prevent_self_review: undefined }), /prevent_self_review/);
 });

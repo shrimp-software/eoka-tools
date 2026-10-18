@@ -537,14 +537,15 @@ Bootstrap accepts an absent name only when both public and authenticated registr
 reads return 404; an existing private package or an authorization failure aborts.
 Both modes retain GitHub OIDC provenance and the same qualification checks.
 
-Normal trusted publication still requires operator setup. On 2026-10-15, the
-GitHub `npm-prerelease` environment allowed only branch `main`, but its sole
-required reviewer was `cbxss` and `prevent_self_review` was `false`. The normal
-publication gate therefore rejects that configuration. Before beta.3 publication,
-an operator must enable `prevent_self_review: true`, arrange an independent
-required reviewer, and confirm npm trusted publishers on all six existing packages
-for owner `shrimp-software`, repository `eoka-tools`, workflow `publish-node.yml`,
-and environment `npm-prerelease`. npm publisher settings were not independently
+Normal trusted publication requires reviewer approval on the GitHub
+`npm-prerelease` environment, which allows only branch `main`. With several
+required reviewers, or a team, the gate requires `prevent_self_review: true` so
+approval is independent. A single user as the sole required reviewer (currently
+`cbxss`) may approve their own run, because blocking self-review would leave no
+possible approver. Before the first normal publication, an operator must confirm
+npm trusted publishers on all six existing packages for owner `shrimp-software`,
+repository `eoka-tools`, workflow `publish-node.yml`, and environment
+`npm-prerelease`. npm publisher settings were not independently
 verified from public registry metadata; a provenance attestation does not prove
 trusted-publisher configuration. Remove any remaining bootstrap environment
 secret and revoke its token after confirming the migration. No environment,
