@@ -117,6 +117,14 @@ test('empty runtime extensions directory does not invalidate the pinned cache', 
   await assert.rejects(f.install({ browserCacheDir: f.cacheDir, download: 'never' }), { code: 'IntegrityMismatch' });
 });
 
+test('empty extensions directory elsewhere in the tree still invalidates the cache', { skip: !supported }, async t => {
+  const f = await fixture(t);
+  const first = await f.install({ browserCacheDir: f.cacheDir });
+  // Only the directory beside the executable is runtime-created.
+  await mkdir(path.join(path.dirname(path.dirname(first.executablePath)), 'extensions'));
+  await assert.rejects(f.install({ browserCacheDir: f.cacheDir, download: 'never' }), { code: 'IntegrityMismatch' });
+});
+
 test('offline cache miss makes no cache directories and performs no network', { skip: !supported }, async t => {
   const f = await fixture(t);
   await assert.rejects(f.install({ browserCacheDir: f.cacheDir, download: 'never' }), { code: 'BrowserNotInstalled' });

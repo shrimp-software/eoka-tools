@@ -34,18 +34,14 @@ function inside(root: string, target: string): boolean {
   return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
 }
 
-/**
- * Directories Chrome creates next to its executable at runtime. They are not
- * part of the pinned archive, so they must not be treated as tampering.
- * `extensions/` is created empty on every startup (component-extension
- * staging) even with `--disable-component-update`; ignoring it only while it
- * is empty keeps the rest of the tree strictly verified.
- */
-const RUNTIME_EMPTY_DIRECTORIES: Record<string, true> = { extensions: true };
-
 export interface InventoryOptions {
-  /** Ignore runtime-created empty directories absent from the pinned archive. */
-  ignoreRuntimeEmptyDirectories?: boolean;
+  /**
+   * Root-relative, `/`-separated directory to skip while it is empty. Chrome
+   * creates `extensions/` next to its executable on every startup
+   * (component-extension staging) even with `--disable-component-update`; it
+   * is not part of the pinned archive, so it must not read as tampering.
+   */
+  ignoreEmptyDirectory?: string;
 }
 
 export async function inventoryTree(root: string, options: InventoryOptions = {}): Promise<InventoryEntry[]> {
@@ -61,14 +57,7 @@ export async function inventoryTree(root: string, options: InventoryOptions = {}
       const absolute = path.join(directory, name);
       const info = await lstat(absolute);
       const mode = info.mode & 0o555;
-      if (
-        options.ignoreRuntimeEmptyDirectories &&
-        RUNTIME_EMPTY_DIRECTORIES[name] === true &&
-        info.isDirectory() &&
-        (await readdir(absolute)).length === 0
-      ) {
-        continue;
-      }
+      if (relative === options.ignoreEmptyDirectory && info.isDirectory() && (await readdir(absolute)).length === 0) continue;
       if (info.isSymbolicLink()) {
         const target = await readlink(absolute);
         try {
@@ -122,12 +111,11 @@ export async function verifyInstallation(root: string, buildId: string, platform
     const marker = JSON.parse(await readFile(markerPath, 'utf8')) as InstallationMarker;
     if (marker.schema !== 1 || marker.buildId !== buildId || marker.platform !== platform || marker.archiveSha256 !== pin.sha256 || marker.archiveUrl !== pin.url || marker.executablePath !== executablePath || !Array.isArray(marker.inventory) || marker.inventorySha256 !== fingerprint(marker.inventory)) throw new Error('Installation inventory does not match the pinned release');
     await validateExecutable(root, executablePath);
-    // The marker is always written from a strict inventory (createMarker), so
-    // an archive that ships an `extensions/` directory would still be recorded
-    // and would fail here if the runtime version were dropped. Chrome's own
-    // install never ships one; the leniency only applies to the empty
-    // directory it creates after the first launch.
-    const actual = await inventoryTree(root, { ignoreRuntimeEmptyDirectories: true });
+    // The marker is always written from a strict inventory (createMarker).
+    // Chrome's archive never ships `extensions/`; the leniency only covers the
+    // empty directory it creates beside the executable after the first launch.
+    const runtimeExtensions = path.posix.join(path.posix.dirname(executablePath), 'extensions');
+    const actual = await inventoryTree(root, { ignoreEmptyDirectory: runtimeExtensions });
     if (fingerprint(actual) !== marker.inventorySha256) throw new Error('Browser distribution resources have changed');
     return true;
   } catch (cause) {
