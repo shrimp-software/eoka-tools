@@ -60,13 +60,13 @@ async function sourceGate() {
   assert.equal(policy.branch_policies[0]?.type, 'branch');
   const manifest = await json(join(root, 'release-manifest.json'));
   const metadata = await json(join(root, 'package.json'));
-  assert.equal(manifest.sdkVersion, '0.1.0-beta.2');
+  assert.equal(manifest.sdkVersion, '0.1.0-beta.3');
   assert.equal(metadata.name, '@cbxss/eoka');
   assert.equal(metadata.version, manifest.sdkVersion);
   assert.equal(metadata.private, true);
   assert.equal(metadata.optionalDependencies, undefined);
   assert.equal(metadata.engines.node, '^24.21.0');
-  assert.equal(manifest.server.version, '0.6.0');
+  assert.equal(manifest.server.version, '0.6.1');
   assert.equal(manifest.server.protocolVersion, '1.3');
   const readiness = await json(join(root, 'scripts', 'publication-readiness.json'));
   assert.equal(readiness.schemaVersion, 1);
@@ -399,7 +399,7 @@ async function smoke() {
       import assert from 'node:assert/strict';
       import { createRequire } from 'node:module';
       import { Browser, releaseManifest, detectPlatform } from '@cbxss/eoka';
-      assert.equal(releaseManifest.sdkVersion, '0.1.0-beta.2');
+      assert.equal(releaseManifest.sdkVersion, '0.1.0-beta.3');
       const pin = releaseManifest.server.platforms[detectPlatform()];
       const packagePath = createRequire(import.meta.url).resolve(pin.packageName + '/package.json');
       assert.ok(packagePath.includes('node_modules'), 'Server must come from the registry platform package');

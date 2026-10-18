@@ -187,9 +187,9 @@ inspectable and are not automatically deleted.
 
 ## Release dependencies
 
-This release uses published eoka `0.7.0` from crates.io. The workspace lockfile
+This release uses published eoka `0.7.2` from crates.io. The workspace lockfile
 records registry checksum
-`447a498ec28c34b2020be583617c70f89dc718228bb02db5750f72e4da333a1e`.
+`bb088753bbef0585bcbaa1e868e4e59b5ee99db40844ba9cb3ec4822ca95e019`.
 Publish protocol,
 SDK, server, runner, MCP/Tack and CLI in dependency order (and the updated
 DataDome adapter before CLI). Run `mise run conformance` and
