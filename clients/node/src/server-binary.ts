@@ -28,6 +28,27 @@ function isSingleton(value: unknown, expected: string): boolean {
   return Array.isArray(value) && value.length === 1 && value[0] === expected;
 }
 
+// npm skips an optional dependency whose engines range rejects the running
+// Node, so a missing platform package often means the wrong Node version.
+export function nodeEngineMismatch(range: string, version: string): boolean {
+  const required = /^\^(\d+)\.(\d+)\.(\d+)$/.exec(range)?.slice(1).map(Number);
+  const current = /^v?(\d+)\.(\d+)\.(\d+)/.exec(version)?.slice(1).map(Number);
+  if (!required || !current || required[0] === 0) return false;
+  if (current[0] !== required[0]) return true;
+  return current[1]! < required[1]! || (current[1] === required[1] && current[2]! < required[2]!);
+}
+
+function unsupportedNodeHint(): string {
+  let range: unknown;
+  try {
+    range = (createRequire(import.meta.url)('../package.json') as { engines?: { node?: unknown } }).engines?.node;
+  } catch {
+    return '';
+  }
+  if (typeof range !== 'string' || !nodeEngineMismatch(range, process.versions.node)) return '';
+  return ` npm skips it on unsupported Node versions: this is Node ${process.versions.node}, but @cbxss/eoka requires ${range}. Switch Node (for example \`mise use node@24\` or \`nvm install 24\`) and reinstall.`;
+}
+
 export async function resolveServerBinary(options: ServerBinaryOptions = {}): Promise<ServerBinaryResolution> {
   const { signal } = options;
   checkAbort(signal);
@@ -51,7 +72,7 @@ export async function resolveServerBinary(options: ServerBinaryOptions = {}): Pr
   try {
     packagePath = createRequire(import.meta.url).resolve(`${pin.packageName}/package.json`);
   } catch (cause) {
-    throw new InstallationError('ServerPackageMissing', `The exact optional dependency ${pin.packageName}@${pin.packageVersion} is missing. Reinstall @cbxss/eoka with optional dependencies enabled (do not use --omit=optional), or install that exact platform package. There is no Cargo, PATH or network fallback.`, { cause });
+    throw new InstallationError('ServerPackageMissing', `The exact optional dependency ${pin.packageName}@${pin.packageVersion} is missing.${unsupportedNodeHint()} Reinstall @cbxss/eoka with optional dependencies enabled (do not use --omit=optional), or install that exact platform package. There is no Cargo, PATH or network fallback.`, { cause });
   }
   if (pin.sha256 === null || pin.size === null) throw new InstallationError('ReleaseNotPrepared', `The SDK has no staged server integrity pin for ${platform}. Use a prepared SDK plus its matching platform package, or set serverPath explicitly.`);
   if (pin.minimumGlibc !== null && pin.minimumGlibc !== '2.35') {
