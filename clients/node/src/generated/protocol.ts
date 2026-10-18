@@ -220,7 +220,7 @@ export type MethodBrowserConnectParams = { "wsEndpoint": string; };
 export type MethodBrowserConnectResult = { "browserVersion": string; "ownership": MethodBrowserConnectResult__BrowserOwnership; [key: string]: unknown; };
 export type MethodBrowserConnectResult__BrowserOwnership = (("owned" | "borrowed") & string);
 
-export type MethodBrowserLaunchParams = { "deviceScaleFactor": (number | null); "executablePath"?: (string | null); "headless"?: boolean; "proxy"?: (MethodBrowserLaunchParams__ProxyParams | null); "runtimeDir"?: (string | null); "sandbox"?: boolean; "timezone"?: (string | null); "userAgent"?: (string | null); "userDataDir"?: (string | null); "viewportHeight"?: (number | null); "viewportWidth"?: (number | null); [key: string]: unknown; };
+export type MethodBrowserLaunchParams = { "aggressiveCdpEvasion"?: boolean; "deviceScaleFactor": (number | null); "executablePath"?: (string | null); "extraArgs"?: Array<string>; "geoAlign"?: boolean; "headless"?: boolean; "proxy"?: (MethodBrowserLaunchParams__ProxyParams | null); "runtimeDir"?: (string | null); "sandbox"?: boolean; "timezone"?: (string | null); "userAgent"?: (string | null); "userDataDir"?: (string | null); "viewportHeight"?: (number | null); "viewportWidth"?: (number | null); [key: string]: unknown; };
 export type MethodBrowserLaunchParams__ProxyParams = { "password"?: (string | null); "server": string; "username"?: (string | null); [key: string]: unknown; };
 
 export type MethodBrowserLaunchResult = { "browserVersion": string; "ownership": MethodBrowserLaunchResult__BrowserOwnership; [key: string]: unknown; };

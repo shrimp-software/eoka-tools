@@ -2366,6 +2366,10 @@
         },
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
+          "aggressiveCdpEvasion": {
+            "default": false,
+            "type": "boolean"
+          },
           "deviceScaleFactor": {
             "exclusiveMinimum": 0,
             "type": [
@@ -2378,6 +2382,17 @@
               "string",
               "null"
             ]
+          },
+          "extraArgs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "geoAlign": {
+            "default": false,
+            "type": "boolean"
           },
           "headless": {
             "default": true,

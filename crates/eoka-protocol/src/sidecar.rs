@@ -320,6 +320,9 @@ dto!(LaunchParams {
     user_data_dir: Option<String>, proxy: Option<ProxyParams>,
     executable_path: Option<String>, runtime_dir: Option<String>,
     #[serde(default)] sandbox: bool,
+    #[serde(default)] aggressive_cdp_evasion: bool,
+    #[serde(default)] geo_align: bool,
+    #[serde(default)] extra_args: Vec<String>,
     #[schemars(schema_with = "optional_positive_scale_schema")]
     device_scale_factor: Option<f64>,
 });
