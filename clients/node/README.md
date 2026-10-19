@@ -45,6 +45,20 @@ String targets are CSS selectors. An action resolves only after its result is ve
 - **Waits:** `waitFor`, `waitForVisible`, `waitForText`
 - **Actions:** `goto`, `fill`, `select`, `hover`, `click`, `type`, `pressKey`, `submit`, `drag`
 
+## Shadow DOM and Turnstile
+
+`page.frames()` lists every frame, including cross-origin OOPIFs. `page.clickShadow(selector, { frameId, resolveTimeoutMs })` searches the frame's light DOM and every shadow root (closed roots included), maps the node to viewport coordinates, and clicks with human-like movement. `resolveTimeoutMs` bounds server-side resolution; `timeoutMs` is the RPC deadline and defaults to it plus 10 seconds.
+
+```js
+const challenge = (await page.frames()).find(frame =>
+  frame.url.includes("challenges.cloudflare.com"));
+if (challenge) {
+  await page.clickShadow('input[type="checkbox"]', { frameId: challenge.id });
+}
+```
+
+`page.solveTurnstile({ timeoutMs })` is a best-effort helper for interactive Cloudflare challenge pages. It finds the challenge frame, clicks the checkbox, and waits for the page to leave the challenge state. It is not a general CAPTCHA solver.
+
 ## Screenshots and recording
 
 ```js
