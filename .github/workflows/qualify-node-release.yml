@@ -1,12 +1,16 @@
 name: Qualify Node release
 
 on:
+  # Every npm publish runs this in full; pull requests only when the release
+  # pipeline itself changes. The nightly run catches native breakage on main.
+  schedule:
+    - cron: '17 6 * * *'
   pull_request:
     paths:
-      - 'clients/node/**'
-      - 'crates/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
+      - 'clients/node/scripts/**'
+      - 'clients/node/release-manifest.json'
+      - 'clients/node/package.json'
+      - 'clients/node/package-lock.json'
       - '.github/workflows/qualify-node-release.yml'
       - '.github/workflows/publish-node.yml'
   workflow_dispatch:

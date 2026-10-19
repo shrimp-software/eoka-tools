@@ -25,7 +25,7 @@ for CLI, MCP, Rust/Go and runner migration, retention and download recovery.
 | [**eoka-protocol**](crates/eoka-protocol) | Shared daemon protocol types and tool catalog metadata |
 | [**eoka-sdk**](crates/eoka-sdk) | Rust SDK for typed Eoka browser sessions |
 | [**eoka-tack**](crates/eoka-tack) | Tack `ToolSet` adapter generated from the Eoka protocol catalog |
-| [**@cbxss/eoka**](clients/node) | Node/TypeScript SDK for private sidecar sessions; npm beta available under `next` |
+| [**@cbxss/eoka**](clients/node) | Node/TypeScript SDK for private sidecar sessions; npm beta: `npm install @cbxss/eoka` |
 | [**eoka-runner**](crates/eoka-runner) | Declarative YAML automation runner |
 | [**eoka-captcha**](crates/captcha) | Optional Anti-Captcha integrations |
 | [**eoka-datadome**](crates/datadome) | Experimental local DataDome slider solver |
@@ -246,16 +246,13 @@ without `server.hello` are rejected before browser work. See the
 
 ## Node / TypeScript SDK
 
-[`clients/node`](clients/node) provides the published `@cbxss/eoka@0.1.0-beta.1` SDK:
+[`clients/node`](clients/node) provides the published `@cbxss/eoka` SDK:
 compiled ESM/declarations for Node 24 LTS (`^24.21.0`), one private sidecar per Browser,
 owned launch or borrowed attachment, verified actions, durable operation recovery,
 page reads, bounded text fetch, PNG/JPEG/WebP screenshots and native MP4 recording.
 
-The source checkout prepares `0.1.0-beta.3`, which is not yet published. It
-rebuilds the native server as `0.6.1` against eoka `0.7.2`, picking up the core's
-stealth reflection-leak fixes ([eoka#37](https://github.com/shrimp-software/eoka/pull/37)).
-Fresh five-platform qualification and publication approval remain pending;
-the npm `next` tag selects beta.2.
+The current release, `0.1.0-beta.3`, bundles server `0.6.1` built against eoka
+`0.7.2`. Merging a version bump to `main` starts the npm release automatically.
 
 `Browser.launch()` resolves an exact optional server package and installs pinned
 full Chrome for Testing 155.0.8059.39 on demand. `installBrowser()` supports explicit
@@ -263,8 +260,8 @@ preparation, progress, cancellation and verified offline/read-only cache reuse.
 Explicit `serverPath`/`executablePath` and environment overrides remain available;
 there is no PATH, Cargo, server-download or system-browser fallback.
 Import and npm installation have no browser/process side effects. Sandboxing is
-enabled by default, without an unsandboxed retry. Install the published beta with
-`npm install @cbxss/eoka@next`. Local source consumption still requires staging the
+enabled by default, without an unsandboxed retry. Install it with
+`npm install @cbxss/eoka`. Local source consumption still requires staging the
 SDK and native package together from release artifacts; the source manifest
 deliberately leaves unbuilt server hashes unset.
 

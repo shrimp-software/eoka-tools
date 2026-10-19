@@ -93,3 +93,19 @@ jobs:
             fi
             echo "::endgroup::"
           done
+
+      - name: Start the npm release when the SDK version is not on npm
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version=$(jq -r .version clients/node/package.json)
+          http_status=$(curl -sS -o /dev/null -w "%{http_code}" "https://registry.npmjs.org/@cbxss/eoka/${version}" || echo 000)
+          case "$http_status" in
+            200) echo "@cbxss/eoka ${version} is already on npm" ;;
+            404)
+              echo "Dispatching npm publication of @cbxss/eoka ${version}"
+              gh workflow run publish-node.yml --repo "${{ github.repository }}" --ref main -f source_sha="$GITHUB_SHA"
+              ;;
+            *) echo "npm registry returned ${http_status} for @cbxss/eoka ${version}"; exit 1 ;;
+          esac

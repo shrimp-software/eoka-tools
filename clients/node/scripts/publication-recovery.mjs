@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 const predicateType = 'https://slsa.dev/provenance/v1';
 const statementType = 'https://in-toto.io/Statement/v1';
 const buildType = 'https://slsa-framework.github.io/github-actions-buildtypes/workflow/v1';
+export const distTag = 'latest';
 
 function utf8Extension(value) {
   const bytes = Buffer.from(value);
@@ -84,7 +85,7 @@ export async function resumePublication({ packages, sdkName, boundary, beforePub
     assert.ok(packument.versions && typeof packument.versions === 'object' && !Array.isArray(packument.versions), `Invalid registry versions: ${item.name}`);
     assert.ok(packument['dist-tags'] && typeof packument['dist-tags'] === 'object', `Invalid registry tags: ${item.name}`);
     if (!Object.hasOwn(packument.versions, item.version)) {
-      assert.notEqual(packument['dist-tags'].next, item.version, `Registry tag points to a missing version: ${item.name}`);
+      assert.notEqual(packument['dist-tags'][distTag], item.version, `Registry tag points to a missing version: ${item.name}`);
       missing.push(item);
       continue;
     }
@@ -92,7 +93,7 @@ export async function resumePublication({ packages, sdkName, boundary, beforePub
     assert.equal(metadata?.name, item.name);
     assert.equal(metadata?.version, item.version);
     assert.equal(metadata?.dist?.integrity, item.integrity, `Existing tarball differs from qualification: ${item.name}`);
-    assert.equal(packument['dist-tags'].next, item.version, `Existing version must already be tagged next; refusing silent retag: ${item.name}`);
+    assert.equal(packument['dist-tags'][distTag], item.version, `Existing version must already be tagged ${distTag}; refusing silent retag: ${item.name}`);
     assert.equal(metadata.dist.attestations?.provenance?.predicateType, predicateType, `Missing npm provenance: ${item.name}`);
     assert.ok(metadata.dist.attestations.url, `Missing npm attestation URL: ${item.name}`);
     await boundary.verifyExisting(item, metadata);
