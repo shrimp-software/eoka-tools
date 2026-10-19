@@ -271,8 +271,7 @@ output and viewport DPR. `page.record()` returns a recoverable recording handle;
 `stop()` resolves only after publishing the complete native MP4 artifact.
 Cancellation and local waiter deadlines are distinct. Chrome selects the codec;
 H.264, audio, deterministic replay and transcoding are not promised. See the
-[capture contract](clients/node/README.md#screenshots-and-native-recording) and
-[SDK release plan](SDK-PLAN.md).
+[Node SDK README](clients/node/README.md#screenshots-and-recording).
 
 ```sh
 npm --prefix clients/node ci --ignore-scripts --omit=optional
