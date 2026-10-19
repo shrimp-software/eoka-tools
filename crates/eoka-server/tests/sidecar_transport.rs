@@ -388,7 +388,9 @@ fn closed_stdout_triggers_cleanup_even_with_stdin_still_open() {
     };
     server
         .send(json!({"id":1,"method":"server.hello","params":{"protocol":{"major":1,"minor":0}}}));
-    let deadline = Instant::now() + Duration::from_secs(5);
+    // A live intake never exits, so a generous bound keeps the regression
+    // signal; exit normally takes ~1s but exceeded 5s on a loaded CI runner.
+    let deadline = Instant::now() + Duration::from_secs(30);
     while server.child.try_wait().unwrap().is_none() {
         assert!(
             Instant::now() < deadline,
