@@ -60,7 +60,7 @@ async function sourceGate() {
   assert.equal(policy.branch_policies[0]?.type, 'branch');
   const manifest = await json(join(root, 'release-manifest.json'));
   const metadata = await json(join(root, 'package.json'));
-  assert.equal(manifest.sdkVersion, '0.1.0-beta.4');
+  assert.equal(manifest.sdkVersion, '0.1.0-beta.5');
   assert.equal(metadata.name, '@cbxss/eoka');
   assert.equal(metadata.version, manifest.sdkVersion);
   assert.equal(metadata.private, true);
@@ -418,7 +418,7 @@ async function smoke() {
       import assert from 'node:assert/strict';
       import { createRequire } from 'node:module';
       import { Browser, releaseManifest, detectPlatform } from '@cbxss/eoka';
-      assert.equal(releaseManifest.sdkVersion, '0.1.0-beta.4');
+      assert.equal(releaseManifest.sdkVersion, '0.1.0-beta.5');
       const pin = releaseManifest.server.platforms[detectPlatform()];
       const packagePath = createRequire(import.meta.url).resolve(pin.packageName + '/package.json');
       assert.ok(packagePath.includes('node_modules'), 'Server must come from the registry platform package');

@@ -59,6 +59,36 @@ if (challenge) {
 
 `page.solveTurnstile({ timeoutMs })` is a best-effort helper for interactive Cloudflare challenge pages. It finds the challenge frame, clicks the checkbox, and waits for the page to leave the challenge state. It is not a general CAPTCHA solver.
 
+### Automatic challenge handling
+
+`Browser.launch({ autoSolveCloudflare: true })` (and `Browser.connect`) watches every tab and calls `solveTurnstile()` when a full-page Cloudflare challenge appears. It does not click Turnstile widgets embedded in normal forms.
+
+```js
+const browser = await Browser.launch({ autoSolveCloudflare: true });
+try {
+  const page = await browser.newPage("https://1337x.to/");
+  await page.waitForText("Torrent Search Engine");
+} finally {
+  await browser.close();
+}
+```
+
+Tune the watcher or observe it:
+
+```js
+const browser = await Browser.launch({
+  autoSolveCloudflare: {
+    intervalMs: 500,       // tab poll interval
+    timeoutMs: 45_000,     // deadline per challenge
+    onChallenge: page => console.log("cloudflare challenge", page.id),
+    onSolved: page => console.log("cloudflare solved", page.id),
+    onError: (error, page) => console.warn("cloudflare", error, page?.id),
+  },
+});
+```
+
+The watcher polls; it is not an event hook. It stops on `browser.close()` and never keeps the Node process alive by itself.
+
 ## Screenshots and recording
 
 ```js
