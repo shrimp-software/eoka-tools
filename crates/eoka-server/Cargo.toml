@@ -15,7 +15,7 @@ name = "eoka-server"
 path = "src/main.rs"
 
 [dependencies]
-eoka = "=0.7.2"
+eoka = "=0.7.3"
 eoka-protocol = { path = "../eoka-protocol", version = "0.6.0" }
 eoka-proxy = { path = "../eoka-proxy", version = "0.2.0" }
 url = "2"
