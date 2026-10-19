@@ -62,6 +62,18 @@ jobs:
       - name: Run tests
         run: cargo test --all-features
 
+  crate-versions:
+    name: Crate versions
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - run: bash scripts/check-crate-versions.sh
+
   clippy:
     name: Clippy
     needs: changes
