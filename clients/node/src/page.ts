@@ -217,14 +217,20 @@ export class Page implements InvokeClient {
    */
   async clickShadow(
     selector: string,
-    options: { frameId?: string; timeoutMs?: number } & CallOptions = {},
+    options: { frameId?: string; resolveTimeoutMs?: number } & CallOptions = {},
   ): Promise<MethodResults['page.click_shadow']> {
-    const { frameId, timeoutMs, ...callOptions } = options;
+    const { frameId, resolveTimeoutMs, ...callOptions } = options;
+    // `CallOptions.timeoutMs` is the RPC deadline; `resolveTimeoutMs` is the
+    // server-side resolution deadline. Derive an RPC deadline that cannot
+    // outlive a long resolution when the caller did not set one explicitly.
+    if (callOptions.timeoutMs === undefined && resolveTimeoutMs !== undefined) {
+      callOptions.timeoutMs = resolveTimeoutMs + 10_000;
+    }
     return this.invoke('page.click_shadow', {
       pageId: this.id,
       selector,
       ...(frameId === undefined ? {} : { frameId }),
-      ...(timeoutMs === undefined ? {} : { timeoutMs }),
+      ...(resolveTimeoutMs === undefined ? {} : { timeoutMs: resolveTimeoutMs }),
     }, callOptions);
   }
 
@@ -234,23 +240,23 @@ export class Page implements InvokeClient {
    * shadow root, and wait for the page to leave the challenge state.
    */
   async solveTurnstile(options: { timeoutMs?: number } & CallOptions = {}): Promise<void> {
-    const timeoutMs = options.timeoutMs ?? 30_000;
+    const { timeoutMs = 30_000, ...callOptions } = options;
     const deadline = performance.now() + timeoutMs;
     while (performance.now() < deadline) {
-      const frames = await this.frames(options);
+      const frames = await this.frames(callOptions);
       const challenge = frames.find(frame => frame.url.includes('challenges.cloudflare.com'));
       if (challenge !== undefined) {
         const remaining = Math.max(1, Math.floor(deadline - performance.now()));
         try {
           await this.clickShadow('input[type="checkbox"]', {
-            ...options,
+            ...callOptions,
             frameId: challenge.id,
-            timeoutMs: Math.min(remaining, 2_000),
+            resolveTimeoutMs: Math.min(remaining, 2_000),
           });
         } catch (error) {
           if (performance.now() >= deadline) throw error;
         }
-      } else if (!(await this.title(options)).includes('moment')) {
+      } else if (!(await this.title(callOptions)).includes('moment')) {
         return;
       }
       await new Promise(resolve => setTimeout(resolve, 500));

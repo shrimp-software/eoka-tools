@@ -47,7 +47,7 @@ String targets are CSS selectors. An action resolves only after its result is ve
 
 ## Shadow DOM and Turnstile
 
-`page.frames()` lists every frame, including cross-origin OOPIFs. `page.clickShadow(selector, { frameId, resolveTimeoutMs })` searches the frame's light DOM and every shadow root (closed roots included), maps the node to viewport coordinates, and clicks with human-like movement. `resolveTimeoutMs` bounds server-side resolution; `timeoutMs` is the RPC deadline and defaults to it plus 10 seconds.
+`page.frames()` lists every frame, including cross-origin OOPIFs. `page.clickShadow(selector, { frameId?, resolveTimeoutMs? })` searches the frame's light DOM and every shadow root (closed roots included), maps the matched node's center to viewport coordinates, and clicks with human-like movement. `resolveTimeoutMs` bounds the server-side resolution; `CallOptions.timeoutMs` remains the RPC deadline and defaults to the resolution deadline plus 10 seconds when omitted:
 
 ```js
 const challenge = (await page.frames()).find(frame =>
