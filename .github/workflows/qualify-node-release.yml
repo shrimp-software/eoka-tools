@@ -180,14 +180,14 @@ jobs:
             const lock = (await readFile("Cargo.lock", "utf8")).replaceAll("\r\n", "\n");
             const coreLock = lock.split("[[package]]").filter(block => /^name = "eoka"$/m.test(block));
             assert.equal(coreLock.length, 1);
-            assert.match(coreLock[0], /^version = "0\.7\.2"$/m);
+            assert.match(coreLock[0], /^version = "0\.7\.3"$/m);
             assert.match(coreLock[0], /^source = "registry\+https:\/\/github\.com\/rust-lang\/crates\.io-index"$/m);
-            assert.match(coreLock[0], /^checksum = "bb088753bbef0585bcbaa1e868e4e59b5ee99db40844ba9cb3ec4822ca95e019"$/m);
+            assert.match(coreLock[0], /^checksum = "203ce86d2c3d2110f899efdc874c961ff176d587533c5dcc7d5c0f467a42aee1"$/m);
             for (const platform of ["linux-x64-gnu","linux-arm64-gnu","darwin-x64","darwin-arm64","win32-x64"]) {
               const metadata = JSON.parse(await readFile(`native/${platform}-cargo.json`, "utf8"));
               const cores = metadata.packages.filter(p => p.name === "eoka");
               assert.equal(cores.length, 1);
-              assert.equal(cores[0].version, "0.7.2");
+              assert.equal(cores[0].version, "0.7.3");
               assert.equal(cores[0].source, "registry+https://github.com/rust-lang/crates.io-index");
               assert.equal((await readFile(`native/${platform}-Cargo.lock`, "utf8")).replaceAll("\r\n", "\n"), lock);
             }
