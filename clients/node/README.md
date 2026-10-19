@@ -3,7 +3,7 @@
 Node.js SDK for eoka, a stealth Chrome automation sidecar.
 
 ```sh
-npm install @cbxss/eoka@next
+npm install @cbxss/eoka@latest
 ```
 
 Requires Node.js 24.21+ (ESM only). Supported platforms: Linux x64/arm64 (glibc 2.35+), macOS x64/arm64, Windows x64.
@@ -67,7 +67,7 @@ if (challenge) {
 const browser = await Browser.launch({ autoSolveCloudflare: true });
 try {
   const page = await browser.newPage("https://1337x.to/");
-  await page.waitForText("Torrent Search Engine");
+  console.log(await page.title()); // Torrent Search Engine | 1337x.to
 } finally {
   await browser.close();
 }
