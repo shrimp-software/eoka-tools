@@ -13,7 +13,7 @@ authors = ["cbxss"]
 [dependencies]
 anyhow = { workspace = true }
 eoka = "0.7.0"
-eoka-protocol = { path = "../eoka-protocol", version = "0.6.0" }
+eoka-protocol = { path = "../eoka-protocol", version = "0.6.1" }
 tokio = { workspace = true }
 
 serde = { workspace = true }

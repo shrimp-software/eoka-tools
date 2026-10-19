@@ -32,5 +32,5 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 clap = { version = "4", features = ["derive"] }
 
 eoka-server = { path = "../eoka-server", version = "0.6.0" }
-eoka-protocol = { path = "../eoka-protocol", version = "0.6.0" }
+eoka-protocol = { path = "../eoka-protocol", version = "0.6.1" }
 uuid = { version = "1", features = ["v4", "v5"] }

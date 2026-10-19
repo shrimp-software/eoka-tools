@@ -655,7 +655,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-protocol"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "eoka",
  "schemars",

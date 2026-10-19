@@ -13,7 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 uuid = { version = "1", features = ["v4"] }
-eoka-protocol = { version = "0.6.0", path = "../eoka-protocol" }
+eoka-protocol = { version = "0.6.1", path = "../eoka-protocol" }
 eoka-proxy = { path = "../eoka-proxy", version = "0.2.0" }
 eoka-server = { version = "0.6.0", path = "../eoka-server" }
 eoka-sdk = { version = "0.7.0", path = "../eoka-sdk" }
