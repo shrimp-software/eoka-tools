@@ -3,7 +3,7 @@ import { createHash, generateKeyPairSync, sign, verify } from 'node:crypto';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { test } from 'node:test';
-import { resumePublication, verifyExistingPackage } from '../scripts/publication-recovery.mjs';
+import { distTag, resumePublication, verifyExistingPackage } from '../scripts/publication-recovery.mjs';
 
 const sdkName = '@cbxss/eoka';
 const identity = { repository: 'shrimp-software/eoka-tools', workflowPath: '.github/workflows/publish-node.yml', sourceSha: 'a'.repeat(40), runId: '12345' };
@@ -53,7 +53,7 @@ function provenanceBundle(item, change = value => value) {
 async function isolatedRegistry({ absentPackages = false } = {}) {
   const versions = new Map();
   const attestations = new Map();
-  const next = new Map();
+  const tags = new Map();
   const writes = [];
   const checks = [];
   const requests = [];
@@ -71,7 +71,7 @@ async function isolatedRegistry({ absentPackages = false } = {}) {
     };
     versions.set(item.name, metadata);
     attestations.set(item.name, { attestations: [{ predicateType: provenanceType, bundle: provenanceBundle(item, change) }] });
-    next.set(item.name, item.version);
+    tags.set(item.name, item.version);
   };
   const server = createServer(async (request, response) => {
     requests.push(`${request.method} ${request.url}`);
@@ -111,7 +111,7 @@ async function isolatedRegistry({ absentPackages = false } = {}) {
     if (path.startsWith('attestations/')) document = attestations.get(decodeURIComponent(path.slice('attestations/'.length)));
     else {
       const name = decodeURIComponent(path);
-      if (packages.some(item => item.name === name) && (!absentPackages || versions.has(name))) document = { name, versions: versions.has(name) ? { [versions.get(name).version]: versions.get(name) } : {}, 'dist-tags': next.has(name) ? { next: next.get(name) } : {} };
+      if (packages.some(item => item.name === name) && (!absentPackages || versions.has(name))) document = { name, versions: versions.has(name) ? { [versions.get(name).version]: versions.get(name) } : {}, 'dist-tags': tags.has(name) ? { [distTag]: tags.get(name) } : {} };
     }
     if (!document) {
       response.writeHead(404).end('{}');
@@ -166,7 +166,7 @@ async function isolatedRegistry({ absentPackages = false } = {}) {
     },
   };
   return {
-    versions, attestations, next, writes, checks, requests, seed,
+    versions, attestations, tags, writes, checks, requests, seed,
     fail: (name, mode) => { failure = name ? { name, mode } : undefined; },
     resume: (beforePublish, { allowMissingPackages = false } = {}) => resumePublication({ packages, sdkName, boundary, beforePublish: beforePublish ?? (async () => {}), allowMissingPackages }),
     close: async () => { server.closeAllConnections(); await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve())); },
@@ -266,7 +266,7 @@ for (const [name, alter, message] of [
   ['unsigned provenance', registry => { registry.attestations.get(sdkName).attestations[0].bundle.dsseEnvelope.signatures = []; }, undefined],
   ['no provenance bundle', registry => { registry.attestations.get(sdkName).attestations = []; }, /Exactly one verified/],
   ['untrusted certificate', registry => { registry.attestations.get(sdkName).attestations[0].bundle.verificationMaterial.certificate.rawBytes = 'untrusted'; }, /Untrusted isolated certificate/],
-  ['next tag mismatch', registry => { registry.next.set(sdkName, '0.1.0-beta.2'); }, /refusing silent retag/],
+  ['release tag mismatch', registry => { registry.tags.set(sdkName, '0.1.0-beta.2'); }, /refusing silent retag/],
 ]) {
   test(`${name} in the final package aborts before any missing native package is published`, async () => {
     await withRegistry(async registry => {
@@ -321,7 +321,7 @@ test('source gate failure preserves packages already uploaded and never starts t
 });
 
 test('ambiguous registry reads and missing scoped-package bootstrap are fail closed', async () => {
-  for (const failure of [new Error('Network unavailable'), { name: ordered[5].name, 'dist-tags': { next: packages[0].version } }]) {
+  for (const failure of [new Error('Network unavailable'), { name: ordered[5].name, 'dist-tags': { [distTag]: packages[0].version } }]) {
     const writes = [];
     await assert.rejects(resumePublication({
       packages, sdkName, beforePublish: async () => {},

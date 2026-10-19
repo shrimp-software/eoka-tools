@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       source_sha:
-        description: Exact 40-character commit currently at protected main; publishes only 0.1.0-beta.3 to next
+        description: Exact 40-character commit currently at protected main; publishes only 0.1.0-beta.3 to latest
         required: true
         type: string
       bootstrap:
@@ -54,7 +54,7 @@ jobs:
       publication: true
 
   publish:
-    name: Publish platform packages then SDK to next
+    name: Publish platform packages then SDK to latest
     needs: [gate, qualify]
     runs-on: ubuntu-22.04
     environment:

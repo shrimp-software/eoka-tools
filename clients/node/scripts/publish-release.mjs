@@ -6,7 +6,7 @@ import { lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import { resumePublication, verifyExistingPackage } from './publication-recovery.mjs';
+import { distTag, resumePublication, verifyExistingPackage } from './publication-recovery.mjs';
 import { assertRecordingQualification } from './recording-qualification.mjs';
 import { npmEnvironment, validatePublicationAuth, validatePublicationReview } from './publication-auth.mjs';
 
@@ -324,7 +324,7 @@ async function registryBoundary(directory, env, { bootstrap = false, publishEnv 
       await verifyExistingPackage(item, metadata, await verifier);
     },
     publish: async item => {
-      const result = await exec('npm', ['publish', join(payload, item.filename), '--ignore-scripts', '--access', 'public', '--tag', 'next', '--provenance', '--registry', registry, '--fetch-retries', '0'], { cwd: directory, env: publishEnv, timeout: 180000, maxBuffer: 8 * 1024 * 1024 });
+      const result = await exec('npm', ['publish', join(payload, item.filename), '--ignore-scripts', '--access', 'public', '--tag', distTag, '--provenance', '--registry', registry, '--fetch-retries', '0'], { cwd: directory, env: publishEnv, timeout: 180000, maxBuffer: 8 * 1024 * 1024 });
       process.stdout.write(result.stdout);
       process.stderr.write(result.stderr);
     },
@@ -373,16 +373,17 @@ async function publish() {
 }
 
 // npm acknowledges a publish before its packument and dist-tags are served.
-// Wait until every qualified package exposes its version under `next`, so the
-// smoke verifies what was published instead of racing registry propagation.
+// Wait until every qualified package exposes its version under the release
+// tag, so the smoke verifies what was published instead of racing registry
+// propagation.
 async function awaitRegistry(packages, { timeoutMs = 900000, intervalMs = 15000 } = {}) {
   const deadline = Date.now() + timeoutMs;
   for (const item of packages) {
     for (;;) {
       const response = await fetch(`${registry}${encodeURIComponent(item.name)}`, { headers: { Accept: 'application/json', 'Cache-Control': 'no-cache' }, redirect: 'error', signal: AbortSignal.timeout(120000) });
       const metadata = response.status === 200 ? await response.json() : (await response.body?.cancel(), null);
-      if (metadata?.versions?.[item.version] && metadata['dist-tags']?.next === item.version) break;
-      assert.ok(Date.now() < deadline, `Registry did not serve ${item.name}@${item.version} under next within ${timeoutMs / 1000}s`);
+      if (metadata?.versions?.[item.version] && metadata['dist-tags']?.[distTag] === item.version) break;
+      assert.ok(Date.now() < deadline, `Registry did not serve ${item.name}@${item.version} under ${distTag} within ${timeoutMs / 1000}s`);
       await new Promise(resolve => setTimeout(resolve, intervalMs));
     }
   }
