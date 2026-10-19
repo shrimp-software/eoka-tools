@@ -767,6 +767,36 @@ dto!(FrameInfo {
     url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")] name: Option<String>,
 });
+dto!(ClickShadowParams {
+    page_id: String,
+    selector: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")] frame_id: Option<String>,
+    #[serde(default = "default_shadow_timeout_ms")] timeout_ms: u64,
+});
+impl ClickShadowParams {
+    pub fn validate(&self) -> Result<(), ServerError> {
+        if self.selector.trim().is_empty() || self.selector.len() > 4096 {
+            return Err(ServerError::invalid_params(
+                "selector must be 1..=4096 characters",
+            ));
+        }
+        if self.timeout_ms == 0 || self.timeout_ms > 60_000 {
+            return Err(ServerError::invalid_params(
+                "timeoutMs must be between 1 and 60000",
+            ));
+        }
+        Ok(())
+    }
+}
+dto!(ClickShadowResult {
+    frame_id: String,
+    selector: String,
+    x: f64,
+    y: f64,
+});
+fn default_shadow_timeout_ms() -> u64 {
+    10_000
+}
 dto!(SelectorParams {
     page_id: String,
     selector: String
@@ -1166,6 +1196,7 @@ methods! {
     "page.execute" => JsParams => Empty,
     "page.frames" => FramesParams => Vec<FrameInfo>,
     "page.evaluate_in_frame" => FrameJsParams => EvaluateResult,
+    "page.click_shadow" => ClickShadowParams, ClickShadowParams::validate => ClickShadowResult,
     "page.fetch" => FetchParams => FetchResult,
     "page.fetch_bounded" => BoundedFetchParams, BoundedFetchParams::validate => BoundedFetchResult,
     "page.capture_state" => PageIdParams => CaptureStateResult,
@@ -1502,6 +1533,33 @@ mod tests {
         let cdp = data.source.unwrap().data.unwrap().cdp.unwrap();
         assert_eq!(cdp.method.as_deref(), Some("Input.dispatchMouseEvent"));
         assert_eq!(cdp.code, Some(-32000));
+    }
+
+    #[test]
+    fn click_shadow_validates_selector_and_deadline() {
+        assert!(validate_params(
+            "page.click_shadow",
+            &json!({"pageId":"p","selector":"input[type=\"checkbox\"]"})
+        )
+        .is_ok());
+        assert!(validate_params(
+            "page.click_shadow",
+            &json!({"pageId":"p","selector":"button","frameId":"frame","timeoutMs":1000})
+        )
+        .is_ok());
+        assert!(
+            validate_params("page.click_shadow", &json!({"pageId":"p","selector":""})).is_err()
+        );
+        assert!(validate_params(
+            "page.click_shadow",
+            &json!({"pageId":"p","selector":"button","timeoutMs":0})
+        )
+        .is_err());
+        assert!(validate_params(
+            "page.click_shadow",
+            &json!({"pageId":"p","selector":"button","timeoutMs":60001})
+        )
+        .is_err());
     }
 
     #[test]

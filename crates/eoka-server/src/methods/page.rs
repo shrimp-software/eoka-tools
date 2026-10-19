@@ -1,12 +1,12 @@
 use base64::Engine;
 use captcha::{build_captcha_inject_js, AntiCaptcha, CaptchaInjectionKind};
 use eoka_protocol::sidecar::{
-    AttributeResult, BoundedFetchParams, BoundedFetchResult, CaptureStateResult, ContentResult,
-    ErrorCode, EvaluateResult, ExistsResult, FetchParams, FetchResult, FrameInfo, FrameJsParams,
-    FramesParams, GetAttributeParams, HeldKeyParams, JsParams, MouseButtonParams, MouseMoveParams,
-    RestoreStateParams, ScreenshotParams, ScreenshotToFileParams, SelectorParams, ServerError,
-    SetViewportParams, SolveCaptchaParams, SolveCaptchaResult, TextResult, TitleResult, UrlResult,
-    WaitForParams, WaitForTextParams,
+    AttributeResult, BoundedFetchParams, BoundedFetchResult, CaptureStateResult, ClickShadowParams,
+    ClickShadowResult, ContentResult, ErrorCode, EvaluateResult, ExistsResult, FetchParams,
+    FetchResult, FrameInfo, FrameJsParams, FramesParams, GetAttributeParams, HeldKeyParams,
+    JsParams, MouseButtonParams, MouseMoveParams, RestoreStateParams, ScreenshotParams,
+    ScreenshotToFileParams, SelectorParams, ServerError, SetViewportParams, SolveCaptchaParams,
+    SolveCaptchaResult, TextResult, TitleResult, UrlResult, WaitForParams, WaitForTextParams,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -195,6 +195,26 @@ pub async fn evaluate_in_frame(state: &AppState, params: Value) -> Result<Value,
         .await?;
     encode(EvaluateResult {
         result: result.into_value()?,
+    })
+}
+
+/// Click an element inside a closed shadow root in the top frame or a child
+/// frame. Coordinates are mapped and the click uses human-like movement.
+pub async fn click_shadow(state: &AppState, params: Value) -> Result<Value, ServerError> {
+    let params: ClickShadowParams = parse_params(params)?;
+    let receipt = state
+        .page(&params.page_id)?
+        .click_shadow_with_timeout(
+            params.frame_id.as_deref(),
+            &params.selector,
+            std::time::Duration::from_millis(params.timeout_ms),
+        )
+        .await?;
+    encode(ClickShadowResult {
+        frame_id: receipt.frame_id,
+        selector: receipt.selector,
+        x: receipt.x,
+        y: receipt.y,
     })
 }
 

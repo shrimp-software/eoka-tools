@@ -4198,6 +4198,65 @@
         "type": "object"
       }
     },
+    "page.click_shadow": {
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "frameId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pageId": {
+            "type": "string"
+          },
+          "selector": {
+            "type": "string"
+          },
+          "timeoutMs": {
+            "default": 10000,
+            "format": "uint64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pageId",
+          "selector"
+        ],
+        "title": "ClickShadowParams",
+        "type": "object"
+      },
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "frameId": {
+            "type": "string"
+          },
+          "selector": {
+            "type": "string"
+          },
+          "x": {
+            "format": "double",
+            "type": "number"
+          },
+          "y": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "frameId",
+          "selector",
+          "x",
+          "y"
+        ],
+        "title": "ClickShadowResult",
+        "type": "object"
+      }
+    },
     "page.click_text": {
       "params": {
         "$defs": {

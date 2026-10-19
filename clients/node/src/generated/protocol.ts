@@ -286,6 +286,10 @@ export type MethodPageClickResult__ActionReceipt = { "action": string; "already_
 export type MethodPageClickResult__DispatchState = (("not_sent" & string) | ("may_have_been_sent" & string) | ("acknowledged" & string));
 export type MethodPageClickResult__OperationState = (("running" | "finished" | "interrupted" | "expired") & string);
 
+export type MethodPageClickShadowParams = { "frameId"?: (string | null); "pageId": string; "selector": string; "timeoutMs"?: number; [key: string]: unknown; };
+
+export type MethodPageClickShadowResult = { "frameId": string; "selector": string; "x": number; "y": number; [key: string]: unknown; };
+
 export type MethodPageClickTextParams = { "operation_id": string; "options"?: MethodPageClickTextParams__ActionOptions; "pageId": string; "text": string; [key: string]: unknown; };
 export type MethodPageClickTextParams__ActionOptions = { "expect"?: (MethodPageClickTextParams__Expectation | null); "timeout_ms"?: number; "wait_for_target"?: boolean; [key: string]: unknown; };
 export type MethodPageClickTextParams__Expectation = ({ "kind": ("download_started" & string); [key: string]: unknown; } | { "kind": ("focused" & string); "target": MethodPageClickTextParams__LocatorSpec; [key: string]: unknown; } | { "contains"?: boolean; "kind": ("url" & string); "value": string; [key: string]: unknown; } | { "kind": ("visible" & string); "target": MethodPageClickTextParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("hidden" & string); "target": MethodPageClickTextParams__LocatorSpec; [key: string]: unknown; } | { "contains"?: boolean; "kind": ("text" & string); "target": MethodPageClickTextParams__LocatorSpec; "value": string; [key: string]: unknown; } | { "kind": ("value" & string); "target": MethodPageClickTextParams__LocatorSpec; "value": string; [key: string]: unknown; } | { "checked": boolean; "kind": ("checked" & string); "target": MethodPageClickTextParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("selected" & string); "target": MethodPageClickTextParams__LocatorSpec; "values": Array<string>; [key: string]: unknown; });
@@ -606,6 +610,7 @@ export type MethodParams = {
   "operations.wait": MethodOperationsWaitParams;
   "page.capture_state": MethodPageCaptureStateParams;
   "page.click": MethodPageClickParams;
+  "page.click_shadow": MethodPageClickShadowParams;
   "page.click_text": MethodPageClickTextParams;
   "page.close": MethodPageCloseParams;
   "page.content": MethodPageContentParams;
@@ -669,6 +674,7 @@ export type MethodResults = {
   "operations.wait": MethodOperationsWaitResult;
   "page.capture_state": MethodPageCaptureStateResult;
   "page.click": MethodPageClickResult;
+  "page.click_shadow": MethodPageClickShadowResult;
   "page.click_text": MethodPageClickTextResult;
   "page.close": MethodPageCloseResult;
   "page.content": MethodPageContentResult;
@@ -731,4 +737,4 @@ export type ProtocolErrorResponse = { id: number | null; error: ServerError; res
 export type ProtocolResponse<M extends MethodName = MethodName> = ProtocolSuccessResponse<M> | ProtocolErrorResponse;
 
 export const protocolVersion = {"major":1,"minor":3} as const;
-export const methodNames = ["actions.perform","agent.observe","agent.step","browser.close","browser.close_tab","browser.connect","browser.launch","browser.new_page","browser.tabs","operations.cancel","operations.get","operations.list","operations.wait","page.capture_state","page.click","page.click_text","page.close","page.content","page.evaluate","page.evaluate_in_frame","page.execute","page.exists","page.fetch","page.fetch_bounded","page.fill","page.frames","page.get_attribute","page.get_text","page.goto","page.hover","page.human_click","page.human_click_text","page.human_fill","page.key_down","page.key_up","page.mouse_down","page.mouse_move","page.mouse_up","page.press_key","page.release_all_inputs","page.reset_viewport","page.restore_state","page.screenshot","page.screenshot_to_file","page.select","page.set_viewport","page.solve_captcha","page.text","page.title","page.type_into","page.url","page.wait_for","page.wait_for_text","page.wait_for_visible","recording.cancel","recording.get","recording.start","recording.stop","server.hello","server.shutdown"] as const;
+export const methodNames = ["actions.perform","agent.observe","agent.step","browser.close","browser.close_tab","browser.connect","browser.launch","browser.new_page","browser.tabs","operations.cancel","operations.get","operations.list","operations.wait","page.capture_state","page.click","page.click_shadow","page.click_text","page.close","page.content","page.evaluate","page.evaluate_in_frame","page.execute","page.exists","page.fetch","page.fetch_bounded","page.fill","page.frames","page.get_attribute","page.get_text","page.goto","page.hover","page.human_click","page.human_click_text","page.human_fill","page.key_down","page.key_up","page.mouse_down","page.mouse_move","page.mouse_up","page.press_key","page.release_all_inputs","page.reset_viewport","page.restore_state","page.screenshot","page.screenshot_to_file","page.select","page.set_viewport","page.solve_captcha","page.text","page.title","page.type_into","page.url","page.wait_for","page.wait_for_text","page.wait_for_visible","recording.cancel","recording.get","recording.start","recording.stop","server.hello","server.shutdown"] as const;

@@ -7,6 +7,7 @@ import type {
   AgentStepResult, BrowserState, Expectation, LocatorSpec, MethodName,
   MethodParams, MethodResults, OperationRecord,
 } from './generated/protocol.js';
+import { ProtocolError } from './errors.js';
 import { Operation, OperationError, operationFailure, validateOperationRecord, type WaitOptions } from './operations.js';
 import { Recording, RecordingError, recordingFailure, requireCaptureCapability, validateRecordingRecord } from './recording.js';
 
@@ -201,6 +202,66 @@ export class Page implements InvokeClient {
 
   async execute(js: string, options?: CallOptions): Promise<void> {
     await this.invoke('page.execute', { pageId: this.id, js }, options);
+  }
+
+  /** List every frame in the page, including cross-origin OOPIFs. */
+  async frames(options?: CallOptions): Promise<MethodResults['page.frames']> {
+    return this.invoke('page.frames', { pageId: this.id }, options);
+  }
+
+  /**
+   * Click an element inside a closed shadow root in the top frame or a child
+   * frame. `frameId` comes from `frames()`. The selector is searched through
+   * the frame's light DOM and every shadow root; the node's center is mapped
+   * to viewport coordinates and clicked with human-like movement.
+   */
+  async clickShadow(
+    selector: string,
+    options: { frameId?: string; resolveTimeoutMs?: number } & CallOptions = {},
+  ): Promise<MethodResults['page.click_shadow']> {
+    const { frameId, resolveTimeoutMs, ...callOptions } = options;
+    // `CallOptions.timeoutMs` is the RPC deadline; `resolveTimeoutMs` is the
+    // server-side resolution deadline. Derive an RPC deadline that cannot
+    // outlive a long resolution when the caller did not set one explicitly.
+    if (callOptions.timeoutMs === undefined && resolveTimeoutMs !== undefined) {
+      callOptions.timeoutMs = resolveTimeoutMs + 10_000;
+    }
+    return this.invoke('page.click_shadow', {
+      pageId: this.id,
+      selector,
+      ...(frameId === undefined ? {} : { frameId }),
+      ...(resolveTimeoutMs === undefined ? {} : { timeoutMs: resolveTimeoutMs }),
+    }, callOptions);
+  }
+
+  /**
+   * Best-effort helper for interactive Cloudflare challenge pages: find the
+   * `challenges.cloudflare.com` frame, click its checkbox through the closed
+   * shadow root, and wait for the page to leave the challenge state.
+   */
+  async solveTurnstile(options: { timeoutMs?: number } & CallOptions = {}): Promise<void> {
+    const { timeoutMs = 30_000, ...callOptions } = options;
+    const deadline = performance.now() + timeoutMs;
+    while (performance.now() < deadline) {
+      const frames = await this.frames(callOptions);
+      const challenge = frames.find(frame => frame.url.includes('challenges.cloudflare.com'));
+      if (challenge !== undefined) {
+        const remaining = Math.max(1, Math.floor(deadline - performance.now()));
+        try {
+          await this.clickShadow('input[type="checkbox"]', {
+            ...callOptions,
+            frameId: challenge.id,
+            resolveTimeoutMs: Math.min(remaining, 2_000),
+          });
+        } catch (error) {
+          if (performance.now() >= deadline) throw error;
+        }
+      } else if (!(await this.title(callOptions)).includes('moment')) {
+        return;
+      }
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    throw new ProtocolError('Turnstile challenge did not resolve before the deadline');
   }
 
   async captureState(options?: CallOptions): Promise<BrowserState> {

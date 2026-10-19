@@ -83,6 +83,7 @@ pub async fn dispatch(
         "page.execute" => page::execute(state, params).await,
         "page.frames" => page::frames(state, params).await,
         "page.evaluate_in_frame" => page::evaluate_in_frame(state, params).await,
+        "page.click_shadow" => page::click_shadow(state, params).await,
         "page.fetch" => page::fetch(state, params).await,
         "page.fetch_bounded" => page::fetch_bounded(state, params).await,
         "page.capture_state" => page::capture_state(state, params).await,
