@@ -4,9 +4,9 @@ use crate::methods::{browser, page};
 use crate::state::AppState;
 use eoka_protocol::sidecar::{
     method_names, validate_params, validate_safe_numbers, AgentObserveParams, AgentStepParams,
-    ErrorCode, HelloParams, HelloResult, ServerError, TransportLimits, CAPABILITY_NATIVE_RECORDING,
-    CAPABILITY_SCREENSHOT_FILE, CAPABILITY_SCREENSHOT_OPTIONS, MAX_IN_FLIGHT, MAX_MESSAGE_BYTES,
-    PROTOCOL_VERSION,
+    ErrorCode, HelloParams, HelloResult, ServerError, TransportLimits,
+    CAPABILITY_CLOUDFLARE_AUTO_SOLVE, CAPABILITY_NATIVE_RECORDING, CAPABILITY_SCREENSHOT_FILE,
+    CAPABILITY_SCREENSHOT_OPTIONS, MAX_IN_FLIGHT, MAX_MESSAGE_BYTES, PROTOCOL_VERSION,
 };
 
 pub async fn dispatch(
@@ -84,6 +84,7 @@ pub async fn dispatch(
         "page.frames" => page::frames(state, params).await,
         "page.evaluate_in_frame" => page::evaluate_in_frame(state, params).await,
         "page.click_shadow" => page::click_shadow(state, params).await,
+        "page.solve_turnstile" => page::solve_turnstile(state, params).await,
         "page.fetch" => page::fetch(state, params).await,
         "page.fetch_bounded" => page::fetch_bounded(state, params).await,
         "page.capture_state" => page::capture_state(state, params).await,
@@ -149,6 +150,7 @@ pub fn hello(params: Value) -> Result<Value, ServerError> {
             CAPABILITY_SCREENSHOT_OPTIONS.to_owned(),
             CAPABILITY_SCREENSHOT_FILE.to_owned(),
             CAPABILITY_NATIVE_RECORDING.to_owned(),
+            CAPABILITY_CLOUDFLARE_AUTO_SOLVE.to_owned(),
         ],
         limits: TransportLimits {
             max_message_bytes: MAX_MESSAGE_BYTES,

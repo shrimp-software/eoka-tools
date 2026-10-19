@@ -63,14 +63,15 @@ func fakeServerInfo() ServerInfo {
 			"agent.observe", "agent.step", "page.text", "page.content", "page.title",
 			"page.url", "page.get_text", "page.get_attribute", "page.exists",
 			"page.wait_for", "page.wait_for_visible", "page.wait_for_text",
-			"page.evaluate", "page.execute", "page.fetch", "page.solve_captcha",
+			"page.evaluate", "page.execute", "page.fetch", "page.solve_captcha", "page.solve_turnstile",
 			"page.capture_state", "page.restore_state", "page.screenshot",
 			"page.mouse_down", "page.mouse_move", "page.mouse_up",
 			"page.key_down", "page.key_up", "page.release_all_inputs", "page.close",
 			"page.set_viewport", "page.reset_viewport",
 		},
 		Capabilities: []string{"durableActions", "operationCancellation", "gracefulShutdown",
-			"explicitExecutablePath", "browserAttachment", "runtimeIsolation", "sandboxControl", "viewportEmulation"},
+			"explicitExecutablePath", "browserAttachment", "runtimeIsolation", "sandboxControl", "viewportEmulation",
+			"cloudflareAutoSolve"},
 		Limits: TransportLimits{MaxMessageBytes: maxMessageBytes, MaxInFlight: maxInFlight},
 	}
 }

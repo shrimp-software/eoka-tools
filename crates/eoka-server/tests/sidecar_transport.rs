@@ -496,6 +496,64 @@ fn assert_process_gone(pid: i32) {
 
 #[test]
 #[ignore = "requires Chrome"]
+fn turnstile_solve_and_auto_solve_watcher_stop_with_the_browser() {
+    let (root, state, scratch) = directories();
+    let profile = root.path().join("profile");
+    let mut server = Sidecar::start(&state, &scratch);
+    let mut params = json!({
+        "headless":true,"userDataDir":profile,
+        "autoSolveCloudflare":{"intervalMs":100,"timeoutMs":60_000}
+    });
+    if let Ok(executable) = std::env::var("EOKA_TEST_CHROME_PATH") {
+        params["executablePath"] = json!(executable);
+    }
+    let response = server.request(1, "browser.launch", params);
+    assert_eq!(response["result"]["ownership"], "owned", "{response}");
+    let page = server.request(2, "browser.new_page", json!({}))["result"]["pageId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let normal = server.request(
+        3,
+        "page.solve_turnstile",
+        json!({"pageId":page,"timeoutMs":5_000}),
+    );
+    assert_eq!(normal["result"]["clicks"], 0, "{normal}");
+    let challenge = server.request(
+        4,
+        "browser.new_page",
+        json!({"url":"data:text/html,<title>Just a moment...</title><p>checking</p>"}),
+    )["result"]["pageId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let loaded = server.request(
+        41,
+        "page.wait_for_text",
+        json!({"pageId":challenge,"text":"checking","timeoutMs":5_000}),
+    );
+    assert!(loaded.get("error").is_none(), "{loaded}");
+    let stuck = server.request(
+        5,
+        "page.solve_turnstile",
+        json!({"pageId":challenge,"timeoutMs":1_500}),
+    );
+    assert!(
+        stuck["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("did not resolve")),
+        "{stuck}"
+    );
+    // The watcher is now mid-solve on the challenge-titled tab; shutdown must
+    // still release the browser instead of waiting out its 60s deadline.
+    std::thread::sleep(Duration::from_millis(300));
+    let started = Instant::now();
+    server.shutdown(6);
+    assert!(started.elapsed() < Duration::from_secs(10));
+}
+
+#[test]
+#[ignore = "requires Chrome"]
 fn waits_are_independent_pending_ceiling_is_enforced_and_shutdown_cancels_all() {
     let (root, state, scratch) = directories();
     let profile = root.path().join("profile");

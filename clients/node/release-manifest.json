@@ -1,16 +1,16 @@
 {
   "schemaVersion": 1,
-  "sdkVersion": "0.1.0-beta.5",
+  "sdkVersion": "0.1.0-beta.6",
   "installerVersion": "3.2.4",
   "server": {
-    "version": "0.6.2",
+    "version": "0.6.3",
     "protocolVersion": "1.3",
     "platforms": {
-      "linux-x64-gnu": { "packageName": "@cbxss/eoka-server-linux-x64-gnu", "packageVersion": "0.1.0-beta.5", "target": "x86_64-unknown-linux-gnu", "asset": "eoka-server-linux-amd64", "executablePath": "bin/eoka-server", "sha256": null, "size": null, "minimumGlibc": "2.35", "development": false },
-      "linux-arm64-gnu": { "packageName": "@cbxss/eoka-server-linux-arm64-gnu", "packageVersion": "0.1.0-beta.5", "target": "aarch64-unknown-linux-gnu", "asset": "eoka-server-linux-arm64", "executablePath": "bin/eoka-server", "sha256": null, "size": null, "minimumGlibc": "2.35", "development": false },
-      "darwin-x64": { "packageName": "@cbxss/eoka-server-darwin-x64", "packageVersion": "0.1.0-beta.5", "target": "x86_64-apple-darwin", "asset": "eoka-server-darwin-amd64", "executablePath": "bin/eoka-server", "sha256": null, "size": null, "minimumGlibc": null, "development": false },
-      "darwin-arm64": { "packageName": "@cbxss/eoka-server-darwin-arm64", "packageVersion": "0.1.0-beta.5", "target": "aarch64-apple-darwin", "asset": "eoka-server-darwin-arm64", "executablePath": "bin/eoka-server", "sha256": null, "size": null, "minimumGlibc": null, "development": false },
-      "win32-x64": { "packageName": "@cbxss/eoka-server-win32-x64", "packageVersion": "0.1.0-beta.5", "target": "x86_64-pc-windows-msvc", "asset": "eoka-server-windows-amd64.exe", "executablePath": "bin/eoka-server.exe", "sha256": null, "size": null, "minimumGlibc": null, "development": false }
+      "linux-x64-gnu": { "packageName": "@cbxss/eoka-server-linux-x64-gnu", "packageVersion": "0.1.0-beta.6", "target": "x86_64-unknown-linux-gnu", "asset": "eoka-server-linux-amd64", "executablePath": "bin/eoka-server", "sha256": null, "size": null, "minimumGlibc": "2.35", "development": false },
+      "linux-arm64-gnu": { "packageName": "@cbxss/eoka-server-linux-arm64-gnu", "packageVersion": "0.1.0-beta.6", "target": "aarch64-unknown-linux-gnu", "asset": "eoka-server-linux-arm64", "executablePath": "bin/eoka-server", "sha256": null, "size": null, "minimumGlibc": "2.35", "development": false },
+      "darwin-x64": { "packageName": "@cbxss/eoka-server-darwin-x64", "packageVersion": "0.1.0-beta.6", "target": "x86_64-apple-darwin", "asset": "eoka-server-darwin-amd64", "executablePath": "bin/eoka-server", "sha256": null, "size": null, "minimumGlibc": null, "development": false },
+      "darwin-arm64": { "packageName": "@cbxss/eoka-server-darwin-arm64", "packageVersion": "0.1.0-beta.6", "target": "aarch64-apple-darwin", "asset": "eoka-server-darwin-arm64", "executablePath": "bin/eoka-server", "sha256": null, "size": null, "minimumGlibc": null, "development": false },
+      "win32-x64": { "packageName": "@cbxss/eoka-server-win32-x64", "packageVersion": "0.1.0-beta.6", "target": "x86_64-pc-windows-msvc", "asset": "eoka-server-windows-amd64.exe", "executablePath": "bin/eoka-server.exe", "sha256": null, "size": null, "minimumGlibc": null, "development": false }
     }
   },
   "chrome": {

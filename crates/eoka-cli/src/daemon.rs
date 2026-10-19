@@ -169,6 +169,7 @@ mod tests {
             js_block: Vec::new(),
             persist: false,
             geo_align: false,
+            auto_solve_cloudflare: false,
         };
 
         let result = tokio::time::timeout(Duration::from_secs(15), run(&session_name, spec)).await;

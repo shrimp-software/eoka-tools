@@ -16,6 +16,8 @@ pub enum LaunchSpec {
         js_block: Vec<String>,
         persist: bool,
         geo_align: bool,
+        /// Solve full-page Cloudflare challenges in every tab automatically.
+        auto_solve_cloudflare: bool,
     },
     /// Attach to a Chrome already running, via `Browser::connect_with_config`.
     Connect { ws_url: String },

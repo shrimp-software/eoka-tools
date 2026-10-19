@@ -1,6 +1,6 @@
 {
   "name": "@cbxss/eoka",
-  "version": "0.1.0-beta.5",
+  "version": "0.1.0-beta.6",
   "private": true,
   "type": "module",
   "description": "Node.js SDK with pinned Chrome installation and verified eoka sidecar resolution",

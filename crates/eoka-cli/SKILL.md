@@ -184,6 +184,8 @@ In `--cdp` and `--auto-connect` mode, eoka attaches to an existing Chrome and do
 
 ```bash
 eoka --session demo captcha datadome
+eoka --session demo captcha turnstile --timeout-ms 30000
+eoka --auto-solve-cloudflare open https://example.com
 eoka --session demo --json captcha datadome --max-attempts 2 --timeout-ms 60000
 eoka captcha solve --captcha-type recaptcha_v3 --website-url https://target.com --website-key SITE_KEY --page-action submit
 eoka captcha solve --captcha-type recaptcha_v3 --website-url https://target.com --website-key SITE_KEY --inject
@@ -203,6 +205,11 @@ plus bounded cleanup. `challenge_cleared` is not login proof; `not_present` is a
 no-op. Other outcomes/errors exit nonzero. Do not automatically retry application
 actions or uncertain transport results. Use the same session/connection flags;
 an old daemon is not automatically restarted.
+
+`captcha turnstile` clicks the Cloudflare Turnstile checkbox on the current tab
+until it leaves the challenge page and reports `clicks`/`elapsed_ms`; a normal page
+returns zero clicks. `--auto-solve-cloudflare` (or `EOKA_AUTO_SOLVE_CLOUDFLARE=1`)
+does this automatically for every tab of a browser eoka launches.
 
 Provider-based `captcha solve` uses `ANTI_CAPTCHA_KEY` unless `--api-key` is passed.
 

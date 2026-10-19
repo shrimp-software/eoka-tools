@@ -56,6 +56,7 @@ pub struct Handler {
     fetch_sender: Option<tokio::sync::mpsc::Sender<RequestPause>>,
     fetch_dropped: std::sync::Arc<std::sync::atomic::AtomicU64>,
     fetch_sessions: HashMap<String, CdpSession>,
+    cloudflare: Option<eoka_server::cloudflare::CloudflareWatcher>,
 }
 
 impl Handler {
@@ -92,6 +93,7 @@ impl Handler {
             fetch_sender: None,
             fetch_dropped: Default::default(),
             fetch_sessions: HashMap::new(),
+            cloudflare: None,
         }
     }
 
@@ -153,7 +155,28 @@ impl Handler {
         }
 
         self.state = Some(state);
+        if matches!(
+            self.spec,
+            LaunchSpec::Launch {
+                auto_solve_cloudflare: true,
+                ..
+            }
+        ) && self.cloudflare.is_none()
+        {
+            self.cloudflare = Some(eoka_server::cloudflare::CloudflareWatcher::start(
+                eoka_server::cloudflare::DEFAULT_WATCH_INTERVAL,
+                eoka_server::cloudflare::DEFAULT_SOLVE_TIMEOUT,
+            ));
+        }
         Ok(())
+    }
+
+    /// Hand the watcher the current tabs; commands are the only place tabs change.
+    fn publish_cloudflare_pages(&self) {
+        if let Some(watcher) = &self.cloudflare {
+            let tabs = self.state.as_ref().map(|state| &state.tabs);
+            watcher.set_pages(tabs.into_iter().flatten().map(|(id, tab)| (id, &tab.page)));
+        }
     }
 
     fn require_tab(&self) -> Result<&TabState, String> {
@@ -179,6 +202,12 @@ impl Handler {
     }
 
     pub async fn handle(&mut self, cmd: &str, args: &Value) -> Response {
+        let response = self.handle_command(cmd, args).await;
+        self.publish_cloudflare_pages();
+        response
+    }
+
+    async fn handle_command(&mut self, cmd: &str, args: &Value) -> Response {
         if matches!(cmd, "agent_observe" | "agent_step") {
             return self.handle_agent(cmd, args).await;
         }
@@ -300,6 +329,14 @@ impl Handler {
             }
             "captcha_datadome" => Ok(self.cmd_captcha_datadome(args).await),
             "captcha_inject" => self.cmd_captcha_inject(args).await,
+            "captcha_turnstile" => {
+                let drain = self.start_fetch_drain();
+                let result = self.cmd_captcha_turnstile(args).await;
+                if !self.stop_fetch_drain(drain).await {
+                    return Err("Request interception cleanup failed".into());
+                }
+                result
+            }
             "fetch" => self.cmd_fetch(args).await,
             "cookies" => self.cmd_cookies().await,
             "set_cookie" => self.cmd_set_cookie(args).await,

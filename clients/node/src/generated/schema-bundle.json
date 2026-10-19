@@ -2297,9 +2297,40 @@
     },
     "browser.connect": {
       "params": {
+        "$defs": {
+          "CloudflareAutoSolve": {
+            "properties": {
+              "intervalMs": {
+                "default": 500,
+                "format": "uint64",
+                "maximum": 60000,
+                "minimum": 100,
+                "type": "integer"
+              },
+              "timeoutMs": {
+                "default": 30000,
+                "format": "uint64",
+                "maximum": 120000,
+                "minimum": 1,
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          }
+        },
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": false,
         "properties": {
+          "autoSolveCloudflare": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/CloudflareAutoSolve"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "wsEndpoint": {
             "type": "string"
           }
@@ -2340,6 +2371,25 @@
     "browser.launch": {
       "params": {
         "$defs": {
+          "CloudflareAutoSolve": {
+            "properties": {
+              "intervalMs": {
+                "default": 500,
+                "format": "uint64",
+                "maximum": 60000,
+                "minimum": 100,
+                "type": "integer"
+              },
+              "timeoutMs": {
+                "default": 30000,
+                "format": "uint64",
+                "maximum": 120000,
+                "minimum": 1,
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          },
           "ProxyParams": {
             "properties": {
               "password": {
@@ -2369,6 +2419,16 @@
           "aggressiveCdpEvasion": {
             "default": false,
             "type": "boolean"
+          },
+          "autoSolveCloudflare": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/CloudflareAutoSolve"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "deviceScaleFactor": {
             "exclusiveMinimum": 0,
@@ -11803,6 +11863,51 @@
         "type": "object"
       }
     },
+    "page.solve_turnstile": {
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "pageId": {
+            "type": "string"
+          },
+          "timeoutMs": {
+            "default": 30000,
+            "format": "uint64",
+            "maximum": 120000,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pageId"
+        ],
+        "title": "SolveTurnstileParams",
+        "type": "object"
+      },
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "clicks": {
+            "format": "uint32",
+            "maximum": 4294967295,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "elapsedMs": {
+            "format": "uint64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "clicks",
+          "elapsedMs"
+        ],
+        "title": "SolveTurnstileResult",
+        "type": "object"
+      }
+    },
     "page.text": {
       "params": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -15566,6 +15671,27 @@
         "message"
       ],
       "title": "CdpErrorDetail",
+      "type": "object"
+    },
+    "CloudflareAutoSolve": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "intervalMs": {
+          "default": 500,
+          "format": "uint64",
+          "maximum": 60000,
+          "minimum": 100,
+          "type": "integer"
+        },
+        "timeoutMs": {
+          "default": 30000,
+          "format": "uint64",
+          "maximum": 120000,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "title": "CloudflareAutoSolve",
       "type": "object"
     },
     "DispatchState": {

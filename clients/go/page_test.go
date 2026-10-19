@@ -228,6 +228,31 @@ func TestPageFetch(t *testing.T) {
 	}
 }
 
+func TestPageSolveTurnstileSendsTimeoutAndReturnsReceipt(t *testing.T) {
+	var sent map[string]any
+	page := newFakePage(t, func(id int64, method string, params json.RawMessage) (any, *rpcError) {
+		if method != "page.solve_turnstile" {
+			return nil, &rpcError{Code: ErrCodeUnknownMethod, Message: method}
+		}
+		_ = json.Unmarshal(params, &sent)
+		return map[string]any{"clicks": 2, "elapsedMs": 1800}, nil
+	})
+
+	result, err := page.SolveTurnstile(context.Background(), 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result != (TurnstileResult{Clicks: 2, ElapsedMs: 1800}) {
+		t.Fatalf("result = %#v", result)
+	}
+	if sent["timeoutMs"] != float64(5000) || sent["pageId"] == nil {
+		t.Fatalf("params = %#v", sent)
+	}
+	if _, err := page.SolveTurnstile(context.Background(), 3*time.Minute); err == nil {
+		t.Fatal("SolveTurnstile accepted a timeout above 120s")
+	}
+}
+
 func TestPageSolveCaptchaReturnsSolverUserAgent(t *testing.T) {
 	page := newFakePage(t, func(id int64, method string, params json.RawMessage) (any, *rpcError) {
 		if method != "page.solve_captcha" {

@@ -61,6 +61,7 @@ const MCP_PROTOCOL_TOOL_ROUTES: &[(&str, &str)] = &[
     ("close_tab", "tab_close"),
     ("spa_navigate", "spa_navigate"),
     ("save_state", "save_state"),
+    ("captcha_turnstile", "captcha_turnstile"),
 ];
 
 fn apply_protocol_tool_metadata(router: &mut ToolRouter<EokaServer>) {
@@ -1141,6 +1142,37 @@ impl EokaServer {
             }
             Err(e) => Err(internal(format!("Failed to solve captcha: {}", e))),
         }
+    }
+
+    #[tool]
+    async fn captcha_turnstile(
+        &self,
+        req: Parameters<eoka_protocol::CaptchaTurnstileArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.ensure_browser().await?;
+        let page = {
+            let guard = self.state.lock().await;
+            let state = guard
+                .as_ref()
+                .ok_or_else(|| ErrorData::from(AgentError::NoBrowser))?;
+            state
+                .current_tab()
+                .ok_or_else(|| ErrorData::from(AgentError::NoTab))?
+                .page
+                .clone()
+        };
+        let receipt = eoka_server::cloudflare::solve_turnstile(
+            &page,
+            std::time::Duration::from_millis(req.0.timeout_ms),
+        )
+        .await
+        .map_err(internal)?;
+        let result = eoka_protocol::CaptchaTurnstileResult {
+            tab_id: page.target_id().to_string(),
+            clicks: receipt.clicks,
+            elapsed_ms: receipt.elapsed.as_millis() as u64,
+        };
+        text_ok(serde_json::to_string(&result).map_err(internal)?)
     }
 
     #[tool(

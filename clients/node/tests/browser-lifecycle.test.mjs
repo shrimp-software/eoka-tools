@@ -90,6 +90,24 @@ test('invalid launch and connect inputs fail before sidecar spawn', { skip: !sup
   assert.deepEqual(await f.events(), []);
 });
 
+test('autoSolveCloudflare is sent to the server and needs its capability', { skip: !supported }, async t => {
+  const f = await fixture(t);
+  const browser = await Browser.launch({ ...f.options, autoSolveCloudflare: { timeoutMs: 5000 } });
+  f.track(browser);
+  const launch = await f.waitFor(event => event.event === 'request' && event.method === 'browser.launch');
+  assert.deepEqual(launch.params.autoSolveCloudflare, { intervalMs: 500, timeoutMs: 5000 });
+  const plain = await Browser.launch({ ...f.options, autoSolveCloudflare: false });
+  f.track(plain);
+  const launches = (await f.events()).filter(event => event.event === 'request' && event.method === 'browser.launch');
+  assert.equal(Object.hasOwn(launches.at(-1).params, 'autoSolveCloudflare'), false);
+
+  const old = await fixture(t, 'no-cloudflare');
+  await assert.rejects(Browser.launch({ ...old.options, autoSolveCloudflare: true }), /cloudflareAutoSolve capability/);
+  for (const value of [{ intervalMs: 99 }, { timeoutMs: 0 }, { onSolved: () => {} }]) {
+    await assert.rejects(Browser.launch({ ...f.options, autoSolveCloudflare: value }), ConfigurationError);
+  }
+});
+
 test('explicit paths override environment paths and launch defaults keep sandbox enabled', { skip: !supported }, async t => {
   const f = await fixture(t);
   const browser = await Browser.launch({

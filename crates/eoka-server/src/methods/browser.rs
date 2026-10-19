@@ -6,8 +6,8 @@ use eoka_proxy::ProxyConfig;
 use super::{parse_params, PageIdParams};
 use crate::state::AppState;
 use eoka_protocol::sidecar::{
-    BrowserOwnership, BrowserSessionResult, CloseTabResult, ConnectParams, LaunchParams,
-    NewPageParams, NewPageResult, ProxyParams, ServerError, Tab, TabsResult,
+    BrowserOwnership, BrowserSessionResult, CloseTabResult, CloudflareAutoSolve, ConnectParams,
+    LaunchParams, NewPageParams, NewPageResult, ProxyParams, ServerError, Tab, TabsResult,
 };
 
 fn close_tab_response(cleanup_error: Option<ServerError>) -> Value {
@@ -24,6 +24,7 @@ pub async fn launch(state: &mut AppState, params: Value) -> Result<Value, Server
     let params: LaunchParams = parse_params(params)?;
     params.validate()?;
     let proxy = resolve_proxy(params.proxy)?;
+    let auto_solve = params.auto_solve_cloudflare;
     let browser = Browser::launch_with(|config| {
         config.headless = params.headless;
         config.user_agent = params.user_agent;
@@ -52,7 +53,7 @@ pub async fn launch(state: &mut AppState, params: Value) -> Result<Value, Server
         }
     })
     .await?;
-    initialize_browser(state, browser).await
+    initialize_browser(state, browser, auto_solve).await
 }
 
 fn validate_endpoint(endpoint: &str) -> Result<(), ServerError> {
@@ -81,12 +82,17 @@ pub async fn connect(state: &mut AppState, params: Value) -> Result<Value, Serve
         return Err(ServerError::internal("browser already connected"));
     }
     let params: ConnectParams = parse_params(params)?;
+    params.validate()?;
     validate_endpoint(&params.ws_endpoint)?;
     let browser = Browser::connect(&params.ws_endpoint).await?;
-    initialize_browser(state, browser).await
+    initialize_browser(state, browser, params.auto_solve_cloudflare).await
 }
 
-async fn initialize_browser(state: &mut AppState, browser: Browser) -> Result<Value, ServerError> {
+async fn initialize_browser(
+    state: &mut AppState,
+    browser: Browser,
+    auto_solve: Option<CloudflareAutoSolve>,
+) -> Result<Value, ServerError> {
     let ownership = if browser.owns_process() {
         BrowserOwnership::Owned
     } else {
@@ -104,7 +110,15 @@ async fn initialize_browser(state: &mut AppState, browser: Browser) -> Result<Va
     }
     .await;
     match initialization {
-        Ok(result) => Ok(result),
+        Ok(result) => {
+            if let Some(options) = auto_solve {
+                state.start_cloudflare_watcher(
+                    std::time::Duration::from_millis(options.interval_ms),
+                    std::time::Duration::from_millis(options.timeout_ms),
+                );
+            }
+            Ok(result)
+        }
         Err(mut error) => {
             let cleanup =
                 tokio::time::timeout(std::time::Duration::from_secs(5), state.cleanup_browser())
