@@ -127,6 +127,7 @@ viewport options remain available.
 | `WithSandbox(enabled)` | Explicit sandbox policy. The legacy Go/Rust/sidecar default remains `false`; pass `true` to request sandboxing. Unsupported sandbox environments fail without retrying unsandboxed. The planned managed Node SDK will request `true` explicitly. |
 | `WithViewport(width, height)` | CSS viewport dimensions, both positive and at most 2147483647. |
 | `WithDeviceScaleFactor(scale)` | Finite positive DPR, effective default 1. It may be set without supplying dimensions. |
+| `WithAutoSolveCloudflare(interval, timeout)` | Have the server watch every tab and solve full-page Cloudflare challenges. Zero durations use 500ms and 30s. Also accepted by `Connect`; requires the `cloudflareAutoSolve` capability. |
 
 Executable/runtime paths, dimensions and DPR are validated before downloading or
 starting the sidecar. Runtime storage is separate from the installed-browser
@@ -145,6 +146,10 @@ b, err := eoka.Launch(ctx,
     eoka.WithDeviceScaleFactor(2),
 )
 ```
+
+`Page.SolveTurnstile(ctx, timeout)` clicks a Cloudflare Turnstile checkbox
+until the page leaves the challenge and returns `TurnstileResult{Clicks, ElapsedMs}`;
+a normal page returns zero clicks. A zero timeout uses 30s.
 
 `Browser.SessionInfo()` returns `BrowserSessionInfo{Ownership, BrowserVersion}`.
 Ownership is `BrowserOwnershipOwned` (`"owned"`) or

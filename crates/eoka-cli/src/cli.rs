@@ -81,6 +81,13 @@ pub struct Cli {
     #[arg(
         long,
         global = true,
+        env = "EOKA_AUTO_SOLVE_CLOUDFLARE",
+        help = "Solve full-page Cloudflare challenges in every tab automatically"
+    )]
+    pub auto_solve_cloudflare: bool,
+    #[arg(
+        long,
+        global = true,
         value_name = "URL",
         env = "EOKA_PROXY",
         conflicts_with = "proxy_file",
@@ -549,6 +556,13 @@ pub enum CaptchaAction {
         #[arg(long, default_value_t = eoka_protocol::DATADOME_DEFAULT_ATTEMPTS, value_parser = clap::value_parser!(u32).range(1..=i64::from(eoka_protocol::DATADOME_MAX_ATTEMPTS)))]
         max_attempts: u32,
         #[arg(long, default_value_t = eoka_protocol::DATADOME_DEFAULT_TIMEOUT_MS, value_parser = clap::value_parser!(u64).range(eoka_protocol::DATADOME_MIN_TIMEOUT_MS..=eoka_protocol::DATADOME_MAX_TIMEOUT_MS))]
+        timeout_ms: u64,
+    },
+    #[command(
+        about = "Click the Cloudflare Turnstile checkbox on the current tab until the challenge clears"
+    )]
+    Turnstile {
+        #[arg(long, default_value_t = eoka_protocol::TURNSTILE_DEFAULT_TIMEOUT_MS, value_parser = clap::value_parser!(u64).range(1..=eoka_protocol::TURNSTILE_MAX_TIMEOUT_MS))]
         timeout_ms: u64,
     },
     Solve(Box<SolveArgs>),

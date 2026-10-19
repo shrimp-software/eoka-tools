@@ -5,14 +5,14 @@ use tokio::net::UnixStream;
 use crate::launch_spec::LaunchSpec;
 use crate::session;
 use eoka_protocol::{
-    read_msg, write_msg, CaptchaDatadomeArgs, CaptchaInjectArgs, ClearFlagArgs, CloneFromArgs,
-    ConsoleArgs, DeleteCookieArgs, DomainArgs, EmulateArgs, FakeCameraArgs, FetchArgs, FillArgs,
-    FrameEvalArgs, HeadersArgs, IdArgs, InterceptAddArgs, KeyArgs, LoadStateArgs, ModeArgs,
-    MouseButtonArgs, MouseMoveArgs, NetworkExportArgs, NetworkLogArgs, NetworkRecordStartArgs,
-    NetworkShowArgs, NetworkWaitArgs, ObserveArgs, OpenArgs, PathArgs, PathStringArgs, Request,
-    Response, ScreenshotArgs, ScriptArgs, SelectArgs, SetCookieArgs, SetStorageArgs, SnapshotArgs,
-    StorageArgs, TabIdArgs, TabNewArgs, TargetArgs, TextArgs, WaitArgs, WasmFindArgs, WasmReadArgs,
-    WasmWriteArgs,
+    read_msg, write_msg, CaptchaDatadomeArgs, CaptchaInjectArgs, CaptchaTurnstileArgs,
+    ClearFlagArgs, CloneFromArgs, ConsoleArgs, DeleteCookieArgs, DomainArgs, EmulateArgs,
+    FakeCameraArgs, FetchArgs, FillArgs, FrameEvalArgs, HeadersArgs, IdArgs, InterceptAddArgs,
+    KeyArgs, LoadStateArgs, ModeArgs, MouseButtonArgs, MouseMoveArgs, NetworkExportArgs,
+    NetworkLogArgs, NetworkRecordStartArgs, NetworkShowArgs, NetworkWaitArgs, ObserveArgs,
+    OpenArgs, PathArgs, PathStringArgs, Request, Response, ScreenshotArgs, ScriptArgs, SelectArgs,
+    SetCookieArgs, SetStorageArgs, SnapshotArgs, StorageArgs, TabIdArgs, TabNewArgs, TargetArgs,
+    TextArgs, WaitArgs, WasmFindArgs, WasmReadArgs, WasmWriteArgs,
 };
 
 #[derive(Debug, Clone)]
@@ -414,6 +414,10 @@ impl EokaClient {
         self.call(Request::CaptchaDatadome(args)).await
     }
 
+    pub async fn captcha_turnstile(&self, args: CaptchaTurnstileArgs) -> anyhow::Result<Response> {
+        self.call(Request::CaptchaTurnstile(args)).await
+    }
+
     pub async fn captcha_inject(&self, args: CaptchaInjectArgs) -> anyhow::Result<Response> {
         self.call(Request::CaptchaInject(args)).await
     }
@@ -663,6 +667,7 @@ fn launch_daemon(session_name: &str, spec: &LaunchSpec) -> anyhow::Result<()> {
             js_block,
             persist,
             geo_align,
+            auto_solve_cloudflare,
         } => {
             if !*headless {
                 cmd.arg("--headed");
@@ -681,6 +686,9 @@ fn launch_daemon(session_name: &str, spec: &LaunchSpec) -> anyhow::Result<()> {
             }
             if !*geo_align {
                 cmd.arg("--no-geo-align");
+            }
+            if *auto_solve_cloudflare {
+                cmd.arg("--auto-solve-cloudflare");
             }
             if let Some(p) = proxy {
                 cmd.arg("--proxy").arg(p);
@@ -871,6 +879,7 @@ mod tests {
                 js_block: Vec::new(),
                 persist: false,
                 geo_align: false,
+                auto_solve_cloudflare: false,
             },
         )
     }

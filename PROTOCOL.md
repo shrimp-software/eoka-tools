@@ -66,7 +66,11 @@ behavior. `explicitExecutablePath`, `browserAttachment`, `runtimeIsolation`,
 below. `boundedFetch` advertises streaming response-body inspection with a
 sidecar-enforced byte budget. `screenshotOptions`, `screenshotFile` and
 `nativeRecording` advertise the capture methods below, not a guarantee that an
-attached Chrome build supports a format or its native encoder. Browser support
+attached Chrome build supports a format or its native encoder. `cloudflareAutoSolve`
+advertises the `autoSolveCloudflare` option on `browser.launch` and
+`browser.connect`: `{intervalMs?, timeoutMs?}` (defaults 500 and 30000) starts a
+server-side watcher that solves full-page Cloudflare challenges in every tab until
+the browser is closed. Browser support
 is checked at runtime; no capability implies managed Chrome installation.
 
 ## Message shapes
@@ -254,6 +258,10 @@ Element handles do not cross this wire.
 - Held input: `page.mouse_down`, `page.mouse_move`, `page.mouse_up`,
   `page.key_down`, `page.key_up`, `page.release_all_inputs` are primitives,
   distinct from verified high-level actions.
+- Cloudflare: `page.solve_turnstile` (`{pageId, timeoutMs?}`, default 30000, at
+  most 120000) clicks the Turnstile checkbox through its closed shadow root until
+  the page leaves the challenge and returns `{clicks, elapsedMs}`; a normal page
+  returns zero clicks. It holds the request queue for up to `timeoutMs`.
 - Other implemented methods include `page.solve_captcha` and `page.close`.
 
 JSON results are dynamic data, not statically known application types. Type

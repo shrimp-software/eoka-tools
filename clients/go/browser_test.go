@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLaunchParamsIncludeRedactedProxyFields(t *testing.T) {
@@ -26,6 +27,34 @@ func TestLaunchParamsIncludeRedactedProxyFields(t *testing.T) {
 	}
 	if got, want := proxy["password"], "pass:word"; got != want {
 		t.Fatalf("password = %v, want %v", got, want)
+	}
+}
+
+func TestLaunchParamsIncludeAutoSolveCloudflare(t *testing.T) {
+	o := options{headless: true}
+	WithAutoSolveCloudflare(0, 0)(&o)
+	params, err := o.launchParams()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := params["autoSolveCloudflare"].(map[string]any); !ok || len(got) != 0 {
+		t.Fatalf("autoSolveCloudflare = %#v", params["autoSolveCloudflare"])
+	}
+	WithAutoSolveCloudflare(time.Second, 10*time.Second)(&o)
+	params, err = o.launchParams()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"intervalMs": int64(1000), "timeoutMs": int64(10000)}
+	if got := params["autoSolveCloudflare"].(map[string]any); got["intervalMs"] != want["intervalMs"] || got["timeoutMs"] != want["timeoutMs"] {
+		t.Fatalf("autoSolveCloudflare = %#v", got)
+	}
+	WithAutoSolveCloudflare(50*time.Millisecond, 0)(&o)
+	if _, err := o.launchParams(); err == nil {
+		t.Fatal("launchParams accepted a 50ms poll interval")
+	}
+	if params, _ := (options{headless: true}).launchParams(); params["autoSolveCloudflare"] != nil {
+		t.Fatalf("autoSolveCloudflare sent without the option: %#v", params)
 	}
 }
 

@@ -5,6 +5,12 @@ use crate::launch_spec::{self, LaunchSpec};
 
 /// Map CLI flags to a `LaunchSpec`. Resolves --cdp ports to ws:// URLs eagerly.
 pub(crate) fn resolve_launch_spec(cli: &Cli) -> Result<LaunchSpec, String> {
+    if cli.auto_solve_cloudflare && (cli.cdp.is_some() || cli.auto_connect) {
+        return Err(
+            "--auto-solve-cloudflare needs a browser eoka launches, not --cdp/--auto-connect"
+                .into(),
+        );
+    }
     if let Some(spec) = &cli.cdp {
         let ws_url = launch_spec::resolve_cdp_spec(spec)?;
         return Ok(LaunchSpec::Connect { ws_url });
@@ -28,6 +34,7 @@ pub(crate) fn resolve_launch_spec(cli: &Cli) -> Result<LaunchSpec, String> {
         js_block: cli.js_block.clone(),
         persist: cli.persist,
         geo_align: !cli.no_geo_align,
+        auto_solve_cloudflare: cli.auto_solve_cloudflare,
     })
 }
 

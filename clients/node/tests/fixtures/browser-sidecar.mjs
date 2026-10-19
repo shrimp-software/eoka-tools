@@ -34,7 +34,7 @@ input.on('line', line => {
         protocol: protocolVersion,
         serverVersion: process.env.EOKA_BROWSER_FIXTURE_SERVER_VERSION ?? 'lifecycle-fixture',
         coreVersion: 'lifecycle-fixture',
-        capabilities: ['lifecycleFixture'],
+        capabilities: mode === 'no-cloudflare' ? ['lifecycleFixture'] : ['lifecycleFixture', 'cloudflareAutoSolve'],
         methods: methodNames.filter(name => name !== 'page.execute' && (mode !== 'no-connect' || name !== 'browser.connect')),
         limits: { maxInFlight: 8, maxMessageBytes: 1048576 },
       }), mode === 'managed-deadline' ? 1000 : mode === 'shared-deadline' ? 400 : 0);

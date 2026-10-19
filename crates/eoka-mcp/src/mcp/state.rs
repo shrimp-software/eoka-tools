@@ -81,7 +81,7 @@ impl BrowserState {
             proxy.is_some()
         );
         let mut server = AppState::new();
-        let params = json!({
+        let mut params = json!({
             "headless": headless,
             "proxy": proxy.map(|server| json!({
                 "server": server,
@@ -89,6 +89,11 @@ impl BrowserState {
                 "password": proxy_password,
             })),
         });
+        if std::env::var("EOKA_AUTO_SOLVE_CLOUDFLARE")
+            .is_ok_and(|value| value == "1" || value == "true")
+        {
+            params["autoSolveCloudflare"] = json!({});
+        }
         dispatch(&mut server, "browser.launch", params)
             .await
             .map_err(|error| eoka_server::eoka::Error::Launch(error.message))?;

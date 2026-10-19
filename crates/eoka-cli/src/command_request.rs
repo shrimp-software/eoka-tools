@@ -3,12 +3,12 @@ mod network;
 use crate::captcha_cmd::captcha_inject_request;
 use crate::cli::{CaptchaAction, Command, JsAction, TabAction, WasmAction};
 use crate::protocol::{
-    CaptchaDatadomeArgs, ClearFlagArgs, CloneFromArgs, ConsoleArgs, DeleteCookieArgs, DomainArgs,
-    EmulateArgs, FakeCameraArgs, FetchArgs, FillArgs, FrameEvalArgs, HeadersArgs, KeyArgs,
-    LoadStateArgs, ModeArgs, MouseButton, MouseButtonArgs, MouseMoveArgs, ObserveArgs, OpenArgs,
-    PathArgs, PathStringArgs, Request, ScreenshotArgs, ScriptArgs, SelectArgs, SetCookieArgs,
-    SetStorageArgs, SnapshotArgs, StorageArgs, TabIdArgs, TabNewArgs, TargetArgs, TextArgs,
-    WaitArgs, WasmFindArgs, WasmReadArgs, WasmWriteArgs,
+    CaptchaDatadomeArgs, CaptchaTurnstileArgs, ClearFlagArgs, CloneFromArgs, ConsoleArgs,
+    DeleteCookieArgs, DomainArgs, EmulateArgs, FakeCameraArgs, FetchArgs, FillArgs, FrameEvalArgs,
+    HeadersArgs, KeyArgs, LoadStateArgs, ModeArgs, MouseButton, MouseButtonArgs, MouseMoveArgs,
+    ObserveArgs, OpenArgs, PathArgs, PathStringArgs, Request, ScreenshotArgs, ScriptArgs,
+    SelectArgs, SetCookieArgs, SetStorageArgs, SnapshotArgs, StorageArgs, TabIdArgs, TabNewArgs,
+    TargetArgs, TextArgs, WaitArgs, WasmFindArgs, WasmReadArgs, WasmWriteArgs,
 };
 use network::network_action_to_request;
 
@@ -374,6 +374,11 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
             timeout_ms: *timeout_ms,
         }),
         Command::Captcha {
+            action: CaptchaAction::Turnstile { timeout_ms },
+        } => Request::CaptchaTurnstile(CaptchaTurnstileArgs {
+            timeout_ms: *timeout_ms,
+        }),
+        Command::Captcha {
             action:
                 CaptchaAction::Inject {
                     token,
@@ -472,6 +477,18 @@ mod tests {
 
         assert_eq!(request.cmd(), "observe");
         assert_eq!(request.args_json()["structured"], true);
+    }
+
+    #[test]
+    fn turnstile_maps_to_catalog_operation_with_timeout() {
+        let (_, command) =
+            parsed_command(&["eoka", "captcha", "turnstile", "--timeout-ms", "5000"]);
+        let request = command_to_request(&command, false);
+        assert_eq!(request.cmd(), "captcha_turnstile");
+        assert_eq!(request.args_json(), json!({"timeout_ms":5000}));
+        assert!(
+            Cli::try_parse_from(["eoka", "captcha", "turnstile", "--timeout-ms", "0"]).is_err()
+        );
     }
 
     #[test]
@@ -676,6 +693,7 @@ mod tests {
             &["eoka", "spa-info"],
             &["eoka", "spa-navigate", "/account"],
             &["eoka", "captcha", "inject", "token"],
+            &["eoka", "captcha", "turnstile"],
             &["eoka", "network", "record", "start"],
             &["eoka", "network", "record", "stop"],
             &["eoka", "network", "record", "status"],

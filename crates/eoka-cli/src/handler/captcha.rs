@@ -2,7 +2,8 @@ use std::time::{Duration, Instant};
 
 use eoka_datadome::{DataDomeSolver, SolveError, SolveOutcome};
 use eoka_protocol::{
-    CaptchaDatadomeArgs, CaptchaDatadomeResult, DataDomeOutcome, ErrorDetail, Response,
+    CaptchaDatadomeArgs, CaptchaDatadomeResult, CaptchaTurnstileArgs, CaptchaTurnstileResult,
+    DataDomeOutcome, ErrorDetail, Response,
 };
 use serde_json::Value;
 
@@ -55,6 +56,24 @@ fn outcome_response(outcome: SolveOutcome, tab_id: String, elapsed_ms: u64) -> R
 }
 
 impl Handler {
+    pub(super) async fn cmd_captcha_turnstile(&mut self, args: &Value) -> Result<Response, String> {
+        let args: CaptchaTurnstileArgs =
+            serde_json::from_value(args.clone()).map_err(|error| error.to_string())?;
+        let page = self.require_tab()?.page.clone();
+        let receipt =
+            eoka_server::cloudflare::solve_turnstile(&page, Duration::from_millis(args.timeout_ms))
+                .await
+                .map_err(|error| error.to_string())?;
+        let result = CaptchaTurnstileResult {
+            tab_id: page.target_id().to_string(),
+            clicks: receipt.clicks,
+            elapsed_ms: receipt.elapsed.as_millis() as u64,
+        };
+        Ok(Response::ok(
+            serde_json::to_value(result).map_err(|error| error.to_string())?,
+        ))
+    }
+
     pub(super) async fn cmd_captcha_datadome(&mut self, args: &Value) -> Response {
         let started = Instant::now();
         let prior_failures = self

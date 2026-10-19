@@ -235,6 +235,28 @@ func (p *Page) Fetch(ctx context.Context, url string, options FetchOptions) (Fet
 	return response, err
 }
 
+// TurnstileResult reports how a Cloudflare Turnstile challenge was cleared.
+type TurnstileResult struct {
+	Clicks    int   `json:"clicks"`
+	ElapsedMs int64 `json:"elapsedMs"`
+}
+
+// SolveTurnstile clicks the Cloudflare Turnstile checkbox until the page
+// leaves the challenge. It returns zero clicks on a normal page. A zero
+// timeout uses the server default of 30s.
+func (p *Page) SolveTurnstile(ctx context.Context, timeout time.Duration) (TurnstileResult, error) {
+	params := map[string]any{}
+	if timeout != 0 {
+		if err := validateTurnstileTimeout(timeout); err != nil {
+			return TurnstileResult{}, err
+		}
+		params["timeoutMs"] = timeout.Milliseconds()
+	}
+	var result TurnstileResult
+	err := p.call(ctx, "page.solve_turnstile", params, &result)
+	return result, err
+}
+
 func (p *Page) SolveCaptcha(ctx context.Context, options CaptchaOptions) (CaptchaInjection, error) {
 	params := map[string]any{
 		"apiKey":      options.APIKey,

@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 use std::sync::Arc;
+use std::time::Duration;
 
 use eoka::{Browser, Page};
 
@@ -13,6 +14,7 @@ pub struct AppState {
     pub recordings: crate::recordings::RecordingManager,
     browser: Option<Arc<Browser>>,
     pages: HashMap<String, Page>,
+    cloudflare: Option<crate::cloudflare::CloudflareWatcher>,
     shutdown: bool,
 }
 
@@ -43,10 +45,28 @@ impl AppState {
 
     pub fn insert_page(&mut self, id: String, page: Page) {
         self.pages.insert(id, page);
+        self.publish_pages();
     }
 
     pub fn remove_page(&mut self, id: &str) -> Option<Page> {
-        self.pages.remove(id)
+        let page = self.pages.remove(id);
+        self.publish_pages();
+        page
+    }
+
+    /// Solve full-page Cloudflare challenges in every tab until the browser
+    /// is cleaned up.
+    pub fn start_cloudflare_watcher(&mut self, interval: Duration, timeout: Duration) {
+        self.cloudflare = Some(crate::cloudflare::CloudflareWatcher::start(
+            interval, timeout,
+        ));
+        self.publish_pages();
+    }
+
+    fn publish_pages(&self) {
+        if let Some(watcher) = &self.cloudflare {
+            watcher.set_pages(&self.pages);
+        }
     }
 
     pub fn page(&self, id: &str) -> Result<&Page, ServerError> {
@@ -86,6 +106,7 @@ impl AppState {
             }
         }
         self.pages.retain(|id, _| live_tabs.contains(id.as_str()));
+        self.publish_pages();
         for (id, page) in attached {
             if live_tabs.contains(id.as_str()) {
                 self.insert_page(id, page);
@@ -99,6 +120,9 @@ impl AppState {
     }
 
     pub async fn cleanup_browser(&mut self) -> Result<(), ServerError> {
+        if let Some(watcher) = self.cloudflare.take() {
+            watcher.stop().await;
+        }
         let mut cleanup_error = self.recordings.shutdown().await.err();
         for page in self.pages() {
             if let Err(error) = page.release_all_inputs().await {
@@ -149,6 +173,7 @@ impl AppState {
 
     pub fn clear_pages(&mut self) {
         self.pages.clear();
+        self.publish_pages();
     }
 
     pub fn mark_shutdown(&mut self) {
@@ -169,6 +194,7 @@ impl AppState {
         match tokio::time::timeout(std::time::Duration::from_secs(5), cleanup).await {
             Ok(result) => result,
             Err(_) => {
+                self.cloudflare = None;
                 self.clear_pages();
                 self.take_browser();
                 let mut error = self.recordings.shutdown_timeout_error().unwrap_or_else(|| {

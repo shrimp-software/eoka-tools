@@ -58,6 +58,9 @@ type options struct {
 	deviceScaleFactorSet bool
 	viewportSet          bool
 	launchOnly           bool
+	autoSolveCloudflare  bool
+	cloudflareInterval   time.Duration
+	cloudflareTimeout    time.Duration
 }
 
 type BrowserOwnership string
@@ -157,6 +160,41 @@ func WithVisible() Option {
 	return WithHeadless(false)
 }
 
+// WithAutoSolveCloudflare has the server watch every tab and solve full-page
+// Cloudflare challenges. Zero durations use the server defaults (500ms poll,
+// 30s per solve). It applies to both Launch and Connect.
+func WithAutoSolveCloudflare(interval, timeout time.Duration) Option {
+	return func(o *options) {
+		o.autoSolveCloudflare = true
+		o.cloudflareInterval = interval
+		o.cloudflareTimeout = timeout
+	}
+}
+
+func (o options) cloudflareParams() (map[string]any, error) {
+	params := map[string]any{}
+	if o.cloudflareInterval != 0 {
+		if o.cloudflareInterval < 100*time.Millisecond || o.cloudflareInterval > time.Minute {
+			return nil, errors.New("eoka: Cloudflare poll interval must be between 100ms and 60s")
+		}
+		params["intervalMs"] = o.cloudflareInterval.Milliseconds()
+	}
+	if o.cloudflareTimeout != 0 {
+		if err := validateTurnstileTimeout(o.cloudflareTimeout); err != nil {
+			return nil, err
+		}
+		params["timeoutMs"] = o.cloudflareTimeout.Milliseconds()
+	}
+	return params, nil
+}
+
+func validateTurnstileTimeout(timeout time.Duration) error {
+	if timeout < time.Millisecond || timeout > 2*time.Minute {
+		return errors.New("eoka: Turnstile timeout must be between 1ms and 120s")
+	}
+	return nil
+}
+
 func WithServerPath(path string) Option {
 	return func(o *options) { o.serverPath = path }
 }
@@ -209,7 +247,15 @@ func Connect(ctx context.Context, wsEndpoint string, opts ...Option) (*Browser, 
 	if err != nil || endpoint.Scheme != "ws" || endpoint.Hostname() == "" || endpoint.User != nil || endpoint.RawQuery != "" || endpoint.ForceQuery || endpoint.Fragment != "" || !strings.HasPrefix(endpoint.Path, "/devtools/browser/") || strings.TrimPrefix(endpoint.Path, "/devtools/browser/") == "" || strings.Contains(strings.TrimPrefix(endpoint.Path, "/devtools/browser/"), "/") {
 		return nil, errors.New("eoka: Connect requires a ws:// browser DevTools endpoint; wss:// is not supported")
 	}
-	return startBrowser(ctx, o, "browser.connect", map[string]any{"wsEndpoint": wsEndpoint})
+	params := map[string]any{"wsEndpoint": wsEndpoint}
+	if o.autoSolveCloudflare {
+		cloudflare, err := o.cloudflareParams()
+		if err != nil {
+			return nil, err
+		}
+		params["autoSolveCloudflare"] = cloudflare
+	}
+	return startBrowser(ctx, o, "browser.connect", params)
 }
 
 func startBrowser(ctx context.Context, o options, method string, params map[string]any) (*Browser, error) {
@@ -247,6 +293,12 @@ func startBrowser(ctx context.Context, o options, method string, params map[stri
 		_ = b.Close(context.Background())
 		return nil, err
 	}
+	if _, ok := params["autoSolveCloudflare"]; ok {
+		if err := t.requireCapability("cloudflareAutoSolve"); err != nil {
+			_ = b.Close(context.Background())
+			return nil, err
+		}
+	}
 	if err := t.call(ctx, method, params, &b.session); err != nil {
 		_ = b.Close(context.Background())
 		return nil, err
@@ -261,6 +313,13 @@ func startBrowser(ctx context.Context, o options, method string, params map[stri
 
 func (o options) launchParams() (map[string]any, error) {
 	params := map[string]any{"headless": o.headless, "sandbox": o.sandbox}
+	if o.autoSolveCloudflare {
+		cloudflare, err := o.cloudflareParams()
+		if err != nil {
+			return nil, err
+		}
+		params["autoSolveCloudflare"] = cloudflare
+	}
 	if o.executablePathSet || o.executablePath != "" {
 		if !filepath.IsAbs(o.executablePath) {
 			return nil, errors.New("eoka: executable path must be absolute")

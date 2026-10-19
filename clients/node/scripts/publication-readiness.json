@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "status": "ready",
-  "sdkVersion": "0.1.0-beta.5",
+  "sdkVersion": "0.1.0-beta.6",
   "chromeBuildId": "155.0.8059.39",
   "blockers": []
 }

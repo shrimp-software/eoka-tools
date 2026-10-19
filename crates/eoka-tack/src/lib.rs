@@ -248,6 +248,7 @@ mod tests {
                 js_block: Vec::new(),
                 persist: false,
                 geo_align: false,
+                auto_solve_cloudflare: false,
             },
         ))
     }
@@ -270,6 +271,21 @@ mod tests {
         let catalog = set.catalog("eoka").unwrap();
         assert!(catalog.contains_path("eoka.network.log"));
         assert!(!catalog.contains_path("eoka.close"));
+    }
+
+    #[test]
+    fn captcha_opt_in_exposes_turnstile() {
+        assert!(!test_set()
+            .catalog("eoka")
+            .unwrap()
+            .contains_path("eoka.captcha.turnstile"));
+        let set = test_set().with_filter(
+            EokaToolFilter::default_agent().include_capability(OperationCapability::Captcha),
+        );
+        assert!(set
+            .catalog("eoka")
+            .unwrap()
+            .contains_path("eoka.captcha.turnstile"));
     }
 
     #[test]

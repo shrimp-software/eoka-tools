@@ -105,9 +105,7 @@ jobs:
             200) echo "@cbxss/eoka ${version} is already on npm" ;;
             404)
               echo "Dispatching npm publication of @cbxss/eoka ${version}"
-              # npm trusted publishers are not configured for these package names yet;
-              # bootstrap uses the approved token and still signs provenance.
-              gh workflow run publish-node.yml --repo "${{ github.repository }}" --ref main -f source_sha="$GITHUB_SHA" -f bootstrap=true
+              gh workflow run publish-node.yml --repo "${{ github.repository }}" --ref main -f source_sha="$GITHUB_SHA"
               ;;
             *) echo "npm registry returned ${http_status} for @cbxss/eoka ${version}"; exit 1 ;;
           esac

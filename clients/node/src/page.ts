@@ -7,7 +7,6 @@ import type {
   AgentStepResult, BrowserState, Expectation, LocatorSpec, MethodName,
   MethodParams, MethodResults, OperationRecord,
 } from './generated/protocol.js';
-import { ProtocolError } from './errors.js';
 import { Operation, OperationError, operationFailure, validateOperationRecord, type WaitOptions } from './operations.js';
 import { Recording, RecordingError, recordingFailure, requireCaptureCapability, validateRecordingRecord } from './recording.js';
 
@@ -235,33 +234,14 @@ export class Page implements InvokeClient {
   }
 
   /**
-   * Best-effort helper for interactive Cloudflare challenge pages: find the
-   * `challenges.cloudflare.com` frame, click its checkbox through the closed
-   * shadow root, and wait for the page to leave the challenge state.
+   * Best-effort helper for interactive Cloudflare challenge pages: the server
+   * clicks the Turnstile checkbox through its closed shadow root until the page
+   * leaves the challenge. Resolves with zero clicks on a normal page.
    */
-  async solveTurnstile(options: { timeoutMs?: number } & CallOptions = {}): Promise<void> {
+  solveTurnstile(options: { timeoutMs?: number } & CallOptions = {}): Promise<MethodResults['page.solve_turnstile']> {
     const { timeoutMs = 30_000, ...callOptions } = options;
-    const deadline = performance.now() + timeoutMs;
-    while (performance.now() < deadline) {
-      const frames = await this.frames(callOptions);
-      const challenge = frames.find(frame => frame.url.includes('challenges.cloudflare.com'));
-      if (challenge !== undefined) {
-        const remaining = Math.max(1, Math.floor(deadline - performance.now()));
-        try {
-          await this.clickShadow('input[type="checkbox"]', {
-            ...callOptions,
-            frameId: challenge.id,
-            resolveTimeoutMs: Math.min(remaining, 2_000),
-          });
-        } catch (error) {
-          if (performance.now() >= deadline) throw error;
-        }
-      } else if (!(await this.title(callOptions)).includes('moment')) {
-        return;
-      }
-      await new Promise(resolve => setTimeout(resolve, 500));
-    }
-    throw new ProtocolError('Turnstile challenge did not resolve before the deadline');
+    // The local deadline outlasts the server's solve deadline so its error wins.
+    return this.invoke('page.solve_turnstile', { pageId: this.id, timeoutMs }, { ...callOptions, timeoutMs: timeoutMs + 10_000 });
   }
 
   async captureState(options?: CallOptions): Promise<BrowserState> {

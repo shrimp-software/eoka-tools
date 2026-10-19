@@ -15,6 +15,7 @@ pub const MAX_RECORDING_FPS: u32 = 120;
 pub const CAPABILITY_SCREENSHOT_OPTIONS: &str = "screenshotOptions";
 pub const CAPABILITY_SCREENSHOT_FILE: &str = "screenshotFile";
 pub const CAPABILITY_NATIVE_RECORDING: &str = "nativeRecording";
+pub const CAPABILITY_CLOUDFLARE_AUTO_SOLVE: &str = "cloudflareAutoSolve";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProtocolVersion {
@@ -325,6 +326,8 @@ dto!(LaunchParams {
     #[serde(default)] extra_args: Vec<String>,
     #[schemars(schema_with = "optional_positive_scale_schema")]
     device_scale_factor: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    auto_solve_cloudflare: Option<CloudflareAutoSolve>,
 });
 dto!(ProxyParams { server: String, username: Option<String>, password: Option<String> });
 fn default_headless() -> bool {
@@ -350,6 +353,16 @@ fn optional_positive_scale_schema(_: &mut SchemaGenerator) -> Schema {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ConnectParams {
     pub ws_endpoint: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_solve_cloudflare: Option<CloudflareAutoSolve>,
+}
+
+impl ConnectParams {
+    pub fn validate(&self) -> Result<(), ServerError> {
+        self.auto_solve_cloudflare
+            .as_ref()
+            .map_or(Ok(()), CloudflareAutoSolve::validate)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -410,6 +423,9 @@ impl LaunchParams {
                     "{name} must be an absolute path",
                 )));
             }
+        }
+        if let Some(auto_solve) = &self.auto_solve_cloudflare {
+            auto_solve.validate()?;
         }
         Ok(())
     }
@@ -797,6 +813,54 @@ dto!(ClickShadowResult {
 fn default_shadow_timeout_ms() -> u64 {
     10_000
 }
+dto!(SolveTurnstileParams {
+    page_id: String,
+    #[serde(default = "default_turnstile_timeout_ms")]
+    #[schemars(range(min = 1, max = 120000))]
+    timeout_ms: u64,
+});
+impl SolveTurnstileParams {
+    pub fn validate(&self) -> Result<(), ServerError> {
+        validate_turnstile_timeout(self.timeout_ms)
+    }
+}
+dto!(SolveTurnstileResult {
+    clicks: u32,
+    elapsed_ms: u64
+});
+// Server-side watcher that solves full-page Cloudflare challenges in every tab.
+dto!(CloudflareAutoSolve {
+    #[serde(default = "default_cloudflare_interval_ms")]
+    #[schemars(range(min = 100, max = 60000))]
+    interval_ms: u64,
+    #[serde(default = "default_turnstile_timeout_ms")]
+    #[schemars(range(min = 1, max = 120000))]
+    timeout_ms: u64,
+});
+impl CloudflareAutoSolve {
+    pub fn validate(&self) -> Result<(), ServerError> {
+        if !(100..=60_000).contains(&self.interval_ms) {
+            return Err(ServerError::invalid_params(
+                "autoSolveCloudflare.intervalMs must be between 100 and 60000",
+            ));
+        }
+        validate_turnstile_timeout(self.timeout_ms)
+    }
+}
+fn validate_turnstile_timeout(timeout_ms: u64) -> Result<(), ServerError> {
+    if timeout_ms == 0 || timeout_ms > 120_000 {
+        return Err(ServerError::invalid_params(
+            "timeoutMs must be between 1 and 120000",
+        ));
+    }
+    Ok(())
+}
+fn default_turnstile_timeout_ms() -> u64 {
+    30_000
+}
+fn default_cloudflare_interval_ms() -> u64 {
+    500
+}
 dto!(SelectorParams {
     page_id: String,
     selector: String
@@ -1159,7 +1223,7 @@ methods! {
     "server.hello" => HelloParams => HelloResult,
     "server.shutdown" => Empty => Empty,
     "browser.launch" => LaunchParams, LaunchParams::validate => BrowserSessionResult,
-    "browser.connect" => ConnectParams => BrowserSessionResult,
+    "browser.connect" => ConnectParams, ConnectParams::validate => BrowserSessionResult,
     "browser.new_page" => NewPageParams => NewPageResult,
     "browser.tabs" => Empty => TabsResult,
     "browser.close_tab" => PageIdParams => CloseTabResult,
@@ -1197,6 +1261,7 @@ methods! {
     "page.frames" => FramesParams => Vec<FrameInfo>,
     "page.evaluate_in_frame" => FrameJsParams => EvaluateResult,
     "page.click_shadow" => ClickShadowParams, ClickShadowParams::validate => ClickShadowResult,
+    "page.solve_turnstile" => SolveTurnstileParams, SolveTurnstileParams::validate => SolveTurnstileResult,
     "page.fetch" => FetchParams => FetchResult,
     "page.fetch_bounded" => BoundedFetchParams, BoundedFetchParams::validate => BoundedFetchResult,
     "page.capture_state" => PageIdParams => CaptureStateResult,
@@ -1249,7 +1314,7 @@ pub fn schema_bundle() -> Value {
             )
         })
         .collect();
-    json!({
+    let mut bundle = json!({
         "protocolVersion": PROTOCOL_VERSION,
         "methods": methods,
         "types": {
@@ -1274,7 +1339,10 @@ pub fn schema_bundle() -> Value {
             "RecordingRecord": schema::<RecordingRecord>(), "RecordingState": schema::<RecordingState>(),
             "RecordingFailure": schema::<RecordingFailure>(), "RecordingFailureStage": schema::<RecordingFailureStage>()
         }
-    })
+    });
+    // Added outside `json!` to stay under its macro recursion limit.
+    bundle["types"]["CloudflareAutoSolve"] = schema::<CloudflareAutoSolve>();
+    bundle
 }
 
 #[cfg(test)]
@@ -1710,5 +1778,40 @@ mod tests {
         assert_eq!(unique.len(), methods.len());
         assert!(validate_params("browser.connect", &json!({})).is_err());
         assert!(validate_params("operation_get", &json!({"id":"operation"})).is_err());
+    }
+
+    #[test]
+    fn turnstile_and_cloudflare_auto_solve_validate_deadlines() {
+        assert!(validate_params("page.solve_turnstile", &json!({"pageId":"p"})).is_ok());
+        for timeout in [0, 120_001] {
+            assert!(validate_params(
+                "page.solve_turnstile",
+                &json!({"pageId":"p","timeoutMs":timeout})
+            )
+            .is_err());
+        }
+        let launch: LaunchParams =
+            serde_json::from_value(json!({"autoSolveCloudflare":{}})).unwrap();
+        assert_eq!(
+            launch
+                .auto_solve_cloudflare
+                .map(|o| (o.interval_ms, o.timeout_ms)),
+            Some((500, 30_000))
+        );
+        assert!(validate_params(
+            "browser.launch",
+            &json!({"autoSolveCloudflare":{"intervalMs":99}})
+        )
+        .is_err());
+        assert!(validate_params(
+            "browser.connect",
+            &json!({"wsEndpoint":"ws://localhost/devtools/browser/id","autoSolveCloudflare":{"timeoutMs":5000}})
+        )
+        .is_ok());
+        assert!(validate_params(
+            "browser.connect",
+            &json!({"wsEndpoint":"ws://localhost/devtools/browser/id","autoSolveCloudflare":{"intervalMs":60001}})
+        )
+        .is_err());
     }
 }

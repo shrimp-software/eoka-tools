@@ -6,7 +6,8 @@ use eoka_protocol::sidecar::{
     FetchResult, FrameInfo, FrameJsParams, FramesParams, GetAttributeParams, HeldKeyParams,
     JsParams, MouseButtonParams, MouseMoveParams, RestoreStateParams, ScreenshotParams,
     ScreenshotToFileParams, SelectorParams, ServerError, SetViewportParams, SolveCaptchaParams,
-    SolveCaptchaResult, TextResult, TitleResult, UrlResult, WaitForParams, WaitForTextParams,
+    SolveCaptchaResult, SolveTurnstileParams, SolveTurnstileResult, TextResult, TitleResult,
+    UrlResult, WaitForParams, WaitForTextParams,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -215,6 +216,20 @@ pub async fn click_shadow(state: &AppState, params: Value) -> Result<Value, Serv
         selector: receipt.selector,
         x: receipt.x,
         y: receipt.y,
+    })
+}
+
+/// Click a Cloudflare Turnstile checkbox until the page leaves the challenge.
+pub async fn solve_turnstile(state: &AppState, params: Value) -> Result<Value, ServerError> {
+    let params: SolveTurnstileParams = parse_params(params)?;
+    let receipt = crate::cloudflare::solve_turnstile(
+        state.page(&params.page_id)?,
+        std::time::Duration::from_millis(params.timeout_ms),
+    )
+    .await?;
+    encode(SolveTurnstileResult {
+        clicks: receipt.clicks,
+        elapsed_ms: receipt.elapsed.as_millis() as u64,
     })
 }
 

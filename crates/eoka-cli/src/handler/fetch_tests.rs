@@ -270,6 +270,7 @@ async fn delayed_idle_file_operation_keeps_commands_and_shutdown_serviceable() {
                 js_block: Vec::new(),
                 persist: false,
                 geo_align: false,
+                auto_solve_cloudflare: false,
             };
             let daemon_name = name.clone();
             let daemon =
