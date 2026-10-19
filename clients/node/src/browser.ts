@@ -10,6 +10,7 @@ import { Page, type PerformOptions } from './page.js';
 import { Recording } from './recording.js';
 import { SidecarTransport } from './transport.js';
 import { installBrowser, type InstallProgress } from './browser-install.js';
+import { CloudflareWatcher, resolveCloudflareOptions, type CloudflareOptions } from './cloudflare.js';
 import { resolveServerBinary } from './server-binary.js';
 
 export interface BrowserOptions {
@@ -18,6 +19,8 @@ export interface BrowserOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
   shutdownTimeoutMs?: number;
+  /** Watch every tab and click full-page Cloudflare challenge checkboxes. */
+  autoSolveCloudflare?: boolean | CloudflareOptions;
 }
 
 export interface LaunchOptions extends BrowserOptions {
@@ -217,6 +220,7 @@ export class Browser implements InvokeClient {
   readonly #capabilities: ReadonlySet<string>;
   readonly #shutdownTimeoutMs: number;
   #closePromise: Promise<void> | undefined;
+  #cloudflare: CloudflareWatcher | undefined;
   readonly #pageOwners = new Set<Promise<void>>();
   readonly #creationCleanupFailures: unknown[] = [];
   readonly #runtimeCleanup: Promise<void>;
@@ -316,7 +320,13 @@ export class Browser implements InvokeClient {
         throw new ProtocolError(`Managed browser version mismatch: expected ${expectedBrowserVersion}, received ${session.browserVersion}`, { requestState: 'acknowledged' });
       }
       checkAbort(options.signal, 'acknowledged');
-      return new Browser(transport, session, options.shutdownTimeoutMs ?? 45_000, runtimeDir);
+      const browser = new Browser(transport, session, options.shutdownTimeoutMs ?? 45_000, runtimeDir);
+      const cloudflare = resolveCloudflareOptions(options.autoSolveCloudflare);
+      if (cloudflare !== undefined) {
+        browser.#cloudflare = new CloudflareWatcher(browser, cloudflare);
+        browser.#cloudflare.start();
+      }
+      return browser;
     } catch (primary) {
       try {
         await transport.close();
@@ -433,6 +443,7 @@ export class Browser implements InvokeClient {
 
   close(): Promise<void> {
     this.#closePromise ??= (async () => {
+      this.#cloudflare?.stop();
       this.#transport.quiesce();
       await Promise.all(this.#pageOwners);
       let transportFailure: unknown;

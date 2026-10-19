@@ -1,5 +1,6 @@
 export { Browser } from "./browser.js";
 export type { BrowserOptions, LaunchOptions, ConnectOptions } from "./browser.js";
+export type { CloudflareOptions } from "./cloudflare.js";
 export { installBrowser } from "./browser-install.js";
 export type { InstallBrowserOptions, InstallProgress, BrowserInstallation } from "./browser-install.js";
 export { InstallationError } from "./install-errors.js";
