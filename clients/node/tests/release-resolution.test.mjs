@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import { promisify } from 'node:util';
 import { detectPlatform, platformIds, selectPlatform } from '../dist/platform.js';
 import { releaseManifest, validateReleaseManifest } from '../dist/release.js';
-import { resolveServerBinary } from '../dist/server-binary.js';
+import { nodeEngineMismatch, resolveServerBinary } from '../dist/server-binary.js';
 import { stageRelease } from '../scripts/stage-release.mjs';
 
 const exec = promisify(execFile);
@@ -125,8 +125,9 @@ async function fixture(run) {
     await chmod(binary, 0o755);
     await writeFile(join(packageRoot, 'package.json'), JSON.stringify(packageJson));
     await writeFile(join(packageRoot, 'release-metadata.json'), JSON.stringify(metadata));
-    const probe = async () => {
-      const result = await exec(process.execPath, ['--input-type=module', '--eval', `const {resolveServerBinary}=await import('./dist/server-binary.js');try{console.log(JSON.stringify(await resolveServerBinary({env:{}})))}catch(error){console.log(JSON.stringify({code:error.code,message:error.message}))}`], { cwd: directory, env: { ...process.env, PATH: '' } });
+    const probe = async ({ nodeVersion } = {}) => {
+      const pretend = nodeVersion === undefined ? '' : `Object.defineProperty(process.versions,'node',{value:${JSON.stringify(nodeVersion)}});`;
+      const result = await exec(process.execPath, ['--input-type=module', '--eval', `${pretend}const {resolveServerBinary}=await import('./dist/server-binary.js');try{console.log(JSON.stringify(await resolveServerBinary({env:{}})))}catch(error){console.log(JSON.stringify({code:error.code,message:error.message}))}`], { cwd: directory, env: { ...process.env, PATH: '' } });
       assert.equal(result.stderr, '');
       return JSON.parse(result.stdout);
     };
@@ -150,6 +151,26 @@ test('missing optional package is actionable even for source-only unstaged SDK',
   assert.match(result.message, /optional dependencies enabled/);
   assert.match(result.message, /no Cargo, PATH or network fallback/);
 }));
+
+test('missing optional package names the required Node range on an unsupported Node', () => fixture(async ({ packageRoot, directory, probe }) => {
+  await writeFile(join(directory, 'package.json'), JSON.stringify({ type: 'module', engines: { node: '^24.21.0' } }));
+  await rm(packageRoot, { recursive: true });
+  const old = await probe({ nodeVersion: '24.18.0' });
+  assert.equal(old.code, 'ServerPackageMissing');
+  assert.match(old.message, /this is Node 24\.18\.0, but @cbxss\/eoka requires \^24\.21\.0/);
+  assert.match(old.message, /mise use node@24/);
+  assert.match(old.message, /optional dependencies enabled/);
+  const supported = await probe({ nodeVersion: '24.21.0' });
+  assert.equal(supported.code, 'ServerPackageMissing');
+  assert.doesNotMatch(supported.message, /requires \^24/);
+}));
+
+test('node engine check follows caret ranges', () => {
+  for (const [version, mismatch] of [['24.21.0', false], ['24.30.1', false], ['24.20.9', true], ['24.18.0', true], ['22.12.0', true], ['25.0.0', true], ['v24.21.0', false]]) {
+    assert.equal(nodeEngineMismatch('^24.21.0', version), mismatch, version);
+  }
+  assert.equal(nodeEngineMismatch('>=24', '22.0.0'), false);
+});
 
 test('unstaged SDK never trusts a package to authorize its own digest', () => fixture(async ({ directory, manifest, pin, probe }) => {
   pin.sha256 = null;
