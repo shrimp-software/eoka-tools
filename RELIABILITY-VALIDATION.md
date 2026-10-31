@@ -39,7 +39,7 @@ cargo --config 'patch.crates-io.eoka.path="../eoka-reliability"' test --workspac
 | Go formatting, vet, race suite and real-browser fixture | Passed; uncached race run |
 | Sketchy helper fixtures and real local HLS download | 6 passed |
 | CLI installer | Exact compiled binary installed; bad checksum and wrong version rejected without replacing the existing binary |
-| New/changed CI workflows | YAML and shell syntax checked; hosted runners only; remote CI execution pending |
+| New/changed CI workflows | YAML and shell syntax checked; hosted runners only; actionlint validates the browser job after moving runner paths into a step; registry qualification remains blocked on core 0.8.0 |
 | `mise run release-check` | Quality gates passed; registry gate correctly rejected the local core override |
 
 The new hosted browser CI job runs all Rust browser tests, all Node tests with

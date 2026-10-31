@@ -167,9 +167,6 @@ jobs:
     timeout-minutes: 30
     env:
       TMPDIR: /var/tmp/er
-      EOKA_BROWSER_CACHE_DIR: ${{ runner.temp }}/eoka-browser
-      EOKA_SERVER_ARTIFACTS_DIR: ${{ runner.temp }}/eoka-artifacts
-      EOKA_RELEASE_STAGE_DIR: ${{ runner.temp }}/eoka-stage
       EOKA_RELIABILITY_SERVER: ${{ github.workspace }}/target/debug/eoka-server
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
@@ -178,6 +175,13 @@ jobs:
         with:
           go-version: "1.21"
       - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db
+      - name: Initialize qualification paths
+        run: |
+          {
+            echo "EOKA_BROWSER_CACHE_DIR=$RUNNER_TEMP/eoka-browser"
+            echo "EOKA_SERVER_ARTIFACTS_DIR=$RUNNER_TEMP/eoka-artifacts"
+            echo "EOKA_RELEASE_STAGE_DIR=$RUNNER_TEMP/eoka-stage"
+          } >> "$GITHUB_ENV"
       - name: Prepare browser dependencies and SDK
         run: |
           mkdir -p "$TMPDIR" "$EOKA_SERVER_ARTIFACTS_DIR"
