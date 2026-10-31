@@ -8,7 +8,10 @@ page state, stable control references, one durable action and fresh observations
 Exploratory input reports uncertainty without claiming task completion.
 See [AGENT-BROWSING.md](AGENT-BROWSING.md) for the contract and examples.
 
-## Durable actions (core 0.7 / CLI 0.5)
+See [RELIABILITY-MIGRATION.md](RELIABILITY-MIGRATION.md) for the breaking protocol 2 session, input, JavaScript and completion contracts.
+The [validation report](RELIABILITY-VALIDATION.md) records local proof and the remaining macOS and publication gates.
+
+## Durable actions (core 0.8 / CLI 0.7)
 
 High-level actions now return durable operation records. Click and key actions
 require an explicit expected outcome. Generate an operation UUID before sending,

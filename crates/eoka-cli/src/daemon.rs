@@ -55,32 +55,60 @@ pub async fn run(session_name: &str, spec: LaunchSpec) -> anyhow::Result<()> {
         let _ = shutdown_tx.send(()).await;
     });
 
+    let hello = handler
+        .handle("session_hello", &serde_json::Value::Null)
+        .await
+        .data
+        .unwrap_or_default();
+    let (accepted, mut incoming) = mpsc::channel(64);
+    let frontdoor = tokio::spawn(async move {
+        while let Ok((stream, _)) = listener.accept().await {
+            let (mut reader, mut writer) = stream.into_split();
+            let raw: serde_json::Value =
+                match tokio::time::timeout(Duration::from_secs(5), read_msg(&mut reader)).await {
+                    Ok(Ok(raw)) => raw,
+                    _ => continue,
+                };
+            let req: Request = match serde_json::from_value(raw.clone()) {
+                Ok(req) => req,
+                Err(error) => {
+                    let _ = write_msg(
+                        &mut writer,
+                        &Response::err(format!("Invalid command request: {error}")),
+                    )
+                    .await;
+                    continue;
+                }
+            };
+            if matches!(req, Request::SessionHello) {
+                let _ = write_msg(&mut writer, &Response::ok(hello.clone())).await;
+                continue;
+            }
+            if raw["protocol_major"] != eoka_protocol::sidecar::PROTOCOL_VERSION.major {
+                let _ = write_msg(&mut writer, &Response::err_detail(eoka_protocol::ErrorDetail::new("protocol_mismatch", "Client and daemon protocols differ; upgrade explicitly. No browser was restarted and no command was dispatched."))).await;
+                continue;
+            }
+            if let Err(error) = accepted.try_send((reader, writer, req, raw)) {
+                let (_, mut writer, _, _) = error.into_inner();
+                let _ = write_msg(
+                    &mut writer,
+                    &Response::err_detail(eoka_protocol::ErrorDetail::new(
+                        "daemon_busy",
+                        "Command queue is full; no command was admitted",
+                    )),
+                )
+                .await;
+            }
+        }
+    });
+
     let mut maintenance = tokio::time::interval(Duration::from_millis(25));
     maintenance.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         tokio::select! {
-            result = listener.accept() => {
-                match result {
-                    Ok((stream, _)) => {
+            request = incoming.recv() => {
+                if let Some((mut reader, mut writer, req, raw)) = request {
                         last_activity = Instant::now();
-                        let (mut reader, mut writer) = stream.into_split();
-
-                        let raw: serde_json::Value = match read_msg(&mut reader).await {
-                            Ok(r) => r,
-                            Err(e) => {
-                                eprintln!("[eoka] read error: {}", e);
-                                continue;
-                            }
-                        };
-                        let req: Request = match serde_json::from_value(raw.clone()) {
-                            Ok(req) => req,
-                            Err(e) => {
-                                let resp = Response::err(format!("Invalid command request: {}", e));
-                                let _ = write_msg(&mut writer, &resp).await;
-                                continue;
-                            }
-                        };
-
                         if matches!(req, Request::Shutdown) {
                             let _ = handler.handle("close", &serde_json::Value::Null).await;
                             let resp = Response::ok_text("Daemon shutting down");
@@ -94,7 +122,7 @@ pub async fn run(session_name: &str, spec: LaunchSpec) -> anyhow::Result<()> {
                             waiters.spawn(async move {
                                 let mut disconnected=[0u8;1];
                                 tokio::select! {
-                                    result=manager.wait(&args.id,args.timeout_ms)=>{let response=eoka_server::operations::commands::response(result);let _=write_msg(&mut writer,&response).await;},
+                                    result=manager.wait(&args.id,args.timeout_ms)=>{let response=match result { Ok(record)=>Response::action_result(record), Err(error)=>Response::err(error.to_string()) };let _=write_msg(&mut writer,&response).await;},
                                     _=reader.read(&mut disconnected)=>{},
                                 }
                             });
@@ -121,9 +149,7 @@ pub async fn run(session_name: &str, spec: LaunchSpec) -> anyhow::Result<()> {
                         if let Err(e) = write_msg(&mut writer, &resp).await {
                             eprintln!("[eoka] write error: {}", e);
                         }
-                    }
-                    Err(e) => eprintln!("[eoka] accept error: {}", e),
-                }
+                } else { break; }
             }
             _ = maintenance.tick() => {
                 handler.service_idle_fetch();
@@ -142,6 +168,8 @@ pub async fn run(session_name: &str, spec: LaunchSpec) -> anyhow::Result<()> {
         }
     }
 
+    frontdoor.abort();
+    let _ = frontdoor.await;
     waiters.shutdown().await;
     let _ = std::fs::remove_file(&sock_path);
     let _ = std::fs::remove_file(&pid_path);

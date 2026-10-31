@@ -17,11 +17,7 @@ impl Cli {
     }
 
     fn effective_name(&self) -> String {
-        if self.port.is_some() {
-            format!("{}-live", self.name)
-        } else {
-            self.name.clone()
-        }
+        self.name.clone()
     }
 
     fn command(&self, args: &[&str]) -> Command {
@@ -46,7 +42,11 @@ impl Cli {
         if let Some(port) = self.port {
             cmd.args(["--cdp", &port.to_string()]);
         }
-        cmd.args(args).kill_on_drop(true);
+        cmd.args(args);
+        if matches!(args.first(), Some(&"eval" | &"exec")) {
+            cmd.arg("--raw");
+        }
+        cmd.kill_on_drop(true);
         cmd
     }
 
@@ -641,9 +641,12 @@ async fn failed_interception_files_suppress_clearance_and_idle_special_files_do_
         tokio::net::UnixStream::connect(eoka_sdk::session::socket_path(&cli.effective_name()))
             .await
             .unwrap();
-    eoka_sdk::write_msg(&mut socket, &eoka_sdk::Request::Shutdown)
-        .await
-        .unwrap();
+    eoka_sdk::write_msg(
+        &mut socket,
+        &serde_json::json!({"cmd":"shutdown","protocol_major":2}),
+    )
+    .await
+    .unwrap();
     let shutdown: eoka_sdk::Response =
         tokio::time::timeout(Duration::from_secs(5), eoka_sdk::read_msg(&mut socket))
             .await

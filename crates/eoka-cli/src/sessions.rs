@@ -1,44 +1,32 @@
-//! `eoka sessions` — list every session with a socket in the runtime dir.
+use crate::{client, launch_spec::LaunchSpec, output, protocol, session};
+use serde_json::json;
 
-use serde_json::{json, Value};
-
-use crate::{client, output, protocol, session};
-
-/// List every session with a socket file in the runtime dir, live or stale,
-/// like `tmux ls`. Names are the fully-qualified session ids (e.g.
-/// `default-headed`), matching what `--session`/`session_suffix` produce.
-pub(crate) fn print_sessions(json_mode: bool) {
-    let sessions = session::list_sessions();
-
+pub(crate) async fn print_sessions(json_mode: bool) {
+    let mut rows = Vec::new();
+    for name in session::list_sessions() {
+        let hello =
+            client::send_command(&name, protocol::Request::SessionHello, LaunchSpec::Reuse).await;
+        let details = hello
+            .ok()
+            .filter(|r| r.ok)
+            .and_then(|r| r.data)
+            .unwrap_or_default();
+        rows.push(json!({"session":name,"running":client::is_daemon_running(&name),"socket":session::socket_path(&name).to_string_lossy(),"mode":details["mode"],"daemon_version":details["daemon_version"],"protocol_major":details["protocol_major"],"legacy_name":name.ends_with("-headed") || name.ends_with("-live")}));
+    }
     if json_mode {
-        let rows: Vec<Value> = sessions
-            .iter()
-            .map(|name| {
-                json!({
-                    "session": name,
-                    "running": client::is_daemon_running(name),
-                    "socket": session::socket_path(name).to_string_lossy(),
-                })
-            })
-            .collect();
-        output::print_response(&protocol::Response::ok(json!({ "sessions": rows })), true);
-        return;
-    }
-
-    if sessions.is_empty() {
+        output::print_response(&protocol::Response::ok(json!({"sessions":rows})), true);
+    } else if rows.is_empty() {
         println!("No sessions found");
-        return;
-    }
-
-    let name_width = sessions.iter().map(String::len).max().unwrap_or(0).max(7);
-    println!("{:<name_width$}  RUNNING  SOCKET", "SESSION");
-    for name in &sessions {
-        let running = client::is_daemon_running(name);
-        println!(
-            "{:<name_width$}  {:<7}  {}",
-            name,
-            if running { "yes" } else { "no" },
-            session::socket_path(name).display()
-        );
+    } else {
+        println!("SESSION  MODE  VERSION  RUNNING");
+        for row in rows {
+            println!(
+                "{}  {}  {}  {}",
+                row["session"].as_str().unwrap_or_default(),
+                row["mode"].as_str().unwrap_or("unknown"),
+                row["daemon_version"].as_str().unwrap_or("unknown"),
+                row["running"]
+            );
+        }
     }
 }

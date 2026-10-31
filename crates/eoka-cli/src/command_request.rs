@@ -15,7 +15,7 @@ use network::network_action_to_request;
 fn parse_mouse_button(button: &str) -> MouseButton {
     serde_json::from_value(serde_json::Value::String(button.to_owned())).unwrap_or_else(|error| {
         eprintln!("Error: invalid mouse button: {error}");
-        std::process::exit(1);
+        std::process::exit(2);
     })
 }
 
@@ -24,7 +24,7 @@ fn parse_headers_json(raw: &str) -> serde_json::Value {
         Ok(v) => v,
         Err(e) => {
             eprintln!("Error: invalid --headers JSON: {}", e);
-            std::process::exit(1);
+            std::process::exit(2);
         }
     }
 }
@@ -32,22 +32,28 @@ fn parse_headers_json(raw: &str) -> serde_json::Value {
 pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
     match cmd {
         Command::View {
+            cursor,
+            role,
+            name,
             max_controls,
             timeout_ms,
         } => Request::AgentObserve(eoka_protocol::AgentObserveArgs {
+            cursor: cursor.clone(),
+            role: role.clone(),
+            name: name.clone(),
             max_controls: *max_controls,
             timeout_ms: *timeout_ms,
         }),
         Command::Step { request } => {
             Request::AgentStep(serde_json::from_str(request).unwrap_or_else(|error| {
                 eprintln!("Invalid step request: {error}");
-                std::process::exit(1)
+                std::process::exit(2)
             }))
         }
         Command::Action { request } => {
             Request::ActionPerform(serde_json::from_str(request).unwrap_or_else(|e| {
                 eprintln!("Invalid action request: {e}");
-                std::process::exit(1)
+                std::process::exit(2)
             }))
         }
         Command::Operations { command } => match command {
@@ -72,7 +78,7 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
         },
         Command::Download(args) => args.request().unwrap_or_else(|error| {
             eprintln!("Error: {error}");
-            std::process::exit(1);
+            std::process::exit(2);
         }),
         Command::Open {
             url,
@@ -82,6 +88,7 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
             inject_js,
             load_state,
         } => Request::Open(OpenArgs {
+            operation: Default::default(),
             url: url.clone(),
             headers: headers.as_ref().map(|h| parse_headers_json(h)),
             user_agent: user_agent.clone(),
@@ -137,7 +144,16 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
             operation: Default::default(),
             target: target.clone(),
         }),
-        Command::Fill { target, text } => Request::Fill(FillArgs {
+        Command::Fill {
+            target,
+            text,
+            input_mode,
+        } => Request::Fill(FillArgs {
+            input_mode: if input_mode == "bulk" {
+                eoka_protocol::InputMode::Bulk
+            } else {
+                eoka_protocol::InputMode::Sequential
+            },
             operation: Default::default(),
             target: target.clone(),
             text: text.clone(),
@@ -180,6 +196,8 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
             target: target.clone(),
         }),
         Command::Eval {
+            args,
+            raw,
             code,
             file,
             no_return,
@@ -187,6 +205,11 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
             no_await,
         } => {
             let args = ScriptArgs {
+                arguments: serde_json::from_str(args).unwrap_or_else(|error| {
+                    eprintln!("Invalid --args: {error}");
+                    std::process::exit(2)
+                }),
+                raw: *raw,
                 code: code.clone(),
                 file: file.as_ref().map(|path| path.to_string_lossy().to_string()),
                 max_size: *max_size,
@@ -199,10 +222,17 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
             }
         }
         Command::Exec {
+            args,
+            raw,
             code,
             file,
             no_await,
         } => Request::Exec(ScriptArgs {
+            arguments: serde_json::from_str(args).unwrap_or_else(|error| {
+                eprintln!("Invalid --args: {error}");
+                std::process::exit(2)
+            }),
+            raw: *raw,
             code: code.clone(),
             file: file.as_ref().map(|path| path.to_string_lossy().to_string()),
             max_size: None,
@@ -303,6 +333,7 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
             load,
             timeout,
         } => Request::Wait(WaitArgs {
+            expect: None,
             ms: *ms,
             text: text.clone(),
             url: url.clone(),

@@ -152,8 +152,7 @@ async function consumer(config, classifyRecordingDiagnostics) {
       }
       return pids;
     };
-    // Navigation verifies a commit, not completion of HTML parsing.
-    const waitForDocument = page => page.evaluate(`new Promise(resolve => {
+    const waitForDocument = page => page.evaluate(`()=>new Promise(resolve => {
       if (document.readyState !== 'loading') resolve(true);
       else document.addEventListener('DOMContentLoaded', () => resolve(true), { once: true });
     })`);
@@ -166,7 +165,7 @@ async function consumer(config, classifyRecordingDiagnostics) {
     if (platform.startsWith('linux-')) {
       const sandboxPage = await active.newPage('chrome://sandbox');
       await waitForDocument(sandboxPage);
-      const status = await sandboxPage.evaluate('document.body.innerText');
+      const status = await sandboxPage.evaluate('()=>document.body.innerText');
       for (const field of ['PID namespaces', 'Network namespaces', 'Seccomp-BPF sandbox']) {
         assert.match(status, new RegExp(`${field}\\s+Yes(?:\\r?\\n|$)`));
       }
@@ -178,7 +177,7 @@ async function consumer(config, classifyRecordingDiagnostics) {
     const receipt = await page.fill('#field', 'packed native qualification');
     assert.equal(receipt.outcome, 'verified_complete');
     assert.equal(receipt.dispatch, 'acknowledged');
-    assert.equal(await page.evaluate('document.querySelector("#field").value'), 'packed native qualification');
+    assert.equal(await page.evaluate('()=>document.querySelector("#field").value'), 'packed native qualification');
     evidence.checks.fill = receipt;
     const screenshots = [];
     for (const format of ['png', 'jpeg', 'webp']) {
@@ -290,7 +289,7 @@ async function consumer(config, classifyRecordingDiagnostics) {
     active = await launch(false);
     const headed = await active.newPage('data:text/html,<title>Headed qualification</title>');
     await waitForDocument(headed);
-    assert.equal(await headed.evaluate('document.title'), 'Headed qualification');
+    assert.equal(await headed.evaluate('()=>document.title'), 'Headed qualification');
     evidence.checks.headed = { passed: true, pids: await closeOwned(), display: process.env.DISPLAY ?? null };
     const chromePin = releaseManifest.chrome.platforms[platform];
     const distribution = resolve(fresh.executablePath, ...chromePin.executablePath.split('/').map(() => '..'));
@@ -323,7 +322,7 @@ async function consumer(config, classifyRecordingDiagnostics) {
     assert.equal(active.ownership, 'borrowed');
     const borrowed = await active.newPage('data:text/html,<title>Borrowed qualification</title>');
     await waitForDocument(borrowed);
-    assert.equal(await borrowed.evaluate('document.title'), 'Borrowed qualification');
+    assert.equal(await borrowed.evaluate('()=>document.title'), 'Borrowed qualification');
     await active.close();
     active = undefined;
     assert.equal(external.exitCode, null);

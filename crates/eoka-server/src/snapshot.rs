@@ -23,6 +23,7 @@ struct AXNode {
     ignored: bool,
     role: Option<AXValue>,
     name: Option<AXValue>,
+    description: Option<AXValue>,
     value: Option<AXValue>,
     #[serde(default)]
     properties: Vec<AXProperty>,
@@ -75,6 +76,12 @@ pub struct SnapshotRef {
     pub disabled: bool,
     pub checked: Option<bool>,
     pub expanded: Option<bool>,
+    pub focused: bool,
+    pub readonly: bool,
+    pub editable: bool,
+    pub required: bool,
+    pub invalid: bool,
+    pub validation_message: Option<String>,
 }
 
 #[derive(Debug)]
@@ -180,6 +187,32 @@ impl<'a> Walker<'a> {
                 self.ref_counter += 1;
                 let label = format!("@e{}", self.ref_counter);
                 self.refs.push(SnapshotRef {
+                    focused: node
+                        .properties
+                        .iter()
+                        .any(|p| p.name == "focused" && p.value.is_truthy()),
+                    readonly: node
+                        .properties
+                        .iter()
+                        .any(|p| p.name == "readonly" && p.value.is_truthy()),
+                    editable: node
+                        .properties
+                        .iter()
+                        .any(|p| p.name == "editable" && !p.value.as_str().is_empty()),
+                    required: node
+                        .properties
+                        .iter()
+                        .any(|p| p.name == "required" && p.value.is_truthy()),
+                    invalid: node.properties.iter().any(|p| {
+                        p.name == "invalid"
+                            && p.value.as_str() != "false"
+                            && !p.value.as_str().is_empty()
+                    }),
+                    validation_message: node
+                        .description
+                        .as_ref()
+                        .map(|v| v.as_str().chars().take(200).collect())
+                        .filter(|v: &String| !v.is_empty()),
                     ref_label: label.clone(),
                     backend_node_id: id,
                     role: role.to_string(),
@@ -361,6 +394,7 @@ mod tests {
     #[test]
     fn format_props_value_and_disabled() {
         let node = AXNode {
+            description: None,
             node_id: "1".into(),
             ignored: false,
             role: None,

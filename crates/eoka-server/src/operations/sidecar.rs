@@ -152,7 +152,7 @@ fn admission(
                 Action::Fill {
                     target,
                     value: args.value,
-                    human: method == "page.human_fill",
+                    input_mode: args.input_mode,
                 }
             };
             (args.page_id, args.operation_id, action, args.options)
@@ -165,7 +165,7 @@ fn admission(
                 Action::Type {
                     target: LocatorSpec::css(args.selector),
                     text: args.text,
-                    human: false,
+                    input_mode: args.input_mode,
                 },
                 args.options,
             )

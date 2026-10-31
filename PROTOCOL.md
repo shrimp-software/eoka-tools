@@ -38,7 +38,7 @@ consume those contracts. The Go client implements the same wire protocol.
 Before launching Chrome, clients send:
 
 ```json
-{"id":1,"method":"server.hello","params":{"protocol":{"major":1,"minor":3}}}
+{"id":1,"method":"server.hello","params":{"protocol":{"major":2,"minor":0}}}
 ```
 
 The result contains:
@@ -53,12 +53,12 @@ The result contains:
 | `limits.maxMessageBytes` | Maximum serialized message size |
 | `limits.maxInFlight` | Maximum in-flight requests |
 
-Protocol major 1/minor 3 is supported, including compatible 1.0/1.1/1.2 requests. A
+Protocol major 2/minor 0 is supported. Version 1 clients must migrate. A
 different major or a requested minor newer than the server supports returns
 `ProtocolMismatch` without launching a browser. Existing low-level clients can
 still call compatible methods directly; the Go client requires protocol 1.1
 before launch or attachment and fails explicitly against older servers.
-The Node SDK requires protocol 1.3, including bounded browser fetch and capture contracts.
+The Node SDK requires protocol 2.0, including bounded browser fetch and capture contracts.
 
 `durableActions`, `operationCancellation` and `gracefulShutdown` describe server
 behavior. `explicitExecutablePath`, `browserAttachment`, `runtimeIsolation`,
@@ -211,7 +211,8 @@ Element handles do not cross this wire.
   `page.get_attribute`, `page.exists`.
 - Waits: `page.wait_for`, `page.wait_for_visible`, `page.wait_for_text`.
 - Evaluation: `page.evaluate` returns `{result: <JSON value>}`;
-  `page.execute` discards the result. These are raw JavaScript primitives,
+  `page.execute` discards the result. These accept `function` and JSON `arguments`; raw evaluation uses the explicit
+  `page.evaluate_raw` / `page.execute_raw` methods. See [migration](RELIABILITY-MIGRATION.md). These are JavaScript primitives,
   not action-receipt-producing operations and not closure serialization.
 - Fetch: `page.fetch` performs browser-context fetch with page credentials and
   preserves its existing result shape. The protocol response limit does not

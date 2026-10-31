@@ -4,6 +4,55 @@ use eoka::{Action, ActionOptions, LocatorQuery, LocatorSpec};
 use eoka_protocol::{ErrorDetail, Response};
 use serde_json::Value;
 
+#[derive(Debug)]
+struct OutcomeUnknown(anyhow::Error);
+
+impl std::fmt::Display for OutcomeUnknown {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:#}", self.0)
+    }
+}
+
+impl std::error::Error for OutcomeUnknown {}
+
+pub fn uncertain(error: anyhow::Error) -> anyhow::Error {
+    OutcomeUnknown(error).into()
+}
+
+pub fn failure(error: anyhow::Error, id: Option<String>) -> Response {
+    let unknown = error.downcast_ref::<OutcomeUnknown>().is_some();
+    let status = if unknown {
+        eoka_protocol::OperationStatus::OutcomeUnknown
+    } else {
+        eoka_protocol::OperationStatus::NotDispatched
+    };
+    let mut response = Response::err_detail(
+        ErrorDetail::new(
+            if unknown {
+                "outcome_unknown"
+            } else {
+                "invalid_action"
+            },
+            format!("{error:#}"),
+        )
+        .retryable(false)
+        .context(eoka_protocol::ErrorContext {
+            operation_id: id.clone(),
+            phase: Some(
+                if unknown {
+                    "admission_or_execution"
+                } else {
+                    "validation"
+                }
+                .into(),
+            ),
+            ..Default::default()
+        }),
+    );
+    response.data = Some(serde_json::json!({"operation_id":id,"status":status}));
+    response
+}
+
 pub fn live_locator(target: &str) -> Result<LocatorSpec> {
     let query = match Target::parse(target) {
         Target::Live(LivePattern::Css(selector)) => LocatorQuery::Css { selector },
@@ -59,7 +108,11 @@ pub fn action(cmd: &str, args: &Value, target: Option<LocatorSpec>) -> Result<Ac
         "fill" => Action::Fill {
             target: required()?,
             value: string("text")?,
-            human: false,
+            input_mode: serde_json::from_value(
+                args.get("input_mode")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!("sequential")),
+            )?,
         },
         "select" => Action::SelectOption {
             target: required()?,
@@ -115,15 +168,43 @@ impl super::OperationManager {
         Some(match cmd {
             "operation_get" => response(self.get(id).await),
             "operation_cancel" => response(self.cancel(id).await),
-            "operation_wait" => response(
-                self.wait(id, args["timeout_ms"].as_u64().unwrap_or(30_000))
-                    .await,
-            ),
+            "operation_wait" => match self
+                .wait(id, args["timeout_ms"].as_u64().unwrap_or(30_000))
+                .await
+            {
+                Ok(record) => Response::action_result(record),
+                Err(error) => Response::err_detail(
+                    ErrorDetail::new("operation_error", error.to_string()).retryable(false),
+                ),
+            },
             "operation_list" => match serde_json::from_value(args.clone()) {
                 Ok(args) => response(self.list(args).await),
                 Err(error) => Response::err(error.to_string()),
             },
             _ => return None,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn failed_admission_preserves_recovery_id_and_uncertainty() {
+        let id = uuid::Uuid::new_v4().to_string();
+        let response = failure(
+            uncertain(anyhow!("storage acknowledgement lost")),
+            Some(id.clone()),
+        );
+        assert_eq!(response.exit_code(), 4);
+        assert_eq!(response.data.as_ref().unwrap()["operation_id"], id);
+        assert_eq!(
+            response.error_detail.unwrap().context.unwrap().operation_id,
+            Some(id)
+        );
+        let rejected = failure(anyhow!("Target is required"), None);
+        assert_eq!(rejected.exit_code(), 1);
+        assert_eq!(rejected.data.unwrap()["status"], "not_dispatched");
     }
 }

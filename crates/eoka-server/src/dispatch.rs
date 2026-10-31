@@ -41,11 +41,22 @@ pub async fn dispatch(
             .map_err(|error| ServerError::invalid_params(error.to_string()))?;
         let browser = state.browser()?.clone();
         let page = state.page(&args.page_id)?.clone();
-        let result = state
+        let mut result = state
             .agent
             .step(&browser, &page, &state.operations, args.args)
             .await
             .map_err(agent_error)?;
+        if let Some(observation) = &result.observation {
+            if state.page(&observation.tab_id).is_err() {
+                match browser.attach_page(&observation.tab_id).await {
+                    Ok(page) => state.insert_page(observation.tab_id.clone(), page),
+                    Err(error) => {
+                        result.observation_error =
+                            Some(format!("Destination attachment failed: {error}"));
+                    }
+                }
+            }
+        }
         return serde_json::to_value(result)
             .map_err(|error| ServerError::internal(error.to_string()));
     }
@@ -81,6 +92,8 @@ pub async fn dispatch(
         "page.wait_for_text" => page::wait_for_text(state, params).await,
         "page.evaluate" => page::evaluate(state, params).await,
         "page.execute" => page::execute(state, params).await,
+        "page.evaluate_raw" => page::evaluate_raw(state, params).await,
+        "page.execute_raw" => page::execute_raw(state, params).await,
         "page.frames" => page::frames(state, params).await,
         "page.evaluate_in_frame" => page::evaluate_in_frame(state, params).await,
         "page.click_shadow" => page::click_shadow(state, params).await,

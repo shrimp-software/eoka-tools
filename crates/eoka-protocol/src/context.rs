@@ -22,6 +22,10 @@ pub enum ActionStatus {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ErrorContext {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub phase: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub page: Option<PageContext>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub download_id: Option<String>,

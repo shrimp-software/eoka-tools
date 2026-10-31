@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
 pub struct OpenArgs {
+    #[serde(flatten)]
+    pub operation: crate::ActionSettings,
     pub url: String,
     pub headers: Option<serde_json::Value>,
     pub user_agent: Option<String>,
@@ -75,7 +77,7 @@ pub struct TargetArgs {
     #[serde(flatten)]
     pub operation: crate::ActionSettings,
     #[schemars(
-        description = "Target element. Supports index, snapshot refs like @e1, text:Submit, placeholder:Email, role:button, css:form button, id:my-btn, or plain text search."
+        description = "Target element. Supports scoped refs from view, text:Submit, placeholder:Email, role:button, css:form button, id:my-btn, or plain text search."
     )]
     pub target: String,
 }
@@ -85,18 +87,22 @@ pub struct FillArgs {
     #[serde(flatten)]
     pub operation: crate::ActionSettings,
     #[schemars(
-        description = "Target input. Supports index, text:Email, placeholder:Enter code, css:input.search, id:email-field, or plain text search."
+        description = "Target input. Supports scoped refs from view, text:Email, placeholder:Enter code, css:input.search, id:email-field, or plain text search."
     )]
     pub target: String,
     #[schemars(description = "Text to type into the element.")]
     pub text: String,
+    #[serde(default)]
+    pub input_mode: crate::InputMode,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
 pub struct SelectArgs {
     #[serde(flatten)]
     pub operation: crate::ActionSettings,
-    #[schemars(description = "Target select element by index, text, CSS selector, id, or role.")]
+    #[schemars(
+        description = "Target select element by scoped reference, text, CSS selector, id, or role."
+    )]
     pub target: String,
     #[schemars(description = "Option value or visible text to select.")]
     pub value: String,
@@ -142,6 +148,10 @@ pub struct MouseMoveArgs {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
 pub struct ScriptArgs {
+    #[serde(default)]
+    pub arguments: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub raw: bool,
     pub code: Option<String>,
     pub file: Option<String>,
     pub max_size: Option<usize>,
@@ -255,6 +265,8 @@ pub struct CloneFromArgs {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
 pub struct WaitArgs {
+    #[serde(default)]
+    pub expect: Option<crate::Expectation>,
     pub ms: Option<u64>,
     pub text: Option<String>,
     pub url: Option<String>,

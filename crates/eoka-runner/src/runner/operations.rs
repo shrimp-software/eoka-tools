@@ -53,7 +53,7 @@ pub(super) fn prepare(action: &Action) -> Result<(ActionPerformArgs, bool)> {
             Core::Fill {
                 target: locator(&a.target)?,
                 value: a.value.clone(),
-                human: a.human,
+                input_mode: a.input_mode,
             },
             &a.operation,
             false,
@@ -62,7 +62,7 @@ pub(super) fn prepare(action: &Action) -> Result<(ActionPerformArgs, bool)> {
             Core::Type {
                 target: locator(&a.target)?,
                 text: a.value.clone(),
-                human: false,
+                input_mode: a.input_mode,
             },
             &a.operation,
             false,
@@ -71,7 +71,7 @@ pub(super) fn prepare(action: &Action) -> Result<(ActionPerformArgs, bool)> {
             Core::Fill {
                 target: locator(&a.target)?,
                 value: String::new(),
-                human: false,
+                input_mode: Default::default(),
             },
             &a.operation,
             false,

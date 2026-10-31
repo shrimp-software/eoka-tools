@@ -37,7 +37,7 @@ try {
   await writeFile(existing, 'do-not-replace');
   await assert.rejects(page.screenshotToFile({ path: existing }), error => error.code === 'FileOutput');
   assert.equal(await readFile(existing, 'utf8'), 'do-not-replace');
-  await page.execute("document.querySelector('.box').style.animationPlayState='running'");
+  await page.execute("()=>{document.querySelector('.box').style.animationPlayState='running'}");
   const recording = await page.record({ path: `${directory}/animation.mp4`, maxWidth: 640, maxHeight: 480, fps: 30 });
   await setTimeout(1000);
   const video = await recording.stop({ timeoutMs: 60000 });
@@ -55,7 +55,7 @@ try {
   await assert.rejects(cancelled.stop(), error => error instanceof RecordingError && error.record.state === 'cancelled');
   await assert.rejects(access(`${directory}/cancelled.mp4`), { code: 'ENOENT' });
   await page.setViewport({ width: 2500, height: 2500, deviceScaleFactor: 1 });
-  await page.execute(`(() => {
+  await page.execute(`() => {
     document.body.replaceChildren();
     document.body.style.height = '2500px';
     const canvas = document.createElement('canvas');
@@ -76,7 +76,7 @@ try {
       image.data[offset + 3] = 255;
     }
     context.putImageData(image, 0, 0);
-  })()`);
+  }`);
   await assert.rejects(page.screenshot({ format: 'png', timeoutMs: 30000 }), error => {
     assert.equal(error.code, 'ScreenshotTooLarge');
     assert.match(error.message, /screenshot_to_file/);
@@ -91,7 +91,7 @@ try {
   assert.deepEqual(oversizedBytes.subarray(0, 8), Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
   assert.equal(oversizedBytes.readUInt32BE(16), 2500);
   assert.equal(oversizedBytes.readUInt32BE(20), 2500);
-  assert.equal(await page.evaluate("document.querySelector('canvas').width"), 2500);
+  assert.equal(await page.evaluate("()=>document.querySelector('canvas').width"), 2500);
   console.log(JSON.stringify({ title, ownership: browser.ownership, browserVersion: browser.browserVersion, buildId: releaseManifest.chrome.buildId, image, fullPage, oversizedImage, video, recordingId: recording.id }));
 } finally {
   await browser.close();

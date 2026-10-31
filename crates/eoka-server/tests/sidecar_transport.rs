@@ -205,7 +205,7 @@ fn hello_negotiates_real_versions_without_launch_and_rejects_mismatch() {
     }
     assert!(!state.exists());
     assert!(server
-        .request(4, "server.hello", json!({"protocol":{"major":1,"minor":0}}))
+        .request(4, "server.hello", json!({"protocol":{"major":2,"minor":0}}))
         .get("result")
         .is_some());
     server.shutdown(5);
@@ -215,7 +215,7 @@ fn hello_negotiates_real_versions_without_launch_and_rejects_mismatch() {
 fn framing_handles_fragmented_utf8_multiple_lines_and_numeric_ids() {
     let (_root, state, scratch) = directories();
     let mut server = Sidecar::start(&state, &scratch);
-    let input = "{\"id\":1,\"method\":\"unknown.é\",\"params\":{}}\n{\"id\":2,\"method\":\"server.hello\",\"params\":{\"protocol\":{\"major\":1,\"minor\":0}}}\n";
+    let input = "{\"id\":1,\"method\":\"unknown.é\",\"params\":{}}\n{\"id\":2,\"method\":\"server.hello\",\"params\":{\"protocol\":{\"major\":2,\"minor\":0}}}\n";
     for byte in input.as_bytes() {
         server.input.as_mut().unwrap().write_all(&[*byte]).unwrap();
         server.input.as_mut().unwrap().flush().unwrap();
@@ -234,7 +234,7 @@ fn framing_handles_fragmented_utf8_multiple_lines_and_numeric_ids() {
         json!(9_007_199_254_740_992_u64),
     ] {
         server.send(
-            json!({"id":id,"method":"server.hello","params":{"protocol":{"major":1,"minor":0}}}),
+            json!({"id":id,"method":"server.hello","params":{"protocol":{"major":2,"minor":0}}}),
         );
         let response = server.reply();
         assert_eq!(response["id"], Value::Null);
@@ -265,7 +265,7 @@ fn oversized_input_is_bounded_and_framing_recovers() {
     assert_eq!(response["error"]["code"], "MessageTooLarge");
     assert_eq!(response["id"], Value::Null);
     assert!(server
-        .request(2, "server.hello", json!({"protocol":{"major":1,"minor":0}}))
+        .request(2, "server.hello", json!({"protocol":{"major":2,"minor":0}}))
         .get("result")
         .is_some());
     server.shutdown(3);
@@ -387,9 +387,7 @@ fn closed_stdout_triggers_cleanup_even_with_stdin_still_open() {
         replies,
     };
     server
-        .send(json!({"id":1,"method":"server.hello","params":{"protocol":{"major":1,"minor":0}}}));
-    // A live intake never exits, so a generous bound keeps the regression
-    // signal; exit normally takes ~1s but exceeded 5s on a loaded CI runner.
+        .send(json!({"id":1,"method":"server.hello","params":{"protocol":{"major":2,"minor":0}}}));
     let deadline = Instant::now() + Duration::from_secs(30);
     while server.child.try_wait().unwrap().is_none() {
         assert!(
@@ -544,8 +542,6 @@ fn turnstile_solve_and_auto_solve_watcher_stop_with_the_browser() {
             .is_some_and(|message| message.contains("did not resolve")),
         "{stuck}"
     );
-    // The watcher is now mid-solve on the challenge-titled tab; shutdown must
-    // still release the browser instead of waiting out its 60s deadline.
     std::thread::sleep(Duration::from_millis(300));
     let started = Instant::now();
     server.shutdown(6);
@@ -690,7 +686,7 @@ fn eof_during_dispatched_action_preserves_durable_unknown_outcome_and_closes_chr
     let pid = browser_pid(&profile);
     let response = server.request(
         3,
-        "page.execute",
+        "page.execute_raw",
         json!({"pageId":page,"js":"document.body.innerHTML='<button id=button>click</button>'"}),
     );
     assert!(response.get("result").is_some(), "{response}");
@@ -755,12 +751,16 @@ fn oversized_evaluation_returns_structured_size_error_and_remains_usable() {
         (4, "'\"'.repeat(9 * 1024 * 1024)".to_owned()),
         (5, "'🌍'.repeat(5 * 1024 * 1024)".to_owned()),
     ] {
-        let response = server.request(id, "page.evaluate", json!({"pageId":page,"js":expression}));
+        let response = server.request(
+            id,
+            "page.evaluate_raw",
+            json!({"pageId":page,"js":expression}),
+        );
         assert_eq!(response["error"]["code"], "MessageTooLarge", "{response}");
     }
     let response = server.request(
         6,
-        "page.evaluate",
+        "page.evaluate_raw",
         json!({"pageId":page,"js":"'x'.repeat(15 * 1024 * 1024)"}),
     );
     let value = response["result"]["result"].as_str().unwrap();
@@ -849,9 +849,10 @@ fn borrowed_browser_survives_sidecar_shutdown() {
 #[test]
 #[ignore = "subprocess fixture for abrupt_parent_death_closes_owned_chrome"]
 fn abrupt_parent_fixture() {
-    let root = std::path::PathBuf::from(
-        std::env::var_os("EOKA_ABRUPT_PARENT_FIXTURE").expect("fixture directory"),
-    );
+    let Some(root) = std::env::var_os("EOKA_ABRUPT_PARENT_FIXTURE") else {
+        return;
+    };
+    let root = std::path::PathBuf::from(root);
     let profile = root.join("profile");
     let mut server = Sidecar::start(&root.join("state"), &root.join("tmp"));
     launch(&mut server, &profile);
@@ -926,7 +927,7 @@ fn abrupt_parent_death_closes_owned_chrome() {
 fn page_metrics(server: &mut Sidecar, id: u64, page: &str) -> Value {
     let response = server.request(
         id,
-        "page.evaluate",
+        "page.evaluate_raw",
         json!({
             "pageId":page,"js":"({width:innerWidth,height:innerHeight,scale:devicePixelRatio})"
         }),

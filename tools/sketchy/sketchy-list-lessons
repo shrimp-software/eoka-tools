@@ -1,0 +1,3 @@
+#!/usr/bin/env python3
+from sketchy import main
+raise SystemExit(main())

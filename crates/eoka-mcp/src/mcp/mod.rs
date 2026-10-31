@@ -20,10 +20,7 @@ use eoka_protocol::{input_schema_for_cmd, operation_by_cmd};
 use eoka_server::{annotate, captcha, observe, snapshot, spa};
 
 use error::{internal, invalid, is_transport_error_msg, AgentError};
-use helpers::{
-    auto_observe_if_needed, element_list, ensure_console_capture, resolve_js, resolve_target,
-    text_ok, title_nonblocking,
-};
+use helpers::{element_list, ensure_console_capture, resolve_js, text_ok, title_nonblocking};
 use state::BrowserState;
 use types::*;
 
@@ -285,17 +282,14 @@ impl EokaServer {
                 eoka_server::downloads::failure("download_busy", "One download is already active"),
             ));
         }
-        let viewport = state.config.viewport_only;
         let browser = state.browser.clone();
         let tab = state
             .current_tab_mut()
             .ok_or_else(|| ErrorData::from(AgentError::NoTab))?;
         let selector = if let Some(target) = req.0.click.as_deref() {
             match eoka_server::downloads::resolve_click(
+                &*self.agent.lock().await,
                 &tab.page,
-                &mut tab.elements,
-                &tab.snapshot_refs,
-                viewport,
                 target,
             )
             .await
@@ -496,9 +490,34 @@ impl EokaServer {
             expect: req.0.operation.expect,
             ..Default::default()
         };
-        protocol_tool_response(eoka_server::operations::commands::response(
-            self.operations.submit(page, id, action, options).await,
-        ))
+        let budget = options.timeout_ms.min(60_000);
+        let record = self
+            .operations
+            .submit(page, id.clone(), action, options)
+            .await;
+        let record = match record {
+            Ok(record) => record,
+            Err(error) => {
+                return protocol_tool_response(eoka_server::operations::commands::failure(
+                    error,
+                    Some(id),
+                ))
+            }
+        };
+        let record = if matches!(record.state, eoka_protocol::OperationState::Running) {
+            match self.operations.wait(&id, budget).await {
+                Ok(record) => record,
+                Err(error) => {
+                    return protocol_tool_response(eoka_server::operations::commands::failure(
+                        eoka_server::operations::commands::uncertain(error),
+                        Some(id),
+                    ))
+                }
+            }
+        } else {
+            record
+        };
+        protocol_tool_response(eoka_protocol::Response::action_result(record))
     }
 
     #[tool(
@@ -584,12 +603,6 @@ impl EokaServer {
         let result = snapshot::snapshot(&tab.page, include_all)
             .await
             .map_err(internal)?;
-
-        tab.snapshot_refs.clear();
-        for r in &result.refs {
-            tab.snapshot_refs
-                .insert(r.ref_label.clone(), r.backend_node_id);
-        }
 
         text_ok(result.tree_text)
     }
@@ -787,7 +800,6 @@ impl EokaServer {
         let state = guard
             .as_mut()
             .ok_or_else(|| ErrorData::from(AgentError::NoBrowser))?;
-        let vp = state.config.viewport_only;
         let tab = state
             .current_tab_mut()
             .ok_or_else(|| ErrorData::from(AgentError::NoTab))?;
@@ -814,13 +826,26 @@ impl EokaServer {
                 .await
                 .map_err(internal)?,
             target_str => {
-                auto_observe_if_needed(tab, target_str, vp).await?;
-                let resolved = resolve_target(tab, target_str).await?;
-                let js = format!(
-                    "document.querySelector({})?.scrollIntoView({{behavior:'smooth',block:'center'}})",
-                    serde_json::to_string(&resolved.selector).unwrap()
-                );
-                tab.page.execute_sync(&js).await.map_err(internal)?;
+                let target = self
+                    .agent
+                    .lock()
+                    .await
+                    .resolve_target(&tab.page, target_str)
+                    .await
+                    .map_err(internal)?;
+                let id = uuid::Uuid::new_v4().to_string();
+                self.operations
+                    .submit(
+                        tab.page.clone(),
+                        id.clone(),
+                        eoka_server::eoka::Action::ScrollIntoView { target },
+                        Default::default(),
+                    )
+                    .await
+                    .map_err(internal)?;
+                return protocol_tool_response(eoka_protocol::Response::action_result(
+                    self.operations.wait(&id, 30_000).await.map_err(internal)?,
+                ));
             }
         }
         text_ok(format!("Scrolled {}", req.0.target))
@@ -870,8 +895,7 @@ impl EokaServer {
     }
 
     #[tool(
-        description = "Run JavaScript and return result. Supports multi-statement code; the last expression's value is returned as JSON. \
-        Pass js= for inline code, or file= with an absolute path to load from disk (saves tokens for repeated/complex scripts)."
+        description = "Invoke a JavaScript function with JSON arguments and return its awaited JSON result. Use code or file for the function; raw=true explicitly selects the raw script escape hatch."
     )]
     async fn extract(&self, req: Parameters<JsRequest>) -> Result<CallToolResult, ErrorData> {
         let guard = self.state.lock().await;
@@ -882,15 +906,22 @@ impl EokaServer {
             .current_tab()
             .ok_or_else(|| ErrorData::from(AgentError::NoTab))?;
         let code = resolve_js(&req.0)?;
-        let escaped_js = serde_json::to_string(&code).map_err(internal)?;
-        let js = format!("JSON.stringify(eval({}))", escaped_js);
-        let json_str: String = tab.page.evaluate_sync(&js).await.map_err(internal)?;
-        text_ok(json_str)
+        let value: Value = if req.0.no_await {
+            tab.page.evaluate_sync(&code).await
+        } else {
+            tab.page.evaluate(&code).await
+        }
+        .map_err(internal)?;
+        let size = serde_json::to_vec(&value).map_err(internal)?.len();
+        let maximum = req.0.max_size.unwrap_or(1_048_576).min(1_048_576);
+        if size > maximum {
+            return Err(invalid("Evaluation result exceeds its JSON byte limit"));
+        }
+        protocol_tool_response(eoka_protocol::Response::ok(value))
     }
 
     #[tool(
-        description = "Execute JavaScript without expecting a return value. Use for side effects like clicking elements via JS. \
-        Pass js= for inline code, or file= with an absolute path to load from disk (saves tokens for repeated/complex scripts)."
+        description = "Invoke and await a JavaScript function with JSON arguments, propagating exceptions. Use code or file; raw=true explicitly selects the raw script escape hatch."
     )]
     async fn exec(&self, req: Parameters<JsRequest>) -> Result<CallToolResult, ErrorData> {
         let guard = self.state.lock().await;
@@ -901,7 +932,11 @@ impl EokaServer {
             .current_tab()
             .ok_or_else(|| ErrorData::from(AgentError::NoTab))?;
         let code = resolve_js(&req.0)?;
-        let _: String = tab.page.evaluate_sync(&code).await.unwrap_or_default();
+        if req.0.no_await {
+            tab.page.execute_sync(&code).await.map_err(internal)?;
+            return protocol_tool_response(eoka_protocol::Response::err_detail(eoka_protocol::ErrorDetail::new("outcome_unknown", "Raw execution dispatched; asynchronous completion was not awaited. Inspect the page before further input.")));
+        }
+        tab.page.execute(&code).await.map_err(internal)?;
         text_ok("Executed successfully")
     }
 
@@ -1266,11 +1301,9 @@ impl EokaServer {
         let state = guard
             .as_mut()
             .ok_or_else(|| ErrorData::from(AgentError::NoBrowser))?;
-        let viewport_only = state.config.viewport_only;
         let tab = state
             .current_tab_mut()
             .ok_or_else(|| ErrorData::from(AgentError::NoTab))?;
-        auto_observe_if_needed(tab, &req.0.target, viewport_only).await?;
         let allow_nav = req.0.allow_nav.unwrap_or(false);
         tab.page
             .execute_sync(&format!(
@@ -1792,6 +1825,7 @@ fn protocol_tool_response(response: eoka_protocol::Response) -> Result<CallToolR
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[tokio::test]
     #[ignore = "requires Chrome; durable navigation diagnostic"]
@@ -1927,5 +1961,78 @@ mod tests {
             assert_eq!(annotations.read_only_hint, Some(operation.read_only));
             assert_eq!(annotations.destructive_hint, Some(operation.destructive));
         }
+    }
+
+    #[tokio::test]
+    #[ignore = "requires Chrome; MCP function execution contract"]
+    async fn mcp_functions_preserve_arguments_exceptions_and_limits() {
+        let server = EokaServer::new();
+        server
+            .navigate(Parameters(NavigateRequest {
+                operation: eoka_protocol::ActionSettings {
+                    operation_id: Some(uuid::Uuid::new_v4().to_string()),
+                    ..Default::default()
+                },
+                url: "about:blank".into(),
+                headers: None,
+                user_agent: None,
+                bypass_csp: None,
+            }))
+            .await
+            .unwrap();
+        for _ in 0..2 {
+            let result = server.extract(Parameters(serde_json::from_value(json!({
+                "code":"value=>{const local=value;return local}", "arguments":[{"quoted":"é😀\""}]
+            })).unwrap())).await.unwrap();
+            let result = serde_json::to_value(result).unwrap();
+            let value: Value =
+                serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
+            assert_eq!(value["data"]["quoted"], "é😀\"");
+        }
+        let result = server
+            .exec(Parameters(
+                serde_json::from_value(json!({
+                    "code":"async()=>{throw new Error('mcp-fixture-exception')}"
+                }))
+                .unwrap(),
+            ))
+            .await;
+        assert!(result
+            .unwrap_err()
+            .message
+            .contains("mcp-fixture-exception"));
+        let result = server
+            .extract(Parameters(
+                serde_json::from_value(json!({
+                    "code":"()=> 'oversized'", "max_size":2
+                }))
+                .unwrap(),
+            ))
+            .await;
+        assert!(result.unwrap_err().message.contains("byte limit"));
+        let result = server
+            .exec(Parameters(
+                serde_json::from_value(json!({
+                    "code":"()=>0", "no_await":true
+                }))
+                .unwrap(),
+            ))
+            .await;
+        assert!(result.unwrap_err().message.contains("requires raw"));
+        let result = server
+            .exec(Parameters(
+                serde_json::from_value(json!({
+                    "code":"Promise.resolve(0)", "raw":true, "no_await":true
+                }))
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+        let result = serde_json::to_value(result).unwrap();
+        let value: Value =
+            serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(value["ok"], false);
+        assert_eq!(value["error_detail"]["code"], "outcome_unknown");
+        server.close().await.unwrap();
     }
 }

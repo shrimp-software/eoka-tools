@@ -19,11 +19,13 @@ eoka operations list --limit 100
 ```
 
 Click, double-click and key commands require an explicit expectation. Fill,
-select and hover verify intrinsic results. Commands return an admitted operation
-record; use `operations wait` to inspect completion. A waiter timing out or
+select and hover verify intrinsic results. CLI/MCP convenience commands wait within their response budget and return a
+completion status with the operation record. Sidecar admission returns a record;
+SDK convenience wrappers wait for verified completion. A waiter timing out or
 disconnecting does not cancel the operation. `operations cancel ID` requests
 cancellation; inspect again for the resulting record and cleanup status.
-Operation queries report command success separately from the action outcome;
+`operations get/list` report read success separately from the action outcome;
+`operations wait` reports completion, pending, or uncertainty explicitly;
 check `outcome == "verified_complete"` before proceeding.
 
 For every core action, including navigation, typing, upload and submit, use

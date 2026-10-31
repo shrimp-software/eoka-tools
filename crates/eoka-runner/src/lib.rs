@@ -1,22 +1,3 @@
-//! # eoka-runner
-//!
-//! Config-based browser automation. Define actions in YAML, execute deterministically.
-//!
-//! ## Quick Start
-//!
-//! ```rust,no_run
-//! use eoka_runner::{Config, Runner};
-//!
-//! # #[tokio::main]
-//! # async fn main() -> eoka_runner::Result<()> {
-//! let config = Config::load("automation.yaml")?;
-//! let mut runner = Runner::new(&config.browser).await?;
-//! let result = runner.run(&config).await?;
-//! println!("Success: {}", result.success);
-//! # Ok(())
-//! # }
-//! ```
-
 mod config;
 mod runner;
 
@@ -25,10 +6,8 @@ pub use config::{
 };
 pub use runner::{RunResult, Runner};
 
-/// Result type for eoka-runner operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Errors that can occur during config loading or execution.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("config error: {0}")]
@@ -221,7 +200,7 @@ actions:
         if let Action::Fill(a) = &config.actions[0] {
             assert_eq!(a.target.selector, Some("#email".into()));
             assert_eq!(a.value, "test@example.com");
-            assert!(a.human);
+            assert_eq!(a.input_mode, eoka::InputMode::Sequential);
         } else {
             panic!("Expected Fill action");
         }
@@ -606,7 +585,6 @@ actions:
       selector: "#search"
       value: "${search_text}"
 "##;
-        // No params provided - should use default
         let config = Config::parse(yaml).unwrap();
         if let Action::Fill(a) = &config.actions[0] {
             assert_eq!(a.value, "default query");

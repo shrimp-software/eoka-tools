@@ -21,7 +21,7 @@ func TestHelloAcceptsCompatibleMinorAndNegotiatesLimits(t *testing.T) {
 		var request struct {
 			Protocol ProtocolVersion `json:"protocol"`
 		}
-		if err := json.Unmarshal(params, &request); err != nil || request.Protocol != (ProtocolVersion{Major: 1, Minor: 1}) {
+		if err := json.Unmarshal(params, &request); err != nil || request.Protocol != (ProtocolVersion{Major: 2, Minor: 0}) {
 			t.Errorf("hello params = %s, error = %v", params, err)
 		}
 		return info, nil
@@ -94,8 +94,8 @@ func TestHelloNeverRaisesLocalTransportCeilings(t *testing.T) {
 
 func TestHelloRejectsIncompatibleOrIncompleteServers(t *testing.T) {
 	cases := map[string]func(*ServerInfo){
-		"major mismatch":          func(info *ServerInfo) { info.Protocol.Major = 2 },
-		"old minor":               func(info *ServerInfo) { info.Protocol.Minor = 0 },
+		"major mismatch":          func(info *ServerInfo) { info.Protocol.Major = 3 },
+		"old major":               func(info *ServerInfo) { info.Protocol.Major = 1 },
 		"no server version":       func(info *ServerInfo) { info.ServerVersion = "" },
 		"no core version":         func(info *ServerInfo) { info.CoreVersion = "" },
 		"invalid message bound":   func(info *ServerInfo) { info.Limits.MaxMessageBytes = 0 },
@@ -131,7 +131,7 @@ func TestHelloReportsPinnedLegacyServerIncompatibility(t *testing.T) {
 		})}
 		err := b.hello(callContext(t))
 		var typed *Error
-		if !errors.As(err, &typed) || typed.Code != ErrCodeProtocolMismatch || string(typed.Data) != string(data) || !strings.Contains(err.Error(), "WithServerPath") || !strings.Contains(err.Error(), "0.3.0") {
+		if !errors.As(err, &typed) || typed.Code != ErrCodeProtocolMismatch || string(typed.Data) != string(data) || !strings.Contains(err.Error(), "WithServerPath") || !strings.Contains(err.Error(), "0.7.0") {
 			t.Fatalf("legacy compatibility error = %v", err)
 		}
 	}

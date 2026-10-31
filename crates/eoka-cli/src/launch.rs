@@ -1,9 +1,6 @@
-//! CLI flags → `LaunchSpec`/session-name resolution.
-
 use crate::cli::Cli;
 use crate::launch_spec::{self, LaunchSpec};
 
-/// Map CLI flags to a `LaunchSpec`. Resolves --cdp ports to ws:// URLs eagerly.
 pub(crate) fn resolve_launch_spec(cli: &Cli) -> Result<LaunchSpec, String> {
     if cli.auto_solve_cloudflare && (cli.cdp.is_some() || cli.auto_connect) {
         return Err(
@@ -18,6 +15,23 @@ pub(crate) fn resolve_launch_spec(cli: &Cli) -> Result<LaunchSpec, String> {
     if cli.auto_connect {
         let (_port, ws_url) = launch_spec::auto_connect()?;
         return Ok(LaunchSpec::Connect { ws_url });
+    }
+    if !cli.daemon
+        && !cli.headed
+        && !cli.headless
+        && cli.from_profile.is_none()
+        && cli.clone_state_from.is_none()
+        && !cli.no_stealth
+        && cli.proxy.is_none()
+        && cli.proxy_file.is_none()
+        && !cli.no_js
+        && cli.js_allow.is_empty()
+        && cli.js_block.is_empty()
+        && !cli.persist
+        && !cli.no_geo_align
+        && !cli.auto_solve_cloudflare
+    {
+        return Ok(LaunchSpec::Reuse);
     }
     Ok(LaunchSpec::Launch {
         headless: !cli.headed,
@@ -50,6 +64,6 @@ fn resolve_profile_spec(spec: &str) -> Result<std::path::PathBuf, String> {
     Ok(p)
 }
 
-pub(crate) fn effective_session(cli: &Cli, spec: &LaunchSpec) -> String {
-    format!("{}{}", cli.session, launch_spec::session_suffix(spec))
+pub(crate) fn effective_session(cli: &Cli, _spec: &LaunchSpec) -> String {
+    cli.session.clone()
 }

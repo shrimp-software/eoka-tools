@@ -189,11 +189,11 @@ func (p *Page) WaitForText(ctx context.Context, text string, timeout time.Durati
 	return p.call(ctx, "page.wait_for_text", map[string]any{"text": text, "timeoutMs": timeout.Milliseconds()}, nil)
 }
 
-func (p *Page) Evaluate(ctx context.Context, js string) (json.RawMessage, error) {
+func (p *Page) Evaluate(ctx context.Context, function string, arguments ...any) (json.RawMessage, error) {
 	var res struct {
 		Result json.RawMessage `json:"result"`
 	}
-	err := p.call(ctx, "page.evaluate", map[string]any{"js": js}, &res)
+	err := p.call(ctx, "page.evaluate", map[string]any{"function": function, "arguments": append([]any{}, arguments...)}, &res)
 	return res.Result, err
 }
 
@@ -212,8 +212,8 @@ func EvaluateAs[T any](ctx context.Context, page *Page, js string) (T, error) {
 	return out, nil
 }
 
-func (p *Page) Execute(ctx context.Context, js string) error {
-	return p.call(ctx, "page.execute", map[string]any{"js": js}, nil)
+func (p *Page) Execute(ctx context.Context, function string, arguments ...any) error {
+	return p.call(ctx, "page.execute", map[string]any{"function": function, "arguments": append([]any{}, arguments...)}, nil)
 }
 
 func (p *Page) Fetch(ctx context.Context, url string, options FetchOptions) (FetchResponse, error) {
@@ -235,15 +235,11 @@ func (p *Page) Fetch(ctx context.Context, url string, options FetchOptions) (Fet
 	return response, err
 }
 
-// TurnstileResult reports how a Cloudflare Turnstile challenge was cleared.
 type TurnstileResult struct {
 	Clicks    int   `json:"clicks"`
 	ElapsedMs int64 `json:"elapsedMs"`
 }
 
-// SolveTurnstile clicks the Cloudflare Turnstile checkbox until the page
-// leaves the challenge. It returns zero clicks on a normal page. A zero
-// timeout uses the server default of 30s.
 func (p *Page) SolveTurnstile(ctx context.Context, timeout time.Duration) (TurnstileResult, error) {
 	params := map[string]any{}
 	if timeout != 0 {
@@ -349,4 +345,24 @@ func (p *Page) ReleaseAllInputs(ctx context.Context) error {
 
 func (p *Page) Close(ctx context.Context) error {
 	return p.call(ctx, "page.close", nil, nil)
+}
+
+func (p *Page) EvaluateRaw(ctx context.Context, js string) (json.RawMessage, error) {
+	var result struct {
+		Result json.RawMessage `json:"result"`
+	}
+	err := p.call(ctx, "page.evaluate_raw", map[string]any{"js": js}, &result)
+	return result.Result, err
+}
+
+func (p *Page) ExecuteRaw(ctx context.Context, js string) error {
+	return p.call(ctx, "page.execute_raw", map[string]any{"js": js}, nil)
+}
+
+func (p *Page) FillWithMode(ctx context.Context, selector, value, inputMode string, options ...ActionOptions) error {
+	return p.performLegacy(ctx, "page.fill", map[string]any{"selector": selector, "value": value, "inputMode": inputMode}, options)
+}
+
+func (p *Page) TypeWithMode(ctx context.Context, selector, text, inputMode string, options ...ActionOptions) error {
+	return p.performLegacy(ctx, "page.type_into", map[string]any{"selector": selector, "text": text, "inputMode": inputMode}, options)
 }

@@ -1,0 +1,67 @@
+name: Release eoka-cli
+on:
+  push:
+    tags: ["eoka-cli-v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published CLI tag to build
+        required: true
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: macos-15
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          targets: ${{ matrix.target }}
+      - name: Verify tag and build registry dependencies
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' crates/eoka-cli/Cargo.toml | head -1)"
+          test "$RELEASE_TAG" = "eoka-cli-v$version"
+          cargo build --release --locked -p eoka-cli --target '${{ matrix.target }}'
+          target/${{ matrix.target }}/release/eoka --version
+          mkdir -p dist
+          tar -czf dist/eoka-cli-${{ matrix.target }}.tar.gz -C target/${{ matrix.target }}/release eoka
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: eoka-cli-${{ matrix.target }}
+          path: dist/*.tar.gz
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish binaries and checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          cd dist
+          sha256sum *.tar.gz > SHA256SUMS
+          gh release view "$RELEASE_TAG" || gh release create "$RELEASE_TAG" --verify-tag --title "$RELEASE_TAG" --notes 'CLI binaries with SHA-256 checksums.'
+          gh release upload "$RELEASE_TAG" ./*.tar.gz SHA256SUMS

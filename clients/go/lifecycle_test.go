@@ -46,17 +46,17 @@ func serveLifecycleFixture(mode string) int {
 		switch request.Method {
 		case "server.hello":
 			params, _ := json.Marshal(request.Params)
-			if string(params) != `{"protocol":{"major":1,"minor":1}}` {
+			if string(params) != `{"protocol":{"major":2,"minor":0}}` {
 				response.Error = &rpcError{Code: ErrCodeInvalidParams, Message: "unexpected hello params"}
 			} else if mode == "legacy" {
 				response.Error = &rpcError{Code: ErrCodeUnknownMethod, Message: "server.hello"}
 			} else {
 				info := fakeServerInfo()
 				if mode == "incompatible" {
-					info.Protocol.Major = 2
+					info.Protocol.Major = 3
 				}
 				if mode == "old-minor" {
-					info.Protocol.Minor = 0
+					info.Protocol.Major = 1
 				}
 				if mode == "no-connect" {
 					info.Methods = []string{"server.hello", "server.shutdown", "browser.launch"}
@@ -202,7 +202,7 @@ func TestLaunchHandshakesBeforeBrowserAndCloseUsesServerShutdown(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = b.Close(context.Background()) })
-	if b.ServerInfo().Protocol.Major != 1 || b.ServerInfo().ServerVersion != "test-server" {
+	if b.ServerInfo().Protocol.Major != 2 || b.ServerInfo().ServerVersion != "test-server" {
 		t.Fatalf("negotiated server info = %+v", b.ServerInfo())
 	}
 	page, err := b.NewPage(ctx, "")

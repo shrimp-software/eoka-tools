@@ -335,7 +335,7 @@ test('evaluation preserves dynamic JSON and propagates canonical non-JSON errors
   const page = new Page({ invoke: async (method, params) => {
     assert.equal(method, 'page.evaluate');
     assert.equal(params.pageId, 'tab');
-    if (params.js === 'unsupported') throw unsupported;
+    if (params.function === 'unsupported') throw unsupported;
     return { result: value };
   } }, 'tab');
   for (value of [null, false, 42, 'text', [1, null], { nested: { value: true } }]) {

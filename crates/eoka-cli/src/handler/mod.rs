@@ -36,10 +36,7 @@ use network::{NetworkConfig, NetworkRecorder};
 use persist::{capture_state, ensure_console_capture, restore_cookies, restore_state, SavedState};
 use script_policy::{ScriptPolicyMode, ScriptPolicyState};
 use state::{BrowserState, TabState};
-use target::{
-    auto_observe_if_needed, click_once, fill_once, json_str, resolve_target, title_nonblocking,
-    wait_for_stable,
-};
+use target::{click_once, json_str, title_nonblocking, wait_for_stable};
 
 pub struct Handler {
     agent: eoka_server::agent::AgentSession,
@@ -76,7 +73,7 @@ impl Handler {
                 js_allow.clone(),
                 js_block.clone(),
             ),
-            LaunchSpec::Connect { .. } => ScriptPolicyState::default(),
+            LaunchSpec::Connect { .. } | LaunchSpec::Reuse => ScriptPolicyState::default(),
         };
         Self {
             agent: Default::default(),
@@ -102,6 +99,9 @@ impl Handler {
             return Ok(());
         }
         let mut state = match &self.spec {
+            LaunchSpec::Reuse => {
+                return Err("Daemon creation requires explicit launch configuration".into())
+            }
             LaunchSpec::Connect { ws_url } => BrowserState::connected(ws_url)
                 .await
                 .map_err(|e| e.to_string())?,
@@ -171,7 +171,6 @@ impl Handler {
         Ok(())
     }
 
-    /// Hand the watcher the current tabs; commands are the only place tabs change.
     fn publish_cloudflare_pages(&self) {
         if let Some(watcher) = &self.cloudflare {
             let tabs = self.state.as_ref().map(|state| &state.tabs);
@@ -208,6 +207,19 @@ impl Handler {
     }
 
     async fn handle_command(&mut self, cmd: &str, args: &Value) -> Response {
+        if cmd == "session_hello" {
+            let mode = match self.spec {
+                LaunchSpec::Launch { headless: true, .. } => "headless",
+                LaunchSpec::Launch {
+                    headless: false, ..
+                } => "headed",
+                LaunchSpec::Connect { .. } => "connect",
+                LaunchSpec::Reuse => "reuse",
+            };
+            return Response::ok(
+                json!({"protocol_major": eoka_protocol::sidecar::PROTOCOL_VERSION.major, "daemon_version":env!("CARGO_PKG_VERSION"), "session":self.session_name, "mode":mode, "configuration_fingerprint":self.spec.configuration_fingerprint()}),
+            );
+        }
         if matches!(cmd, "agent_observe" | "agent_step") {
             return self.handle_agent(cmd, args).await;
         }
@@ -302,12 +314,12 @@ impl Handler {
             "frames" => self.cmd_frames().await,
             "text" => self.cmd_text().await,
             "find" => self.cmd_find(args).await,
-            "click" => self.cmd_click(args).await,
-            "dblclick" => self.cmd_dblclick(args).await,
-            "fill" => self.cmd_fill(args).await,
-            "select" => self.cmd_select(args).await,
-            "hover" => self.cmd_hover(args).await,
-            "key" => self.cmd_key(args).await,
+            "click" => Ok(self.handle_action("click", args).await),
+            "dblclick" => Ok(self.handle_action("dblclick", args).await),
+            "fill" => Ok(self.handle_action("fill", args).await),
+            "select" => Ok(self.handle_action("select", args).await),
+            "hover" => Ok(self.handle_action("hover", args).await),
+            "key" => Ok(self.handle_action("key", args).await),
             "mouse_down" => self.cmd_mouse_down(args).await,
             "mouse_move" => self.cmd_mouse_move(args).await,
             "mouse_up" => self.cmd_mouse_up(args).await,
@@ -446,7 +458,7 @@ impl Handler {
                 .and_then(|parsed| parsed.host_str().map(str::to_owned));
             self.script_policy.resolve(host.as_deref().unwrap_or(""))
         });
-        let has_extras = headers.is_some()
+        let _has_extras = headers.is_some()
             || user_agent.is_some()
             || bypass_csp
             || inject_js.is_some()
@@ -454,6 +466,14 @@ impl Handler {
             || state_init_js.is_some()
             || script_enabled.is_some();
 
+        let operations = self.operations.clone();
+        let operation_id = args["operation_id"]
+            .as_str()
+            .map(str::to_owned)
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let options =
+            eoka_server::operations::commands::options(args).map_err(|e| e.to_string())?;
+        let budget = options.timeout_ms;
         let drain = self.start_fetch_drain();
         let active_recorder = self.network.clone();
         let result = async {
@@ -469,7 +489,7 @@ impl Handler {
                 }
             }
 
-            if has_extras {
+            {
                 let tab = if state.current_tab_id.is_some() {
                     state.current_tab_mut().ok_or("No tab")?
                 } else {
@@ -536,7 +556,23 @@ impl Handler {
                         .map_err(|e| e.to_string())?;
                 }
                 tab.invalidate();
-                let nav_result = tab.page.goto(&url).await;
+                let record = operations
+                    .submit(
+                        tab.page.clone(),
+                        operation_id.clone(),
+                        eoka::Action::Navigate {
+                            url: url.clone(),
+                            referrer: None,
+                        },
+                        options,
+                    )
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let nav_result = if matches!(record.state, eoka_protocol::OperationState::Running) {
+                    operations.wait(&operation_id, budget).await
+                } else {
+                    Ok(record)
+                };
                 if let Some(identifier) = state_script_id {
                     let _ = tab
                         .page
@@ -550,28 +586,17 @@ impl Handler {
                 if headers.is_some() {
                     let _ = tab.page.clear_extra_headers().await;
                 }
-                nav_result.map_err(|e| e.to_string())?;
-            } else {
-                state.ensure_tab(&url).await.map_err(|e| e.to_string())?;
+                nav_result.map_err(|e| e.to_string())
             }
-
-            let tab = state.current_tab_mut().ok_or("No tab after navigate")?;
-            let _ = wait_for_stable(&tab.page).await;
-            let url = tab.page.url().await.map_err(|e| e.to_string())?;
-            let title = title_nonblocking(&tab.page).await;
-            Ok::<_, String>((url, title))
         }
         .await;
         self.stop_fetch_drain(drain).await;
         if let Some(enabled) = script_enabled {
             self.script_policy.note_applied(enabled);
         }
-        let (url, title) = result?;
+        let record = result?;
         self.sync_current_target_features().await?;
-        Ok(Response::ok_text(format!(
-            "Navigated to: {}\nTitle: {}",
-            url, title
-        )))
+        Ok(Response::action_result(record))
     }
 
     async fn cmd_nav<F>(&mut self, f: F, label: &str) -> Result<Response, String>
@@ -636,12 +661,6 @@ impl Handler {
         let result = snapshot::snapshot(&tab.page, include_all)
             .await
             .map_err(|e| e.to_string())?;
-
-        tab.snapshot_refs.clear();
-        for r in &result.refs {
-            tab.snapshot_refs
-                .insert(r.ref_label.clone(), r.backend_node_id);
-        }
 
         Ok(Response::ok_text(result.tree_text))
     }
@@ -797,126 +816,6 @@ impl Handler {
         }
     }
 
-    async fn cmd_click(&mut self, args: &Value) -> Result<Response, String> {
-        self.ensure_browser().await?;
-        let target_str = self.arg_str(args, "target")?;
-        let drain = self.start_fetch_drain();
-        let result = async {
-            let (tab, vp) = self.tab_with_config()?;
-            auto_observe_if_needed(tab, target_str, vp).await?;
-            let desc = click_once(tab, target_str, vp).await?;
-            let _ = wait_for_stable(&tab.page).await;
-            tab.elements.clear();
-            Ok::<_, String>(desc)
-        }
-        .await;
-        self.stop_fetch_drain(drain).await;
-        let desc = result?;
-        Ok(Response::ok_text(format!("Clicked {}", desc)))
-    }
-
-    async fn cmd_dblclick(&mut self, args: &Value) -> Result<Response, String> {
-        let target_str = self.arg_str(args, "target")?;
-        let (tab, vp) = self.tab_with_config()?;
-
-        auto_observe_if_needed(tab, target_str, vp).await?;
-        let resolved = resolve_target(tab, target_str).await?;
-        let js = format!(
-            "document.querySelector({})?.dispatchEvent(new MouseEvent('dblclick', {{bubbles:true}}))",
-            json_str(&resolved.selector)
-        );
-        tab.page
-            .execute_sync(&js)
-            .await
-            .map_err(|e| e.to_string())?;
-        tab.elements.clear();
-        Ok(Response::ok_text(format!(
-            "Double-clicked {}",
-            resolved.desc
-        )))
-    }
-
-    async fn cmd_fill(&mut self, args: &Value) -> Result<Response, String> {
-        self.ensure_browser().await?;
-        let target_str = self.arg_str(args, "target")?;
-        let text = self.arg_str(args, "text")?;
-        let (tab, vp) = self.tab_with_config()?;
-
-        auto_observe_if_needed(tab, target_str, vp).await?;
-        let desc = fill_once(tab, target_str, text, vp).await?;
-        tab.elements.clear();
-        Ok(Response::ok_text(format!(
-            "Filled {} with \"{}\"",
-            desc, text
-        )))
-    }
-
-    async fn cmd_select(&mut self, args: &Value) -> Result<Response, String> {
-        let target_str = self.arg_str(args, "target")?;
-        let value = self.arg_str(args, "value")?;
-        let drain = self.start_fetch_drain();
-        let result = async {
-            let (tab, vp) = self.tab_with_config()?;
-            auto_observe_if_needed(tab, target_str, vp).await?;
-            let resolved = resolve_target(tab, target_str).await?;
-            let arg = json!({ "sel": resolved.selector, "val": value });
-            let js = format!(
-                r#"(() => {{
-                const arg = {arg};
-                const sel = document.querySelector(arg.sel);
-                if (!sel) return false;
-                const opt = Array.from(sel.options).find(o => o.value === arg.val || o.text === arg.val);
-                if (!opt) return false;
-                sel.value = opt.value;
-                sel.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                return true;
-            }})()"#,
-                arg = serde_json::to_string(&arg).map_err(|e| e.to_string())?
-            );
-            let selected: bool = tab.page.evaluate(&js).await.map_err(|e| e.to_string())?;
-            if !selected {
-                return Err(format!(
-                    "Option \"{}\" not found in {}",
-                    value, resolved.desc
-                ));
-            }
-            let _ = wait_for_stable(&tab.page).await;
-            tab.elements.clear();
-            Ok::<_, String>(resolved.desc)
-        }
-        .await;
-        self.stop_fetch_drain(drain).await;
-        let desc = result?;
-        Ok(Response::ok_text(format!(
-            "Selected \"{}\" in {}",
-            value, desc
-        )))
-    }
-
-    async fn cmd_hover(&mut self, args: &Value) -> Result<Response, String> {
-        let target_str = self.arg_str(args, "target")?;
-        let (tab, vp) = self.tab_with_config()?;
-
-        auto_observe_if_needed(tab, target_str, vp).await?;
-        let resolved = resolve_target(tab, target_str).await?;
-        tab.page
-            .hover(&resolved.selector)
-            .await
-            .map_err(|e| e.to_string())?;
-        Ok(Response::ok_text(format!("Hovered {}", resolved.desc)))
-    }
-
-    async fn cmd_key(&mut self, args: &Value) -> Result<Response, String> {
-        let key = self.arg_str(args, "key")?;
-        let tab = self.require_tab()?;
-        tab.page
-            .human()
-            .press_key(key)
-            .await
-            .map_err(|e| e.to_string())?;
-        Ok(Response::ok_text(format!("Pressed {}", key)))
-    }
-
     async fn cmd_mouse_down(&mut self, args: &Value) -> Result<Response, String> {
         let (x, y, button) = self.mouse_button_args(args)?;
         self.require_tab()?
@@ -979,21 +878,47 @@ impl Handler {
 
     async fn cmd_scroll(&mut self, args: &Value) -> Result<Response, String> {
         let target_str = self.arg_str(args, "target")?;
-        let (tab, vp) = self.tab_with_config()?;
+        let tab = self.require_tab()?;
 
         match target_str {
-            "up" => tab.page.execute_sync("window.scrollBy(0, -window.innerHeight * 0.8)").await,
-            "down" => tab.page.execute_sync("window.scrollBy(0, window.innerHeight * 0.8)").await,
+            "up" => {
+                tab.page
+                    .execute_sync("window.scrollBy(0, -window.innerHeight * 0.8)")
+                    .await
+            }
+            "down" => {
+                tab.page
+                    .execute_sync("window.scrollBy(0, window.innerHeight * 0.8)")
+                    .await
+            }
             "top" => tab.page.execute_sync("window.scrollTo(0, 0)").await,
-            "bottom" => tab.page.execute_sync("window.scrollTo(0, document.body.scrollHeight)").await,
+            "bottom" => {
+                tab.page
+                    .execute_sync("window.scrollTo(0, document.body.scrollHeight)")
+                    .await
+            }
             _ => {
-                auto_observe_if_needed(tab, target_str, vp).await?;
-                let resolved = resolve_target(tab, target_str).await?;
-                let js = format!(
-                    "document.querySelector({})?.scrollIntoView({{behavior:'smooth',block:'center'}})",
-                    json_str(&resolved.selector)
-                );
-                tab.page.execute_sync(&js).await
+                let target = self
+                    .agent
+                    .resolve_target(&tab.page, target_str)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let id = uuid::Uuid::new_v4().to_string();
+                self.operations
+                    .submit(
+                        tab.page.clone(),
+                        id.clone(),
+                        eoka::Action::ScrollIntoView { target },
+                        Default::default(),
+                    )
+                    .await
+                    .map_err(|e| e.to_string())?;
+                return Ok(Response::action_result(
+                    self.operations
+                        .wait(&id, 30_000)
+                        .await
+                        .map_err(|e| e.to_string())?,
+                ));
             }
         }
         .map_err(|e| e.to_string())?;
@@ -1427,6 +1352,15 @@ impl Handler {
         let drain = self.start_fetch_drain();
 
         let result = async {
+            if let Some(expect) = args.get("expect").filter(|v| !v.is_null()) {
+                page.wait_for_expectation(
+                    &serde_json::from_value(expect.clone()).map_err(|e| e.to_string())?,
+                    timeout,
+                )
+                .await
+                .map_err(|e| e.to_string())?;
+                return Ok(Response::ok_text("Readiness condition satisfied"));
+            }
             if let Some(text) = args["text"].as_str() {
                 page.wait_for_text(text, timeout)
                     .await

@@ -151,6 +151,21 @@ pub async fn run(
 mod tests {
     use super::*;
     use clap::Parser;
+    async fn handshake(listener: &tokio::net::UnixListener) {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        assert!(matches!(
+            eoka_protocol::read_msg::<_, Request>(&mut stream)
+                .await
+                .unwrap(),
+            Request::SessionHello
+        ));
+        eoka_protocol::write_msg(
+            &mut stream,
+            &Response::ok(serde_json::json!({"protocol_major":2,"mode":"headless"})),
+        )
+        .await
+        .unwrap();
+    }
 
     #[tokio::test]
     async fn lost_wait_response_keeps_known_id_without_replaying_start() {
@@ -161,6 +176,7 @@ mod tests {
         let path = crate::session::socket_path(&session);
         let listener = UnixListener::bind(&path).unwrap();
         let server = tokio::spawn(async move {
+            handshake(&listener).await;
             let (mut start, _) = listener.accept().await.unwrap();
             assert!(matches!(
                 read_msg::<_, Request>(&mut start).await.unwrap(),
@@ -173,6 +189,7 @@ mod tests {
             .await
             .unwrap();
             drop(start);
+            handshake(&listener).await;
             let (mut wait, _) = listener.accept().await.unwrap();
             let request: Request = read_msg(&mut wait).await.unwrap();
             assert!(matches!(request, Request::DownloadWait(ref args) if args.id == "known-job"));
@@ -199,9 +216,7 @@ mod tests {
         let response = run(
             &args,
             &session,
-            crate::launch_spec::LaunchSpec::Connect {
-                ws_url: "unused".into(),
-            },
+            crate::launch_spec::LaunchSpec::Reuse,
             true,
             None,
         )

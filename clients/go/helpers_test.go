@@ -53,7 +53,7 @@ func newFakeBrowser(t *testing.T, handle fakeHandler) *Browser {
 
 func fakeServerInfo() ServerInfo {
 	return ServerInfo{
-		Protocol:      ProtocolVersion{Major: 1, Minor: 1},
+		Protocol:      ProtocolVersion{Major: 2, Minor: 0},
 		ServerVersion: "test-server",
 		CoreVersion:   "test-core",
 		Methods: []string{

@@ -9,11 +9,21 @@ import (
 )
 
 type ActionOptions struct {
-	TimeoutMS uint64         `json:"timeout_ms,omitempty"`
-	Expect    map[string]any `json:"expect,omitempty"`
+	Destination string         `json:"destination,omitempty"`
+	TimeoutMS   uint64         `json:"timeout_ms,omitempty"`
+	Expect      map[string]any `json:"expect,omitempty"`
+}
+
+type ErrorDetail struct {
+	Code      string          `json:"code"`
+	Message   string          `json:"message"`
+	Retryable *bool           `json:"retryable"`
+	Hint      *string         `json:"hint"`
+	Context   json.RawMessage `json:"context"`
 }
 
 type OperationRecord struct {
+	Error             *ErrorDetail    `json:"error"`
 	ID                string          `json:"id"`
 	RuntimeID         string          `json:"runtime_id"`
 	TargetID          string          `json:"target_id"`
@@ -137,9 +147,15 @@ func (p *Page) performLegacy(ctx context.Context, method string, params map[stri
 	case "page.click_text", "page.human_click_text":
 		action = map[string]any{"kind": "click", "target": map[string]any{"query": map[string]any{"kind": "text", "text": params["text"]}}, "human": method == "page.human_click_text"}
 	case "page.fill", "page.human_fill":
-		action = map[string]any{"kind": "fill", "target": selector(), "value": params["value"], "human": method == "page.human_fill"}
+		action = map[string]any{"kind": "fill", "target": selector(), "value": params["value"]}
+		if mode, ok := params["inputMode"]; ok {
+			action["input_mode"] = mode
+		}
 	case "page.type_into":
 		action = map[string]any{"kind": "type", "target": selector(), "text": params["text"]}
+		if mode, ok := params["inputMode"]; ok {
+			action["input_mode"] = mode
+		}
 	case "page.select":
 		action = map[string]any{"kind": "select_option", "target": selector(), "value": params["value"]}
 	case "page.hover":

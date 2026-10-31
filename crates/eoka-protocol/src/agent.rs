@@ -1,9 +1,17 @@
-use crate::{Expectation, OperationRecord, PageContext};
+use crate::{
+    Destination, ErrorDetail, Expectation, InputMode, OperationRecord, OperationStatus, PageContext,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AgentObserveArgs {
+    #[serde(default)]
+    pub cursor: Option<String>,
+    #[serde(default)]
+    pub role: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
     #[schemars(description = "Maximum labeled controls, 1 through 200. Increase if truncated.")]
     #[serde(default = "control_limit")]
     #[schemars(range(min = 1, max = 200))]
@@ -29,6 +37,9 @@ fn action_timeout() -> u64 {
 impl Default for AgentObserveArgs {
     fn default() -> Self {
         Self {
+            cursor: None,
+            role: None,
+            name: None,
             max_controls: control_limit(),
             timeout_ms: observe_timeout(),
         }
@@ -38,22 +49,48 @@ impl Default for AgentObserveArgs {
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentMode {
-    #[default]
     Explore,
+    #[default]
     Verify,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AgentAction {
-    Click { target: String },
-    Fill { target: String, text: String },
-    Type { target: String, text: String },
-    Select { target: String, value: String },
-    Hover { target: String },
-    ScrollIntoView { target: String },
-    PressKey { key: String },
-    Navigate { url: String },
+    Click {
+        target: String,
+    },
+    Fill {
+        target: String,
+        text: String,
+        #[serde(default)]
+        input_mode: InputMode,
+    },
+    Type {
+        target: String,
+        text: String,
+        #[serde(default)]
+        input_mode: InputMode,
+    },
+    Focus {
+        target: String,
+    },
+    Select {
+        target: String,
+        value: String,
+    },
+    Hover {
+        target: String,
+    },
+    ScrollIntoView {
+        target: String,
+    },
+    PressKey {
+        key: String,
+    },
+    Navigate {
+        url: String,
+    },
     Back,
     Forward,
 }
@@ -61,6 +98,8 @@ pub enum AgentAction {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AgentStepArgs {
+    #[serde(default)]
+    pub destination: Destination,
     #[schemars(
         description = "Optional canonical UUID. SDK/CLI allocate before sending; direct MCP callers should supply one when recovery from a lost response is required. Reuse only with identical action arguments."
     )]
@@ -96,6 +135,12 @@ pub struct AgentControl {
     pub disabled: bool,
     pub checked: Option<bool>,
     pub expanded: Option<bool>,
+    pub focused: bool,
+    pub editable: bool,
+    pub readonly: bool,
+    pub required: bool,
+    pub invalid: bool,
+    pub validation_message: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -114,14 +159,17 @@ pub struct AgentObservation {
     pub tabs: Vec<AgentTab>,
     pub controls: Vec<AgentControl>,
     pub truncated: bool,
+    pub next_cursor: Option<String>,
+    pub total_controls: usize,
     pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AgentStepResult {
+    pub status: OperationStatus,
     pub operation_id: String,
     pub operation: Option<OperationRecord>,
-    pub operation_error: Option<String>,
+    pub operation_error: Option<ErrorDetail>,
     pub observation: Option<AgentObservation>,
     pub observation_error: Option<String>,
 }

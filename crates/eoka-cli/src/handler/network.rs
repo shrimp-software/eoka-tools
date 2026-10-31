@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use eoka::cdp::{Session as CdpSession, Transport};
 use serde_json::{json, Value};
-use tokio::sync::{mpsc, Mutex, Notify, Semaphore};
+use tokio::sync::{mpsc, oneshot, Mutex, Notify, Semaphore};
 
 mod body;
 mod har;
@@ -22,11 +22,21 @@ use runtime::{network_enable, run_recorder, NetworkControl};
 pub struct NetworkRecorder {
     namespace: String,
     store: Arc<Mutex<NetworkStore>>,
-    control: mpsc::Sender<NetworkControl>,
+    control: mpsc::Sender<(NetworkControl, oneshot::Sender<Value>)>,
     notify: Arc<Notify>,
 }
 
 impl NetworkRecorder {
+    async fn apply(&self, command: NetworkControl) -> Result<Value, String> {
+        let (reply, result) = oneshot::channel();
+        self.control
+            .send((command, reply))
+            .await
+            .map_err(|_| "Network recorder stopped before applying control".to_string())?;
+        result
+            .await
+            .map_err(|_| "Network recorder stopped before acknowledging control".to_string())
+    }
     pub fn spawn(namespace: impl Into<String>, transport: Arc<Transport>) -> Self {
         let store = Arc::new(Mutex::new(NetworkStore {
             config: NetworkConfig::default(),
@@ -56,47 +66,34 @@ impl NetworkRecorder {
         config: NetworkConfig,
     ) -> Result<Value, String> {
         network_enable(session, &config).await?;
-        self.control
-            .send(NetworkControl::Start {
+        let status = self
+            .apply(NetworkControl::Start {
                 session_id: session.session_id().to_string(),
                 target_id: session.target_id().to_string(),
                 config,
             })
-            .await
-            .map_err(|e| e.to_string())?;
-        Ok(self.status().await)
+            .await?;
+        Ok(json!({"meta":self.meta_with_warnings(Vec::new()).await,"status":status}))
     }
 
     pub async fn update_session(&self, session: &CdpSession) -> Result<(), String> {
         let config = { self.store.lock().await.config.clone() };
         network_enable(session, &config).await?;
-        self.control
-            .send(NetworkControl::SetSession {
-                session_id: session.session_id().to_string(),
-                target_id: session.target_id().to_string(),
-            })
-            .await
-            .map_err(|e| e.to_string())
+        self.apply(NetworkControl::SetSession {
+            session_id: session.session_id().to_string(),
+            target_id: session.target_id().to_string(),
+        })
+        .await
+        .map(|_| ())
     }
 
-    pub async fn stop(&self, session: Option<CdpSession>) -> Result<Value, String> {
-        if let Some(session) = session {
-            let _ = session
-                .send::<_, Value>("Network.disable", &json!({}))
-                .await;
-        }
-        self.control
-            .send(NetworkControl::Stop)
-            .await
-            .map_err(|e| e.to_string())?;
-        Ok(self.status().await)
+    pub async fn stop(&self, _session: Option<CdpSession>) -> Result<Value, String> {
+        let status = self.apply(NetworkControl::Stop).await?;
+        Ok(json!({"meta":self.meta_with_warnings(Vec::new()).await,"status":status}))
     }
 
     pub async fn clear(&self) -> Result<Value, String> {
-        self.control
-            .send(NetworkControl::Clear)
-            .await
-            .map_err(|e| e.to_string())?;
+        self.apply(NetworkControl::Clear).await?;
         let meta = self.meta_with_warnings(Vec::new()).await;
         Ok(json!({ "cleared": true, "meta": meta }))
     }

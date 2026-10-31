@@ -382,6 +382,10 @@ fn network_record_exports_local_fetch_to_har() {
     let _ = std::fs::remove_file(&har_path);
     let _ = std::fs::remove_file(&json_path);
 
+    assert_success(
+        &run(&session, &["open", "about:blank"]),
+        "create recording session",
+    );
     let start = run(
         &session,
         &[
@@ -394,6 +398,8 @@ fn network_record_exports_local_fetch_to_har() {
         ],
     );
     assert_success(&start, "network record start");
+    let started: serde_json::Value = serde_json::from_slice(&start.stdout).unwrap();
+    assert_eq!(started["data"]["status"]["active"], true);
 
     let open = run(&session, &["--json", "open", &page_url]);
     assert_success(&open, "open");
@@ -493,6 +499,21 @@ fn network_record_exports_local_fetch_to_har() {
             .as_str()
             .unwrap_or_default()
             .contains("/api/data?from=page")));
+
+    let stop = run(&session, &["--json", "network", "record", "stop"]);
+    assert_success(&stop, "network record stop");
+    let stopped: serde_json::Value = serde_json::from_slice(&stop.stdout).unwrap();
+    assert_eq!(stopped["data"]["status"]["active"], false);
+    let clear = run(&session, &["--json", "network", "clear"]);
+    assert_success(&clear, "network clear");
+    let log = run(&session, &["--json", "network", "log"]);
+    assert_success(&log, "network log after clear");
+    let log: serde_json::Value = serde_json::from_slice(&log.stdout).unwrap();
+    assert_eq!(log["data"]["entries"].as_array().unwrap().len(), 0);
+    assert_success(
+        &run(&session, &["open", "about:blank"]),
+        "navigation after recorder stop",
+    );
 
     clean_session(&session);
     let _ = std::fs::remove_file(har_path);

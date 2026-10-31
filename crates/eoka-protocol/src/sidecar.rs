@@ -8,7 +8,7 @@ pub use crate::{OperationIdArgs, OperationListArgs, OperationWaitArgs};
 pub const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 pub const MAX_MESSAGE_BYTES: usize = 32 * 1024 * 1024;
 pub const MAX_IN_FLIGHT: usize = 128;
-pub const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion { major: 1, minor: 3 };
+pub const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion { major: 2, minor: 0 };
 pub const MAX_BOUNDED_FETCH_BYTES: usize = 1024 * 1024;
 pub const MAX_SCREENSHOT_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_RECORDING_FPS: u32 = 120;
@@ -828,7 +828,6 @@ dto!(SolveTurnstileResult {
     clicks: u32,
     elapsed_ms: u64
 });
-// Server-side watcher that solves full-page Cloudflare challenges in every tab.
 dto!(CloudflareAutoSolve {
     #[serde(default = "default_cloudflare_interval_ms")]
     #[schemars(range(min = 100, max = 60000))]
@@ -877,11 +876,14 @@ dto!(WaitForTextParams {
 });
 dto!(JsParams {
     page_id: String,
-    #[schemars(
-        description = "JavaScript expression, awaited. Evaluation accepts only JSON data: null, booleans, strings, finite numbers, arrays and plain objects. Undefined, BigInt, functions, symbols, cycles and non-JSON object types are rejected. Execute discards its return value."
-    )]
-    js: String,
+    function: String,
+    #[serde(default)] arguments: Vec<Value>,
 });
+dto!(RawJsParams {
+    page_id: String,
+    js: String
+});
+
 dto!(FetchParams {
     page_id: String, url: String,
     #[serde(default = "default_fetch_method")] method: String,
@@ -1074,12 +1076,12 @@ dto!(SolveCaptchaResult {
 });
 
 macro_rules! action_params {
-    ($name:ident { $($field:ident: $ty:ty),* }) => {
+    ($name:ident { $($(#[$attr:meta])* $field:ident: $ty:ty),* }) => {
         dto!($name {
             page_id: String,
             #[serde(rename = "operation_id")] operation_id: String,
             #[serde(default)] options: crate::ActionOptions,
-            $($field: $ty),*
+            $($(#[$attr])* $field: $ty),*
         });
     };
 }
@@ -1091,11 +1093,15 @@ action_params!(ClickParams { selector: String });
 action_params!(ClickTextParams { text: String });
 action_params!(FillParams {
     selector: String,
-    value: String
+    value: String,
+    #[serde(default)]
+    input_mode: crate::InputMode
 });
 action_params!(TypeIntoParams {
     selector: String,
-    text: String
+    text: String,
+    #[serde(default)]
+    input_mode: crate::InputMode
 });
 action_params!(PressKeyParams { key: String });
 dto!(AgentObserveParams {
@@ -1258,6 +1264,8 @@ methods! {
     "page.wait_for_text" => WaitForTextParams => Empty,
     "page.evaluate" => JsParams => EvaluateResult,
     "page.execute" => JsParams => Empty,
+    "page.evaluate_raw" => RawJsParams => EvaluateResult,
+    "page.execute_raw" => RawJsParams => Empty,
     "page.frames" => FramesParams => Vec<FrameInfo>,
     "page.evaluate_in_frame" => FrameJsParams => EvaluateResult,
     "page.click_shadow" => ClickShadowParams, ClickShadowParams::validate => ClickShadowResult,
@@ -1340,7 +1348,8 @@ pub fn schema_bundle() -> Value {
             "RecordingFailure": schema::<RecordingFailure>(), "RecordingFailureStage": schema::<RecordingFailureStage>()
         }
     });
-    // Added outside `json!` to stay under its macro recursion limit.
+    bundle["types"]["InputMode"] = schema::<crate::InputMode>();
+    bundle["types"]["Destination"] = schema::<crate::Destination>();
     bundle["types"]["CloudflareAutoSolve"] = schema::<CloudflareAutoSolve>();
     bundle
 }
@@ -1567,6 +1576,7 @@ mod tests {
             started_at_ms: 1,
             finished_at_ms: 2,
             download_guid: None,
+            destination_target_id: None,
             action: "click".into(),
             target_id: "target".into(),
             outcome: crate::ActionOutcome::OutcomeUnknown,

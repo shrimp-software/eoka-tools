@@ -1,6 +1,6 @@
 use super::Handler;
 use eoka_protocol::{DownloadStartArgs, Response};
-use eoka_server::downloads::{failure, rejected, resolve_click, start_response, DownloadManager};
+use eoka_server::downloads::{failure, rejected, start_response, DownloadManager};
 use serde_json::Value;
 
 impl Handler {
@@ -37,23 +37,12 @@ impl Handler {
             return rejected(failure("download_busy", "A download is already active"));
         }
         let selector = if let Some(target) = args.click.as_deref() {
-            let (tab, viewport) = match self.tab_with_config() {
+            let tab = match self.require_tab() {
                 Ok(tab) => tab,
                 Err(error) => return rejected(failure("session_unavailable", error)),
             };
-            match resolve_click(
-                &tab.page,
-                &mut tab.elements,
-                &tab.snapshot_refs,
-                viewport,
-                target,
-            )
-            .await
-            {
-                Ok(selector) => {
-                    tab.invalidate();
-                    Some(selector)
-                }
+            match eoka_server::downloads::resolve_click(&self.agent, &tab.page, target).await {
+                Ok(selector) => Some(selector),
                 Err(error) => return rejected(error),
             }
         } else {

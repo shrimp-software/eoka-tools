@@ -4,7 +4,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use eoka::{Action, ActionOptions, Browser, LocatorQuery, LocatorSpec, Page};
 use eoka_protocol::{
     AgentAction, AgentControl, AgentMode, AgentObservation, AgentObserveArgs, AgentStepArgs,
-    AgentStepResult, AgentTab, OperationState,
+    AgentStepResult, AgentTab, ErrorDetail, OperationRecord, OperationState, OperationStatus,
 };
 use tokio::time::{timeout_at, Instant};
 
@@ -22,7 +22,19 @@ struct View {
     document: String,
     namespace: String,
     targets: HashMap<String, i64>,
+    observation: AgentObservation,
+    role: Option<String>,
+    name: Option<String>,
 }
+
+#[derive(Debug)]
+struct RejectedAction(String);
+impl std::fmt::Display for RejectedAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+impl std::error::Error for RejectedAction {}
 
 async fn document_identity(page: &Page) -> Result<String> {
     let tree: serde_json::Value = page
@@ -73,11 +85,6 @@ fn validate_limits(max_controls: usize, timeout_ms: u64) -> Result<()> {
 }
 
 impl AgentSession {
-    fn invalidate(&mut self, tab_id: &str) {
-        if let Some(view) = self.views.get_mut(tab_id) {
-            view.targets.clear();
-        }
-    }
     pub fn references(&self, tab_id: &str) -> HashMap<String, i64> {
         self.views
             .get(tab_id)
@@ -92,18 +99,43 @@ impl AgentSession {
         args: AgentObserveArgs,
     ) -> Result<AgentObservation> {
         validate_limits(args.max_controls, args.timeout_ms)?;
-        self.invalidate(page.target_id());
         let deadline = Instant::now() + Duration::from_millis(args.timeout_ms);
-        timeout_at(deadline, self.capture(browser, page, args.max_controls))
-            .await
-            .context("observation_timeout: no fresh targets were issued")?
+        timeout_at(deadline, async {
+            if let Some(cursor) = &args.cursor {
+                let (id, offset) = cursor
+                    .rsplit_once(':')
+                    .ok_or_else(|| anyhow!("invalid_cursor"))?;
+                let offset: usize = offset.parse().context("invalid_cursor")?;
+                let view = self
+                    .views
+                    .get(page.target_id())
+                    .ok_or_else(|| anyhow!("stale_cursor: observe again"))?;
+                if view.observation.observation_id != id
+                    || view.document != document_identity(page).await?
+                    || args
+                        .role
+                        .as_ref()
+                        .is_some_and(|v| Some(v) != view.role.as_ref())
+                    || args
+                        .name
+                        .as_ref()
+                        .is_some_and(|v| Some(v) != view.name.as_ref())
+                {
+                    bail!("stale_cursor: document, capture, or filters changed");
+                }
+                return paginate(&view.observation, offset, args.max_controls);
+            }
+            self.capture(browser, page, &args).await
+        })
+        .await
+        .context("observation_timeout: no fresh targets were issued")?
     }
 
     async fn capture(
         &mut self,
         browser: &Browser,
         page: &Page,
-        max_controls: usize,
+        args: &AgentObserveArgs,
     ) -> Result<AgentObservation> {
         let document = document_identity(page).await?;
         let (snapshot, context, tabs) = tokio::join!(
@@ -124,19 +156,32 @@ impl AgentSession {
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         let mut targets = HashMap::new();
         let mut controls = Vec::new();
-        let mut truncated = false;
         for node in snapshot
             .refs
             .into_iter()
             .filter(|node| control_role(&node.role))
         {
-            if controls.len() == max_controls {
-                truncated = true;
-                break;
-            }
             let target = format!("@{}:{}", namespace, node.backend_node_id);
             targets.insert(target.clone(), node.backend_node_id);
+            if args.role.as_ref().is_some_and(|role| &node.role != role)
+                || args
+                    .name
+                    .as_ref()
+                    .is_some_and(|name| !node.name.to_lowercase().contains(&name.to_lowercase()))
+            {
+                continue;
+            }
             controls.push(AgentControl {
+                focused: node.focused,
+                readonly: node.readonly,
+                editable: node.editable && !node.readonly && !node.disabled,
+                required: node.required,
+                invalid: node.invalid,
+                validation_message: if node.invalid {
+                    node.validation_message
+                } else {
+                    None
+                },
                 target,
                 role: node.role,
                 name: node.name.chars().take(200).collect(),
@@ -164,24 +209,128 @@ impl AgentSession {
                 Vec::new()
             }
         };
-        self.views
-            .retain(|target, _| tabs.iter().any(|tab: &AgentTab| &tab.id == target));
+        if !tabs.is_empty() {
+            self.views
+                .retain(|target, _| tabs.iter().any(|tab: &AgentTab| &tab.id == target));
+        }
+        let observation = AgentObservation {
+            observation_id: id,
+            tab_id: page.target_id().into(),
+            page: context,
+            tabs,
+            total_controls: controls.len(),
+            controls,
+            truncated: false,
+            next_cursor: None,
+            warnings,
+        };
+        let result = paginate(&observation, 0, args.max_controls)?;
         self.views.insert(
             page.target_id().into(),
             View {
                 document,
                 namespace,
                 targets,
+                observation,
+                role: args.role.clone(),
+                name: args.name.clone(),
             },
         );
-        Ok(AgentObservation {
-            observation_id: id,
-            tab_id: page.target_id().into(),
-            page: context,
-            tabs,
-            controls,
-            truncated,
-            warnings,
+        Ok(result)
+    }
+
+    pub async fn command(
+        &self,
+        operations: &OperationManager,
+        page: &Page,
+        command: &str,
+        arguments: serde_json::Value,
+    ) -> Result<OperationRecord> {
+        if command == "action_perform" {
+            let request: eoka_protocol::ActionPerformArgs = serde_json::from_value(arguments)?;
+            return operations
+                .submit(
+                    page.clone(),
+                    request.operation_id,
+                    request.action,
+                    request.options,
+                )
+                .await;
+        }
+        let id = arguments["operation_id"]
+            .as_str()
+            .ok_or_else(|| anyhow!("operation_id is required"))?
+            .to_owned();
+        let options = crate::operations::commands::options(&arguments)?;
+        let input_mode: eoka::InputMode = serde_json::from_value(
+            arguments
+                .get("input_mode")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!("sequential")),
+        )?;
+        let canonical = serde_json::to_vec(
+            &serde_json::json!({"command":command,"target_id":page.target_id(),"target":arguments["target"],"text":arguments["text"],"value":arguments["value"],"key":arguments["key"],"input_mode":input_mode,"options":options}),
+        )?;
+        let store = operations
+            .store()
+            .await
+            .map_err(crate::operations::commands::uncertain)?;
+        store
+            .recover()
+            .await
+            .map_err(crate::operations::commands::uncertain)?;
+        if let Some(record) = store
+            .lookup(id.clone(), canonical.clone())
+            .await
+            .map_err(crate::operations::commands::uncertain)?
+        {
+            return Ok(record);
+        }
+        let target = match arguments["target"].as_str() {
+            Some(target) => Some(self.resolve_target(page, target).await?),
+            None => None,
+        };
+        let action = crate::operations::commands::action(command, &arguments, target)?;
+        operations
+            .submit_with(
+                page.clone(),
+                id,
+                action,
+                options,
+                Execution {
+                    canonical: Some(canonical),
+                    exploratory: false,
+                },
+            )
+            .await
+    }
+
+    pub async fn resolve_target(&self, page: &Page, target: &str) -> Result<LocatorSpec> {
+        match crate::Target::parse(target) {
+            crate::Target::Ref(label) => self.resolve_reference(page, &label).await,
+            crate::Target::Index(_) => {
+                bail!("Numeric action indices were removed; use a scoped target from view")
+            }
+            crate::Target::Live(_) => crate::operations::commands::live_locator(target),
+        }
+    }
+
+    pub async fn resolve_reference(&self, page: &Page, target: &str) -> Result<LocatorSpec> {
+        let view = self
+            .views
+            .get(page.target_id())
+            .ok_or_else(|| anyhow!("stale_reference: call view first"))?;
+        let id = *view
+            .targets
+            .get(target)
+            .ok_or_else(|| anyhow!("stale_reference: target not present in this document"))?;
+        if view.document != document_identity(page).await? {
+            bail!("stale_reference: document navigated; call view again");
+        }
+        Ok(LocatorSpec {
+            query: LocatorQuery::BackendNode { id },
+            frame_id: None,
+            index: None,
         })
     }
 
@@ -190,27 +339,14 @@ impl AgentSession {
             AgentAction::Click { target }
             | AgentAction::Fill { target, .. }
             | AgentAction::Type { target, .. }
+            | AgentAction::Focus { target }
             | AgentAction::Select { target, .. }
             | AgentAction::Hover { target }
             | AgentAction::ScrollIntoView { target } => Some(target),
             _ => None,
         };
         let locator = if let Some(target) = target {
-            let view = self
-                .views
-                .get(page.target_id())
-                .ok_or_else(|| anyhow!("stale_reference: call agent.observe first"))?;
-            let id = *view.targets.get(target).ok_or_else(|| {
-                anyhow!("stale_reference: target is not from the latest observation of this tab")
-            })?;
-            if view.document != document_identity(page).await? {
-                bail!("stale_reference: document navigated; call agent.observe again");
-            }
-            Some(LocatorSpec {
-                query: LocatorQuery::BackendNode { id },
-                frame_id: None,
-                index: None,
-            })
+            Some(self.resolve_reference(page, target).await?)
         } else {
             None
         };
@@ -225,16 +361,21 @@ impl AgentSession {
                 human: false,
                 double: false,
             },
-            AgentAction::Fill { text, .. } => Action::Fill {
+            AgentAction::Fill {
+                text, input_mode, ..
+            } => Action::Fill {
                 target: locator()?,
                 value: text.clone(),
-                human: false,
+                input_mode: *input_mode,
             },
-            AgentAction::Type { text, .. } => Action::Type {
+            AgentAction::Type {
+                text, input_mode, ..
+            } => Action::Type {
                 target: locator()?,
                 text: text.clone(),
-                human: false,
+                input_mode: *input_mode,
             },
+            AgentAction::Focus { .. } => Action::Focus { target: locator()? },
             AgentAction::Select { value, .. } => Action::SelectOption {
                 target: locator()?,
                 value: value.clone(),
@@ -281,7 +422,7 @@ impl AgentSession {
         let operation_deadline = deadline - reserve;
         let canonical = serde_json::to_vec(&serde_json::json!({
             "agent_step": { "action":args.action, "mode":args.mode, "expect":args.expect,
-                "action_timeout_ms":args.action_timeout_ms, "target_id":page.target_id() }
+                "action_timeout_ms":args.action_timeout_ms, "destination":args.destination, "target_id":page.target_id() }
         }))?;
         let execution = async {
             let store = operations.store().await?;
@@ -290,13 +431,17 @@ impl AgentSession {
                 if let Some(record) = store.lookup(id.clone(), canonical.clone()).await? {
                     record
                 } else {
-                    let action = self.action(page, &args.action).await?;
+                    let action = self
+                        .action(page, &args.action)
+                        .await
+                        .map_err(|error| RejectedAction(error.to_string()))?;
                     operations
                         .submit_with(
                             page.clone(),
                             id.clone(),
                             action,
                             ActionOptions {
+                                destination: args.destination,
                                 timeout_ms: args.action_timeout_ms,
                                 expect: args.expect.clone(),
                                 ..Default::default()
@@ -316,22 +461,55 @@ impl AgentSession {
             }
             Ok::<_, anyhow::Error>(record)
         };
-        let (operation, operation_error) = match timeout_at(operation_deadline, execution).await {
-            Ok(Ok(record)) => (Some(record), None),
-            Ok(Err(error)) => (None, Some(format!("{error:#}"))),
-            Err(_) => (None, Some("Response budget reached; inspect this operation ID. Admission or execution may still be running; do not repeat the action.".into())),
+        let (operation, operation_error, status) = match timeout_at(operation_deadline, execution).await {
+            Ok(Ok(record)) => {
+                let error = record.error.clone().or_else(|| record.error_code.as_ref().map(|code| ErrorDetail::new(code, "Historical operation detail unavailable")));
+                let status = record.status();
+                (Some(record), error, status)
+            },
+            Ok(Err(error)) => {
+                let status = if error.downcast_ref::<RejectedAction>().is_some() { OperationStatus::NotDispatched } else { OperationStatus::OutcomeUnknown };
+                (None, Some(ErrorDetail::new("operation_error", format!("{error:#}")).retryable(false)), status)
+            },
+            Err(_) => (None, Some(ErrorDetail::new("operation_pending", "Response budget reached; inspect this operation ID. Admission or execution may still be running; do not repeat the action.").retryable(false)), OperationStatus::Running),
         };
-        self.invalidate(page.target_id());
-        let (observation, observation_error) =
-            match timeout_at(deadline, self.capture(browser, page, args.max_controls)).await {
-                Ok(Ok(view)) => (Some(view), None),
-                Ok(Err(error)) => (None, Some(format!("{error:#}"))),
-                Err(_) => (
-                    None,
-                    Some("observation_timeout: call agent.observe for fresh page state".into()),
-                ),
-            };
+        let destination_id = operation
+            .as_ref()
+            .and_then(|record: &OperationRecord| record.receipt.as_ref())
+            .and_then(|receipt| receipt.destination_target_id.as_deref());
+        let observation_page = if status == OperationStatus::VerifiedComplete {
+            if let Some(id) = destination_id.filter(|id| *id != page.target_id()) {
+                timeout_at(deadline, browser.attach_page(id))
+                    .await
+                    .ok()
+                    .and_then(Result::ok)
+            } else {
+                Some(page.clone())
+            }
+        } else {
+            Some(page.clone())
+        };
+        let observe_args = AgentObserveArgs {
+            max_controls: args.max_controls,
+            ..Default::default()
+        };
+        let (observation, observation_error) = match timeout_at(deadline, async {
+            let page = observation_page.as_ref().ok_or_else(|| {
+                anyhow!("Verified destination could not be attached; select its tab explicitly")
+            })?;
+            self.capture(browser, page, &observe_args).await
+        })
+        .await
+        {
+            Ok(Ok(view)) => (Some(view), None),
+            Ok(Err(error)) => (None, Some(format!("{error:#}"))),
+            Err(_) => (
+                None,
+                Some("observation_timeout: call agent.observe for fresh page state".into()),
+            ),
+        };
         Ok(AgentStepResult {
+            status,
             operation_id: id,
             operation,
             operation_error,
@@ -339,4 +517,22 @@ impl AgentSession {
             observation_error,
         })
     }
+}
+
+fn paginate(
+    observation: &AgentObservation,
+    offset: usize,
+    limit: usize,
+) -> Result<AgentObservation> {
+    if offset > observation.controls.len() {
+        bail!("invalid_cursor: offset exceeds capture");
+    }
+    let mut page = observation.clone();
+    let end = offset.saturating_add(limit).min(page.controls.len());
+    page.controls = page.controls[offset..end].to_vec();
+    page.truncated = end < observation.controls.len();
+    page.next_cursor = page
+        .truncated
+        .then(|| format!("{}:{end}", observation.observation_id));
+    Ok(page)
 }
