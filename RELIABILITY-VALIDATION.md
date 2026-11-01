@@ -59,6 +59,21 @@ The new hosted browser CI job runs all Rust browser tests, all Node tests with
 native host artifacts, Go race/browser tests, and helper tests. Host artifact
 staging is explicitly development-only.
 
+The first registry-backed hosted run passed all 102 Rust browser tests but
+exposed two workflow defects: release provenance still required core 0.7.3,
+and the Rust Chrome launcher was written inside the verified browser cache.
+Provenance now derives the core version from the committed lockfile while
+requiring each native artifact's lockfile to match it exactly. The launcher
+uses a separate Chrome distribution copy, preserving the managed cache.
+All five native artifacts from qualification run `41259549497` passed the
+revised provenance check; altered-version and altered-checksum negative
+controls were rejected. The complete 322-test Node suite passed with zero
+skips using that run's Linux release binary, all five staged packages and
+pinned Chrome 155. The copied launcher also ran a real browser action, and
+the original cache still passed offline integrity verification afterward.
+The Go race and real-browser suite passed with the same release binary and
+pinned Chrome in an uncached run.
+
 ## Behavior exercised
 
 - A headed session is reused by its literal name; an explicit conflicting mode
@@ -121,4 +136,5 @@ Review revision logs are in `/home/cbass/.cache/er/`: `fix-core-unit-final.log`,
 `fix-helper-tests.log`. Original installer evidence remains in
 `installer-check.log`. Registry follow-up evidence is in
 `registry-release-check.log`; the earlier override-rejection log is retained as
-historical evidence.
+historical evidence. CI follow-up evidence is in `ci-fixed-node-tests.log`,
+`ci-fixed-go-tests.log` and `ci-provenance-41259549497/`.
