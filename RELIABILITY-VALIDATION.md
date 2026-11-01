@@ -4,7 +4,8 @@ Local qualification on 2026-10-31. The changes are in the paired
 `fix/login-navigation-reliability` branches, based on core `659fe31` and tools
 `cacc76d`. The original checkouts and investigation transcript were preserved.
 No live account credentials were used in fixtures.
-The reviewed core implementation is committed as `d7f55bd`.
+The reviewed core implementation `d7f55bd` was merged as `99a4c975` and
+published to crates.io as `eoka 0.8.0` on 2026-10-31 (local time).
 
 ## Environment and dependency boundary
 
@@ -14,12 +15,15 @@ Node 24.21.0. Rust browser tests and direct Node/Go fixtures used Chrome
 Chrome for Testing 155.0.8059.39 cache and a locally staged native server.
 `TMPDIR=/var/tmp/er` kept Chrome sockets on disk with short paths.
 
-Tools were built against the paired core checkout through an external Cargo
-configuration. This is development validation, not registry/release evidence.
-The equivalent explicit override is:
+The original browser/client checks used the paired core checkout through an
+external Cargo configuration. After core publication, Cargo downloaded 0.8.0
+and verified its registry checksum. Its VCS metadata identifies merge commit
+`99a4c975`; all 92 source files and the original manifest match the reviewed
+checkout byte for byte. The tools lockfile now records the registry source and
+checksum, and the full release check passes without local or git overrides:
 
 ```sh
-cargo --config 'patch.crates-io.eoka.path="../eoka-reliability"' test --workspace --all-features
+env -u CARGO_HOME mise run release-check
 ```
 
 The complete tools browser gate also supplies the explicit executable required
@@ -27,8 +31,8 @@ by the runtime/viewport fixture:
 
 ```sh
 TMPDIR=/var/tmp/er EOKA_TEST_CHROME_PATH=/opt/google/chrome-beta/chrome \
-  xvfb-run -a cargo --config 'patch.crates-io.eoka.path="../eoka-reliability"' \
-  test --workspace --all-features --locked --no-fail-fast -- --ignored --test-threads=1
+  xvfb-run -a cargo test --workspace --all-features --locked --no-fail-fast \
+  -- --ignored --test-threads=1
 ```
 
 ## Checks
@@ -48,8 +52,8 @@ TMPDIR=/var/tmp/er EOKA_TEST_CHROME_PATH=/opt/google/chrome-beta/chrome \
 | Go formatting, vet, race suite and real-browser fixture | Passed; uncached race run |
 | Sketchy helper fixtures and real local HLS download | 6 passed |
 | CLI installer | Original PR validation: exact compiled binary installed; bad checksum and wrong version rejected without replacing the existing binary. Installer unchanged and not rerun for this review revision |
-| New/changed CI workflows | Hosted runners only; revised browser CI and publisher pass actionlint. Browser scratch exists before toolchain setup. Shell syntax and CLI/server release-dispatch guard pass; registry qualification remains blocked on core 0.8.0 |
-| `mise run release-check` | Quality gates passed; registry gate correctly rejected the local core override |
+| New/changed CI workflows | Hosted runners only; revised browser CI and publisher pass actionlint. Browser scratch exists before toolchain setup. Shell syntax and CLI/server release-dispatch guard pass |
+| Registry-only `mise run release-check` | Passed: formatting, workspace check, 362 regular tests, Clippy, registry dependency guard, protocol package verification and workspace packaging |
 
 The new hosted browser CI job runs all Rust browser tests, all Node tests with
 native host artifacts, Go race/browser tests, and helper tests. Host artifact
@@ -102,12 +106,9 @@ staging is explicitly development-only.
 1. Run the authenticated macOS workflow with the revised CLI and all three
    helpers: login/blur/validation, navigation, lesson selection, listing and a
    verified download. This Linux environment has not established that result.
-2. Publish core 0.8.0 first, regenerate the tools lockfile from crates.io, and
-   pass the registry-only release check. A current registry query found no
-   `eoka@0.8.0`; the checked-in tools lockfile still represents local validation.
-3. Qualify version-matched CLI/server binaries on each supported platform and
-   complete Node publication qualification. No packages, tags or binaries have
-   been published by this work. Node publication readiness remains blocked in
+2. Qualify version-matched CLI/server binaries on each supported platform and
+   complete Node publication qualification. Tools packages and binaries have
+   not been published by this PR. Node publication readiness remains blocked in
    `clients/node/scripts/publication-readiness.json`.
 
 Review revision logs are in `/home/cbass/.cache/er/`: `fix-core-unit-final.log`,
@@ -118,4 +119,6 @@ Review revision logs are in `/home/cbass/.cache/er/`: `fix-core-unit-final.log`,
 `fix-tools-conformance-final.log`, `fix-surface-parity.log`,
 `fix-node-check-final.log`, `fix-go-vet.log`, `fix-go-tests-final.log` and
 `fix-helper-tests.log`. Original installer evidence remains in
-`installer-check.log`.
+`installer-check.log`. Registry follow-up evidence is in
+`registry-release-check.log`; the earlier override-rejection log is retained as
+historical evidence.

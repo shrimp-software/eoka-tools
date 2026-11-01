@@ -5,7 +5,6 @@
   "chromeBuildId": "155.0.8059.39",
   "blockers": [
     "Authenticated macOS login, lesson selection and download qualification is pending",
-    "Core 0.8.0 must be published and the tools registry lockfile and release check regenerated",
     "Version-matched server and CLI binaries require all-platform qualification before publication"
   ]
 }
