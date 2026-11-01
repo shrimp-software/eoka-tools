@@ -200,7 +200,7 @@ jobs:
           set -euo pipefail
           mise exec -- npm --prefix clients/node ci --ignore-scripts --omit=optional
           mise run node-build
-          mise exec -- node --test clients/node/tests/recording-qualification.test.mjs clients/node/tests/publication-recovery.test.mjs clients/node/tests/sigstore-verification.test.mjs
+          mise exec -- node --test clients/node/tests/recording-qualification.test.mjs clients/node/tests/release-qualification.test.mjs clients/node/tests/publication-recovery.test.mjs clients/node/tests/sigstore-verification.test.mjs
           args=()
           if [[ "$PUBLICATION" == true ]]; then args+=(--publication); fi
           mise exec -- node clients/node/scripts/stage-release.mjs --artifacts native --output stage "${args[@]}"
@@ -268,6 +268,7 @@ jobs:
       - name: Exercise packed native SDK outside repository
         env:
           EOKA_SOURCE_SHA: ${{ needs.source.outputs.sha }}
+          EOKA_PUBLICATION: ${{ inputs.publication || false }}
           PLATFORM: ${{ matrix.platform }}
         run: |
           mise exec -- node clients/node/scripts/qualify-release.mjs --packages packages --cache "$RUNNER_TEMP/b" --output "evidence/$PLATFORM"

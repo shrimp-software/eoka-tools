@@ -48,7 +48,7 @@ TMPDIR=/var/tmp/er EOKA_TEST_CHROME_PATH=/opt/google/chrome-beta/chrome \
 | Tools complete ignored Chrome suite, serial under Xvfb | 102 passed |
 | Protocol projection conformance | Passed |
 | Surface parity | 64 sidecar methods checked |
-| Node generation, types, runtime, package and real-browser tests | 322 passed; zero skipped |
+| Node generation, types, runtime, package and real-browser tests | 331 passed; zero skipped |
 | Go formatting, vet, race suite and real-browser fixture | Passed; uncached race run |
 | Sketchy helper fixtures and real local HLS download | 6 passed |
 | CLI installer | Original PR validation: exact compiled binary installed; bad checksum and wrong version rejected without replacing the existing binary. Installer unchanged and not rerun for this review revision |
@@ -73,6 +73,21 @@ pinned Chrome 155. The copied launcher also ran a real browser action, and
 the original cache still passed offline integrity verification afterward.
 The Go race and real-browser suite passed with the same release binary and
 pinned Chrome in an uncached run.
+
+Qualification run `41270717862` passed native provenance and staging, then
+completed runtime checks on all five platforms, including all ten recording
+cases per platform. Each runtime job failed solely because the final check
+also required publication approval. PR runtime checks now retain the blocked
+readiness record and produce `publication: false` evidence. Publication runs
+still require ready status and no blockers before runtime execution and
+aggregation. Aggregation also rejects evidence from another mode, source or
+readiness state; the publisher continues to require publication evidence.
+Nine subprocess regressions cover this boundary and preserve failure handling
+for runtime tests, recordings and package integrity. All 331 Node tests pass
+with zero skips, and the full registry-only release check passes again.
+The revised full Linux packed qualification passed against the actual CI
+packages, including sandbox, headed/borrowed browser lifecycle, screenshots
+and all ten recording cases, while retaining blocked publication readiness.
 
 ## Behavior exercised
 
@@ -137,4 +152,6 @@ Review revision logs are in `/home/cbass/.cache/er/`: `fix-core-unit-final.log`,
 `installer-check.log`. Registry follow-up evidence is in
 `registry-release-check.log`; the earlier override-rejection log is retained as
 historical evidence. CI follow-up evidence is in `ci-fixed-node-tests.log`,
-`ci-fixed-go-tests.log` and `ci-provenance-41259549497/`.
+`ci-fixed-go-tests.log` and `ci-provenance-41259549497/`. Qualification-policy
+evidence is in `ci-qualification-node-tests.log`,
+`ci-qualification-release-check.log` and `ci-qualification-41270717862/`.
