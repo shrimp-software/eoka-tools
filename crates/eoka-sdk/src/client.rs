@@ -427,6 +427,43 @@ pub async fn send_command(
     mut request: Request,
     spec: LaunchSpec,
 ) -> anyhow::Result<Response> {
+    if !matches!(request, Request::SessionHello) {
+        if let Ok(stream) = UnixStream::connect(session::socket_path(session_name)).await {
+            let hello = tokio::time::timeout(
+                Duration::from_secs(5),
+                exchange_request(stream, &Request::SessionHello),
+            )
+            .await;
+            let hello = match hello {
+                Ok(Ok(response)) if response.ok => response.data.unwrap_or_default(),
+                _ => return Ok(non_retryable_error("protocol_mismatch", "Daemon compatibility could not be verified. Upgrade explicitly; no browser was restarted and no action was sent.")),
+            };
+            if hello["protocol_major"] != eoka_protocol::sidecar::PROTOCOL_VERSION.major {
+                return Ok(non_retryable_error("protocol_mismatch", "Client and daemon protocols differ. Upgrade explicitly; the existing browser was retained."));
+            }
+            let required_mode = match &spec {
+                LaunchSpec::Launch { headless: true, .. } => Some("headless"),
+                LaunchSpec::Launch {
+                    headless: false, ..
+                } => Some("headed"),
+                LaunchSpec::Connect { .. } => Some("connect"),
+                LaunchSpec::Reuse => None,
+            };
+            if spec.has_creation_settings()
+                && hello["configuration_fingerprint"] != spec.configuration_fingerprint()
+            {
+                return Ok(non_retryable_error("session_configuration_conflict", "Creation settings differ from the existing session. Omit creation flags to reuse it or choose a new session name."));
+            }
+            if required_mode.is_some_and(|mode| hello["mode"] != mode) {
+                return Ok(non_retryable_error("session_mode_conflict", "Existing session mode conflicts with the explicit launch mode. Omit launch flags to reuse it or choose a different session name."));
+            }
+        }
+    }
+    if let Request::Open(args) = &mut request {
+        args.operation
+            .operation_id
+            .get_or_insert_with(|| uuid::Uuid::new_v4().to_string());
+    }
     if let Request::DownloadStart(args) = &mut request {
         args.operation_id
             .get_or_insert_with(|| uuid::Uuid::new_v4().to_string());
@@ -474,13 +511,7 @@ pub async fn send_command(
         return Ok(send_existing_session(session_name, &request, "frame_transport_error",
             "This daemon does not support frame operations. Upgrade the daemon explicitly; the existing browser was not restarted.").await);
     }
-    let response = send_command_once(session_name, request.clone(), &spec).await?;
-    if should_restart_headed_daemon(&response, &spec) {
-        let _ = kill_daemon(session_name);
-        let retry = send_command_once(session_name, request, &spec).await?;
-        return Ok(retry);
-    }
-    Ok(response)
+    send_command_once(session_name, request, &spec).await
 }
 
 fn non_retryable_error(code: &str, message: &str) -> Response {
@@ -601,9 +632,26 @@ async fn send_command_once(
     let sock = session::socket_path(session_name);
     let stream = match UnixStream::connect(&sock).await {
         Ok(s) => s,
-        Err(_) => {
+        Err(_)
+            if matches!(request, Request::Open(_))
+                || (matches!(request, Request::TabAttach(_))
+                    && matches!(spec, LaunchSpec::Connect { .. })) =>
+        {
+            let legacy = [
+                format!("{session_name}-headed"),
+                format!("{session_name}-live"),
+            ];
+            if legacy.iter().any(|name| is_daemon_running(name)) {
+                return Ok(non_retryable_error("legacy_session_present", "A legacy suffixed session exists. Select it explicitly or migrate it; no replacement browser was created."));
+            }
             launch_daemon(session_name, spec)?;
             wait_for_socket(session_name).await?
+        }
+        Err(_) => {
+            return Ok(non_retryable_error(
+                "session_unavailable",
+                "Existing session unavailable; open the intended session explicitly",
+            ))
         }
     };
 
@@ -612,26 +660,12 @@ async fn send_command_once(
 
 async fn exchange_request(stream: UnixStream, request: &Request) -> anyhow::Result<Response> {
     let (mut reader, mut writer) = stream.into_split();
-    write_msg(&mut writer, request).await?;
+    let mut wire = serde_json::to_value(request)?;
+    wire["protocol_major"] = serde_json::json!(eoka_protocol::sidecar::PROTOCOL_VERSION.major);
+    write_msg(&mut writer, &wire).await?;
     Ok(read_msg(&mut reader).await?)
 }
 
-fn should_restart_headed_daemon(response: &Response, spec: &LaunchSpec) -> bool {
-    let LaunchSpec::Launch {
-        headless: false, ..
-    } = spec
-    else {
-        return false;
-    };
-    if std::env::var_os("DISPLAY").is_none() {
-        return false;
-    }
-    let Some(error) = response.error.as_deref() else {
-        return false;
-    };
-    error.contains("Missing X server or $DISPLAY")
-        || error.contains("channel is empty and sending half is closed")
-}
 async fn wait_for_socket(session_name: &str) -> anyhow::Result<UnixStream> {
     let sock = session::socket_path(session_name);
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
@@ -656,6 +690,7 @@ fn launch_daemon(session_name: &str, spec: &LaunchSpec) -> anyhow::Result<()> {
     cmd.arg("--daemon").arg("--session").arg(session_name);
 
     match spec {
+        LaunchSpec::Reuse => {}
         LaunchSpec::Launch {
             headless,
             from_profile,
@@ -799,6 +834,7 @@ async fn send_operation(
     if !matches!(request, Request::AgentObserve(_)) {
         wire["operation_id"] = serde_json::json!(id);
     }
+    wire["protocol_major"] = serde_json::json!(eoka_protocol::sidecar::PROTOCOL_VERSION.major);
     let stream = match UnixStream::connect(session::socket_path(session_name)).await {
         Ok(stream) => stream,
         Err(_) if request.cmd().starts_with("operation_") => {
@@ -828,9 +864,16 @@ async fn send_operation(
         exchange.await
     };
     Ok(match result {
-        Ok(response)=>response,
-        Err(_) if matches!(request, Request::AgentObserve(_)) => non_retryable_error("observation_transport_error", "Observation response unavailable; no action was requested."),
-        Err(_)=>non_retryable_error("operation_transport_error",&format!("Connection lost; inspect operation {id}. Its outcome is unknown. No action was replayed.")),
+        Ok(response) => response,
+        Err(_) if matches!(request, Request::AgentObserve(_)) => non_retryable_error(
+            "observation_transport_error",
+            "Observation response unavailable; no action was requested.",
+        ),
+        Err(_) => {
+            let mut response = Response::err_detail(eoka_protocol::ErrorDetail::new("operation_transport_error", format!("Connection lost; inspect operation {id}. Its outcome is unknown. No action was replayed.")).retryable(false).context(eoka_protocol::ErrorContext { operation_id: Some(id.clone()), phase: Some("transport".into()), action_status: Some(eoka_protocol::ActionStatus::MayHaveExecuted), ..Default::default() }));
+            response.data = Some(serde_json::json!({"operation_id":id,"status":"outcome_unknown"}));
+            response
+        }
     })
 }
 
@@ -839,6 +882,14 @@ mod tests {
     use super::*;
     use tokio::net::UnixListener;
 
+    async fn handshake(listener: &UnixListener) {
+        let (stream, _) = listener.accept().await.unwrap();
+        let (mut reader, mut writer) = stream.into_split();
+        let request: Request = read_msg(&mut reader).await.unwrap();
+        assert!(matches!(request, Request::SessionHello));
+        write_msg(&mut writer, &Response::ok(serde_json::json!({"protocol_major":2,"mode":"headless","configuration_fingerprint":test_client("fixture").spec.configuration_fingerprint()}))).await.unwrap();
+    }
+
     #[tokio::test]
     async fn agent_step_allocates_id_before_transport_and_retains_it_on_disconnect() {
         let session = format!("agent-step-{}", uuid::Uuid::new_v4());
@@ -846,6 +897,7 @@ mod tests {
         let socket = session::socket_path(&session);
         let listener = UnixListener::bind(&socket).unwrap();
         let server = tokio::spawn(async move {
+            handshake(&listener).await;
             let (stream, _) = listener.accept().await.unwrap();
             let (mut reader, _) = stream.into_split();
             let request: Request = read_msg(&mut reader).await.unwrap();
@@ -893,6 +945,7 @@ mod tests {
         let listener = UnixListener::bind(&sock).unwrap();
 
         let server = tokio::spawn(async move {
+            handshake(&listener).await;
             let (stream, _) = listener.accept().await.unwrap();
             let (mut reader, mut writer) = stream.into_split();
             let request: Request = read_msg(&mut reader).await.unwrap();
@@ -978,6 +1031,7 @@ mod tests {
                 let sock = session::socket_path(&name);
                 let listener = UnixListener::bind(&sock).unwrap();
                 let server = tokio::spawn(async move {
+                    handshake(&listener).await;
                     let (stream, _) = listener.accept().await.unwrap();
                     let (mut reader, mut writer) = stream.into_split();
                     let request: Request = read_msg(&mut reader).await.unwrap();
@@ -995,10 +1049,7 @@ mod tests {
                             .is_err()
                     );
                 });
-                let mut client = test_client(&name);
-                if let LaunchSpec::Launch { headless, .. } = &mut client.spec {
-                    *headless = false;
-                }
+                let client = test_client(&name);
                 let response = client.call(request.clone()).await.unwrap();
                 assert!(!response.ok);
                 if index == 0 {
@@ -1051,6 +1102,7 @@ mod tests {
             let sock = session::socket_path(&name);
             let listener = UnixListener::bind(&sock).unwrap();
             let server = tokio::spawn(async move {
+                handshake(&listener).await;
                 let (stream, _) = listener.accept().await.unwrap();
                 let (mut reader, mut writer) = stream.into_split();
                 let request: Request = read_msg(&mut reader).await.unwrap();
@@ -1103,6 +1155,7 @@ mod tests {
         let listener = UnixListener::bind(&sock).unwrap();
 
         let server = tokio::spawn(async move {
+            handshake(&listener).await;
             let (stream, _) = listener.accept().await.unwrap();
             let (mut reader, mut writer) = stream.into_split();
             let request: Request = read_msg(&mut reader).await.unwrap();

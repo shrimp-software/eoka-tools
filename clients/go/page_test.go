@@ -40,9 +40,6 @@ func TestPageNoResultMethods(t *testing.T) {
 				}
 			case "fill":
 				method = "page.fill"
-				if a["human"] == true {
-					method = "page.human_fill"
-				}
 			case "select_option":
 				method = "page.select"
 			case "type":
@@ -67,7 +64,7 @@ func TestPageNoResultMethods(t *testing.T) {
 		{"page.click", func() error { return page.Click(ctx, "#go") }},
 		{"page.human_click", func() error { return page.HumanClick(ctx, "#go") }},
 		{"page.fill", func() error { return page.Fill(ctx, "#user", "bob") }},
-		{"page.human_fill", func() error { return page.HumanFill(ctx, "#user", "bob") }},
+		{"page.fill", func() error { return page.HumanFill(ctx, "#user", "bob") }},
 		{"page.type_into", func() error { return page.TypeInto(ctx, "#user", "bob") }},
 		{"page.wait_for", func() error { return page.WaitFor(ctx, "#go", time.Second) }},
 		{"page.wait_for_visible", func() error { return page.WaitForVisible(ctx, "#go", time.Second) }},
@@ -164,13 +161,13 @@ func TestPageGetAttribute(t *testing.T) {
 func TestPageEvaluate(t *testing.T) {
 	page := newFakePage(t, func(id int64, method string, params json.RawMessage) (any, *rpcError) {
 		var p struct {
-			JS string `json:"js"`
+			JS string `json:"function"`
 		}
 		_ = json.Unmarshal(params, &p)
 		switch p.JS {
-		case "1+1":
+		case "()=>1+1":
 			return map[string]any{"result": 2}, nil
-		case "document.title":
+		case "()=>document.title":
 			return map[string]any{"result": "Example Domain"}, nil
 		}
 		return map[string]any{"result": nil}, nil
@@ -178,17 +175,17 @@ func TestPageEvaluate(t *testing.T) {
 
 	ctx := context.Background()
 
-	raw, err := page.Evaluate(ctx, "1+1")
+	raw, err := page.Evaluate(ctx, "()=>1+1")
 	if err != nil || string(raw) != "2" {
 		t.Fatalf("Evaluate: %s, %v", raw, err)
 	}
 
-	title, err := EvaluateAs[string](ctx, page, "document.title")
+	title, err := EvaluateAs[string](ctx, page, "()=>document.title")
 	if err != nil || title != "Example Domain" {
 		t.Fatalf("EvaluateAs[string]: %q, %v", title, err)
 	}
 
-	n, err := EvaluateAs[int](ctx, page, "1+1")
+	n, err := EvaluateAs[int](ctx, page, "()=>1+1")
 	if err != nil || n != 2 {
 		t.Fatalf("EvaluateAs[int]: %d, %v", n, err)
 	}

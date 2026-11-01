@@ -542,9 +542,9 @@ dependencies = [
 
 [[package]]
 name = "eoka"
-version = "0.7.3"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "203ce86d2c3d2110f899efdc874c961ff176d587533c5dcc7d5c0f467a42aee1"
+checksum = "6a446247b52d4136d9642ec301d575001d022752c4981394800d9c52771697c8"
 dependencies = [
  "aho-corasick",
  "base64 0.23.0",
@@ -574,7 +574,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-cli"
-version = "0.6.1"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -604,7 +604,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-datadome"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "base64 0.23.0",
  "eoka",
@@ -636,7 +636,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-mcp"
-version = "0.6.1"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -655,7 +655,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-protocol"
-version = "0.6.2"
+version = "0.7.0"
 dependencies = [
  "eoka",
  "schemars",
@@ -674,7 +674,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-runner"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "chrono",
  "clap",
@@ -696,20 +696,21 @@ dependencies = [
 
 [[package]]
 name = "eoka-sdk"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "eoka",
  "eoka-protocol",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
  "uuid",
 ]
 
 [[package]]
 name = "eoka-server"
-version = "0.6.3"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -738,7 +739,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-tack"
-version = "0.6.1"
+version = "0.7.0"
 dependencies = [
  "async-trait",
  "eoka-protocol",

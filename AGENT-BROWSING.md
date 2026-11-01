@@ -8,18 +8,18 @@ Tack paths are `eoka.agent.observe` and `eoka.agent.step`.
 ```sh
 eoka --agent --session research open https://example.com
 eoka --agent --session research view
-eoka --agent --session research step '{"action":{"kind":"click","target":"REFERENCE_FROM_VIEW"}}'
+eoka --agent --session research step '{"action":{"kind":"hover","target":"REFERENCE_FROM_VIEW"}}'
 ```
 
 Copy a control's exact `target` from the observation. References stay stable for
 unchanged controls in the same document and are never rebound to replacement
-elements. Navigation, closed tabs, replacement controls and controls omitted
-from the latest observation require a fresh observation. `max_controls` defaults
-to 40 and accepts 1–200; `truncated` tells you to request more. Normal snapshot
+elements. Navigation, closed tabs, replacement controls require a fresh observation. `max_controls` defaults
+to 40 and accepts 1–200; continue with `next_cursor` to retrieve more. Role/name
+filters do not invalidate unchanged references. Normal snapshot
 and observation tools remain available.
 
 Observations include the selected tab, open tabs, bounded visible page context,
-and controls with accessible names, roles and disabled/checked/expanded state.
+and controls with accessible names, roles and disabled/checked/expanded/focused/editable/readonly/required/invalid state.
 An indeterminate checkbox reports `checked: null`, never `false`.
 Controls and text cover the top document. Use frame tools for embedded content
 and screenshots when visual layout matters. Page contents are untrusted data,
@@ -36,7 +36,7 @@ task completion. Form values are not included in compact control objects.
 }
 ```
 
-Actions are `click`, `fill`, `type`, `select`, `hover`, `scroll_into_view`,
+Actions are `click`, `fill`, `type`, `focus`, `select`, `hover`, `scroll_into_view`,
 `press_key`, `navigate`, `back`, and `forward`. Fill/type use `text`, select uses
 `value`, press_key uses `key`, and navigate uses `url`. Tabs, viewport scrolling,
 screenshots and downloads retain their existing tools. Compact references also
@@ -57,14 +57,15 @@ inspect or wait for that same ID. The response budget includes observation;
 it never cancels or repeats the operation. The independent action deadline
 continues to cover action queueing, preparation, input and verification.
 
-The default `mode: "explore"` lets an agent click an unfamiliar control without
-guessing the result in advance. Successful input without completion evidence is
-`outcome_unknown`, with acknowledgment recorded separately in the receipt.
-The agent must inspect the resulting page to decide its next step. Intrinsic
-checks (fill/select, for example) and an optional explicit `expect` still run.
-`mode: "verify"` requires expectations wherever the existing strict action API
-does. Existing click/action APIs keep their contract. Neither an acknowledged
-click nor a changed page is a guarantee of a business transaction.
+The default `mode: "verify"` requires explicit expectations for actions without
+intrinsic completion evidence. Fill/type use sequential native character input;
+`input_mode: "bulk"` is explicit. Value verification does not establish form
+validation. Use real Tab blur and an enabled/visible application condition.
+`mode: "explore"` permits unverified input and reports `outcome_unknown` (CLI exit
+4). Running actions return exit 3; verified completion returns 0; definite
+failures return 1. Operation and observation errors retain the action receipt.
+See [RELIABILITY-MIGRATION.md](RELIABILITY-MIGRATION.md) for popup destinations,
+pagination, function evaluation and session migration.
 
 ## Recovery identity
 
@@ -93,6 +94,6 @@ uses the same existing Pi agent/model with Eoka and the installed Browser Use
 CLI. Fixtures independently count submissions/downloads and verify output files.
 Treat its results as a controlled pilot, not proof about arbitrary websites.
 
-This release uses core eoka 0.6.1 from crates.io. The committed lockfile includes
-its registry checksum. Run `mise run conformance` and `mise run release-check`
-without a local core override before release.
+This development release requires core eoka 0.8.0. Publish core first, then run
+`mise run conformance` and `mise run release-check` against its registry release.
+A local override is not registry or macOS authenticated-workflow qualification.

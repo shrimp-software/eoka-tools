@@ -71,6 +71,75 @@ pub struct Response {
 }
 
 impl Response {
+    pub fn action_result(record: crate::OperationRecord) -> Self {
+        let status = record.status();
+        let detail = record.error.clone().or_else(|| {
+            record
+                .error_code
+                .as_ref()
+                .map(|code| ErrorDetail::new(code, "Historical operation detail unavailable"))
+        });
+        let mut data = serde_json::to_value(record).expect("operation record is JSON serializable");
+        data["status"] = serde_json::json!(status);
+        Self::completion(status, data, detail)
+    }
+
+    pub fn agent_result(result: crate::AgentStepResult) -> Self {
+        Self::completion(
+            result.status,
+            serde_json::json!(result),
+            result.operation_error.clone(),
+        )
+    }
+
+    fn completion(
+        status: crate::OperationStatus,
+        data: serde_json::Value,
+        detail: Option<ErrorDetail>,
+    ) -> Self {
+        let ok = status == crate::OperationStatus::VerifiedComplete;
+        let detail = detail.or_else(|| {
+            (!ok).then(|| {
+                ErrorDetail::new(
+                    match status {
+                        crate::OperationStatus::Running => "operation_pending",
+                        crate::OperationStatus::NotDispatched => "not_dispatched",
+                        _ => "outcome_unknown",
+                    },
+                    "Inspect the operation ID and dispatch evidence; do not repeat the action",
+                )
+                .retryable(false)
+            })
+        });
+        Self {
+            ok,
+            data: Some(data),
+            error: detail.as_ref().map(|e| e.message.clone()),
+            error_detail: detail,
+            meta: None,
+        }
+    }
+
+    pub fn exit_code(&self) -> i32 {
+        if let Some(status) = self
+            .data
+            .as_ref()
+            .and_then(|data| data.get("status"))
+            .and_then(|status| {
+                serde_json::from_value::<crate::OperationStatus>(status.clone()).ok()
+            })
+        {
+            return status.exit_code();
+        }
+        if self.ok {
+            return 0;
+        }
+        match self.error_detail.as_ref().map(|e| e.code.as_str()) {
+            Some("operation_pending") => 3,
+            Some("operation_transport_error" | "outcome_unknown") => 4,
+            _ => 1,
+        }
+    }
     pub fn ok(data: impl Into<serde_json::Value>) -> Self {
         Self {
             ok: true,

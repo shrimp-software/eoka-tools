@@ -387,7 +387,7 @@ impl Session {
         self.perform_and_wait(eoka::Action::Fill {
             target: eoka::LocatorSpec::css(selector),
             value: text.into(),
-            human: false,
+            input_mode: Default::default(),
         })
         .await
     }
@@ -457,7 +457,7 @@ impl Session {
         self.perform_and_wait(eoka::Action::Fill {
             target: eoka::LocatorSpec::css(selector),
             value: text.into(),
-            human: true,
+            input_mode: Default::default(),
         })
         .await
     }

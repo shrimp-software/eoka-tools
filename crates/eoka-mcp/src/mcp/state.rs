@@ -24,7 +24,6 @@ fn reconcile_closed_tab<T>(
 pub(crate) struct TabState {
     pub page: Page,
     pub elements: Vec<InteractiveElement>,
-    pub snapshot_refs: HashMap<String, i64>,
     pub console_injected: bool,
 }
 
@@ -33,14 +32,12 @@ impl TabState {
         Self {
             page,
             elements: Vec::new(),
-            snapshot_refs: HashMap::new(),
             console_injected: false,
         }
     }
 
     pub fn invalidate(&mut self) {
         self.elements.clear();
-        self.snapshot_refs.clear();
     }
 }
 

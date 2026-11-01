@@ -14,12 +14,16 @@ impl EokaServer {
             .as_u64()
             .unwrap_or(if cmd == "agent_step" { 10000 } else { 3000 })
             .min(60000);
-        tokio::time::timeout(std::time::Duration::from_millis(budget), self.agent_command_inner(cmd, args)).await.unwrap_or_else(|_| {
-            Err(internal(match id {
-                Some(id) => format!("Response deadline reached; inspect operation {id}. Admission or execution may still be running; do not replay."),
-                None => "Observation deadline reached; no action was requested.".into(),
-            }))
-        })
+        match tokio::time::timeout(std::time::Duration::from_millis(budget), self.agent_command_inner(cmd, args)).await {
+            Ok(result) => result,
+            Err(_) => protocol_tool_response(match id {
+                Some(id) => eoka_server::operations::commands::failure(
+                    eoka_server::operations::commands::uncertain(anyhow::anyhow!("Response deadline reached; inspect this operation ID. Admission or execution may still be running; do not replay.")),
+                    Some(id),
+                ),
+                None => eoka_protocol::Response::err_detail(eoka_protocol::ErrorDetail::new("observation_timeout", "Observation deadline reached; no action was requested.")),
+            }),
+        }
     }
 
     async fn agent_command_inner(
@@ -40,20 +44,23 @@ impl EokaServer {
             (state.browser.clone(), page)
         };
         let mut agent = self.agent.lock().await;
-        let result = match cmd {
-            "agent_observe" => serde_json::to_value(
-                agent
-                    .observe(
-                        &browser,
-                        &page,
-                        serde_json::from_value(args).map_err(|e| invalid(e.to_string()))?,
-                    )
-                    .await
-                    .map_err(internal)?,
+        let mut response = match cmd {
+            "agent_observe" => eoka_protocol::Response::ok(
+                serde_json::to_value(
+                    agent
+                        .observe(
+                            &browser,
+                            &page,
+                            serde_json::from_value(args).map_err(|e| invalid(e.to_string()))?,
+                        )
+                        .await
+                        .map_err(internal)?,
+                )
+                .map_err(internal)?,
             ),
-            "agent_step" => serde_json::to_value(
+            "agent_step" => eoka_protocol::Response::agent_result(
                 agent
-                    .step(
+                    .step_selected(
                         &browser,
                         &page,
                         &self.operations,
@@ -63,20 +70,26 @@ impl EokaServer {
                     .map_err(internal)?,
             ),
             _ => return Err(invalid("Unknown agent tool")),
-        }
-        .map_err(internal)?;
-        let references = agent.references(page.target_id());
+        };
         drop(agent);
-        if let Some(tab) = self
-            .state
-            .lock()
-            .await
-            .as_mut()
-            .and_then(|state| state.tabs.get_mut(page.target_id()))
-        {
-            tab.snapshot_refs = references;
+        let destination = response
+            .data
+            .as_ref()
+            .and_then(|v| v["observation"]["tab_id"].as_str())
+            .map(str::to_owned);
+        if let Some(id) = destination {
+            if let Some(state) = self.state.lock().await.as_mut() {
+                if state.current_tab_id.as_deref() != Some(id.as_str()) {
+                    if let Err(error) = state.switch_tab(&id).await {
+                        if let Some(data) = response.data.as_mut() {
+                            data["observation_error"] =
+                                serde_json::json!(format!("Destination selection failed: {error}"));
+                        }
+                    }
+                }
+            }
         }
-        protocol_tool_response(eoka_protocol::Response::ok(result))
+        protocol_tool_response(response)
     }
 }
 
@@ -150,20 +163,67 @@ mod tests {
             server
                 .agent_step(Parameters(
                     serde_json::from_value(
-                        serde_json::json!({"action":{"kind":"click","target":button}}),
+                        serde_json::json!({"action":{"kind":"click","target":button},"expect":{"kind":"text","target":{"query":{"kind":"css","selector":"#status"}},"value":"Saved"}}),
                     )
                     .unwrap(),
                 ))
                 .await
                 .unwrap(),
         );
-        assert_eq!(click["operation"]["outcome"], "outcome_unknown");
+        assert_eq!(click["operation"]["outcome"], "verified_complete");
         assert!(click["operation_id"].as_str().is_some());
         assert!(click["observation"]["page"]["text_excerpt"]
             .as_str()
             .unwrap()
             .contains("Saved"));
         assert_eq!(page.evaluate::<u32>("window.hits").await.unwrap(), 1);
+        page.execute("document.querySelector('#go').onclick=()=>{window.hits++;const child=window.open('about:blank');child.document.body.innerHTML='<button id=ready>Ready</button>'}").await.unwrap();
+        let request: eoka_protocol::AgentStepArgs = serde_json::from_value(serde_json::json!({
+            "operation_id":uuid::Uuid::new_v4().to_string(),
+            "action":{"kind":"click","target":button},
+            "expect":{"kind":"visible","target":{"query":{"kind":"css","selector":"#ready"}}}
+        }))
+        .unwrap();
+        let first = data(
+            server
+                .agent_step(Parameters(request.clone()))
+                .await
+                .unwrap(),
+        );
+        let second = data(
+            server
+                .agent_step(Parameters(request.clone()))
+                .await
+                .unwrap(),
+        );
+        assert_eq!(first["operation"], second["operation"]);
+        assert_eq!(
+            first["observation"]["tab_id"],
+            second["observation"]["tab_id"]
+        );
+        assert_eq!(page.evaluate::<u32>("window.hits").await.unwrap(), 2);
+        let (browser, selected) = {
+            let guard = server.state.lock().await;
+            let state = guard.as_ref().unwrap();
+            (
+                state.browser.clone(),
+                state.current_tab().unwrap().page.clone(),
+            )
+        };
+        assert_ne!(selected.target_id(), page.target_id());
+        let explicit = server
+            .agent
+            .lock()
+            .await
+            .step(&browser, &selected, &server.operations, request)
+            .await
+            .unwrap();
+        assert!(explicit
+            .operation_error
+            .unwrap()
+            .message
+            .contains("operation_id_conflict"));
+        drop(browser);
         server.close().await.unwrap();
         drop(server);
         std::fs::remove_dir_all(directory).unwrap();

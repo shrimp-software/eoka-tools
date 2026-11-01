@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use eoka::cdp::{transport::CdpMessage, Session as CdpSession, Transport};
 use serde_json::{json, Map, Value};
-use tokio::sync::{broadcast, mpsc, Mutex, Notify, Semaphore};
+use tokio::sync::{broadcast, mpsc, oneshot, Mutex, Notify, Semaphore};
 
 use super::body::{capture_text_body, decode_response_body, BodyCaptureExt};
 use super::{
@@ -28,17 +28,18 @@ pub(super) async fn run_recorder(
     store: Arc<Mutex<NetworkStore>>,
     transport: Arc<Transport>,
     mut rx: broadcast::Receiver<CdpMessage>,
-    mut control_rx: mpsc::Receiver<NetworkControl>,
+    mut control_rx: mpsc::Receiver<(NetworkControl, oneshot::Sender<Value>)>,
     body_permits: Arc<Semaphore>,
     notify: Arc<Notify>,
 ) {
     loop {
         tokio::select! {
             command = control_rx.recv() => {
-                let Some(command) = command else {
+                let Some((command, reply)) = command else {
                     break;
                 };
                 apply_control(&store, command, notify.as_ref()).await;
+                let _ = reply.send(store.lock().await.status_json());
             }
             message = rx.recv() => {
                 match message {

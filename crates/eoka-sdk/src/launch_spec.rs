@@ -1,10 +1,8 @@
-//! How the daemon should obtain its `Browser` instance.
-
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub enum LaunchSpec {
-    /// Spawn a fresh Chrome via `Browser::launch_with_config`.
+    Reuse,
     Launch {
         headless: bool,
         from_profile: Option<PathBuf>,
@@ -16,17 +14,13 @@ pub enum LaunchSpec {
         js_block: Vec<String>,
         persist: bool,
         geo_align: bool,
-        /// Solve full-page Cloudflare challenges in every tab automatically.
         auto_solve_cloudflare: bool,
     },
-    /// Attach to a Chrome already running, via `Browser::connect_with_config`.
-    Connect { ws_url: String },
+    Connect {
+        ws_url: String,
+    },
 }
 
-/// Resolve `--proxy`/`--proxy-file` into a single proxy URL. `--proxy` wins
-/// if both are somehow set (clap already rejects that combination via
-/// `conflicts_with`, so this is just a defensive precedence rule).
-/// A `--proxy-file` with multiple lines picks one at random per call.
 pub fn resolve_proxy_spec(
     proxy: Option<&str>,
     proxy_file: Option<&Path>,
@@ -59,13 +53,50 @@ pub fn resolve_proxy_spec(
 }
 
 impl LaunchSpec {
+    pub fn configuration_fingerprint(&self) -> String {
+        use sha2::{Digest, Sha256};
+        format!(
+            "{:x}",
+            Sha256::digest(serde_json::to_vec(self).unwrap_or_default())
+        )
+    }
+
+    pub fn has_creation_settings(&self) -> bool {
+        match self {
+            Self::Reuse => false,
+            Self::Connect { .. } => true,
+            Self::Launch {
+                from_profile,
+                clone_state_from,
+                no_stealth,
+                proxy,
+                no_js,
+                js_allow,
+                js_block,
+                persist,
+                geo_align,
+                auto_solve_cloudflare,
+                ..
+            } => {
+                from_profile.is_some()
+                    || clone_state_from.is_some()
+                    || *no_stealth
+                    || proxy.is_some()
+                    || *no_js
+                    || !js_allow.is_empty()
+                    || !js_block.is_empty()
+                    || *persist
+                    || !geo_align
+                    || *auto_solve_cloudflare
+            }
+        }
+    }
+
     pub fn is_live(&self) -> bool {
         matches!(self, LaunchSpec::Connect { .. })
     }
 }
 
-/// Resolve a `--cdp <spec>` argument (port, `ws://` URL, or `auto`) into a
-/// WebSocket URL. `auto` scans 9222-9229 for a responsive Chrome.
 pub fn resolve_cdp_spec(spec: &str) -> Result<String, String> {
     let trimmed = spec.trim();
     if trimmed.eq_ignore_ascii_case("auto") {
@@ -84,21 +115,7 @@ pub fn resolve_cdp_spec(spec: &str) -> Result<String, String> {
         .map_err(|e| format!("Failed to discover Chrome on 127.0.0.1:{}: {}", port, e))
 }
 
-/// Find the first port in 9222..=9229 with a responsive Chrome DevTools endpoint.
 pub fn auto_connect() -> Result<(u16, String), String> {
     eoka::cdp::discover::auto_connect(9222, 9229)
         .ok_or_else(|| "No running Chrome found on ports 9222-9229".to_string())
-}
-
-/// Internal session-name suffix so daemons in different modes don't collide.
-/// Headed and headless launches are kept separate so `--headed` always
-/// produces a visible window even if a headless daemon was running.
-pub fn session_suffix(spec: &LaunchSpec) -> &'static str {
-    match spec {
-        LaunchSpec::Launch { headless: true, .. } => "",
-        LaunchSpec::Launch {
-            headless: false, ..
-        } => "-headed",
-        LaunchSpec::Connect { .. } => "-live",
-    }
 }

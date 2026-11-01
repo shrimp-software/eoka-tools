@@ -225,13 +225,20 @@ impl Store {
     }
 
     pub async fn get(self: &Arc<Self>, id: String) -> Result<OperationRecord> {
+        self.find(id)
+            .await?
+            .ok_or_else(|| anyhow!("operation_not_found"))
+    }
+
+    pub async fn find(self: &Arc<Self>, id: String) -> Result<Option<OperationRecord>> {
         self.run(move |connection| {
-            let json: String = connection
+            let json: Option<String> = connection
                 .query_row("SELECT record FROM operations WHERE id=?", [id], |r| {
                     r.get(0)
                 })
-                .context("operation_not_found")?;
-            Ok(serde_json::from_str(&json)?)
+                .optional()?;
+            json.map(|json| serde_json::from_str(&json).map_err(Into::into))
+                .transpose()
         })
         .await
     }

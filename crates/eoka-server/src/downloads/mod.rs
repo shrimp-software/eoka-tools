@@ -1,9 +1,6 @@
 pub(crate) mod durable;
 mod files;
-mod target;
 mod worker;
-
-pub use target::resolve_click;
 
 use eoka::{Browser, Page};
 use eoka_protocol::{
@@ -415,6 +412,7 @@ impl DownloadManager {
             finished_at_ms: None,
             receipt: None,
             error_code: None,
+            error: None,
         };
         let (_, created) = store
             .admit(operation, canonical_request(&args)?)
@@ -557,6 +555,65 @@ impl Drop for Inner {
     }
 }
 
+pub async fn resolve_click(
+    agent: &crate::agent::AgentSession,
+    page: &eoka::Page,
+    target: &str,
+) -> Result<eoka::LocatorSpec, ErrorDetail> {
+    let resolve = async {
+        let pinned = matches!(crate::Target::parse(target), crate::Target::Ref(_));
+        let locator = agent.resolve_target(page, target).await.map_err(|error| {
+            failure(
+                if pinned {
+                    "download_target_stale"
+                } else {
+                    "download_target_resolution_failed"
+                },
+                error.to_string(),
+            )
+        })?;
+        let state = page
+            .locator_spec(locator.clone())
+            .state()
+            .await
+            .map_err(|error| failure("download_target_resolution_failed", error.to_string()))?;
+        match state {
+            None => Err(failure(
+                if pinned {
+                    "download_target_stale"
+                } else {
+                    "download_target_not_found"
+                },
+                "Download target is not present",
+            )),
+            Some(state) if !state.connected => {
+                Err(failure("download_target_stale", "Download target detached"))
+            }
+            Some(state) if !state.enabled => Err(failure(
+                "download_target_disabled",
+                "Download target is disabled",
+            )),
+            Some(state) if !state.visible => Err(failure(
+                "download_target_hidden",
+                "Download target is hidden",
+            )),
+            Some(_) => Ok(locator),
+        }
+    };
+    let result = tokio::time::timeout(Duration::from_secs(5), resolve)
+        .await
+        .unwrap_or_else(|_| {
+            Err(failure(
+                "download_target_resolution_failed",
+                "Download target inspection timed out",
+            ))
+        });
+    match result {
+        Ok(locator) => Ok(locator),
+        Err(error) => Err(diagnose(error, page, ActionStatus::NotAttempted, None).await),
+    }
+}
+
 pub fn failure(code: &str, message: impl Into<String>) -> ErrorDetail {
     ErrorDetail::new(code, message).retryable(false)
 }
@@ -582,6 +639,8 @@ async fn diagnose(
         context.url = redact_url(&context.url);
     }
     error.context(ErrorContext {
+        operation_id: None,
+        phase: None,
         page: context,
         download_id: id,
         action_status: Some(action_status),

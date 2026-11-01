@@ -1,3 +1,4 @@
+use super::state::TabState;
 use std::collections::HashMap;
 use std::fmt::Write;
 
@@ -5,101 +6,10 @@ use eoka_server::eoka::Page;
 use rmcp::model::{CallToolResult, ContentBlock, ErrorData};
 use serde::{Deserialize, Serialize};
 
-use eoka_server::{observe, target, InteractiveElement, Target};
+use eoka_server::InteractiveElement;
 
 use super::error::{internal, invalid};
-use super::state::TabState;
 use super::types::JsRequest;
-
-pub(crate) struct ResolvedTarget {
-    pub selector: String,
-}
-
-const SELECTOR_JS: &str = include_str!("../js/selector.js");
-
-async fn resolve_ref(
-    page: &Page,
-    snapshot_refs: &HashMap<String, i64>,
-    label: &str,
-) -> Result<String, ErrorData> {
-    let stale = |detail: &str| invalid(format!("Ref {} {}. Take a new snapshot.", label, detail));
-
-    let backend_id = snapshot_refs.get(label).ok_or_else(|| stale("not found"))?;
-
-    let resolve_result: serde_json::Value = page
-        .session()
-        .send(
-            "DOM.resolveNode",
-            &serde_json::json!({ "backendNodeId": backend_id }),
-        )
-        .await
-        .map_err(|_| stale("no longer exists"))?;
-
-    let object_id = resolve_result
-        .get("object")
-        .and_then(|o| o.get("objectId"))
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| stale("could not be resolved to DOM node"))?;
-
-    let call_result: serde_json::Value = page
-        .session()
-        .send(
-            "Runtime.callFunctionOn",
-            &serde_json::json!({
-                "objectId": object_id,
-                "functionDeclaration": SELECTOR_JS,
-                "arguments": [{ "objectId": object_id }],
-                "returnByValue": true
-            }),
-        )
-        .await
-        .map_err(|_| stale("failed to generate selector"))?;
-
-    call_result
-        .get("result")
-        .and_then(|r| r.get("value"))
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .ok_or_else(|| stale("selector generation returned null"))
-}
-
-pub(crate) async fn resolve_target(
-    tab: &TabState,
-    target_str: &str,
-) -> Result<ResolvedTarget, ErrorData> {
-    match Target::parse(target_str) {
-        Target::Index(idx) => {
-            let el = tab.elements.get(idx).ok_or_else(|| {
-                invalid(format!(
-                    "Index {} out of range (have {})",
-                    idx,
-                    tab.elements.len()
-                ))
-            })?;
-            Ok(ResolvedTarget {
-                selector: el.selector.clone(),
-            })
-        }
-        Target::Ref(label) => {
-            let selector = resolve_ref(&tab.page, &tab.snapshot_refs, &label).await?;
-            Ok(ResolvedTarget { selector })
-        }
-        Target::Live(pattern) => {
-            let r = target::resolve(&tab.page, &pattern)
-                .await
-                .map_err(internal)?;
-            if !r.found {
-                return Err(invalid(
-                    r.error
-                        .unwrap_or_else(|| format!("{} not found", target_str)),
-                ));
-            }
-            Ok(ResolvedTarget {
-                selector: r.selector,
-            })
-        }
-    }
-}
 
 pub(crate) async fn title_nonblocking(page: &Page) -> String {
     page.evaluate_sync("document.title || ''")
@@ -127,28 +37,30 @@ pub(crate) async fn wait_for_stable(page: &Page) -> eoka_server::eoka::Result<()
     }
 }
 
-pub(crate) async fn auto_observe_if_needed(
-    tab: &mut TabState,
-    target_str: &str,
-    viewport_only: bool,
-) -> Result<(), ErrorData> {
-    if matches!(Target::parse(target_str), Target::Index(_)) && tab.elements.is_empty() {
-        tab.elements = observe::observe(&tab.page, viewport_only)
-            .await
-            .map_err(internal)?;
+pub(crate) fn resolve_js(req: &JsRequest) -> Result<String, ErrorData> {
+    let source = resolve_js_source(req)?;
+    if req.raw {
+        Ok(source)
+    } else {
+        Page::function_expression(&source, &req.arguments).map_err(internal)
     }
-    Ok(())
 }
 
-pub(crate) fn resolve_js(req: &JsRequest) -> Result<String, ErrorData> {
-    if let Some(path) = &req.file {
-        std::fs::read_to_string(path)
-            .map_err(|e| invalid(format!("Failed to read JS file '{}': {}", path, e)))
-    } else if let Some(js) = &req.js {
-        Ok(js.clone())
-    } else {
-        Err(invalid("Either 'js' or 'file' must be provided"))
+pub(crate) fn resolve_js_source(req: &JsRequest) -> Result<String, ErrorData> {
+    if req.no_await && !req.raw {
+        return Err(invalid(
+            "Function execution awaits completion; no_await requires raw=true",
+        ));
     }
+    let source = if let Some(path) = &req.file {
+        std::fs::read_to_string(path)
+            .map_err(|e| invalid(format!("Failed to read JS file '{path}': {e}")))?
+    } else if let Some(code) = &req.code {
+        code.clone()
+    } else {
+        return Err(invalid("Either code or file must be provided"));
+    };
+    Ok(source)
 }
 
 pub(crate) fn text_ok(s: impl Into<String>) -> Result<CallToolResult, ErrorData> {
@@ -356,8 +268,10 @@ mod tests {
     #[test]
     fn resolve_js_inline_ok() {
         let req = JsRequest {
-            js: Some("console.log('hi')".into()),
+            raw: true,
+            code: Some("console.log('hi')".into()),
             file: None,
+            ..Default::default()
         };
         assert_eq!(resolve_js(&req).unwrap(), "console.log('hi')");
     }
@@ -365,8 +279,10 @@ mod tests {
     #[test]
     fn resolve_js_neither_field_errors() {
         let req = JsRequest {
-            js: None,
+            raw: true,
+            code: None,
             file: None,
+            ..Default::default()
         };
         assert!(resolve_js(&req).is_err());
     }
@@ -374,8 +290,10 @@ mod tests {
     #[test]
     fn resolve_js_nonexistent_file_errors() {
         let req = JsRequest {
-            js: None,
+            raw: true,
+            code: None,
             file: Some("/nonexistent/path/to/script.js".into()),
+            ..Default::default()
         };
         assert!(resolve_js(&req).is_err());
     }

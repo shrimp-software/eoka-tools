@@ -29,6 +29,13 @@ pub struct Cli {
     pub headed: bool,
     #[arg(
         long,
+        global = true,
+        conflicts_with = "headed",
+        help = "Create a headless browser or require an existing headless session"
+    )]
+    pub headless: bool,
+    #[arg(
+        long,
         value_name = "PORT|URL",
         global = true,
         env = "EOKA_CDP",
@@ -135,6 +142,12 @@ pub struct Cli {
 pub enum Command {
     #[command(about = "Compact agent page state with scoped control references")]
     View {
+        #[arg(long)]
+        cursor: Option<String>,
+        #[arg(long)]
+        role: Option<String>,
+        #[arg(long)]
+        name: Option<String>,
         #[arg(long, default_value_t = 40)]
         max_controls: usize,
         #[arg(long, default_value_t = 3000)]
@@ -221,7 +234,12 @@ pub enum Command {
     #[command(name = "dblclick", about = "Double-click element")]
     DoubleClick { target: String },
     #[command(about = "Clear and fill input")]
-    Fill { target: String, text: String },
+    Fill {
+        target: String,
+        text: String,
+        #[arg(long, default_value="sequential", value_parser=["sequential", "bulk"])]
+        input_mode: String,
+    },
     #[command(about = "Select dropdown option")]
     Select { target: String, value: String },
     #[command(about = "Hover over element")]
@@ -254,6 +272,10 @@ pub enum Command {
     Scroll { target: String },
     #[command(about = "Execute JavaScript and return result")]
     Eval {
+        #[arg(long, default_value = "[]")]
+        args: String,
+        #[arg(long)]
+        raw: bool,
         code: Option<String>,
         #[arg(short, long)]
         file: Option<PathBuf>,
@@ -278,6 +300,10 @@ pub enum Command {
     },
     #[command(about = "Execute JavaScript without returning a value")]
     Exec {
+        #[arg(long, default_value = "[]")]
+        args: String,
+        #[arg(long)]
+        raw: bool,
         code: Option<String>,
         #[arg(short, long)]
         file: Option<PathBuf>,

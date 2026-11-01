@@ -440,11 +440,13 @@ pub struct FillAction {
     pub target: Target,
     pub value: String,
     #[serde(default)]
-    pub human: bool,
+    pub input_mode: eoka::InputMode,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct TypeAction {
+    #[serde(default)]
+    pub input_mode: eoka::InputMode,
     #[serde(flatten)]
     pub operation: eoka_protocol::ActionSettings,
     #[serde(flatten)]

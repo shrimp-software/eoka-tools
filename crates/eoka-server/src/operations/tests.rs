@@ -15,6 +15,7 @@ fn record(store: &Store, id: &str) -> OperationRecord {
         finished_at_ms: None,
         receipt: None,
         error_code: None,
+        error: None,
     }
 }
 

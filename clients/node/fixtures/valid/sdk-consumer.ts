@@ -97,7 +97,7 @@ export async function usePage(page: Page): Promise<{ receipt: ActionReceipt; rec
   const record = await operation.wait(waitOptions);
   await operation.get(callOptions);
   await page.operation(operation.id).get(callOptions);
-  const evaluation = await page.invoke("page.evaluate", { pageId: page.id, js: "({ answer: 42 })" });
+  const evaluation = await page.invoke("page.evaluate", { pageId: page.id, function: "()=>({ answer: 42 })" });
   const bounded = await page.fetchBounded("/text", { maxBytes: 8192 });
   const retainedBytes: number = bounded.bytesRead;
   const omission: string | null | undefined = bounded.bodyOmitted;

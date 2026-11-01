@@ -18,7 +18,7 @@ const listRequest: ProtocolRequest<"operations.list"> = {
 const evaluationRequest: ProtocolRequest<"page.evaluate"> = {
   id: 2,
   method: "page.evaluate",
-  params: { pageId: "page-1", js: "({answer: 42})" },
+  params: { pageId: "page-1", function: "()=>({answer: 42})" },
 };
 const waitRequest: ProtocolRequest<"operations.wait"> = {
   id: 3,

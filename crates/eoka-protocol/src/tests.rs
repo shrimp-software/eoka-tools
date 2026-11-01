@@ -200,7 +200,7 @@ fn shared_mcp_inputs_keep_schema_descriptions() {
     let click_schema = input_schema_for_cmd("click");
     assert_eq!(
         click_schema["properties"]["target"]["description"],
-        "Target element. Supports index, snapshot refs like @e1, text:Submit, placeholder:Email, role:button, css:form button, id:my-btn, or plain text search."
+        "Target element. Supports scoped refs from view, text:Submit, placeholder:Email, role:button, css:form button, id:my-btn, or plain text search."
     );
 
     let tab_schema = input_schema_for_cmd("tab_switch");

@@ -9,6 +9,24 @@ impl Handler {
     pub(super) async fn cmd_eval(&mut self, args: &Value) -> Result<Response, String> {
         let code = resolve_js(args)?;
         let max_size = args["max_size"].as_u64().map(|v| v as usize);
+        if !args["raw"].as_bool().unwrap_or(false) {
+            if args["no_await"].as_bool().unwrap_or(false) {
+                return Err(
+                    "Function evaluation awaits completion; --no-await requires --raw".into(),
+                );
+            }
+            let value: Value = self
+                .require_tab()?
+                .page
+                .evaluate_function(&code, &function_arguments(args)?)
+                .await
+                .map_err(|e| e.to_string())?;
+            let size = serde_json::to_vec(&value).map_err(|e| e.to_string())?.len();
+            if size > max_size.unwrap_or(1_048_576).min(1_048_576) {
+                return Err("Evaluation result exceeds its JSON byte limit".into());
+            }
+            return Ok(Response::ok(value));
+        }
         let await_promise = !args["no_await"].as_bool().unwrap_or(false);
         let session = self.require_tab()?.page.session().clone();
 
@@ -47,9 +65,26 @@ impl Handler {
         let code = resolve_js(args)?;
         let tab = self.require_tab()?;
         if args["no_await"].as_bool().unwrap_or(false) {
-            let _: String = tab.page.evaluate_sync(&code).await.unwrap_or_default();
+            if !args["raw"].as_bool().unwrap_or(false) {
+                return Err(
+                    "Function execution awaits completion; --no-await requires --raw".into(),
+                );
+            }
+            tab.page
+                .execute_sync(&code)
+                .await
+                .map_err(|error| error.to_string())?;
+            return Ok(Response::err_detail(eoka_protocol::ErrorDetail::new("outcome_unknown", "Raw execution dispatched; asynchronous completion was not awaited. Inspect the page before further input.")));
+        } else if args["raw"].as_bool().unwrap_or(false) {
+            tab.page
+                .execute(&code)
+                .await
+                .map_err(|error| error.to_string())?;
         } else {
-            let _ = tab.page.execute(&code).await;
+            tab.page
+                .execute_function(&code, &function_arguments(args)?)
+                .await
+                .map_err(|error| error.to_string())?;
         }
         Ok(Response::ok_text("Executed successfully"))
     }
@@ -124,19 +159,7 @@ fn runtime_eval_string_value(result: &Value) -> Result<String, String> {
 }
 
 fn format_runtime_exception(exception: &Value) -> String {
-    let text = exception
-        .get("text")
-        .and_then(Value::as_str)
-        .unwrap_or("JavaScript error");
-    let line = exception
-        .get("lineNumber")
-        .and_then(Value::as_i64)
-        .unwrap_or(0);
-    let column = exception
-        .get("columnNumber")
-        .and_then(Value::as_i64)
-        .unwrap_or(0);
-    format!("JavaScript error: {} at {}:{}", text, line, column)
+    eoka::Error::javascript_exception(exception).to_string()
 }
 
 async fn format_runtime_remote_object(
@@ -258,6 +281,11 @@ fn build_limited_eval_js(code: &str, max_size: usize) -> String {
     )
 }
 
+fn function_arguments(args: &Value) -> Result<Vec<Value>, String> {
+    serde_json::from_value(args.get("arguments").cloned().unwrap_or_else(|| json!([])))
+        .map_err(|error| error.to_string())
+}
+
 fn resolve_js(args: &Value) -> Result<String, String> {
     if let Some(path) = args["file"].as_str() {
         std::fs::read_to_string(path)
@@ -306,7 +334,7 @@ mod tests {
             "columnNumber": 2
         }));
 
-        assert_eq!(err, "JavaScript error: Uncaught at 1:2");
+        assert_eq!(err, "CDP error: JavaScript error: Uncaught at 2:3");
     }
 
     #[test]
@@ -325,7 +353,7 @@ mod tests {
             .map(format_runtime_exception)
             .unwrap();
 
-        assert_eq!(err, "JavaScript error: Uncaught at 1:2");
+        assert_eq!(err, "CDP error: JavaScript error: Uncaught at 2:3");
     }
 
     #[test]

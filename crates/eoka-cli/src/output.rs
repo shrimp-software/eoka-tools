@@ -62,7 +62,22 @@ fn format_error(response: &Response) -> String {
         .and_then(|meta| meta.session.as_deref())
         .unwrap_or("default");
     let quote = |value: &str| format!("'{}'", value.replace('\'', "'\"'\"'"));
-    if let Some(id) = id {
+    let operation_id = context
+        .and_then(|c| c.operation_id.as_deref())
+        .or_else(|| data.and_then(|d| d["operation_id"].as_str()))
+        .or_else(|| {
+            data.filter(|d| d.get("status").is_some())
+                .and_then(|d| d["id"].as_str())
+        });
+    if let Some(id) = operation_id {
+        let _ = writeln!(text, "Operation: {id}");
+        let _ = writeln!(
+            text,
+            "Next: eoka --session {} operations get {}",
+            quote(session),
+            quote(id)
+        );
+    } else if let Some(id) = id {
         let _ = writeln!(text, "Download job: {id}");
         if let Some(data) = data {
             for key in ["state", "output", "published_path", "staging_path"] {

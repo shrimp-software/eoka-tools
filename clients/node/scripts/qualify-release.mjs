@@ -12,6 +12,21 @@ const platforms = ['linux-x64-gnu', 'linux-arm64-gnu', 'darwin-x64', 'darwin-arm
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const json = async path => JSON.parse(await readFile(path, 'utf8'));
 const save = (path, value) => writeFile(path, `${JSON.stringify(value, null, 2)}\n`);
+const publicationSetting = process.env.EOKA_PUBLICATION ?? 'false';
+assert.ok(['true', 'false'].includes(publicationSetting), 'EOKA_PUBLICATION must be true or false');
+const publication = publicationSetting === 'true';
+
+function assertReadiness(readiness, manifest) {
+  assert.equal(readiness.schemaVersion, 1);
+  assert.equal(readiness.sdkVersion, manifest.sdkVersion);
+  assert.equal(readiness.chromeBuildId, manifest.chrome.buildId);
+  assert.ok(['ready', 'blocked'].includes(readiness.status));
+  assert.ok(Array.isArray(readiness.blockers));
+  if (publication) {
+    assert.equal(readiness.status, 'ready', 'Publication readiness blocked');
+    assert.deepEqual(readiness.blockers, [], 'Publication readiness blocked');
+  }
+}
 
 async function npm(args, cwd) {
   const options = { cwd, maxBuffer: 16 * 1024 * 1024, timeout: 300000, env: { ...process.env, npm_config_update_notifier: 'false' } };
@@ -67,7 +82,7 @@ async function consumer(config, classifyRecordingDiagnostics) {
   const sdk = await import('@cbxss/eoka');
   const { Browser, detectPlatform, installBrowser, releaseManifest } = sdk;
   const platform = detectPlatform();
-  const evidence = { schemaVersion: 1, platform, sourceSha: config.sourceSha, status: 'failed', readiness: config.readiness, preview: config.preview, development: config.development, sandbox: true, checks: {}, recordings: [] };
+  const evidence = { schemaVersion: 1, platform, sourceSha: config.sourceSha, publication: config.publication, status: 'failed', readiness: config.readiness, preview: config.preview, development: config.development, sandbox: true, checks: {}, recordings: [] };
   const save = (name, value) => writeFile(join(config.output, name), `${JSON.stringify(value, null, 2)}\n`);
   const failure = error => ({ name: error.name, message: error.message, stack: error.stack, code: error.code, stderr: error.stderr, data: error.data, recordingId: error.recordingId, record: error.record, failure: error.failure, path: error.path, partialPath: error.partialPath, cleanupUncertain: error.cleanupUncertain, cause: error.cause instanceof Error ? failure(error.cause) : error.cause, errors: error instanceof AggregateError ? error.errors.map(failure) : undefined });
   const command = async (binary, args, name) => {
@@ -152,8 +167,7 @@ async function consumer(config, classifyRecordingDiagnostics) {
       }
       return pids;
     };
-    // Navigation verifies a commit, not completion of HTML parsing.
-    const waitForDocument = page => page.evaluate(`new Promise(resolve => {
+    const waitForDocument = page => page.evaluate(`()=>new Promise(resolve => {
       if (document.readyState !== 'loading') resolve(true);
       else document.addEventListener('DOMContentLoaded', () => resolve(true), { once: true });
     })`);
@@ -166,7 +180,7 @@ async function consumer(config, classifyRecordingDiagnostics) {
     if (platform.startsWith('linux-')) {
       const sandboxPage = await active.newPage('chrome://sandbox');
       await waitForDocument(sandboxPage);
-      const status = await sandboxPage.evaluate('document.body.innerText');
+      const status = await sandboxPage.evaluate('()=>document.body.innerText');
       for (const field of ['PID namespaces', 'Network namespaces', 'Seccomp-BPF sandbox']) {
         assert.match(status, new RegExp(`${field}\\s+Yes(?:\\r?\\n|$)`));
       }
@@ -178,7 +192,7 @@ async function consumer(config, classifyRecordingDiagnostics) {
     const receipt = await page.fill('#field', 'packed native qualification');
     assert.equal(receipt.outcome, 'verified_complete');
     assert.equal(receipt.dispatch, 'acknowledged');
-    assert.equal(await page.evaluate('document.querySelector("#field").value'), 'packed native qualification');
+    assert.equal(await page.evaluate('()=>document.querySelector("#field").value'), 'packed native qualification');
     evidence.checks.fill = receipt;
     const screenshots = [];
     for (const format of ['png', 'jpeg', 'webp']) {
@@ -290,7 +304,7 @@ async function consumer(config, classifyRecordingDiagnostics) {
     active = await launch(false);
     const headed = await active.newPage('data:text/html,<title>Headed qualification</title>');
     await waitForDocument(headed);
-    assert.equal(await headed.evaluate('document.title'), 'Headed qualification');
+    assert.equal(await headed.evaluate('()=>document.title'), 'Headed qualification');
     evidence.checks.headed = { passed: true, pids: await closeOwned(), display: process.env.DISPLAY ?? null };
     const chromePin = releaseManifest.chrome.platforms[platform];
     const distribution = resolve(fresh.executablePath, ...chromePin.executablePath.split('/').map(() => '..'));
@@ -323,7 +337,7 @@ async function consumer(config, classifyRecordingDiagnostics) {
     assert.equal(active.ownership, 'borrowed');
     const borrowed = await active.newPage('data:text/html,<title>Borrowed qualification</title>');
     await waitForDocument(borrowed);
-    assert.equal(await borrowed.evaluate('document.title'), 'Borrowed qualification');
+    assert.equal(await borrowed.evaluate('()=>document.title'), 'Borrowed qualification');
     await active.close();
     active = undefined;
     assert.equal(external.exitCode, null);
@@ -332,10 +346,6 @@ async function consumer(config, classifyRecordingDiagnostics) {
     assert.equal((await installBrowser({ browserCacheDir: freshCache, download: 'never' })).source, 'cache', 'Launching copied external Chrome mutated the verified distribution');
     if (recordingErrors.length > 0) throw new AggregateError(recordingErrors, 'Finalized SDK recording qualification failed; every scheduled case was attempted once');
     evidence.status = 'passed';
-    if (config.readiness.status !== 'ready' || config.readiness.blockers.length !== 0) {
-      evidence.status = 'blocked';
-      throw new Error('Runtime checks completed, but source publication readiness remains blocked. Passing samples do not resolve known native recording defects.');
-    }
   } catch (error) {
     evidence.error = failure(error);
     throw error;
@@ -378,10 +388,7 @@ if (options.aggregate) {
   assert.ok(options.packages && options.evidence);
   const { manifest, packages } = await json(join(options.packages, 'packages.json'));
   const readiness = await json(new URL('publication-readiness.json', import.meta.url));
-  assert.equal(readiness.status, 'ready', 'Known release blocker remains unresolved');
-  assert.deepEqual(readiness.blockers, []);
-  assert.equal(readiness.sdkVersion, manifest.sdkVersion);
-  assert.equal(readiness.chromeBuildId, manifest.chrome.buildId);
+  assertReadiness(readiness, manifest);
   assert.equal(packages.length, 6);
   const evidence = [];
   for (const platform of platforms) {
@@ -391,6 +398,8 @@ if (options.aggregate) {
     assert.equal(result.platform, platform);
     assert.equal(result.sourceSha, process.env.EOKA_SOURCE_SHA);
     assert.equal(result.status, 'passed');
+    assert.equal(result.publication, publication, 'Qualification mode does not match this run');
+    assert.deepEqual(result.readiness, readiness, 'Qualification readiness does not match this source');
     assert.equal(result.preview, false, 'Local preview cannot qualify a publication');
     assert.equal(result.development, false, 'Host-development artifact cannot qualify a publication');
     assert.equal(result.sandbox, true);
@@ -403,7 +412,6 @@ if (options.aggregate) {
     assert.equal(digest(await readFile(join(options.packages, entry.filename))), entry.sha256);
     await cp(join(options.packages, entry.filename), join(options.output, entry.filename));
   }
-  const publication = process.env.EOKA_PUBLICATION === 'true';
   await save(join(options.output, 'qualification.json'), { schemaVersion: 1, sourceSha: process.env.EOKA_SOURCE_SHA, publication, readiness, sdkVersion: manifest.sdkVersion, serverVersion: manifest.server.version, protocolVersion: manifest.server.protocolVersion, packages, platforms, evidence });
 } else if (options['pack-only']) {
   assert.ok(options.stage);
@@ -434,18 +442,15 @@ if (options.aggregate) {
   env.CARGO_HOME = join(scratch, 'no-cargo');
   try {
     const readiness = await json(new URL('publication-readiness.json', import.meta.url));
-    assert.equal(readiness.schemaVersion, 1);
-    assert.equal(readiness.sdkVersion, packed.manifest.sdkVersion);
-    assert.equal(readiness.chromeBuildId, packed.manifest.chrome.buildId);
-    assert.ok(Array.isArray(readiness.blockers));
-    await save(join(options.output, 'qualification.json'), { schemaVersion: 1, platform, sourceSha: env.EOKA_SOURCE_SHA ?? null, readiness, preview: options.preview === true, development: hostPin.development, sandbox: true, packages: packed.packages, status: 'failed', phase: 'installation' });
+    assertReadiness(readiness, packed.manifest);
+    await save(join(options.output, 'qualification.json'), { schemaVersion: 1, platform, sourceSha: env.EOKA_SOURCE_SHA ?? null, publication, readiness, preview: options.preview === true, development: hostPin.development, sandbox: true, packages: packed.packages, status: 'failed', phase: 'installation' });
     const app = join(scratch, 'a');
     await mkdir(app);
     await save(join(app, 'package.json'), { private: true, type: 'module', dependencies: { '@cbxss/eoka': `file:${join(packageDirectory, sdkPackage.filename)}`, [hostPin.packageName]: `file:${join(packageDirectory, nativePackage.filename)}` } });
     const install = await npm(['install', '--ignore-scripts', '--omit=optional', '--no-audit', '--no-fund'], app);
     await writeFile(join(options.output, 'npm-install.stdout'), install.stdout);
     await writeFile(join(options.output, 'npm-install.stderr'), install.stderr);
-    const config = { scratch, cache: options.cache, output: options.output, sourceSha: env.EOKA_SOURCE_SHA ?? null, readiness, recordingSchedule, preview: options.preview === true, development: hostPin.development };
+    const config = { scratch, cache: options.cache, output: options.output, sourceSha: env.EOKA_SOURCE_SHA ?? null, publication, readiness, recordingSchedule, preview: options.preview === true, development: hostPin.development };
     await writeFile(join(app, 'qualify.mjs'), `await (${consumer.toString()})(${JSON.stringify(config)}, (${classifyRecordingDiagnostics.toString()}));\n`);
     try {
       const result = await exec(process.execPath, [join(app, 'qualify.mjs')], { cwd: app, env, maxBuffer: 32 * 1024 * 1024, timeout: 900000 });

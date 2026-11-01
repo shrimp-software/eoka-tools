@@ -84,11 +84,11 @@ jobs:
               git push origin "$tag"
             fi
 
-            if [ "$crate" = "eoka-server" ]; then
+            if [ "$crate" = "eoka-server" ] || [ "$crate" = "eoka-cli" ]; then
               if GH_TOKEN="${{ github.token }}" gh release view "$tag" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-                echo "Release ${tag} already exists — skip server release dispatch"
+                echo "Release ${tag} already exists — skip binary release dispatch"
               else
-                GH_TOKEN="${{ github.token }}" gh workflow run release-eoka-server.yml --repo "${{ github.repository }}" --ref "$tag" -f tag="$tag"
+                GH_TOKEN="${{ github.token }}" gh workflow run "release-${crate}.yml" --repo "${{ github.repository }}" --ref "$tag" -f tag="$tag"
               fi
             fi
             echo "::endgroup::"

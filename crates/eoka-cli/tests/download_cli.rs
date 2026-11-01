@@ -147,13 +147,7 @@ impl Cli {
     }
 
     fn effective_name(&self) -> String {
-        if self.port.is_some() {
-            format!("{}-live", self.session)
-        } else if std::env::var_os("EOKA_DOWNLOAD_TEST_HEADED").is_some() {
-            format!("{}-headed", self.session)
-        } else {
-            self.session.clone()
-        }
+        self.session.clone()
     }
 
     fn binary() -> std::ffi::OsString {
@@ -201,6 +195,9 @@ impl Cli {
             .args(args)
             .current_dir(self.directory.path())
             .kill_on_drop(true);
+        if matches!(args.first(), Some(&"eval" | &"exec")) {
+            command.arg("--raw");
+        }
         command
     }
 
@@ -366,8 +363,24 @@ async fn observation_bounds_context_and_preserves_element_targeting() {
     assert_eq!(page["messages"].as_array().unwrap().len(), 5);
     assert!(page["text_excerpt"].as_str().unwrap().chars().count() <= 2000);
     assert_eq!(page["truncated"], true);
+    let rejected = cli
+        .call(&["download", "--click", "0", "--out", "indexed.bin"])
+        .await;
+    assert_eq!(
+        rejected["error_detail"]["code"],
+        "download_target_resolution_failed"
+    );
+    let view = cli.ok(&["view"]).await;
+    let reference = view["controls"][0]["target"].as_str().unwrap();
     let completed = cli
-        .ok(&["download", "--click", "0", "--out", "indexed.bin", "--wait"])
+        .ok(&[
+            "download",
+            "--click",
+            reference,
+            "--out",
+            "indexed.bin",
+            "--wait",
+        ])
         .await;
     assert_eq!(completed["state"], "completed");
     cli.ok(&["exec", "document.body.innerHTML='<main><p role=status>Loading transfer</p></main>';setTimeout(()=>{document.querySelector('main').innerHTML='<h1>Transfer ready</h1><button>Download ready</button>'},1500)"]).await;
@@ -807,7 +820,7 @@ async fn disconnected_clients_do_not_cancel_and_large_files_stay_out_of_daemon_m
     let mut stream = tokio::net::UnixStream::connect(&socket).await.unwrap();
     eoka_sdk::write_msg(
         &mut stream,
-        &eoka_sdk::Request::DownloadStart(eoka_protocol::DownloadStartArgs {
+        &serde_json::json!({"protocol_major":2,"cmd":"download_start","args":eoka_protocol::DownloadStartArgs {
             operation_id: None,
             click: Some("css:#slow".into()),
             url: None,
@@ -820,7 +833,7 @@ async fn disconnected_clients_do_not_cancel_and_large_files_stay_out_of_daemon_m
                 .into(),
             expect_bytes: None,
             start_timeout_ms: 1000,
-        }),
+        }}),
     )
     .await
     .unwrap();
@@ -937,7 +950,7 @@ async fn durable_actions_survive_client_disconnect_and_completed_downloads_survi
     cli.ok(&["eval", "document.body.insertAdjacentHTML('beforeend','<button id=operation>Run</button><p id=operation-result>pending</p>');window.operationHits=0;document.getElementById('operation').onclick=()=>{window.operationHits++;setTimeout(()=>document.getElementById('operation-result').textContent='done',300)};true"]).await;
     let id = "6d098ba0-d7d5-4d08-940a-438a0d6a5375";
     let expect=serde_json::json!({"kind":"text","target":{"query":{"kind":"css","selector":"#operation-result"}},"value":"done"}).to_string();
-    let request = serde_json::json!({"cmd":"action_command","args":{"operation_id":id,"command":"click","arguments":{"target":"css:#operation","expect":serde_json::from_str::<Value>(&expect).unwrap()}}});
+    let request = serde_json::json!({"protocol_major":2,"cmd":"action_command","args":{"operation_id":id,"command":"click","arguments":{"target":"css:#operation","expect":serde_json::from_str::<Value>(&expect).unwrap()}}});
     let mut stream = UnixStream::connect(eoka_sdk::session::socket_path(&cli.session))
         .await
         .unwrap();

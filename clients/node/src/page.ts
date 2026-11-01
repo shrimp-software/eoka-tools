@@ -5,7 +5,7 @@ import type { CallOptions, InvokeClient } from './client.js';
 import type {
   Action, ActionOptions, ActionReceipt, AgentAction, AgentMode, AgentObservation,
   AgentStepResult, BrowserState, Expectation, LocatorSpec, MethodName,
-  MethodParams, MethodResults, OperationRecord,
+  MethodParams, MethodResults, OperationRecord, InputMode, Destination,
 } from './generated/protocol.js';
 import { Operation, OperationError, operationFailure, validateOperationRecord, type WaitOptions } from './operations.js';
 import { Recording, RecordingError, recordingFailure, requireCaptureCapability, validateRecordingRecord } from './recording.js';
@@ -24,11 +24,15 @@ export interface PageWaitOptions extends CallOptions {
 }
 
 export interface AgentObserveOptions extends CallOptions {
+  cursor?: string;
+  role?: string;
+  name?: string;
   observationTimeoutMs?: number;
   maxControls?: number;
 }
 
 export interface AgentStepOptions extends AgentObserveOptions {
+  destination?: Destination;
   expect?: Expectation;
   mode?: AgentMode;
   actionTimeoutMs?: number;
@@ -110,7 +114,7 @@ export class Page implements InvokeClient {
     }
     if (record.state !== 'finished' || record.outcome !== 'verified_complete' || record.receipt?.outcome !== 'verified_complete' || record.error_code != null) {
       throw new OperationError(record.error_code ?? (record.state === 'running' ? 'OperationRunning' : record.outcome),
-        `Operation ${operation.id} is ${record.state} with outcome ${record.outcome}; verified completion was not established.`,
+        record.error?.message ?? `Operation ${operation.id} is ${record.state} with outcome ${record.outcome}; verified completion was not established.`,
         operation.id, record, { requestState: 'acknowledged' });
     }
     return record.receipt;
@@ -120,8 +124,8 @@ export class Page implements InvokeClient {
     return this.verified({ kind: 'navigate', url }, options);
   }
 
-  fill(target: LocatorInput, value: string, options?: PerformOptions): Promise<ActionReceipt> {
-    return this.verified({ kind: 'fill', target: locator(target), value }, options);
+  fill(target: LocatorInput, value: string, options: PerformOptions & { inputMode?: InputMode } = {}): Promise<ActionReceipt> {
+    return this.verified({ kind: 'fill', target: locator(target), value, input_mode: options.inputMode ?? 'sequential' }, options);
   }
 
   select(target: LocatorInput, value: string | string[], options?: PerformOptions): Promise<ActionReceipt> {
@@ -136,8 +140,8 @@ export class Page implements InvokeClient {
     return this.verified({ kind: 'click', target: locator(target) }, options);
   }
 
-  type(target: LocatorInput, text: string, options?: PerformOptions): Promise<ActionReceipt> {
-    return this.verified({ kind: 'type', target: locator(target), text }, options);
+  type(target: LocatorInput, text: string, options: PerformOptions & { inputMode?: InputMode } = {}): Promise<ActionReceipt> {
+    return this.verified({ kind: 'type', target: locator(target), text, input_mode: options.inputMode ?? 'sequential' }, options);
   }
 
   pressKey(key: string, options?: PerformOptions): Promise<ActionReceipt> {
@@ -195,12 +199,20 @@ export class Page implements InvokeClient {
     await this.invoke('page.wait_for_text', { pageId: this.id, text, timeoutMs: waitTimeoutMs }, localOptions);
   }
 
-  async evaluate(js: string, options?: CallOptions): Promise<unknown> {
-    return (await this.invoke('page.evaluate', { pageId: this.id, js }, options)).result;
+  async evaluate(fn: string, args: unknown[] = [], options?: CallOptions): Promise<unknown> {
+    return (await this.invoke('page.evaluate', { pageId: this.id, function: fn, arguments: args }, options)).result;
   }
 
-  async execute(js: string, options?: CallOptions): Promise<void> {
-    await this.invoke('page.execute', { pageId: this.id, js }, options);
+  async evaluateRaw(js: string, options?: CallOptions): Promise<unknown> {
+    return (await this.invoke('page.evaluate_raw', { pageId: this.id, js }, options)).result;
+  }
+
+  async execute(fn: string, args: unknown[] = [], options?: CallOptions): Promise<void> {
+    await this.invoke('page.execute', { pageId: this.id, function: fn, arguments: args }, options);
+  }
+
+  async executeRaw(js: string, options?: CallOptions): Promise<void> {
+    await this.invoke('page.execute_raw', { pageId: this.id, js }, options);
   }
 
   /** List every frame in the page, including cross-origin OOPIFs. */
@@ -314,19 +326,23 @@ export class Page implements InvokeClient {
   }
 
   observe(options: AgentObserveOptions = {}): Promise<AgentObservation> {
-    const { observationTimeoutMs, maxControls, ...localOptions } = options;
+    const { observationTimeoutMs, maxControls, cursor, role, name, ...localOptions } = options;
     const params: MethodParams['agent.observe'] = { pageId: this.id };
+    if (cursor !== undefined) params.cursor = cursor;
+    if (role !== undefined) params.role = role;
+    if (name !== undefined) params.name = name;
     if (observationTimeoutMs !== undefined) params.timeout_ms = observationTimeoutMs;
     if (maxControls !== undefined) params.max_controls = maxControls;
     return this.invoke('agent.observe', params, localOptions);
   }
 
   async step(action: AgentAction, options: AgentStepOptions = {}): Promise<AgentStepResult> {
-    const { operationId = randomUUID(), observationTimeoutMs, maxControls, actionTimeoutMs, expect, mode, ...localOptions } = options;
+    const { operationId = randomUUID(), observationTimeoutMs, maxControls, actionTimeoutMs, expect, mode, destination, ...localOptions } = options;
     try {
       const params: MethodParams['agent.step'] = { pageId: this.id, action, operation_id: operationId };
       if (expect !== undefined) params.expect = expect;
       if (mode !== undefined) params.mode = mode;
+      if (destination !== undefined) params.destination = destination;
       if (actionTimeoutMs !== undefined) params.action_timeout_ms = actionTimeoutMs;
       if (observationTimeoutMs !== undefined) params.timeout_ms = observationTimeoutMs;
       if (maxControls !== undefined) params.max_controls = maxControls;

@@ -173,7 +173,7 @@ input.on('line', async line => {
   else if (mode === 'out-of-order' && request.method === 'page.evaluate') {
     pair.push(request);
     if (pair.length === 2) {
-      for (const item of pair.reverse()) reply(item.id, { result: JSON.parse(item.params.js) });
+      for (const item of pair.reverse()) reply(item.id, { result: JSON.parse(item.params.function) });
       pair = [];
     }
   } else if (mode === 'split-utf8') {
@@ -183,5 +183,5 @@ input.on('line', async line => {
       await new Promise(resolve => setTimeout(resolve, 1));
     }
   } else if (request.method === 'operations.list') reply(request.id, []);
-  else reply(request.id, { result: JSON.parse(request.params.js) });
+  else reply(request.id, { result: JSON.parse(request.params.function) });
 });

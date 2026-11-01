@@ -1,6 +1,6 @@
 pub use eoka::{
-    Action, ActionOptions, ActionOutcome, ActionReceipt, DispatchState, Expectation, LocatorQuery,
-    LocatorSpec,
+    Action, ActionOptions, ActionOutcome, ActionReceipt, Destination, DispatchState, Expectation,
+    InputMode, LocatorQuery, LocatorSpec,
 };
 use serde::{Deserialize, Serialize};
 
@@ -59,6 +59,43 @@ pub struct OperationRecord {
     pub finished_at_ms: Option<u64>,
     pub receipt: Option<ActionReceipt>,
     pub error_code: Option<String>,
+    #[serde(default)]
+    pub error: Option<crate::ErrorDetail>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum OperationStatus {
+    Running,
+    VerifiedComplete,
+    NotDispatched,
+    OutcomeUnknown,
+}
+
+impl OperationStatus {
+    pub fn exit_code(self) -> i32 {
+        match self {
+            Self::VerifiedComplete => 0,
+            Self::NotDispatched => 1,
+            Self::Running => 3,
+            Self::OutcomeUnknown => 4,
+        }
+    }
+}
+
+impl OperationRecord {
+    pub fn status(&self) -> OperationStatus {
+        if matches!(self.state, OperationState::Running) {
+            return OperationStatus::Running;
+        }
+        match self.outcome {
+            ActionOutcome::VerifiedComplete if self.error_code.is_none() => {
+                OperationStatus::VerifiedComplete
+            }
+            ActionOutcome::NotDispatched => OperationStatus::NotDispatched,
+            _ => OperationStatus::OutcomeUnknown,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]

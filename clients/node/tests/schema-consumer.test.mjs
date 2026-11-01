@@ -41,9 +41,9 @@ test("the consumer refuses unsafe IDs, error/success ambiguity and unavailable m
 
 test("canonical method schemas reject invalid arguments and preserve null optionals", () => {
   const evaluate = new Ajv2020({ strict: false, validateFormats: false }).compile(bundle.methods["page.evaluate"].params);
-  assert.equal(evaluate({ pageId: "page-1", js: "42" }), true);
+  assert.equal(evaluate({ pageId: "page-1", function: "()=>42" }), true);
   assert.equal(evaluate({ pageId: "page-1" }), false);
-  assert.equal(evaluate({ pageId: 7, js: "42" }), false);
+  assert.equal(evaluate({ pageId: 7, function: "()=>42" }), false);
   const list = new Ajv2020({ strict: false, validateFormats: false }).compile(bundle.methods["operations.list"].params);
   assert.equal(list({ limit: 10, before_ms: null }), true);
   assert.equal(list({ limit: -1 }), false);

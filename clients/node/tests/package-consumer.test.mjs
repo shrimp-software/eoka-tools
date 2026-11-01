@@ -66,7 +66,7 @@ test("locally staged SDK and native package capture images and native artifacts 
 }, async () => {
   const stage = process.env.EOKA_RELEASE_STAGE_DIR;
   const platform = detectPlatform();
-  const directory = await mkdtemp(join(tmpdir(), "e4-consumer-"));
+  const directory = await mkdtemp(join(tmpdir(), "c-"));
   try {
     const archives = [];
     for (const source of [join(stage, "platforms", platform), join(stage, "sdk")]) {

@@ -124,7 +124,8 @@ impl OperationManager {
                 .await
         })
         .await
-        .context("Operation admission task failed; inspect its ID before retrying")?
+        .context("Operation admission task failed; inspect its ID before retrying")
+        .map_err(commands::uncertain)?
     }
 
     async fn submit_owned(
@@ -158,8 +159,12 @@ impl OperationManager {
             finished_at_ms: None,
             receipt: None,
             error_code: None,
+            error: None,
         };
-        let (record, created) = store.admit(initial, canonical).await?;
+        let (record, created) = store
+            .admit(initial, canonical)
+            .await
+            .map_err(commands::uncertain)?;
         if !created {
             return Ok(record);
         }
@@ -167,7 +172,7 @@ impl OperationManager {
         self.inner
             .jobs
             .lock()
-            .map_err(|_| anyhow!("Operation registry unavailable"))?
+            .map_err(|_| commands::uncertain(anyhow!("Operation registry unavailable")))?
             .insert(id.clone(), cancel);
         options.observer = Some(Arc::new(Intent {
             store: store.clone(),
@@ -175,6 +180,7 @@ impl OperationManager {
         }));
         let manager = self.clone();
         tokio::spawn(async move {
+            let sensitive = action_values(&action);
             let result = tokio::select! {
                 biased;
                 _ = canceled.changed() => None,
@@ -183,10 +189,47 @@ impl OperationManager {
                     else { page.act(action, options).await }
                 } => Some(result),
             };
+            let diagnostic = result
+                .as_ref()
+                .and_then(|result| result.as_ref().err())
+                .map(|error| {
+                    let (code, source) = match error {
+                        Error::Action { code, source, .. } => (code.as_str(), source.as_ref()),
+                        error => ("action_failed", error),
+                    };
+                    let mut message = source.to_string();
+                    for value in &sensitive {
+                        if !value.is_empty() {
+                            message = message.replace(value, "[redacted]");
+                        }
+                    }
+                    let phase = if message.contains("preparation") {
+                        "preparation"
+                    } else if message.contains("queue admission") {
+                        "queue"
+                    } else if message.contains("input dispatch") {
+                        "dispatch"
+                    } else if message.contains("verification") {
+                        "verification"
+                    } else {
+                        "execution"
+                    };
+                    eoka_protocol::ErrorDetail::new(
+                        code,
+                        message.chars().take(8192).collect::<String>(),
+                    )
+                    .retryable(false)
+                    .context(eoka_protocol::ErrorContext {
+                        operation_id: Some(id.clone()),
+                        phase: Some(phase.into()),
+                        ..Default::default()
+                    })
+                });
             let finish = store
                 .update(id.clone(), move |record| {
                     record.state = OperationState::Finished;
                     record.finished_at_ms = Some(timestamp());
+                    record.error = diagnostic;
                     match result {
                         Some(Ok(receipt)) => {
                             record.outcome = receipt.outcome;
@@ -211,6 +254,9 @@ impl OperationManager {
                                 }
                                 .into(),
                             );
+                            if record.error.is_none() {
+                                record.error = Some(eoka_protocol::ErrorDetail::new(record.error_code.as_deref().unwrap_or("action_failed"), "Operation canceled; inspect dispatch evidence before further input").retryable(false));
+                            }
                         }
                     }
                 })
@@ -315,3 +361,11 @@ impl OperationManager {
 
 #[cfg(test)]
 mod tests;
+
+fn action_values(action: &Action) -> Vec<String> {
+    match action {
+        Action::Fill { value, .. } => vec![value.clone()],
+        Action::Type { text, .. } | Action::InsertText { text } => vec![text.clone()],
+        _ => Vec::new(),
+    }
+}

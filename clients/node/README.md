@@ -36,7 +36,7 @@ await page.click("button[type=submit]", {
 
 await page.waitForText("Welcome");
 const heading = await page.getText("h1");
-const count = await page.evaluate("document.querySelectorAll('li').length");
+const count = await page.evaluate("()=>document.querySelectorAll('li').length");
 ```
 
 String targets are CSS selectors. An action resolves only after its result is verified. `click`, `type`, `pressKey`, `submit` and `drag` need an `expect` that describes the result.

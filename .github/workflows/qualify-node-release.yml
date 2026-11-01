@@ -180,14 +180,15 @@ jobs:
             const lock = (await readFile("Cargo.lock", "utf8")).replaceAll("\r\n", "\n");
             const coreLock = lock.split("[[package]]").filter(block => /^name = "eoka"$/m.test(block));
             assert.equal(coreLock.length, 1);
-            assert.match(coreLock[0], /^version = "0\.7\.3"$/m);
+            const coreVersion = /^version = "([^"]+)"$/m.exec(coreLock[0])?.[1];
+            assert.ok(coreVersion);
             assert.match(coreLock[0], /^source = "registry\+https:\/\/github\.com\/rust-lang\/crates\.io-index"$/m);
-            assert.match(coreLock[0], /^checksum = "203ce86d2c3d2110f899efdc874c961ff176d587533c5dcc7d5c0f467a42aee1"$/m);
+            assert.match(coreLock[0], /^checksum = "[a-f0-9]{64}"$/m);
             for (const platform of ["linux-x64-gnu","linux-arm64-gnu","darwin-x64","darwin-arm64","win32-x64"]) {
               const metadata = JSON.parse(await readFile(`native/${platform}-cargo.json`, "utf8"));
               const cores = metadata.packages.filter(p => p.name === "eoka");
               assert.equal(cores.length, 1);
-              assert.equal(cores[0].version, "0.7.3");
+              assert.equal(cores[0].version, coreVersion);
               assert.equal(cores[0].source, "registry+https://github.com/rust-lang/crates.io-index");
               assert.equal((await readFile(`native/${platform}-Cargo.lock`, "utf8")).replaceAll("\r\n", "\n"), lock);
             }
@@ -199,7 +200,7 @@ jobs:
           set -euo pipefail
           mise exec -- npm --prefix clients/node ci --ignore-scripts --omit=optional
           mise run node-build
-          mise exec -- node --test clients/node/tests/recording-qualification.test.mjs clients/node/tests/publication-recovery.test.mjs clients/node/tests/sigstore-verification.test.mjs
+          mise exec -- node --test clients/node/tests/recording-qualification.test.mjs clients/node/tests/release-qualification.test.mjs clients/node/tests/publication-recovery.test.mjs clients/node/tests/sigstore-verification.test.mjs
           args=()
           if [[ "$PUBLICATION" == true ]]; then args+=(--publication); fi
           mise exec -- node clients/node/scripts/stage-release.mjs --artifacts native --output stage "${args[@]}"
@@ -267,6 +268,7 @@ jobs:
       - name: Exercise packed native SDK outside repository
         env:
           EOKA_SOURCE_SHA: ${{ needs.source.outputs.sha }}
+          EOKA_PUBLICATION: ${{ inputs.publication || false }}
           PLATFORM: ${{ matrix.platform }}
         run: |
           mise exec -- node clients/node/scripts/qualify-release.mjs --packages packages --cache "$RUNNER_TEMP/b" --output "evidence/$PLATFORM"

@@ -68,7 +68,7 @@ async fn main() {
     };
     match &command {
         Command::Sessions => {
-            sessions::print_sessions(json_mode);
+            sessions::print_sessions(json_mode).await;
             return;
         }
         Command::Captcha {
@@ -107,7 +107,7 @@ async fn main() {
             return;
         }
         Command::Doctor => {
-            let response = doctor_response(&effective_session, &spec);
+            let response = doctor_response(&effective_session, &spec).await;
             output::print_response(&response, json_mode);
             return;
         }
@@ -261,7 +261,7 @@ async fn main() {
             .transpose()
             .unwrap_or_else(|error| {
                 eprintln!("Invalid --expect: {error}");
-                std::process::exit(1)
+                std::process::exit(2)
             }),
         timeout_ms: cli.action_timeout_ms,
     };
@@ -281,6 +281,8 @@ async fn main() {
         | eoka_protocol::Request::DblClick(args)
         | eoka_protocol::Request::Hover(args) => args.operation = settings,
         eoka_protocol::Request::Fill(args) => args.operation = settings,
+        eoka_protocol::Request::Open(args) => args.operation = settings,
+        eoka_protocol::Request::Wait(args) => args.expect = settings.expect,
         eoka_protocol::Request::Select(args) => args.operation = settings,
         eoka_protocol::Request::Key(args) => args.operation = settings,
         eoka_protocol::Request::Back
@@ -309,8 +311,8 @@ async fn main() {
 
     output::print_response(&response, json_mode);
 
-    if !response.ok {
-        std::process::exit(1);
+    if response.exit_code() != 0 {
+        std::process::exit(response.exit_code());
     }
     if matches!(command, Command::Close) {
         let _ = client::kill_daemon(&effective_session);
@@ -348,11 +350,21 @@ fn tack_filter(all_tools: bool, capabilities: &[String]) -> Result<EokaToolFilte
     Ok(filter)
 }
 
-fn doctor_response(session: &str, spec: &LaunchSpec) -> Response {
+async fn doctor_response(session: &str, spec: &LaunchSpec) -> Response {
+    let daemon = client::send_command(
+        session,
+        eoka_protocol::Request::SessionHello,
+        LaunchSpec::Reuse,
+    )
+    .await
+    .ok()
+    .filter(|r| r.ok)
+    .and_then(|r| r.data);
     let socket = session::socket_path(session);
     let pid = session::pid_path(session);
     let log = socket.with_extension("log");
     let cdp = match spec {
+        LaunchSpec::Reuse => json!({"mode":"reuse"}),
         LaunchSpec::Connect { ws_url } => json!({
             "mode": "connect",
             "ws_url": ws_url,
@@ -365,6 +377,7 @@ fn doctor_response(session: &str, spec: &LaunchSpec) -> Response {
     let chrome_9222 = eoka::cdp::discover::discover_browser_ws("127.0.0.1", 9222).ok();
     Response::ok(json!({
         "version": env!("CARGO_PKG_VERSION"),
+        "daemon": daemon,
         "session": session,
         "runtime_dir": socket.parent().map(|path| path.to_string_lossy().to_string()),
         "socket": socket.to_string_lossy(),

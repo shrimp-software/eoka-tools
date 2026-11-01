@@ -6,11 +6,15 @@ import (
 )
 
 type AgentObserveOptions struct {
+	Cursor      string `json:"cursor,omitempty"`
+	Role        string `json:"role,omitempty"`
+	Name        string `json:"name,omitempty"`
 	MaxControls int    `json:"max_controls,omitempty"`
 	TimeoutMS   uint64 `json:"timeout_ms,omitempty"`
 }
 
 type AgentStepRequest struct {
+	Destination     string         `json:"destination,omitempty"`
 	OperationID     string         `json:"operation_id,omitempty"`
 	Action          map[string]any `json:"action"`
 	Mode            string         `json:"mode,omitempty"`
@@ -21,15 +25,23 @@ type AgentStepRequest struct {
 }
 
 type AgentControl struct {
-	Target   string `json:"target"`
-	Role     string `json:"role"`
-	Name     string `json:"name"`
-	Disabled bool   `json:"disabled"`
-	Checked  *bool  `json:"checked"`
-	Expanded *bool  `json:"expanded"`
+	Focused           bool    `json:"focused"`
+	Editable          bool    `json:"editable"`
+	Readonly          bool    `json:"readonly"`
+	Required          bool    `json:"required"`
+	Invalid           bool    `json:"invalid"`
+	ValidationMessage *string `json:"validation_message"`
+	Target            string  `json:"target"`
+	Role              string  `json:"role"`
+	Name              string  `json:"name"`
+	Disabled          bool    `json:"disabled"`
+	Checked           *bool   `json:"checked"`
+	Expanded          *bool   `json:"expanded"`
 }
 
 type AgentObservation struct {
+	NextCursor    *string           `json:"next_cursor"`
+	TotalControls int               `json:"total_controls"`
 	ObservationID string            `json:"observation_id"`
 	TabID         string            `json:"tab_id"`
 	Page          json.RawMessage   `json:"page"`
@@ -40,9 +52,10 @@ type AgentObservation struct {
 }
 
 type AgentStepResult struct {
+	Status           string            `json:"status"`
 	OperationID      string            `json:"operation_id"`
 	Operation        *OperationRecord  `json:"operation"`
-	OperationError   *string           `json:"operation_error"`
+	OperationError   *ErrorDetail      `json:"operation_error"`
 	Observation      *AgentObservation `json:"observation"`
 	ObservationError *string           `json:"observation_error"`
 }

@@ -5,7 +5,7 @@ description: "Drive a real Chrome browser from the shell with eoka. Use for brow
 
 # eoka
 
-Use `eoka` when the task needs a real Chrome browser instead of plain HTTP or a synthetic DOM. Commands auto-start a per-session daemon, so repeated calls are fast and keep browser state.
+Use `eoka` when the task needs a real Chrome browser instead of plain HTTP or a synthetic DOM. `open` creates a named session; subsequent commands reuse its exact identity. Launch flags never change its name. Reads and input do not auto-start a replacement browser. See ../../RELIABILITY-MIGRATION.md for protocol 2.
 
 ## Agent Defaults
 
@@ -32,8 +32,8 @@ link or a stale daemon. For diagnosis, inspect once before choosing an action.
 eoka open https://example.com
 eoka snapshot -i
 eoka observe --filter inputs --max 10
-eoka click @e2
-eoka fill @e3 "test@example.com"
+eoka view
+eoka fill css:input[type=email] "test@example.com"
 eoka screenshot --annotate -o page.png
 eoka close
 ```
@@ -42,20 +42,21 @@ Targets accepted by action commands:
 
 | Target | Example |
 | --- | --- |
-| snapshot ref | `@e1` |
-| observe index | `[0]`, `0`, `index:0` |
+| scoped reference | exact `target` from `view` |
 | text | `text:Submit` or `Submit` |
 | placeholder | `placeholder:Email` |
 | CSS | `css:#submit` |
 | ID | `id:login` |
 | role | `role:button` |
 
+Snapshot refs and numeric indices are inspection labels only. `step` defaults to verification; use an explicit expected result for clicks and keys. Exploratory input requires `mode: "explore"` and returns exit 4 when unverified. Fill is sequential native input; use `input_mode: "bulk"` only deliberately. A filled value is not form validation: use native Tab blur and verify the enabled submit control.
+
 ## Automation Tools
 
 ```bash
-eoka eval "document.title"
+eoka eval "()=>document.title"
 eoka eval -f ./script.js --max-size 4096
-eoka exec "localStorage.clear()"
+eoka exec "()=>localStorage.clear()"
 eoka frames
 eoka frame-eval 'iframe#login' 'document.title'
 eoka frame-eval 'id:FRAME_ID_FROM_FRAMES' 'document.title'

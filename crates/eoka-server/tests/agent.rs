@@ -54,6 +54,7 @@ async fn observe_step_replay_and_verification_preserve_actual_page_effects() {
         .target
         .clone();
     let mut request = step(AgentAction::Click { target });
+    request.mode = AgentMode::Explore;
     request.operation_id = Some(uuid::Uuid::new_v4().to_string());
     let result = agent
         .step(&browser, &page, &operations, request.clone())
@@ -94,6 +95,7 @@ async fn observe_step_replay_and_verification_preserve_actual_page_effects() {
     assert!(result
         .operation_error
         .unwrap()
+        .message
         .contains("operation_id_conflict"));
     assert_eq!(page.evaluate::<u32>("window.hits").await.unwrap(), 1);
     let view = agent
@@ -113,6 +115,7 @@ async fn observe_step_replay_and_verification_preserve_actual_page_effects() {
             &page,
             &operations,
             step(AgentAction::Fill {
+                input_mode: Default::default(),
                 target,
                 text: "Ada".into(),
             }),
@@ -193,7 +196,11 @@ async fn stale_replaced_and_wrong_tab_references_never_click_another_control() {
         )
         .await
         .unwrap();
-    assert!(result.operation_error.unwrap().contains("stale_reference"));
+    assert!(result
+        .operation_error
+        .unwrap()
+        .message
+        .contains("stale_reference"));
     let current = result.observation.unwrap().controls[0].target.clone();
     let other = browser.new_blank_page().await.unwrap();
     let result = agent
@@ -207,7 +214,11 @@ async fn stale_replaced_and_wrong_tab_references_never_click_another_control() {
         )
         .await
         .unwrap();
-    assert!(result.operation_error.unwrap().contains("stale_reference"));
+    assert!(result
+        .operation_error
+        .unwrap()
+        .message
+        .contains("stale_reference"));
     page.execute(
         "document.querySelector('#go').outerHTML='<button id=go onclick=window.hits++>Go</button>'",
     )
@@ -260,6 +271,7 @@ async fn stale_replaced_and_wrong_tab_references_never_click_another_control() {
     assert!(result
         .operation_error
         .unwrap()
+        .message
         .contains("document navigated"));
     assert_eq!(page.evaluate::<u32>("window.hits").await.unwrap(), 0);
     browser.close().await.unwrap();
@@ -282,6 +294,7 @@ async fn short_response_budget_keeps_operation_inspectable_without_replay() {
     let mut request = step(AgentAction::Click {
         target: view.controls[0].target.clone(),
     });
+    request.mode = AgentMode::Explore;
     request.timeout_ms = 500;
     request.action_timeout_ms = 3000;
     operations.list(Default::default()).await.unwrap();

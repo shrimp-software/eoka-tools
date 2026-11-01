@@ -32,15 +32,7 @@ pub struct NavigateRequest {
     pub bypass_csp: Option<bool>,
 }
 
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct JsRequest {
-    #[schemars(description = "JavaScript code to execute (optional if 'file' is provided)")]
-    pub js: Option<String>,
-    #[schemars(
-        description = "Path to a .js file on disk to execute instead of inline code. Saves tokens on repeated/complex scripts."
-    )]
-    pub file: Option<String>,
-}
+pub type JsRequest = eoka_protocol::ScriptArgs;
 
 pub type FetchRequest = eoka_protocol::FetchArgs;
 pub type DownloadStartRequest = eoka_protocol::DownloadStartArgs;
@@ -122,7 +114,7 @@ pub struct WaitMsRequest {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct ClickInterceptNavRequest {
     #[schemars(
-        description = "Target element. Supports: index (0), text:Submit, placeholder:Email, role:button, css:form button, id:my-btn, or plain text search"
+        description = "Canonical target from agent.observe, or a live text:, placeholder:, role:, css:, id: query. Numeric and legacy snapshot labels are not action targets."
     )]
     pub target: String,
     #[serde(flatten)]

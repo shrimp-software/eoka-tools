@@ -21,13 +21,13 @@ import eoka "github.com/shrimp-software/eoka-tools/clients/go"
 ## Prerequisites
 
 You need a Chrome/Chromium install and an `eoka-server` binary implementing
-sidecar protocol **1.1** or a newer compatible 1.x minor. The client locates the binary in this order:
+sidecar protocol **2.0** or a newer compatible 2.x minor. The client locates the binary in this order:
 
 1. `eoka.WithServerPath("/path/to/eoka-server")` passed to `Launch` or `Connect`, if given.
 2. The `EOKA_SERVER_BIN` environment variable, if set.
 3. `eoka-server` on `PATH`.
 4. A prebuilt binary downloaded from this repo's GitHub Releases, still pinned to
-   [`eoka-server-v0.3.0`](https://github.com/shrimp-software/eoka-tools/releases/tag/eoka-server-v0.3.0).
+   [`eoka-server-v0.7.0`](https://github.com/shrimp-software/eoka-tools/releases/tag/eoka-server-v0.7.0).
    Assets are available for linux/amd64, linux/arm64, darwin/amd64, darwin/arm64
    and windows/amd64. The binary is cached under `os.UserCacheDir()/eoka/` and
    verified against the release's published SHA-256 checksums before installation.
@@ -35,7 +35,7 @@ sidecar protocol **1.1** or a newer compatible 1.x minor. The client locates the
    Pass `eoka.WithNoAutoDownload()` to disable this and get
    `eoka.ErrServerBinaryNotFound` if steps 1–3 do not resolve.
 
-The pinned 0.3.0 release predates the 1.1 handshake and is **not compatible**
+The pinned 0.7.0 release predates the 1.1 handshake and is **not compatible**
 with this client. It fails with `ProtocolMismatch` before browser creation,
 including guidance to provide a compatible binary. The resolver does not invent
 a newer release or fall back to launching an unverified protocol.
@@ -45,7 +45,7 @@ the resulting server.
 
 ## Action migration
 
-`Launch` and `Connect` send `server.hello` with protocol 1.1 before creating
+`Launch` and `Connect` send `server.hello` with protocol 2.0 before creating
 a browser session. The client requires major 1 and minor >= 1; server/core
 package versions are diagnostic information, not substitutes for protocol
 compatibility. `Browser.ServerInfo()` returns the negotiated versions, supported
@@ -55,7 +55,7 @@ Every convenience API requires its method to be advertised before transmission.
 Optional capabilities are interpreted: durable actions/recovery require
 `durableActions`; explicit operation cancellation requires `operationCancellation`.
 
-Protocol 1.3 servers remain compatible with these 1.1 conveniences:
+Protocol 2.0 servers provide these conveniences:
 `Page.Screenshot(ctx)` still requests default PNG and decodes the unchanged
 `{dataBase64}` result. The server bounds raw screenshots at 16 MiB and returns
 `ErrCodeScreenshotTooLarge` with direct-file guidance. Typed screenshot options,

@@ -35,11 +35,11 @@ func (b *Browser) ServerInfo() ServerInfo {
 
 func (b *Browser) hello(ctx context.Context, requiredMethods ...string) error {
 	var raw json.RawMessage
-	if err := b.t.call(ctx, "server.hello", map[string]any{"protocol": ProtocolVersion{Major: 1, Minor: 1}}, &raw); err != nil {
+	if err := b.t.call(ctx, "server.hello", map[string]any{"protocol": ProtocolVersion{Major: 2, Minor: 0}}, &raw); err != nil {
 		if HasCode(err, ErrCodeUnknownMethod) || HasCode(err, ErrCodeProtocolMismatch) {
 			var serverError *Error
 			errors.As(err, &serverError)
-			return &Error{Code: ErrCodeProtocolMismatch, Data: serverError.Data, Message: fmt.Sprintf("server does not support sidecar protocol 1.1 (%v); provide a compatible eoka-server with WithServerPath or EOKA_SERVER_BIN; the pinned 0.3.0 download is not upgraded automatically", err)}
+			return &Error{Code: ErrCodeProtocolMismatch, Data: serverError.Data, Message: fmt.Sprintf("server does not support sidecar protocol 2.0 (%v); provide a compatible eoka-server with WithServerPath or EOKA_SERVER_BIN; the pinned 0.7.0 download is not upgraded automatically", err)}
 		}
 		return fmt.Errorf("eoka: server.hello failed before browser session creation: %w", err)
 	}
@@ -56,8 +56,8 @@ func (b *Browser) hello(ctx context.Context, requiredMethods ...string) error {
 	if err := json.Unmarshal(raw, &shape); err != nil || shape.Protocol == nil || shape.Protocol.Major == nil || shape.Protocol.Minor == nil {
 		return &Error{Code: ErrCodeProtocolMismatch, Message: "server.hello omitted its protocol version"}
 	}
-	if info.Protocol.Major != 1 || info.Protocol.Minor < 1 {
-		return &Error{Code: ErrCodeProtocolMismatch, Message: fmt.Sprintf("server protocol %d.%d is incompatible with client protocol 1.1", info.Protocol.Major, info.Protocol.Minor)}
+	if info.Protocol.Major != 2 {
+		return &Error{Code: ErrCodeProtocolMismatch, Message: fmt.Sprintf("server protocol %d.%d is incompatible with client protocol 2.0", info.Protocol.Major, info.Protocol.Minor)}
 	}
 	if info.ServerVersion == "" || info.CoreVersion == "" || info.Limits.MaxMessageBytes <= 0 || info.Limits.MaxInFlight <= 0 || info.Methods == nil || info.Capabilities == nil {
 		return &Error{Code: ErrCodeProtocolMismatch, Message: "server.hello omitted versions, methods, capabilities or positive transport limits"}

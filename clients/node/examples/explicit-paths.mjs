@@ -24,7 +24,7 @@ try {
     actionOptions: { expect: { kind: "value", target, value: "Ada" }, timeout_ms: 5000 },
   });
   console.log(JSON.stringify({ ownership: browser.ownership, browserVersion: browser.browserVersion, operationId, receipt }, null, 2));
-  console.log(JSON.stringify(await page.invoke("page.evaluate", { pageId: page.id, js: '({name: document.querySelector("#name").value})' })));
+  console.log(JSON.stringify(await page.invoke("page.evaluate", { pageId: page.id, function: '()=>({name: document.querySelector("#name").value})' })));
 } catch (error) {
   const primary = error instanceof AggregateError ? error.cause : error;
   if (primary instanceof EokaError && primary.operationId) {
