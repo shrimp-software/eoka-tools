@@ -34,6 +34,12 @@ test('real browser preserves sequential input, scoped references, exceptions and
       assert.equal(await page.evaluate('value=>{const local=value;return Object.hasOwn(local,"__proto__")}', [JSON.parse('{"__proto__":42}')]), true);
     }
     await assert.rejects(page.execute('async()=>{throw new Error("fixture-exception")}'), /fixture-exception/);
+    for (const fn of ['()=>({missing:undefined})', '()=>({n:NaN})', '()=>9007199254740992', '()=>new Date(0)']) {
+      await assert.rejects(page.evaluate(fn), /JSON|number/);
+    }
+    assert.equal((await page.evaluate("()=> 'é'.repeat(524287)")).length, 524287);
+    await assert.rejects(page.evaluate("()=> 'é'.repeat(524288)"), error => error.code === 'MessageTooLarge');
+    await page.execute('()=>{const v={};v.self=v;return v}');
     const rejected = await page.step({ kind: 'click', target: link });
     assert.equal(rejected.status, 'not_dispatched');
     const clicked = await page.step({ kind: 'click', target: link }, { expect: { kind: 'all', conditions: [

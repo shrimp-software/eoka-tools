@@ -1,3 +1,5 @@
+mod frontdoor;
+
 use std::time::{Duration, Instant};
 use tokio::io::AsyncReadExt;
 use tokio::net::UnixListener;
@@ -5,7 +7,7 @@ use tokio::sync::mpsc;
 
 use crate::handler::Handler;
 use crate::launch_spec::LaunchSpec;
-use crate::protocol::{read_msg, write_msg, Request, Response};
+use crate::protocol::{write_msg, Request, Response};
 use crate::session;
 
 fn idle_timeout() -> Duration {
@@ -61,46 +63,17 @@ pub async fn run(session_name: &str, spec: LaunchSpec) -> anyhow::Result<()> {
         .data
         .unwrap_or_default();
     let (accepted, mut incoming) = mpsc::channel(64);
-    let frontdoor = tokio::spawn(async move {
-        while let Ok((stream, _)) = listener.accept().await {
-            let (mut reader, mut writer) = stream.into_split();
-            let raw: serde_json::Value =
-                match tokio::time::timeout(Duration::from_secs(5), read_msg(&mut reader)).await {
-                    Ok(Ok(raw)) => raw,
-                    _ => continue,
-                };
-            let req: Request = match serde_json::from_value(raw.clone()) {
-                Ok(req) => req,
-                Err(error) => {
-                    let _ = write_msg(
-                        &mut writer,
-                        &Response::err(format!("Invalid command request: {error}")),
-                    )
-                    .await;
-                    continue;
-                }
-            };
-            if matches!(req, Request::SessionHello) {
-                let _ = write_msg(&mut writer, &Response::ok(hello.clone())).await;
-                continue;
-            }
-            if raw["protocol_major"] != eoka_protocol::sidecar::PROTOCOL_VERSION.major {
-                let _ = write_msg(&mut writer, &Response::err_detail(eoka_protocol::ErrorDetail::new("protocol_mismatch", "Client and daemon protocols differ; upgrade explicitly. No browser was restarted and no command was dispatched."))).await;
-                continue;
-            }
-            if let Err(error) = accepted.try_send((reader, writer, req, raw)) {
-                let (_, mut writer, _, _) = error.into_inner();
-                let _ = write_msg(
-                    &mut writer,
-                    &Response::err_detail(eoka_protocol::ErrorDetail::new(
-                        "daemon_busy",
-                        "Command queue is full; no command was admitted",
-                    )),
-                )
-                .await;
-            }
-        }
+    let (activity_tx, activity_rx) = tokio::sync::watch::channel(frontdoor::Activity {
+        last_request: Instant::now(),
+        waiting: false,
     });
+    let frontdoor = tokio::spawn(frontdoor::serve(
+        listener,
+        hello,
+        handler.operation_manager(),
+        accepted,
+        activity_tx,
+    ));
 
     let mut maintenance = tokio::time::interval(Duration::from_millis(25));
     maintenance.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -116,18 +89,6 @@ pub async fn run(session_name: &str, spec: LaunchSpec) -> anyhow::Result<()> {
                             break;
                         }
 
-                        if let Request::OperationWait(args) = &req {
-                            let manager=handler.operation_manager();
-                            let args=args.clone();
-                            waiters.spawn(async move {
-                                let mut disconnected=[0u8;1];
-                                tokio::select! {
-                                    result=manager.wait(&args.id,args.timeout_ms)=>{let response=match result { Ok(record)=>Response::action_result(record), Err(error)=>Response::err(error.to_string()) };let _=write_msg(&mut writer,&response).await;},
-                                    _=reader.read(&mut disconnected)=>{},
-                                }
-                            });
-                            continue;
-                        }
                         if let Request::DownloadWait(args) = req {
                             let manager = handler.download_manager();
                             waiters.spawn(async move {
@@ -153,7 +114,9 @@ pub async fn run(session_name: &str, spec: LaunchSpec) -> anyhow::Result<()> {
             }
             _ = maintenance.tick() => {
                 handler.service_idle_fetch();
-                if !waiters.is_empty() || handler.download_manager().is_active() || handler.operation_manager().is_active() { last_activity = Instant::now(); }
+                let activity = *activity_rx.borrow();
+                last_activity = last_activity.max(activity.last_request);
+                if activity.waiting || !waiters.is_empty() || handler.download_manager().is_active() || handler.operation_manager().is_active() { last_activity = Instant::now(); }
                 if last_activity.elapsed() > timeout && !handler.is_network_recording().await {
                     eprintln!("[eoka] idle timeout ({}s), shutting down", timeout.as_secs());
                     let _ = handler.handle("close", &serde_json::Value::Null).await;

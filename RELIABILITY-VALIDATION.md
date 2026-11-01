@@ -4,7 +4,7 @@ Local qualification on 2026-10-31. The changes are in the paired
 `fix/login-navigation-reliability` branches, based on core `659fe31` and tools
 `cacc76d`. The original checkouts and investigation transcript were preserved.
 No live account credentials were used in fixtures.
-The core implementation is committed as `203a419`.
+The reviewed core implementation is committed as `d7f55bd`.
 
 ## Environment and dependency boundary
 
@@ -22,24 +22,33 @@ The equivalent explicit override is:
 cargo --config 'patch.crates-io.eoka.path="../eoka-reliability"' test --workspace --all-features
 ```
 
+The complete tools browser gate also supplies the explicit executable required
+by the runtime/viewport fixture:
+
+```sh
+TMPDIR=/var/tmp/er EOKA_TEST_CHROME_PATH=/opt/google/chrome-beta/chrome \
+  xvfb-run -a cargo --config 'patch.crates-io.eoka.path="../eoka-reliability"' \
+  test --workspace --all-features --locked --no-fail-fast -- --ignored --test-threads=1
+```
+
 ## Checks
 
 | Gate | Local result |
 |---|---|
 | Core formatting, all-target/all-feature Clippy | Passed |
-| Core all-feature unit/integration/doc tests without Chrome | 234 passed |
-| Core complete ignored Chrome suite, serial under Xvfb | 90 passed |
+| Core all-feature unit/integration/doc tests without Chrome | 235 passed |
+| Core complete ignored Chrome suite, serial under Xvfb | 92 passed |
 | Core examples and Rust 1.85.0 library check | Passed |
 | Tools formatting, workspace check, all-target/all-feature Clippy | Passed |
 | Tools workspace unit/doc tests | 362 passed |
-| Tools complete ignored Chrome suite, serial under Xvfb | 99 passed |
+| Tools complete ignored Chrome suite, serial under Xvfb | 102 passed |
 | Protocol projection conformance | Passed |
 | Surface parity | 64 sidecar methods checked |
 | Node generation, types, runtime, package and real-browser tests | 322 passed; zero skipped |
 | Go formatting, vet, race suite and real-browser fixture | Passed; uncached race run |
 | Sketchy helper fixtures and real local HLS download | 6 passed |
-| CLI installer | Exact compiled binary installed; bad checksum and wrong version rejected without replacing the existing binary |
-| New/changed CI workflows | YAML and shell syntax checked; hosted runners only; actionlint validates the browser job after moving runner paths into a step; registry qualification remains blocked on core 0.8.0 |
+| CLI installer | Original PR validation: exact compiled binary installed; bad checksum and wrong version rejected without replacing the existing binary. Installer unchanged and not rerun for this review revision |
+| New/changed CI workflows | Hosted runners only; browser workflow actionlint check retained from original PR. Revised publisher passes actionlint, shell syntax and CLI/server release-dispatch guard; registry qualification remains blocked on core 0.8.0 |
 | `mise run release-check` | Quality gates passed; registry gate correctly rejected the local core override |
 
 The new hosted browser CI job runs all Rust browser tests, all Node tests with
@@ -58,14 +67,29 @@ staging is explicitly development-only.
   targets retain useful errors. A partial action is never replayed.
 - Moving focus after the first character stops further input. The regression
   failed before the repair by placing the remaining text in the other field.
+- Operation status and cancellation remain responsive during both ordinary fill
+  and agent-step input. Cancellation stops partial input without replaying it;
+  the operation remains inspectable independently of the serial command handler.
 - Popup verification follows the originating tab's child, waits for URL and
-  enabled-state conditions, and returns the destination ID.
+  enabled-state conditions, and returns the destination ID even when the
+  script-opened origin closes during verification.
+- Target destruction interrupts an unanswered verification read, preserving the
+  remaining deadline for surviving popup candidates. A deterministic CDP peer
+  reproduces the stalled read before the fix and passes afterward. All nine core
+  reliability fixtures also pass on pinned Chrome for Testing 155.0.8059.39.
+- CLI and MCP recover the original operation after automatically selecting its
+  popup. Identical retries do not click again; changed expectations and explicit
+  page changes still produce operation-ID conflicts.
 - Strict actions reject missing expectations; deliberate exploration reports
   uncertainty. Operation IDs and failure details survive recovery. Ambiguous
   admission/storage failures retain an unknown outcome rather than claiming
   that nothing was dispatched.
 - Scoped function calls preserve JSON keys and Unicode arguments, fresh locals,
-  exceptions, promise rejection and result limits. Raw unawaited execution is
+  exceptions, promise rejection and result limits. Core owns the shared JSON
+  validation before CDP serialization, rejecting lossy/non-JSON values and
+  enforcing the one-MiB UTF-8 boundary consistently across scoped clients.
+  Validation failure invokes the function only once; execution discards cyclic
+  return values while preserving exceptions. Raw unawaited execution is
   explicitly uncertain.
 - Recorder start/stop/clear acknowledge state changes. Immediate navigation is
   captured and navigation still works after recording stops.
@@ -86,8 +110,12 @@ staging is explicitly development-only.
    been published by this work. Node publication readiness remains blocked in
    `clients/node/scripts/publication-readiness.json`.
 
-Full local logs are in `/home/cbass/.cache/er/`: `core-unit-final.log`,
-`core-browser-final.log`, `core-clippy-final.log`, `core-msrv-final.log`,
-`core-examples-final.log`, `release-check-final.log`,
-`tools-browser-complete.log`, `conformance-final.log`, `node-all-final.log`,
-`go-final.log`, `helpers-final.log` and `installer-check.log`.
+Review revision logs are in `/home/cbass/.cache/er/`: `fix-core-unit-final.log`,
+`fix-core-browser-final.log`, `fix-core-clippy-final.log`,
+`fix-core-msrv-final.log`, `fix-core-examples-final.log`,
+`fix-core-reliability-pinned.log`, `fix-core-lifecycle-negative.log`,
+`fix-tools-release-check-final.log`, `fix-tools-browser-lifecycle.log`,
+`fix-tools-conformance-final.log`, `fix-surface-parity.log`,
+`fix-node-check-final.log`, `fix-go-vet.log`, `fix-go-tests-final.log` and
+`fix-helper-tests.log`. Original installer evidence remains in
+`installer-check.log`.

@@ -29,6 +29,11 @@ struct View {
 
 #[derive(Debug)]
 struct RejectedAction(String);
+
+enum StepOrigin {
+    Explicit,
+    Selected,
+}
 impl std::fmt::Display for RejectedAction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.0)
@@ -402,6 +407,29 @@ impl AgentSession {
         operations: &OperationManager,
         args: AgentStepArgs,
     ) -> Result<AgentStepResult> {
+        self.step_with_origin(browser, page, operations, args, StepOrigin::Explicit)
+            .await
+    }
+
+    pub async fn step_selected(
+        &mut self,
+        browser: &Browser,
+        page: &Page,
+        operations: &OperationManager,
+        args: AgentStepArgs,
+    ) -> Result<AgentStepResult> {
+        self.step_with_origin(browser, page, operations, args, StepOrigin::Selected)
+            .await
+    }
+
+    async fn step_with_origin(
+        &mut self,
+        browser: &Browser,
+        page: &Page,
+        operations: &OperationManager,
+        args: AgentStepArgs,
+        origin: StepOrigin,
+    ) -> Result<AgentStepResult> {
         validate_limits(args.max_controls, args.timeout_ms)?;
         if !(1..=300_000).contains(&args.action_timeout_ms) {
             bail!("action_timeout_ms must be between 1 and 300000");
@@ -420,13 +448,20 @@ impl AgentSession {
         let deadline = Instant::now() + Duration::from_millis(args.timeout_ms);
         let reserve = Duration::from_millis((args.timeout_ms / 3).min(2000));
         let operation_deadline = deadline - reserve;
-        let canonical = serde_json::to_vec(&serde_json::json!({
-            "agent_step": { "action":args.action, "mode":args.mode, "expect":args.expect,
-                "action_timeout_ms":args.action_timeout_ms, "destination":args.destination, "target_id":page.target_id() }
-        }))?;
         let execution = async {
             let store = operations.store().await?;
             store.recover().await?;
+            let bound = match origin {
+                StepOrigin::Selected => store.find(id.clone()).await?,
+                StepOrigin::Explicit => None,
+            };
+            let target_id = bound
+                .as_ref()
+                .map_or(page.target_id(), |record| &record.target_id);
+            let canonical = serde_json::to_vec(&serde_json::json!({
+                "agent_step": { "action":args.action, "mode":args.mode, "expect":args.expect,
+                    "action_timeout_ms":args.action_timeout_ms, "destination":args.destination, "target_id":target_id }
+            }))?;
             let mut record =
                 if let Some(record) = store.lookup(id.clone(), canonical.clone()).await? {
                     record

@@ -7,7 +7,7 @@ use crate::protocol::Response;
 
 impl Handler {
     pub(super) async fn cmd_eval(&mut self, args: &Value) -> Result<Response, String> {
-        let code = resolve_call(args)?;
+        let code = resolve_js(args)?;
         let max_size = args["max_size"].as_u64().map(|v| v as usize);
         if !args["raw"].as_bool().unwrap_or(false) {
             if args["no_await"].as_bool().unwrap_or(false) {
@@ -18,7 +18,7 @@ impl Handler {
             let value: Value = self
                 .require_tab()?
                 .page
-                .evaluate(&code)
+                .evaluate_function(&code, &function_arguments(args)?)
                 .await
                 .map_err(|e| e.to_string())?;
             let size = serde_json::to_vec(&value).map_err(|e| e.to_string())?.len();
@@ -62,7 +62,7 @@ impl Handler {
     }
 
     pub(super) async fn cmd_exec(&mut self, args: &Value) -> Result<Response, String> {
-        let code = resolve_call(args)?;
+        let code = resolve_js(args)?;
         let tab = self.require_tab()?;
         if args["no_await"].as_bool().unwrap_or(false) {
             if !args["raw"].as_bool().unwrap_or(false) {
@@ -75,9 +75,14 @@ impl Handler {
                 .await
                 .map_err(|error| error.to_string())?;
             return Ok(Response::err_detail(eoka_protocol::ErrorDetail::new("outcome_unknown", "Raw execution dispatched; asynchronous completion was not awaited. Inspect the page before further input.")));
-        } else {
+        } else if args["raw"].as_bool().unwrap_or(false) {
             tab.page
                 .execute(&code)
+                .await
+                .map_err(|error| error.to_string())?;
+        } else {
+            tab.page
+                .execute_function(&code, &function_arguments(args)?)
                 .await
                 .map_err(|error| error.to_string())?;
         }
@@ -276,15 +281,9 @@ fn build_limited_eval_js(code: &str, max_size: usize) -> String {
     )
 }
 
-fn resolve_call(args: &Value) -> Result<String, String> {
-    let source = resolve_js(args)?;
-    if args["raw"].as_bool().unwrap_or(false) {
-        return Ok(source);
-    }
-    let arguments: Vec<Value> =
-        serde_json::from_value(args.get("arguments").cloned().unwrap_or_else(|| json!([])))
-            .map_err(|e| e.to_string())?;
-    eoka::Page::function_expression(&source, &arguments).map_err(|e| e.to_string())
+fn function_arguments(args: &Value) -> Result<Vec<Value>, String> {
+    serde_json::from_value(args.get("arguments").cloned().unwrap_or_else(|| json!([])))
+        .map_err(|error| error.to_string())
 }
 
 fn resolve_js(args: &Value) -> Result<String, String> {

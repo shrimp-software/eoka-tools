@@ -905,11 +905,13 @@ impl EokaServer {
         let tab = state
             .current_tab()
             .ok_or_else(|| ErrorData::from(AgentError::NoTab))?;
-        let code = resolve_js(&req.0)?;
+        let code = helpers::resolve_js_source(&req.0)?;
         let value: Value = if req.0.no_await {
             tab.page.evaluate_sync(&code).await
-        } else {
+        } else if req.0.raw {
             tab.page.evaluate(&code).await
+        } else {
+            tab.page.evaluate_function(&code, &req.0.arguments).await
         }
         .map_err(internal)?;
         let size = serde_json::to_vec(&value).map_err(internal)?.len();
@@ -931,12 +933,19 @@ impl EokaServer {
         let tab = state
             .current_tab()
             .ok_or_else(|| ErrorData::from(AgentError::NoTab))?;
-        let code = resolve_js(&req.0)?;
+        let code = helpers::resolve_js_source(&req.0)?;
         if req.0.no_await {
             tab.page.execute_sync(&code).await.map_err(internal)?;
             return protocol_tool_response(eoka_protocol::Response::err_detail(eoka_protocol::ErrorDetail::new("outcome_unknown", "Raw execution dispatched; asynchronous completion was not awaited. Inspect the page before further input.")));
         }
-        tab.page.execute(&code).await.map_err(internal)?;
+        if req.0.raw {
+            tab.page.execute(&code).await.map_err(internal)?;
+        } else {
+            tab.page
+                .execute_function(&code, &req.0.arguments)
+                .await
+                .map_err(internal)?;
+        }
         text_ok("Executed successfully")
     }
 
@@ -2001,6 +2010,23 @@ mod tests {
             .unwrap_err()
             .message
             .contains("mcp-fixture-exception"));
+        for code in [
+            "()=>({missing:undefined})",
+            "()=>({n:NaN})",
+            "()=>9007199254740992",
+            "()=>new Date(0)",
+            "()=> 'é'.repeat(524288)",
+        ] {
+            assert!(
+                server
+                    .extract(Parameters(
+                        serde_json::from_value(json!({"code":code})).unwrap()
+                    ))
+                    .await
+                    .is_err(),
+                "{code}"
+            );
+        }
         let result = server
             .extract(Parameters(
                 serde_json::from_value(json!({

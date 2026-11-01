@@ -38,6 +38,15 @@ pub(crate) async fn wait_for_stable(page: &Page) -> eoka_server::eoka::Result<()
 }
 
 pub(crate) fn resolve_js(req: &JsRequest) -> Result<String, ErrorData> {
+    let source = resolve_js_source(req)?;
+    if req.raw {
+        Ok(source)
+    } else {
+        Page::function_expression(&source, &req.arguments).map_err(internal)
+    }
+}
+
+pub(crate) fn resolve_js_source(req: &JsRequest) -> Result<String, ErrorData> {
     if req.no_await && !req.raw {
         return Err(invalid(
             "Function execution awaits completion; no_await requires raw=true",
@@ -51,10 +60,7 @@ pub(crate) fn resolve_js(req: &JsRequest) -> Result<String, ErrorData> {
     } else {
         return Err(invalid("Either code or file must be provided"));
     };
-    if req.raw {
-        return Ok(source);
-    }
-    eoka_server::eoka::Page::function_expression(&source, &req.arguments).map_err(internal)
+    Ok(source)
 }
 
 pub(crate) fn text_ok(s: impl Into<String>) -> Result<CallToolResult, ErrorData> {

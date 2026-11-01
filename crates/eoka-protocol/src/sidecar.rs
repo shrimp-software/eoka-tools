@@ -292,6 +292,9 @@ impl From<eoka::Error> for ServerError {
                 Self::new(ErrorCode::ElementNotVisible, message)
             }
             eoka::Error::Timeout(_) => Self::new(ErrorCode::Timeout, message),
+            eoka::Error::EvaluationTooLarge { .. } => {
+                Self::new(ErrorCode::MessageTooLarge, message)
+            }
             eoka::Error::RetryExhausted { .. } => Self::new(ErrorCode::RetryExhausted, message),
             eoka::Error::InvalidScreenshotOptions(_) => {
                 Self::new(ErrorCode::InvalidParams, message)

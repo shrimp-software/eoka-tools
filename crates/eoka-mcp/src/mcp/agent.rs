@@ -60,7 +60,7 @@ impl EokaServer {
             ),
             "agent_step" => eoka_protocol::Response::agent_result(
                 agent
-                    .step(
+                    .step_selected(
                         &browser,
                         &page,
                         &self.operations,
@@ -177,6 +177,53 @@ mod tests {
             .unwrap()
             .contains("Saved"));
         assert_eq!(page.evaluate::<u32>("window.hits").await.unwrap(), 1);
+        page.execute("document.querySelector('#go').onclick=()=>{window.hits++;const child=window.open('about:blank');child.document.body.innerHTML='<button id=ready>Ready</button>'}").await.unwrap();
+        let request: eoka_protocol::AgentStepArgs = serde_json::from_value(serde_json::json!({
+            "operation_id":uuid::Uuid::new_v4().to_string(),
+            "action":{"kind":"click","target":button},
+            "expect":{"kind":"visible","target":{"query":{"kind":"css","selector":"#ready"}}}
+        }))
+        .unwrap();
+        let first = data(
+            server
+                .agent_step(Parameters(request.clone()))
+                .await
+                .unwrap(),
+        );
+        let second = data(
+            server
+                .agent_step(Parameters(request.clone()))
+                .await
+                .unwrap(),
+        );
+        assert_eq!(first["operation"], second["operation"]);
+        assert_eq!(
+            first["observation"]["tab_id"],
+            second["observation"]["tab_id"]
+        );
+        assert_eq!(page.evaluate::<u32>("window.hits").await.unwrap(), 2);
+        let (browser, selected) = {
+            let guard = server.state.lock().await;
+            let state = guard.as_ref().unwrap();
+            (
+                state.browser.clone(),
+                state.current_tab().unwrap().page.clone(),
+            )
+        };
+        assert_ne!(selected.target_id(), page.target_id());
+        let explicit = server
+            .agent
+            .lock()
+            .await
+            .step(&browser, &selected, &server.operations, request)
+            .await
+            .unwrap();
+        assert!(explicit
+            .operation_error
+            .unwrap()
+            .message
+            .contains("operation_id_conflict"));
+        drop(browser);
         server.close().await.unwrap();
         drop(server);
         std::fs::remove_dir_all(directory).unwrap();

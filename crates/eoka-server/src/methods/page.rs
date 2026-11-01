@@ -9,7 +9,6 @@ use eoka_protocol::sidecar::{
     SolveCaptchaParams, SolveCaptchaResult, SolveTurnstileParams, SolveTurnstileResult, TextResult,
     TitleResult, UrlResult, WaitForParams, WaitForTextParams,
 };
-use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::browser::close_tab_impl;
@@ -154,12 +153,11 @@ pub async fn wait_for_text(state: &AppState, params: Value) -> Result<Value, Ser
 
 pub async fn evaluate(state: &AppState, params: Value) -> Result<Value, ServerError> {
     let params: JsParams = parse_params(params)?;
-    let expression = eoka::Page::function_expression(&params.function, &params.arguments)?;
-    let script = build_json_evaluation_js(&expression)?;
-    let result: BrowserEvaluation = state.page(&params.page_id)?.evaluate(&script).await?;
-    encode(EvaluateResult {
-        result: result.into_value()?,
-    })
+    let result = state
+        .page(&params.page_id)?
+        .evaluate_function(&params.function, &params.arguments)
+        .await?;
+    encode(EvaluateResult { result })
 }
 
 pub async fn execute(state: &AppState, params: Value) -> Result<Value, ServerError> {
@@ -173,11 +171,11 @@ pub async fn execute(state: &AppState, params: Value) -> Result<Value, ServerErr
 
 pub async fn evaluate_raw(state: &AppState, params: Value) -> Result<Value, ServerError> {
     let params: RawJsParams = parse_params(params)?;
-    let script = build_json_evaluation_js(&params.js)?;
-    let result: BrowserEvaluation = state.page(&params.page_id)?.evaluate(&script).await?;
-    encode(EvaluateResult {
-        result: result.into_value()?,
-    })
+    let result = state
+        .page(&params.page_id)?
+        .evaluate_json(&params.js, MAX_EVALUATION_BYTES)
+        .await?;
+    encode(EvaluateResult { result })
 }
 
 pub async fn execute_raw(state: &AppState, params: Value) -> Result<Value, ServerError> {
@@ -204,14 +202,11 @@ pub async fn frames(state: &AppState, params: Value) -> Result<Value, ServerErro
 
 pub async fn evaluate_in_frame(state: &AppState, params: Value) -> Result<Value, ServerError> {
     let params: FrameJsParams = parse_params(params)?;
-    let script = build_json_evaluation_js(&params.js)?;
-    let result: BrowserEvaluation = state
+    let result = state
         .page(&params.page_id)?
-        .evaluate_in_frame_id(&params.frame_id, &script)
+        .evaluate_json_in_frame_id(&params.frame_id, &params.js, MAX_EVALUATION_BYTES)
         .await?;
-    encode(EvaluateResult {
-        result: result.into_value()?,
-    })
+    encode(EvaluateResult { result })
 }
 
 pub async fn click_shadow(state: &AppState, params: Value) -> Result<Value, ServerError> {
@@ -246,75 +241,6 @@ pub async fn solve_turnstile(state: &AppState, params: Value) -> Result<Value, S
 }
 
 const MAX_EVALUATION_BYTES: usize = 16 * 1024 * 1024 - 4096;
-
-#[derive(Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-enum BrowserEvaluation {
-    Value { value: Value },
-    TooLarge,
-}
-
-impl BrowserEvaluation {
-    fn into_value(self) -> Result<Value, ServerError> {
-        match self {
-            Self::Value { value } => Ok(value),
-            Self::TooLarge => Err(ServerError::new(
-                ErrorCode::MessageTooLarge,
-                format!(
-                    "evaluation result exceeds the {MAX_EVALUATION_BYTES} byte CDP payload limit"
-                ),
-            )),
-        }
-    }
-}
-
-fn build_json_evaluation_js(expression: &str) -> Result<String, ServerError> {
-    let expression = serde_json::to_string(expression)
-        .map_err(|error| ServerError::internal(error.to_string()))?;
-    Ok(format!(
-        r#"(async () => {{
-            const value = await (0, eval)({expression});
-            const ancestors = new WeakSet();
-            const normalize = (value) => {{
-                if (value === null || typeof value === "string" || typeof value === "boolean") return value;
-                if (typeof value === "number") {{
-                    if (!Number.isFinite(value) || (Number.isInteger(value) && !Number.isSafeInteger(value))) {{
-                        throw new TypeError("Evaluation result contains a non-finite or unsafe number");
-                    }}
-                    return value;
-                }}
-                if (typeof value !== "object") throw new TypeError("Evaluation result is not JSON-compatible");
-                const prototype = Object.getPrototypeOf(value);
-                if (!Array.isArray(value) && prototype !== Object.prototype && prototype !== null) {{
-                    throw new TypeError("Evaluation result contains a non-JSON object");
-                }}
-                if (Object.getOwnPropertySymbols(value).length !== 0) {{
-                    throw new TypeError("Evaluation result contains symbol keys");
-                }}
-                if (ancestors.has(value)) throw new TypeError("Evaluation result contains a cycle");
-                ancestors.add(value);
-                const normalized = Array.isArray(value) ? [] : Object.create(null);
-                if (Array.isArray(value)) {{
-                    for (let index = 0; index < value.length; index++) {{
-                        if (!Object.hasOwn(value, index)) throw new TypeError("Evaluation result contains an array hole");
-                        normalized.push(normalize(value[index]));
-                    }}
-                }} else {{
-                    for (const key of Object.keys(value)) normalized[key] = normalize(value[key]);
-                }}
-                ancestors.delete(value);
-                return normalized;
-            }};
-            const normalized = normalize(value);
-            const serialized = JSON.stringify(normalized);
-            if (serialized.length > {MAX_EVALUATION_BYTES} ||
-                new TextEncoder().encode(serialized).byteLength > {MAX_EVALUATION_BYTES}) {{
-                return {{kind: "too_large"}};
-            }}
-            return {{kind: "value", value: normalized}};
-        }})()"#
-    ))
-}
 
 pub async fn fetch(state: &AppState, params: Value) -> Result<Value, ServerError> {
     let params: FetchParams = parse_params(params)?;
@@ -581,6 +507,7 @@ pub async fn close(state: &mut AppState, params: Value) -> Result<Value, ServerE
 
 #[cfg(test)]
 mod tests {
+    use serde_json::Value;
     #[test]
     fn screenshot_bound_is_checked_before_base64_expansion() {
         let bytes = vec![0; eoka_protocol::sidecar::MAX_SCREENSHOT_BYTES + 1];
@@ -622,12 +549,11 @@ mod tests {
                 serde_json::json!({"__proto__":{"safe":true}}),
             ),
         ] {
-            let script = super::build_json_evaluation_js(expression).unwrap();
-            let result: super::BrowserEvaluation = page.evaluate(&script).await.unwrap();
-            let super::BrowserEvaluation::Value { value } = result else {
-                panic!("small JSON value exceeded the evaluation limit");
-            };
-            assert_eq!(value, expected);
+            let result: Value = page
+                .evaluate_json(expression, super::MAX_EVALUATION_BYTES)
+                .await
+                .unwrap();
+            assert_eq!(result, expected);
         }
         for expression in [
             "undefined",
@@ -644,9 +570,8 @@ mod tests {
             "({[Symbol('key')]:1})",
             "(() => { const value = {}; value.self = value; return value; })()",
         ] {
-            let script = super::build_json_evaluation_js(expression).unwrap();
             assert!(
-                page.evaluate::<super::BrowserEvaluation>(&script)
+                page.evaluate_json::<Value>(expression, super::MAX_EVALUATION_BYTES)
                     .await
                     .is_err(),
                 "{expression}"

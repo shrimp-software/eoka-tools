@@ -20,7 +20,7 @@ impl Handler {
                 )?)),
                 "agent_step" => Ok(Response::agent_result(
                     self.agent
-                        .step(
+                        .step_selected(
                             &state.browser,
                             &page,
                             &self.operations,

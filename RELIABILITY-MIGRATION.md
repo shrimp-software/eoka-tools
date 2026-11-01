@@ -49,9 +49,15 @@ Action responses keep their operation record even when `ok` is false. `operation
 
 Use `operations get ID` to inspect a known operation, and `operations wait ID` for a completion result. Reading a record can succeed while its recorded action failed. A lost response never authorizes replay. Reusing an operation ID with the same request recovers the existing operation; changing the request is rejected.
 
+Operation status, cancellation and wait requests remain available while the CLI is waiting for a browser action. Canceling sequential input stops subsequent characters; already-dispatched input remains uncertain. CLI/MCP step recovery retains the original operation's tab identity after automatic destination selection. Explicit Node/Go page IDs remain part of the request identity.
+
+Popup verification continues when the originating window closes. Closed candidates and transient execution-context changes do not discard other eligible destinations; unrelated evaluation failures still propagate under the original action deadline.
+
 ## JavaScript and recording
 
 `eval`/`exec` and sidecar `page.evaluate`/`page.execute` take a function and JSON arguments. Functions run once in a fresh lexical scope; promises are awaited. JSON arguments are parsed as data, preserving keys such as `__proto__`. Arguments reject unsafe integer values and nesting beyond 64; function/argument/result limits are 1 MiB. Undefined/non-JSON evaluation results fail explicitly; use `exec` when no return value is needed.
+
+All function evaluators use core's result validator before CDP serialization. Nested undefined, non-finite or unsafe numbers, sparse arrays, cycles, symbol keys and non-JSON objects are rejected without silent coercion. The result limit counts UTF-8 JSON bytes. Raw sidecar and frame evaluation reuse that validator with their existing transport-sized result limit.
 
 ```sh
 eoka --session demo eval '(value)=>{const local=value; return local}' --args '["hello"]'
