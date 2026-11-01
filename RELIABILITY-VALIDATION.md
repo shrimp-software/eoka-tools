@@ -48,7 +48,7 @@ TMPDIR=/var/tmp/er EOKA_TEST_CHROME_PATH=/opt/google/chrome-beta/chrome \
 | Go formatting, vet, race suite and real-browser fixture | Passed; uncached race run |
 | Sketchy helper fixtures and real local HLS download | 6 passed |
 | CLI installer | Original PR validation: exact compiled binary installed; bad checksum and wrong version rejected without replacing the existing binary. Installer unchanged and not rerun for this review revision |
-| New/changed CI workflows | Hosted runners only; browser workflow actionlint check retained from original PR. Revised publisher passes actionlint, shell syntax and CLI/server release-dispatch guard; registry qualification remains blocked on core 0.8.0 |
+| New/changed CI workflows | Hosted runners only; revised browser CI and publisher pass actionlint. Browser scratch exists before toolchain setup. Shell syntax and CLI/server release-dispatch guard pass; registry qualification remains blocked on core 0.8.0 |
 | `mise run release-check` | Quality gates passed; registry gate correctly rejected the local core override |
 
 The new hosted browser CI job runs all Rust browser tests, all Node tests with
