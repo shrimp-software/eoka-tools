@@ -1,6 +1,6 @@
 #!/bin/sh
 set -eu
-version="${EOKA_VERSION:-0.7.0}"
+version="${EOKA_VERSION:-0.8.0}"
 case "$version" in *[!0-9.]*|'') echo "Invalid EOKA_VERSION" >&2; exit 2;; esac
 case "$(uname -s)-$(uname -m)" in
     Darwin-arm64) target=aarch64-apple-darwin ;;

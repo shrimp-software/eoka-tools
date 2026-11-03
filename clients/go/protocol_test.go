@@ -131,7 +131,7 @@ func TestHelloReportsPinnedLegacyServerIncompatibility(t *testing.T) {
 		})}
 		err := b.hello(callContext(t))
 		var typed *Error
-		if !errors.As(err, &typed) || typed.Code != ErrCodeProtocolMismatch || string(typed.Data) != string(data) || !strings.Contains(err.Error(), "WithServerPath") || !strings.Contains(err.Error(), "0.7.0") {
+		if !errors.As(err, &typed) || typed.Code != ErrCodeProtocolMismatch || string(typed.Data) != string(data) || !strings.Contains(err.Error(), "WithServerPath") || !strings.Contains(err.Error(), "0.8.0") {
 			t.Fatalf("legacy compatibility error = %v", err)
 		}
 	}
