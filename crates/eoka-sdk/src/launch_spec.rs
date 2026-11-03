@@ -15,6 +15,7 @@ pub enum LaunchSpec {
         persist: bool,
         geo_align: bool,
         auto_solve_cloudflare: bool,
+        sandbox: bool,
     },
     Connect {
         ws_url: String,
@@ -76,6 +77,7 @@ impl LaunchSpec {
                 persist,
                 geo_align,
                 auto_solve_cloudflare,
+                sandbox,
                 ..
             } => {
                 from_profile.is_some()
@@ -88,6 +90,7 @@ impl LaunchSpec {
                     || *persist
                     || !geo_align
                     || *auto_solve_cloudflare
+                    || !sandbox
             }
         }
     }

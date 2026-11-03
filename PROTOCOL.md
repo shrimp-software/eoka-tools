@@ -171,11 +171,12 @@ is unchanged. Only the owned child is removed, never the caller's root or an
 explicit user profile. Source browser executables and their dependency files are
 not modified.
 
-The low-level sidecar and existing Go SDK default `sandbox` to false for
-compatibility; the Node SDK requests true by default. A requested sandbox
-failure is an error, not an automatic unsandboxed retry. Explicit
-executable/runtime/sandbox policy cannot silently reuse a
-running profile whose identity or policy cannot be guaranteed.
+The sidecar, Go SDK, Node SDK and CLI all default `sandbox` to true; pass
+false (`--no-sandbox` / `EOKA_NO_SANDBOX` in the CLI) only where the environment
+cannot provide one. A requested sandbox failure is an error, not an automatic
+unsandboxed retry. Explicit executable/runtime policy cannot silently reuse a
+running profile, and a sandboxed launch reuses one only when that process is
+verifiably running without sandbox-disabling switches.
 
 `browser.connect` accepts only `ws://host[:port]/devtools/browser/<id>` without
 credentials, query, fragment or trailing path components. HTTP discovery URLs,

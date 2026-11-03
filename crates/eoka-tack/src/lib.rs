@@ -249,6 +249,7 @@ mod tests {
                 persist: false,
                 geo_align: false,
                 auto_solve_cloudflare: false,
+                sandbox: true,
             },
         ))
     }

@@ -113,6 +113,7 @@ impl Handler {
                 proxy,
                 persist,
                 geo_align,
+                sandbox,
                 ..
             } => {
                 let persist_dir = if *persist {
@@ -127,6 +128,7 @@ impl Handler {
                     proxy.clone(),
                     persist_dir.as_deref(),
                     *geo_align,
+                    *sandbox,
                 )
                 .await
                 .map_err(|e| e.to_string())?;

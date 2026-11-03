@@ -124,7 +124,7 @@ viewport options remain available.
 | --- | --- |
 | `WithExecutablePath(path)` | Select an absolute Chrome executable path; an invalid explicit executable fails without discovery or fallback. |
 | `WithRuntimeDir(path)` | Use an absolute writable runtime root for private per-browser temporary files. The root remains caller-owned; only the owned unique child is removed. |
-| `WithSandbox(enabled)` | Explicit sandbox policy. The legacy Go/Rust/sidecar default remains `false`; pass `true` to request sandboxing. Unsupported sandbox environments fail without retrying unsandboxed. The planned managed Node SDK will request `true` explicitly. |
+| `WithSandbox(enabled)` | Chrome sandbox policy, `true` by default. Pass `false` only where the environment cannot provide a sandbox (some containers and CI runners). Unsupported sandbox environments fail without retrying unsandboxed. |
 | `WithViewport(width, height)` | CSS viewport dimensions, both positive and at most 2147483647. |
 | `WithDeviceScaleFactor(scale)` | Finite positive DPR, effective default 1. It may be set without supplying dimensions. |
 | `WithAutoSolveCloudflare(interval, timeout)` | Have the server watch every tab and solve full-page Cloudflare challenges. Zero durations use 500ms and 30s. Also accepted by `Connect`; requires the `cloudflareAutoSolve` capability. |
@@ -141,7 +141,6 @@ b, err := eoka.Launch(ctx,
     eoka.WithServerPath("/absolute/path/to/eoka-server"),
     eoka.WithExecutablePath("/absolute/path/to/chrome"),
     eoka.WithRuntimeDir("/absolute/path/to/private-runtime"),
-    eoka.WithSandbox(true),
     eoka.WithViewport(640, 360),
     eoka.WithDeviceScaleFactor(2),
 )

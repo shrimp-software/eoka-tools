@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { assertRecordingQualification, recordingSchedule } from '../scripts/recording-qualification.mjs';
 
-const build = '155.0.8059.39';
+const build = '156.0.8078.80';
 const rejected = evidence => assert.throws(() => assertRecordingQualification(evidence, build));
 function completeEvidence() {
   return {

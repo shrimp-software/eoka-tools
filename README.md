@@ -258,7 +258,7 @@ The current release, `0.1.0-beta.3`, bundles server `0.6.1` built against eoka
 `0.7.2`. Merging a version bump to `main` starts the npm release automatically.
 
 `Browser.launch()` resolves an exact optional server package and installs pinned
-full Chrome for Testing 155.0.8059.39 on demand. `installBrowser()` supports explicit
+full Chrome for Testing 156.0.8078.80 on demand. `installBrowser()` supports explicit
 preparation, progress, cancellation and verified offline/read-only cache reuse.
 Explicit `serverPath`/`executablePath` and environment overrides remain available;
 there is no PATH, Cargo, server-download or system-browser fallback.

@@ -53,7 +53,7 @@ test("canonical method schemas reject invalid arguments and preserve null option
 test("browser session metadata requires truthful ownership and version fields", () => {
   for (const method of ["browser.launch", "browser.connect"]) {
     for (const ownership of ["owned", "borrowed"]) {
-      const result = { ownership, browserVersion: "Chrome/155.0.8059.39" };
+      const result = { ownership, browserVersion: "Chrome/156.0.8078.80" };
       assert.deepEqual(decodeMethodResult(bundle, method, JSON.stringify({ id: 3, result })), result);
     }
     for (const result of [{}, { ownership: "owned" }, { ownership: "unknown", browserVersion: "Chrome/155" }]) {

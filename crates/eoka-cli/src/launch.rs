@@ -29,6 +29,7 @@ pub(crate) fn resolve_launch_spec(cli: &Cli) -> Result<LaunchSpec, String> {
         && cli.js_block.is_empty()
         && !cli.persist
         && !cli.no_geo_align
+        && !cli.no_sandbox
         && !cli.auto_solve_cloudflare
     {
         return Ok(LaunchSpec::Reuse);
@@ -49,6 +50,7 @@ pub(crate) fn resolve_launch_spec(cli: &Cli) -> Result<LaunchSpec, String> {
         persist: cli.persist,
         geo_align: !cli.no_geo_align,
         auto_solve_cloudflare: cli.auto_solve_cloudflare,
+        sandbox: !cli.no_sandbox,
     })
 }
 
