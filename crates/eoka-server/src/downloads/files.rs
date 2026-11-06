@@ -42,7 +42,7 @@ impl Destination {
         Ok(Self { output, staging })
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub fn publish(
         &self,
         guid: &str,
