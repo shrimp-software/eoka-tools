@@ -325,3 +325,18 @@ jobs:
           path: qualified/
           if-no-files-found: error
           retention-days: 14
+
+  notify:
+    name: Nightly status issue
+    if: always() && github.event_name == 'schedule'
+    needs: [collect]
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/nightly-issue.sh ${{ needs.collect.result }}

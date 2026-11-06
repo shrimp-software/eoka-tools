@@ -12,7 +12,7 @@ import { installBrowser } from '../dist/browser-install.js';
 import { sanitizeInstallationDiagnostic } from '../dist/browser-install-diagnostics.js';
 import { chromeArchive } from './fixtures/browser-install-archive.mjs';
 
-const buildId = '156.0.8078.80';
+const buildId = JSON.parse(await readFile(new URL('../release-manifest.json', import.meta.url), 'utf8')).chrome.buildId;
 const supported = process.platform === 'linux' && process.arch === 'x64';
 
 async function fixture(t, { data = chromeArchive(), stall = false } = {}) {

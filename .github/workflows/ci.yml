@@ -19,8 +19,8 @@ env:
   RUSTFLAGS: -Dwarnings
 
 jobs:
-  # Pull requests run only the jobs for the areas they touch; a job skipped by
-  # `if:` still satisfies a required check. Pushes run everything.
+  # Pull requests run only the jobs for the areas they touch; skipped jobs
+  # still satisfy the CI OK gate. Pushes run everything.
   changes:
     name: Detect changed areas
     runs-on: ubuntu-latest
@@ -43,40 +43,35 @@ jobs:
             exit 0
           fi
           files=$(git diff --name-only "$BASE_SHA" HEAD)
-          area() { grep -qE "$1|^\.github/workflows/ci\.yml$" <<<"$files" && echo true || echo false; }
+          area() { grep -qE "$1|^\.github/(workflows/ci\.yml|scripts/)|^(deny\.toml|\.config/)" <<<"$files" && echo true || echo false; }
           {
             echo "rust=$(area '^(crates/|tools/sketchy/|scripts/|Cargo\.(toml|lock)$)')"
             echo "go=$(area '^clients/go/')"
             echo "node=$(area '^(clients/node/|mise\.toml$)')"
           } | tee -a "$GITHUB_OUTPUT"
 
-  test:
-    name: Test
-    needs: changes
-    if: needs.changes.outputs.rust == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
-
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-
-      - name: Run tests
-        run: cargo test --all-features --locked
-
-  crate-versions:
-    name: Crate versions
+  lint:
+    name: Lint and conformance
     needs: changes
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          fetch-depth: 0
+          fetch-depth: 0 # crate-version check compares against release tags
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
-      - run: bash scripts/check-crate-versions.sh
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --all -- --check
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: cargo clippy --workspace --all-features --all-targets --locked -- -D warnings
+      - name: Crate versions
+        run: bash scripts/check-crate-versions.sh
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db
+      - name: Protocol conformance
+        run: mise run conformance
+      - name: Lesson and media helpers
+        run: python3 -m unittest discover -s tools/sketchy -p 'test_*.py'
 
   surface-parity:
     name: Surface parity
@@ -87,31 +82,20 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - run: node scripts/check-surface-parity.mjs
 
-  clippy:
-    name: Clippy
+  unit:
+    name: Unit (${{ matrix.os }})
     needs: changes
     if: needs.changes.outputs.rust == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15, windows-2025]
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
-        with:
-          components: clippy
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - run: cargo clippy --all-features --all-targets --locked -- -D warnings
-
-  fmt:
-    name: Format
-    needs: changes
-    if: needs.changes.outputs.rust == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
-        with:
-          components: rustfmt
-      - run: cargo fmt --all -- --check
+      - run: cargo test --workspace --all-features --locked
 
   go:
     name: Go SDK
@@ -123,22 +107,14 @@ jobs:
         working-directory: clients/go
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: "1.21"
-
       - name: gofmt
         run: test -z "$(gofmt -l .)"
-
-      - name: Vet
-        run: go vet ./...
-
-      - name: Build
-        run: go build ./...
-
-      - name: Test
-        run: go test ./... -race
+      - run: go vet ./...
+      - run: go build ./...
+      - run: go test ./... -race
 
   node:
     name: Node SDK
@@ -147,95 +123,103 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
-
       - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db
-
       - name: Install SDK dependencies
         run: mise exec -- npm --prefix clients/node ci --ignore-scripts --omit=optional
-
       - name: Check committed schema projection
         run: mise exec -- node clients/node/scripts/generate-protocol.mjs --check --schema clients/node/src/generated/schema-bundle.json
-
       - name: Build SDK
         run: mise run node-build
-
       - name: Check SDK consumers and runtime
         run: |
           mise exec -- node clients/node/scripts/typecheck.mjs
           mise exec -- node --test clients/node/tests/*.test.mjs
 
-  browser-reliability:
-    name: Browser and packaged client reliability
+  # Real-Chrome tests. The Rust suite is sharded; the Node and Go clients run
+  # against the same staged native build in their own job.
+  browser:
+    name: Browser (${{ matrix.suite }})
     needs: changes
     if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.node == 'true'
     runs-on: ubuntu-22.04
-    timeout-minutes: 30
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [rust 1/3, rust 2/3, rust 3/3, clients]
     env:
       EOKA_RELIABILITY_SERVER: ${{ github.workspace }}/target/debug/eoka-server
     steps:
       - name: Initialize qualification paths
         run: |
-          qualification_tmp=/var/tmp/er
-          mkdir -p "$qualification_tmp"
+          mkdir -p /var/tmp/er
           {
-            echo "TMPDIR=$qualification_tmp"
+            echo "TMPDIR=/var/tmp/er"
             echo "EOKA_BROWSER_CACHE_DIR=$RUNNER_TEMP/eoka-browser"
             echo "EOKA_SERVER_ARTIFACTS_DIR=$RUNNER_TEMP/eoka-artifacts"
             echo "EOKA_RELEASE_STAGE_DIR=$RUNNER_TEMP/eoka-stage"
           } >> "$GITHUB_ENV"
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: browser
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        if: matrix.suite == 'clients'
         with:
           go-version: "1.21"
       - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db
-      - name: Prepare browser dependencies and SDK
-        run: |
-          mkdir -p "$TMPDIR" "$EOKA_SERVER_ARTIFACTS_DIR"
-          sudo apt-get update
-          sudo apt-get install -y xvfb xauth ffmpeg libnss3 libatk-bridge2.0-0 libgbm1 libasound2
-          mise exec -- npm --prefix clients/node ci --ignore-scripts --omit=optional
-          mise run node-build
-      - name: Install checksum-verified pinned Chrome
-        run: |
-          mise exec -- node --input-type=module <<'JS'
-          import { appendFile, cp, writeFile } from 'node:fs/promises';
-          import { basename, dirname, join } from 'node:path';
-          import { installBrowser } from './clients/node/dist/index.js';
-          const { executablePath } = await installBrowser({ browserCacheDir: process.env.EOKA_BROWSER_CACHE_DIR, timeoutMs: 300000 });
-          const rustChromeDirectory = join(process.env.RUNNER_TEMP, 'eoka-rust-chrome');
-          await cp(dirname(executablePath), rustChromeDirectory, { recursive: true });
-          const rustChrome = join(rustChromeDirectory, basename(executablePath));
-          await appendFile(process.env.GITHUB_ENV, `EOKA_RELIABILITY_CHROME=${executablePath}\nEOKA_TEST_CHROME_PATH=${rustChrome}\n`);
-          const launcher = join(rustChromeDirectory, 'google-chrome');
-          await writeFile(launcher, '#!/bin/sh\nexec "$(dirname "$(readlink -f "$0")")/chrome" "$@"\n', { mode: 0o755 });
-          await appendFile(process.env.GITHUB_PATH, `${dirname(launcher)}\n`);
-          JS
-      - name: Build and stage the native host client
-        run: |
-          sudo ln -sf "$(dirname "$EOKA_TEST_CHROME_PATH")/google-chrome" /usr/bin/google-chrome
-          /usr/bin/google-chrome --version
-          cargo build --locked -p eoka-server -p eoka-cli
-          cp target/debug/eoka-server "$EOKA_SERVER_ARTIFACTS_DIR/eoka-server-linux-amd64"
-          mise exec -- node clients/node/scripts/stage-release.mjs --artifacts "$EOKA_SERVER_ARTIFACTS_DIR" --output "$EOKA_RELEASE_STAGE_DIR" --host-only
-      - name: Allow Chrome's namespace sandbox on the ephemeral runner
-        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - name: Run every Rust browser test
-        run: |
-          set -o pipefail
-          xvfb-run -a cargo test --workspace --all-features --locked --no-fail-fast -- --ignored --test-threads=1 2>&1 | tee browser-tests.log
-      - name: Run all Node tests with native artifacts and real Chrome
-        run: |
-          set -o pipefail
-          xvfb-run -a mise run node-check 2>&1 | tee node-browser-tests.log
-      - name: Run Go race and real-browser tests
-        run: go -C clients/go test -race -count=1 ./...
-      - name: Verify lesson and media helpers
-        run: python3 -m unittest discover -s tools/sketchy -p 'test_*.py'
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        if: matrix.suite != 'clients'
         with:
-          name: browser-reliability
-          path: |
-            browser-tests.log
-            node-browser-tests.log
+          tool: cargo-nextest
+      - name: Prepare Chrome, SDK and native client
+        run: .github/scripts/browser-setup.sh
+      - name: Rust browser tests (shard ${{ matrix.suite }})
+        if: matrix.suite != 'clients'
+        env:
+          SUITE: ${{ matrix.suite }}
+        run: |
+          xvfb-run -a cargo nextest run --profile ci --workspace --all-features --locked \
+            --run-ignored only --partition "hash:${SUITE#rust }"
+      - name: Node tests with native artifacts and real Chrome
+        if: matrix.suite == 'clients'
+        run: xvfb-run -a mise run node-check
+      - name: Go race and real-browser tests
+        if: matrix.suite == 'clients'
+        run: go -C clients/go test -race -count=1 ./...
+      - name: Upload test report
+        if: always() && matrix.suite != 'clients'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: browser-${{ strategy.job-index }}
+          path: target/nextest/ci/junit.xml
+          retention-days: 14
+          if-no-files-found: ignore
+
+  deny:
+    name: Dependency policy
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check
+
+  # The only check branch protection requires. Skipped jobs pass.
+  ci-ok:
+    name: CI OK
+    if: always()
+    needs: [changes, lint, surface-parity, unit, go, node, browser, deny]
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          failed=$(jq -r 'to_entries
+            | map(select(.value.result != "success" and .value.result != "skipped"))
+            | map("\(.key): \(.value.result)") | .[]' <<<"$NEEDS")
+          if [ -n "$failed" ]; then echo "$failed"; exit 1; fi
+          echo "All required jobs passed."
