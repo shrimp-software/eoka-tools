@@ -5,8 +5,9 @@
 set -euo pipefail
 
 mkdir -p "$EOKA_SERVER_ARTIFACTS_DIR"
-sudo apt-get update
-sudo apt-get install -y xvfb xauth ffmpeg libnss3 libatk-bridge2.0-0 libgbm1 libasound2
+apt=(sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30)
+"${apt[@]}" update
+"${apt[@]}" install -y xvfb xauth ffmpeg libnss3 libatk-bridge2.0-0 libgbm1 libasound2
 mise exec -- npm --prefix clients/node ci --ignore-scripts --omit=optional
 mise exec -- node .github/scripts/install-chrome.mjs
 # install-chrome.mjs exports through GITHUB_ENV, which this step can't see yet.
