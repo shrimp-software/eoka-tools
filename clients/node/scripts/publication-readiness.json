@@ -2,9 +2,10 @@
   "schemaVersion": 1,
   "status": "blocked",
   "sdkVersion": "0.1.0-beta.7",
-  "chromeBuildId": "155.0.8059.39",
+  "chromeBuildId": "156.0.8078.80",
   "blockers": [
     "Authenticated macOS login, lesson selection and download qualification is pending",
-    "Version-matched server and CLI binaries require all-platform qualification before publication"
+    "Version-matched server and CLI binaries require all-platform qualification before publication",
+    "Release qualification (including native recording) is pending on Chrome for Testing 156.0.8078.80"
   ]
 }

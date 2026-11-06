@@ -273,6 +273,7 @@ async fn delayed_idle_file_operation_keeps_commands_and_shutdown_serviceable() {
                 persist: false,
                 geo_align: false,
                 auto_solve_cloudflare: false,
+                sandbox: true,
             };
             let daemon_name = name.clone();
             let daemon =

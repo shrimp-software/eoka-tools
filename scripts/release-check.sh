@@ -44,8 +44,8 @@ cargo test --workspace --all-features
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 
 core_dependency="$(cargo tree --locked -p eoka --depth 0 --prefix none)"
-if [[ "${core_dependency}" != "eoka v0.8.0" ]]; then
-  echo "Release requires registry eoka 0.8.0; local, path and git overrides do not qualify."
+if [[ "${core_dependency}" != "eoka v0.9.1" ]]; then
+  echo "Release requires registry eoka 0.9.1; local, path and git overrides do not qualify."
   exit 1
 fi
 
@@ -57,7 +57,7 @@ cat <<'MSG'
 Release check passed.
 
 Publish order:
-  0. use the published eoka 0.8.0 registry dependency
+  0. use the published eoka 0.9.1 registry dependency
   1. publish tack-rs 0.0.2 crates first
   2. cargo publish -p eoka-captcha
   3. cargo publish -p eoka-proxy

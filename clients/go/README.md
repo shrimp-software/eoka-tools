@@ -27,7 +27,7 @@ sidecar protocol **2.0** or a newer compatible 2.x minor. The client locates the
 2. The `EOKA_SERVER_BIN` environment variable, if set.
 3. `eoka-server` on `PATH`.
 4. A prebuilt binary downloaded from this repo's GitHub Releases, still pinned to
-   [`eoka-server-v0.7.0`](https://github.com/shrimp-software/eoka-tools/releases/tag/eoka-server-v0.7.0).
+   [`eoka-server-v0.8.0`](https://github.com/shrimp-software/eoka-tools/releases/tag/eoka-server-v0.8.0).
    Assets are available for linux/amd64, linux/arm64, darwin/amd64, darwin/arm64
    and windows/amd64. The binary is cached under `os.UserCacheDir()/eoka/` and
    verified against the release's published SHA-256 checksums before installation.
@@ -35,9 +35,9 @@ sidecar protocol **2.0** or a newer compatible 2.x minor. The client locates the
    Pass `eoka.WithNoAutoDownload()` to disable this and get
    `eoka.ErrServerBinaryNotFound` if steps 1–3 do not resolve.
 
-The pinned 0.7.0 release predates the 1.1 handshake and is **not compatible**
-with this client. It fails with `ProtocolMismatch` before browser creation,
-including guidance to provide a compatible binary. The resolver does not invent
+A server that does not speak this client's sidecar protocol fails with
+`ProtocolMismatch` before browser creation, including guidance to provide a
+compatible binary. The resolver does not invent
 a newer release or fall back to launching an unverified protocol.
 For this development checkout, run `cargo build -p eoka-server --release`
 from this repo and use `eoka.WithServerPath` or `EOKA_SERVER_BIN` to select
@@ -124,7 +124,7 @@ viewport options remain available.
 | --- | --- |
 | `WithExecutablePath(path)` | Select an absolute Chrome executable path; an invalid explicit executable fails without discovery or fallback. |
 | `WithRuntimeDir(path)` | Use an absolute writable runtime root for private per-browser temporary files. The root remains caller-owned; only the owned unique child is removed. |
-| `WithSandbox(enabled)` | Explicit sandbox policy. The legacy Go/Rust/sidecar default remains `false`; pass `true` to request sandboxing. Unsupported sandbox environments fail without retrying unsandboxed. The planned managed Node SDK will request `true` explicitly. |
+| `WithSandbox(enabled)` | Chrome sandbox policy, `true` by default. Pass `false` only where the environment cannot provide a sandbox (some containers and CI runners). Unsupported sandbox environments fail without retrying unsandboxed. |
 | `WithViewport(width, height)` | CSS viewport dimensions, both positive and at most 2147483647. |
 | `WithDeviceScaleFactor(scale)` | Finite positive DPR, effective default 1. It may be set without supplying dimensions. |
 | `WithAutoSolveCloudflare(interval, timeout)` | Have the server watch every tab and solve full-page Cloudflare challenges. Zero durations use 500ms and 30s. Also accepted by `Connect`; requires the `cloudflareAutoSolve` capability. |
@@ -141,7 +141,6 @@ b, err := eoka.Launch(ctx,
     eoka.WithServerPath("/absolute/path/to/eoka-server"),
     eoka.WithExecutablePath("/absolute/path/to/chrome"),
     eoka.WithRuntimeDir("/absolute/path/to/private-runtime"),
-    eoka.WithSandbox(true),
     eoka.WithViewport(640, 360),
     eoka.WithDeviceScaleFactor(2),
 )

@@ -161,6 +161,7 @@ mod tests {
             persist: false,
             geo_align: false,
             auto_solve_cloudflare: false,
+            sandbox: true,
         };
 
         let result = tokio::time::timeout(Duration::from_secs(15), run(&session_name, spec)).await;

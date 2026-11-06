@@ -703,6 +703,7 @@ fn launch_daemon(session_name: &str, spec: &LaunchSpec) -> anyhow::Result<()> {
             persist,
             geo_align,
             auto_solve_cloudflare,
+            sandbox,
         } => {
             if !*headless {
                 cmd.arg("--headed");
@@ -724,6 +725,9 @@ fn launch_daemon(session_name: &str, spec: &LaunchSpec) -> anyhow::Result<()> {
             }
             if *auto_solve_cloudflare {
                 cmd.arg("--auto-solve-cloudflare");
+            }
+            if !*sandbox {
+                cmd.arg("--no-sandbox");
             }
             if let Some(p) = proxy {
                 cmd.arg("--proxy").arg(p);
@@ -917,6 +921,30 @@ mod tests {
         std::fs::remove_file(socket).unwrap();
     }
 
+    #[test]
+    fn disabling_the_sandbox_is_a_creation_setting() {
+        let spec = |sandbox| LaunchSpec::Launch {
+            headless: true,
+            from_profile: None,
+            clone_state_from: None,
+            no_stealth: false,
+            proxy: None,
+            no_js: false,
+            js_allow: Vec::new(),
+            js_block: Vec::new(),
+            persist: false,
+            geo_align: true,
+            auto_solve_cloudflare: false,
+            sandbox,
+        };
+        assert!(!spec(true).has_creation_settings());
+        assert!(spec(false).has_creation_settings());
+        assert_ne!(
+            spec(true).configuration_fingerprint(),
+            spec(false).configuration_fingerprint()
+        );
+    }
+
     fn test_client(session: &str) -> EokaClient {
         EokaClient::new(
             session,
@@ -932,6 +960,7 @@ mod tests {
                 persist: false,
                 geo_align: false,
                 auto_solve_cloudflare: false,
+                sandbox: true,
             },
         )
     }

@@ -88,6 +88,13 @@ pub struct Cli {
     #[arg(
         long,
         global = true,
+        env = "EOKA_NO_SANDBOX",
+        help = "Disable Chrome's sandbox (only for containers/CI that cannot run it)"
+    )]
+    pub no_sandbox: bool,
+    #[arg(
+        long,
+        global = true,
         env = "EOKA_AUTO_SOLVE_CLOUDFLARE",
         help = "Solve full-page Cloudflare challenges in every tab automatically"
     )]

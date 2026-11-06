@@ -40,6 +40,7 @@ impl Runner {
             user_agent: config.user_agent.clone(),
             viewport_width: config.viewport.as_ref().map(|v| v.width).unwrap_or(1280),
             viewport_height: config.viewport.as_ref().map(|v| v.height).unwrap_or(720),
+            sandbox: true,
             ..Default::default()
         };
 

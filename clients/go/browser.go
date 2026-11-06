@@ -224,7 +224,7 @@ func resolveServerPath(ctx context.Context, explicit string, allowDownload bool)
 }
 
 func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
-	o := options{headless: true, stderr: io.Discard}
+	o := options{headless: true, sandbox: true, stderr: io.Discard}
 	for _, opt := range opts {
 		opt(&o)
 	}

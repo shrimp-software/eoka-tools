@@ -323,7 +323,7 @@ dto!(LaunchParams {
     #[schemars(range(min = 1, max = 2147483647))] viewport_height: Option<u32>,
     user_data_dir: Option<String>, proxy: Option<ProxyParams>,
     executable_path: Option<String>, runtime_dir: Option<String>,
-    #[serde(default)] sandbox: bool,
+    #[serde(default = "default_sandbox")] sandbox: bool,
     #[serde(default)] aggressive_cdp_evasion: bool,
     #[serde(default)] geo_align: bool,
     #[serde(default)] extra_args: Vec<String>,
@@ -334,6 +334,10 @@ dto!(LaunchParams {
 });
 dto!(ProxyParams { server: String, username: Option<String>, password: Option<String> });
 fn default_headless() -> bool {
+    true
+}
+
+fn default_sandbox() -> bool {
     true
 }
 fn default_device_scale_factor() -> f64 {

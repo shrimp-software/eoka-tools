@@ -64,6 +64,7 @@ impl BrowserState {
         proxy: Option<String>,
         persist_profile_dir: Option<&std::path::Path>,
         geo_align: bool,
+        sandbox: bool,
     ) -> eoka::Result<Self> {
         let patch_binary = std::env::var("EOKA_PATCH_BINARY")
             .map(|v| v == "true" || v == "1")
@@ -137,6 +138,7 @@ impl BrowserState {
             filter_cdp: !no_stealth,
             user_data_dir,
             geo_align: geo_align && !no_stealth,
+            sandbox,
             ..Default::default()
         };
         let browser = Browser::launch_with_config(config).await?;

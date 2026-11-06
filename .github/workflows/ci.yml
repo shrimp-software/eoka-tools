@@ -213,6 +213,8 @@ jobs:
           cargo build --locked -p eoka-server -p eoka-cli
           cp target/debug/eoka-server "$EOKA_SERVER_ARTIFACTS_DIR/eoka-server-linux-amd64"
           mise exec -- node clients/node/scripts/stage-release.mjs --artifacts "$EOKA_SERVER_ARTIFACTS_DIR" --output "$EOKA_RELEASE_STAGE_DIR" --host-only
+      - name: Allow Chrome's namespace sandbox on the ephemeral runner
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Run every Rust browser test
         run: |
           set -o pipefail

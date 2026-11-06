@@ -94,6 +94,6 @@ uses the same existing Pi agent/model with Eoka and the installed Browser Use
 CLI. Fixtures independently count submissions/downloads and verify output files.
 Treat its results as a controlled pilot, not proof about arbitrary websites.
 
-This development release requires core eoka 0.8.0. Publish core first, then run
+This development release requires core eoka 0.9.1. Publish core first, then run
 `mise run conformance` and `mise run release-check` against its registry release.
 A local override is not registry or macOS authenticated-workflow qualification.
