@@ -3,9 +3,6 @@ name: CI
 on:
   pull_request:
     branches: [main, master, "sdk/**"]
-  # The merge queue tests the exact commit that lands, so main is not
-  # re-tested after merge.
-  merge_group:
   workflow_dispatch:
 
 permissions:
@@ -14,7 +11,7 @@ permissions:
 # A newer push to the same PR supersedes the running checks.
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -22,7 +19,7 @@ env:
 
 jobs:
   # Pull requests run only the jobs for the areas they touch; skipped jobs
-  # still satisfy the CI OK gate. Pushes run everything.
+  # still satisfy the CI OK gate. Manual runs run everything.
   changes:
     name: Detect changed areas
     runs-on: ubuntu-latest
@@ -53,38 +50,44 @@ jobs:
           } | tee -a "$GITHUB_OUTPUT"
 
   lint:
-    name: Lint and conformance
+    name: Lint
     needs: changes
-    if: needs.changes.outputs.rust == 'true'
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.node == 'true'
     runs-on: ubuntu-latest
+    env:
+      RUST: ${{ needs.changes.outputs.rust }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0 # crate-version check compares against release tags
+      - name: Surface parity
+        run: node scripts/check-surface-parity.mjs
+      - name: Release versions are consistent
+        run: node scripts/bump-release.mjs --check
       - uses: shrimp-software/eoka/.github/actions/rust@ec4b741b7c109d426a4fa07d2bb0a76d67369cfd
+        if: env.RUST == 'true'
         with:
           components: rustfmt, clippy
-      - run: cargo fmt --all -- --check
-      - run: cargo clippy --workspace --all-features --all-targets --locked -- -D warnings
+      - if: env.RUST == 'true'
+        run: cargo fmt --all -- --check
+      - if: env.RUST == 'true'
+        run: cargo clippy --workspace --all-features --all-targets --locked -- -D warnings
       - name: Crate versions
+        if: env.RUST == 'true'
         run: bash scripts/check-crate-versions.sh
       # The conformance tests themselves run in the unit job; this is the one
       # conformance rule that is not a test.
       - name: CLI does not depend on eoka-mcp
+        if: env.RUST == 'true'
         run: "! cargo tree -p eoka-cli -e normal --depth 1 | grep -q eoka-mcp"
       - name: Lesson and media helpers
+        if: env.RUST == 'true'
         run: python3 -m unittest discover -s tools/sketchy -p 'test_*.py'
-
-  surface-parity:
-    name: Surface parity and versions
-    needs: changes
-    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.node == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - run: node scripts/check-surface-parity.mjs
-      - name: Release versions are consistent
-        run: node scripts/bump-release.mjs --check
+      - name: Dependency policy
+        if: env.RUST == 'true'
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check
 
   unit:
     name: Unit (${{ matrix.os }})
@@ -180,7 +183,7 @@ jobs:
           path: browser-build.tgz
           retention-days: 1
 
-  # Real-Chrome tests from the shared build: the Rust suite in three shards,
+  # Real-Chrome tests from the shared build: the Rust suite in two shards,
   # and the Node and Go test suites against the staged native client.
   browser:
     name: Browser (${{ matrix.suite }})
@@ -190,7 +193,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [rust 1/3, rust 2/3, rust 3/3, clients]
+        suite: [rust 1/2, rust 2/2, clients]
     env:
       EOKA_RELIABILITY_SERVER: ${{ github.workspace }}/target/debug/eoka-server
     steps:
@@ -246,22 +249,12 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
-  deny:
-    name: Dependency policy
-    needs: changes
-    if: needs.changes.outputs.rust == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
-      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
-        with:
-          command: check
 
   # The only check branch protection requires. Skipped jobs pass.
   ci-ok:
     name: CI OK
     if: always()
-    needs: [changes, lint, surface-parity, unit, go, node, browser-build, browser, deny]
+    needs: [changes, lint, unit, go, node, browser-build, browser]
     runs-on: ubuntu-latest
     steps:
       - env:
