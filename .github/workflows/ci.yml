@@ -97,11 +97,11 @@ jobs:
         include:
           - { os: ubuntu-latest, packages: --workspace }
           - { os: macos-15, packages: --workspace }
-          # The SDK, CLI and tack client talk to the server over Unix sockets
+          # The SDK, CLI, tack client and MCP server use Unix sockets or signals
           # and do not build on Windows; test the crates that ship there.
           - os: windows-2025
             packages: >-
-              -p eoka-server -p eoka-mcp -p eoka-runner -p eoka-captcha
+              -p eoka-server -p eoka-runner -p eoka-captcha
               -p eoka-datadome -p eoka-proxy -p eoka-email
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
