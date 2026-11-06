@@ -16,8 +16,8 @@ path = "src/main.rs"
 
 [dependencies]
 eoka = "=0.9.1"
-eoka-protocol = { path = "../eoka-protocol", version = "0.8.0" }
-eoka-proxy = { path = "../eoka-proxy", version = "0.2.0" }
+eoka-protocol = { workspace = true }
+eoka-proxy = { workspace = true }
 url = "2"
 libc = "0.2"
 parking_lot = "0.12"
@@ -28,7 +28,7 @@ base64 = "0.22"
 anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-captcha = { package = "eoka-captcha", version = "0.1.1", path = "../captcha" }
+captcha = { workspace = true }
 
 rusqlite = { version = "0.37", features = ["bundled"] }
 uuid = { version = "1", features = ["v4"] }

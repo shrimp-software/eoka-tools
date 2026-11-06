@@ -17,9 +17,9 @@ name = "eoka-runner"
 path = "src/bin/main.rs"
 
 [dependencies]
-eoka = "0.9.1"
-eoka-proxy = { path = "../eoka-proxy", version = "0.2.0" }
-eoka-email = { path = "../eoka-email", version = "0.1.0", features = ["async"] }
+eoka = { workspace = true }
+eoka-proxy = { workspace = true }
+eoka-email = { workspace = true, features = ["async"] }
 chrono = { version = "0.4", features = ["clock"] }
 regex = "1"
 serde = { version = "1", features = ["derive"] }
@@ -31,6 +31,6 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 clap = { version = "4", features = ["derive"] }
 
-eoka-server = { path = "../eoka-server", version = "0.8.0" }
-eoka-protocol = { path = "../eoka-protocol", version = "0.8.0" }
+eoka-server = { workspace = true }
+eoka-protocol = { workspace = true }
 uuid = { version = "1", features = ["v4", "v5"] }

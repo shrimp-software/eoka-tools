@@ -13,14 +13,14 @@ path = "src/main.rs"
 
 [dependencies]
 uuid = { version = "1", features = ["v4"] }
-eoka-protocol = { version = "0.8.0", path = "../eoka-protocol" }
-eoka-proxy = { path = "../eoka-proxy", version = "0.2.0" }
-eoka-server = { version = "0.8.0", path = "../eoka-server" }
-eoka-sdk = { version = "0.9.0", path = "../eoka-sdk" }
-eoka-tack = { version = "0.8.0", path = "../eoka-tack" }
-captcha = { package = "eoka-captcha", version = "0.1.1", path = "../captcha" }
-eoka-datadome = { version = "0.5.0", path = "../datadome" }
-eoka = "0.9.1"
+eoka-protocol = { workspace = true }
+eoka-proxy = { workspace = true }
+eoka-server = { workspace = true }
+eoka-sdk = { workspace = true }
+eoka-tack = { workspace = true }
+captcha = { workspace = true }
+eoka-datadome = { workspace = true }
+eoka = { workspace = true }
 tack-core = { workspace = true }
 tack-runtime-quickjs = { workspace = true }
 clap = { workspace = true }
@@ -38,4 +38,4 @@ async-trait = { workspace = true }
 futures-util = { version = "0.3", features = ["sink"] }
 tokio-tungstenite = "0.30"
 tempfile = "3"
-eoka-datadome = { version = "0.5.0", path = "../datadome", features = ["test-fixtures"] }
+eoka-datadome = { workspace = true, features = ["test-fixtures"] }

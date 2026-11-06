@@ -9,6 +9,7 @@ import { promisify } from 'node:util';
 import { distTag, resumePublication, verifyExistingPackage } from './publication-recovery.mjs';
 import { assertRecordingQualification } from './recording-qualification.mjs';
 import { npmEnvironment, validatePublicationAuth, validatePublicationReview } from './publication-auth.mjs';
+import { serverCrateVersion, versionDrift } from './release-versions.mjs';
 
 const exec = promisify(execFile);
 const root = resolve(import.meta.dirname, '..');
@@ -60,13 +61,13 @@ async function sourceGate() {
   assert.equal(policy.branch_policies[0]?.type, 'branch');
   const manifest = await json(join(root, 'release-manifest.json'));
   const metadata = await json(join(root, 'package.json'));
-  assert.equal(manifest.sdkVersion, '0.1.0-beta.7');
+  assert.deepEqual(await versionDrift(root), [], 'Release versions drifted; run scripts/bump-release.mjs');
   assert.equal(metadata.name, '@cbxss/eoka');
   assert.equal(metadata.version, manifest.sdkVersion);
   assert.equal(metadata.private, true);
   assert.equal(metadata.optionalDependencies, undefined);
   assert.equal(metadata.engines.node, '^24.21.0');
-  assert.equal(manifest.server.version, '0.8.0');
+  assert.equal(manifest.server.version, await serverCrateVersion());
   assert.equal(manifest.server.protocolVersion, '2.0');
   const readiness = await json(join(root, 'scripts', 'publication-readiness.json'));
   assert.equal(readiness.schemaVersion, 1);
@@ -423,7 +424,7 @@ async function smoke() {
       import assert from 'node:assert/strict';
       import { createRequire } from 'node:module';
       import { Browser, releaseManifest, detectPlatform } from '@cbxss/eoka';
-      assert.equal(releaseManifest.sdkVersion, '0.1.0-beta.7');
+      assert.equal(releaseManifest.sdkVersion, ${JSON.stringify(qualification.sdkVersion)});
       const pin = releaseManifest.server.platforms[detectPlatform()];
       const packagePath = createRequire(import.meta.url).resolve(pin.packageName + '/package.json');
       assert.ok(packagePath.includes('node_modules'), 'Server must come from the registry platform package');

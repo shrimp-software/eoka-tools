@@ -6,6 +6,7 @@ import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { detectPlatform, platformIds } from '../dist/platform.js';
 import { validateReleaseManifest } from '../dist/release.js';
+import { versionDrift } from './release-versions.mjs';
 
 const exec = promisify(execFile);
 const sdkRoot = resolve(import.meta.dirname, '..');
@@ -18,7 +19,7 @@ export async function stageRelease({ artifacts, output, hostOnly = false, public
   if (!hostOnly && (selected.length !== platformIds.length || !platformIds.every((id) => selected.includes(id)))) throw new Error('Release staging requires all five server artifacts. Use --host-only for a clearly marked local development gate.');
   if (publication && hostOnly) throw new Error('Publication cannot use host-only development artifacts');
   if (publication && Object.keys(process.env).some(key => /^(?:EOKA_(?:SERVER_BIN|CHROME_PATH|CORE_(?:REF|PATH))|CARGO_PATCH_|CARGO_SOURCE_|CARGO_BUILD_RUSTFLAGS$|RUSTFLAGS$)/.test(key) && process.env[key])) throw new Error('Publication cannot use local runtime or Cargo overrides');
-  if (publication && (manifest.sdkVersion !== '0.1.0-beta.7' || manifest.server.version !== '0.8.0' || manifest.server.protocolVersion !== '2.0' || Object.values(manifest.server.platforms).some(pin => pin.development))) throw new Error('Publication requires reserved prerelease versions and non-development source metadata');
+  if (publication && ((await versionDrift(root)).length || Object.values(manifest.server.platforms).some(pin => pin.development))) throw new Error('Publication requires consistent release versions (scripts/bump-release.mjs --check) and non-development source metadata');
   if (publication) {
     const readiness = JSON.parse(await readFile(join(root, 'scripts', 'publication-readiness.json'), 'utf8'));
     if (readiness.schemaVersion !== 1 || readiness.sdkVersion !== manifest.sdkVersion || readiness.chromeBuildId !== manifest.chrome.buildId || readiness.status !== 'ready' || !Array.isArray(readiness.blockers) || readiness.blockers.length !== 0) throw new Error(`Publication readiness blocked: ${JSON.stringify(readiness.blockers)}`);
