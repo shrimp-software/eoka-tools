@@ -374,7 +374,7 @@ async function publish() {
 
 // npm acknowledges a publish before its packument and dist-tags are served.
 // Wait until every qualified package exposes its version under the release
-// tag, so the smoke verifies what was published instead of racing registry
+// tag and its tarball downloads, so the smoke verifies what was published instead of racing registry
 // propagation.
 async function awaitRegistry(packages, { timeoutMs = 900000, intervalMs = 15000 } = {}) {
   const deadline = Date.now() + timeoutMs;
@@ -382,7 +382,12 @@ async function awaitRegistry(packages, { timeoutMs = 900000, intervalMs = 15000 
     for (;;) {
       const response = await fetch(`${registry}${encodeURIComponent(item.name)}`, { headers: { Accept: 'application/json', 'Cache-Control': 'no-cache' }, redirect: 'error', signal: AbortSignal.timeout(120000) });
       const metadata = response.status === 200 ? await response.json() : (await response.body?.cancel(), null);
-      if (metadata?.versions?.[item.version] && metadata['dist-tags']?.[distTag] === item.version) break;
+      const tarball = metadata?.['dist-tags']?.[distTag] === item.version ? metadata.versions?.[item.version]?.dist?.tarball : undefined;
+      // The packument can be served before the tarball reaches the CDN.
+      if (typeof tarball === 'string' && tarball.startsWith(registry)) {
+        const head = await fetch(tarball, { method: 'HEAD', headers: { 'Cache-Control': 'no-cache' }, redirect: 'error', signal: AbortSignal.timeout(120000) });
+        if (head.status === 200) break;
+      }
       assert.ok(Date.now() < deadline, `Registry did not serve ${item.name}@${item.version} under ${distTag} within ${timeoutMs / 1000}s`);
       await new Promise(resolve => setTimeout(resolve, intervalMs));
     }

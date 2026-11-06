@@ -47,6 +47,8 @@ test('manifest rejects mutable URLs, incomplete or malformed pins and dishonest 
     (manifest) => { manifest.server.platforms['linux-x64-gnu'].minimumGlibc = '2.39'; },
     (manifest) => { delete manifest.server.platforms['win32-x64']; },
     (manifest) => { manifest.server.protocolVersion = '1.4'; },
+    (manifest) => { manifest.server.version = '^0.8.0'; },
+    (manifest) => { manifest.chrome.buildId = 'stable'; },
   ]) {
     const manifest = structuredClone(releaseManifest);
     mutate(manifest);
