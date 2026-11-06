@@ -28,7 +28,7 @@ jobs:
       go: ${{ steps.filter.outputs.go }}
       node: ${{ steps.filter.outputs.node }}
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - id: filter
@@ -57,7 +57,7 @@ jobs:
     env:
       RUST: ${{ needs.changes.outputs.rust }}
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # crate-version check compares against release tags
       - name: Surface parity
@@ -107,7 +107,7 @@ jobs:
               -p eoka-server -p eoka-runner -p eoka-captcha
               -p eoka-datadome -p eoka-proxy -p eoka-email
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: shrimp-software/eoka/.github/actions/rust@2e108f041f487df9acc2b04fe5508ec4bf041a56
       # macOS's per-user TMPDIR is long enough to push session socket paths
       # past the 104-byte limit; give the runtime directory a short base.
@@ -127,8 +127,8 @@ jobs:
       run:
         working-directory: clients/go
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.21"
       - name: gofmt
@@ -142,11 +142,11 @@ jobs:
     if: needs.changes.outputs.node == 'true' || needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: shrimp-software/eoka/.github/actions/rust@2e108f041f487df9acc2b04fe5508ec4bf041a56
         with:
           cache-key: node-schema
-      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c
       - name: Install SDK dependencies
         run: mise exec -- npm --prefix clients/node ci --ignore-scripts --omit=optional
       - name: Check generated contracts against the Rust schema export
@@ -164,11 +164,11 @@ jobs:
     if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.node == 'true'
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: shrimp-software/eoka/.github/actions/rust@2e108f041f487df9acc2b04fe5508ec4bf041a56
         with:
           cache-key: browser
-      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c
       - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
           tool: cargo-nextest
@@ -180,7 +180,7 @@ jobs:
           mise exec -- npm --prefix clients/node ci --ignore-scripts --omit=optional
           mise run node-build
           tar -czf browser-build.tgz nextest.tar.zst target/debug/eoka-server target/debug/eoka clients/node/dist
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: browser-build
           path: browser-build.tgz
@@ -209,17 +209,17 @@ jobs:
             echo "EOKA_SERVER_ARTIFACTS_DIR=$RUNNER_TEMP/eoka-artifacts"
             echo "EOKA_RELEASE_STAGE_DIR=$RUNNER_TEMP/eoka-stage"
           } >> "$GITHUB_ENV"
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         if: matrix.suite == 'clients'
         with:
           go-version: "1.21"
-      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c
       - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         if: matrix.suite != 'clients'
         with:
           tool: cargo-nextest
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: browser-build
       - run: tar -xzf browser-build.tgz
@@ -245,7 +245,7 @@ jobs:
         run: go -C clients/go test -race -count=1 ./...
       - name: Upload test report
         if: always() && matrix.suite != 'clients'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: browser-${{ strategy.job-index }}
           path: target/nextest/ci/junit.xml
