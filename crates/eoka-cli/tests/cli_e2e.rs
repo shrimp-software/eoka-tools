@@ -455,24 +455,34 @@ fn network_record_exports_local_fetch_to_har() {
         "network log did not include api request: {log_json}"
     );
 
-    let save = run(&session, &["--json", "network", "har", &har_arg]);
-    assert_success(&save, "network har");
-
-    let har: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&har_path).expect("har file should exist"))
-            .expect("har should be valid JSON");
-    let entries = har["log"]["entries"]
-        .as_array()
-        .expect("har entries should be an array");
-    let entry = entries
-        .iter()
-        .find(|entry| {
-            entry["request"]["url"]
-                .as_str()
-                .unwrap_or_default()
-                .contains("/api/data?from=page")
-        })
-        .expect("har should include api request");
+    // The network log can list the request before its response has finished
+    // loading, and the HAR only includes finished entries; export again until
+    // the request lands.
+    let mut entry = None;
+    for _ in 0..20 {
+        let _ = std::fs::remove_file(&har_path);
+        let save = run(&session, &["--json", "network", "har", &har_arg]);
+        assert_success(&save, "network har");
+        let har: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&har_path).expect("har file should exist"))
+                .expect("har should be valid JSON");
+        entry = har["log"]["entries"]
+            .as_array()
+            .expect("har entries should be an array")
+            .iter()
+            .find(|entry| {
+                entry["request"]["url"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("/api/data?from=page")
+            })
+            .cloned();
+        if entry.is_some() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+    let entry = entry.expect("har should include api request");
 
     assert_eq!(entry["request"]["method"], "POST");
     assert_eq!(entry["response"]["status"], 201);
