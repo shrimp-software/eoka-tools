@@ -31,7 +31,6 @@ impl Destination {
         }
         ensure_space(&parent, expected.unwrap_or(0))?;
         let staging = parent.join(format!(".eoka-download-{id}"));
-        #[cfg_attr(not(unix), allow(unused_mut))]
         let mut builder = std::fs::DirBuilder::new();
         #[cfg(unix)]
         {

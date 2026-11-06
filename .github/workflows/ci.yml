@@ -94,11 +94,28 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-15, windows-2025]
+        include:
+          - { os: ubuntu-latest, packages: --workspace }
+          - { os: macos-15, packages: --workspace }
+          # The SDK, CLI and tack client talk to the server over Unix sockets
+          # and do not build on Windows; test the crates that ship there.
+          - os: windows-2025
+            packages: >-
+              -p eoka-server -p eoka-mcp -p eoka-runner -p eoka-captcha
+              -p eoka-datadome -p eoka-proxy -p eoka-email
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: shrimp-software/eoka/.github/actions/rust@ec4b741b7c109d426a4fa07d2bb0a76d67369cfd
-      - run: cargo test --workspace --all-features --locked
+      # macOS's per-user TMPDIR is long enough to push session socket paths
+      # past the 104-byte limit; give the runtime directory a short base.
+      - name: Short runtime directory
+        if: runner.os == 'macOS'
+        run: echo "XDG_RUNTIME_DIR=/tmp" >> "$GITHUB_ENV"
+      # Published eoka-server 0.8.0 has a Windows-only unused-mut warning;
+      # clippy on Linux enforces warnings, so Windows only has to build and pass.
+      - run: cargo test ${{ matrix.packages }} --all-features --locked
+        env:
+          RUSTFLAGS: ${{ runner.os != 'Windows' && '-Dwarnings' || '' }}
 
   # Static checks only: the Go and Node test suites run once, against the
   # native build and real Chrome, in the browser clients job.

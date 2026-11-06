@@ -896,8 +896,7 @@ mod tests {
 
     #[tokio::test]
     async fn agent_step_allocates_id_before_transport_and_retains_it_on_disconnect() {
-        // Short name: macOS TMPDIR is long and socket paths cap at 104 bytes.
-        let session = format!("as-{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
+        let session = format!("agent-step-{}", uuid::Uuid::new_v4());
         session::ensure_runtime_dir().unwrap();
         let socket = session::socket_path(&session);
         let listener = UnixListener::bind(&socket).unwrap();

@@ -25,9 +25,6 @@ jobs:
             target: x86_64-apple-darwin
           - os: macos-15
             target: aarch64-apple-darwin
-          - os: windows-2025
-            target: x86_64-pc-windows-msvc
-            ext: .exe
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
@@ -40,16 +37,15 @@ jobs:
         if: matrix.target == 'x86_64-apple-darwin'
         run: /usr/bin/pgrep -q oahd || softwareupdate --install-rosetta --agree-to-license
       - name: Verify tag and build registry dependencies
-        shell: bash
         env:
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' crates/eoka-cli/Cargo.toml | head -1)"
           test "$RELEASE_TAG" = "eoka-cli-v$version"
           cargo build --release --locked -p eoka-cli --target '${{ matrix.target }}'
-          target/${{ matrix.target }}/release/eoka${{ matrix.ext }} --version
+          target/${{ matrix.target }}/release/eoka --version
           mkdir -p dist
-          tar -czf dist/eoka-cli-${{ matrix.target }}.tar.gz -C target/${{ matrix.target }}/release eoka${{ matrix.ext }}
+          tar -czf dist/eoka-cli-${{ matrix.target }}.tar.gz -C target/${{ matrix.target }}/release eoka
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: eoka-cli-${{ matrix.target }}
