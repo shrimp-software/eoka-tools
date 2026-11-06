@@ -160,7 +160,7 @@ jobs:
           cargo nextest archive --workspace --all-features --locked --archive-file nextest.tar.zst
           mise exec -- npm --prefix clients/node ci --ignore-scripts --omit=optional
           mise run node-build
-          tar -czf browser-build.tgz nextest.tar.zst target/debug/eoka-server target/debug/eoka-cli clients/node/dist
+          tar -czf browser-build.tgz nextest.tar.zst target/debug/eoka-server target/debug/eoka clients/node/dist
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: browser-build
