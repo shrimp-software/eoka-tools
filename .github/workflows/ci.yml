@@ -6,9 +6,6 @@ on:
   # The merge queue tests the exact commit that lands, so main is not
   # re-tested after merge.
   merge_group:
-  # Nightly on main: everything, which also warms the cache for pull requests.
-  schedule:
-    - cron: "37 6 * * *"
   workflow_dispatch:
 
 permissions:
@@ -64,7 +61,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0 # crate-version check compares against release tags
-      - uses: shrimp-software/eoka/.github/actions/rust@59a5295955ce8375076d2154bdfceb488e40e85f
+      - uses: shrimp-software/eoka/.github/actions/rust@ec4b741b7c109d426a4fa07d2bb0a76d67369cfd
         with:
           components: rustfmt, clippy
       - run: cargo fmt --all -- --check
@@ -100,7 +97,7 @@ jobs:
         os: [ubuntu-latest, macos-15, windows-2025]
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: shrimp-software/eoka/.github/actions/rust@59a5295955ce8375076d2154bdfceb488e40e85f
+      - uses: shrimp-software/eoka/.github/actions/rust@ec4b741b7c109d426a4fa07d2bb0a76d67369cfd
       - run: cargo test --workspace --all-features --locked
 
   # Static checks only: the Go and Node test suites run once, against the
@@ -149,7 +146,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
-      - uses: shrimp-software/eoka/.github/actions/rust@59a5295955ce8375076d2154bdfceb488e40e85f
+      - uses: shrimp-software/eoka/.github/actions/rust@ec4b741b7c109d426a4fa07d2bb0a76d67369cfd
         with:
           cache-key: browser
       - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db
@@ -263,15 +260,3 @@ jobs:
           if [ -n "$failed" ]; then echo "$failed"; exit 1; fi
           echo "All required jobs passed."
 
-  notify:
-    name: Nightly status issue
-    if: always() && github.event_name == 'schedule'
-    needs: [ci-ok]
-    runs-on: ubuntu-latest
-    permissions:
-      issues: write
-    steps:
-      - uses: shrimp-software/eoka/.github/actions/nightly-issue@59a5295955ce8375076d2154bdfceb488e40e85f
-        with:
-          result: ${{ needs.ci-ok.result }}
-          token: ${{ github.token }}

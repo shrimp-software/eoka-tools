@@ -1,10 +1,8 @@
 name: Qualify Node release
 
 on:
-  # Every npm publish runs this in full; pull requests only when the release
-  # pipeline itself changes. The nightly run catches native breakage on main.
-  schedule:
-    - cron: '17 6 * * *'
+  # Every npm publish and server release runs this in full; pull requests
+  # only when the release pipeline itself changes.
   pull_request:
     paths:
       - 'clients/node/scripts/**'
@@ -326,15 +324,3 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  notify:
-    name: Nightly status issue
-    if: always() && github.event_name == 'schedule'
-    needs: [collect]
-    runs-on: ubuntu-latest
-    permissions:
-      issues: write
-    steps:
-      - uses: shrimp-software/eoka/.github/actions/nightly-issue@59a5295955ce8375076d2154bdfceb488e40e85f
-        with:
-          result: ${{ needs.collect.result }}
-          token: ${{ github.token }}

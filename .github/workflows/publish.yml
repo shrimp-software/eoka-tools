@@ -22,7 +22,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: shrimp-software/eoka/.github/actions/rust@59a5295955ce8375076d2154bdfceb488e40e85f
+      - uses: shrimp-software/eoka/.github/actions/rust@ec4b741b7c109d426a4fa07d2bb0a76d67369cfd
 
       - name: Configure git
         run: |
