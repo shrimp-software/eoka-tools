@@ -103,14 +103,6 @@ jobs:
             packages: >-
               -p eoka-server -p eoka-runner -p eoka-captcha
               -p eoka-datadome -p eoka-proxy -p eoka-email
-            # eoka-server refuses downloads off Unix ("Downloads currently
-            # require a Unix filesystem") but its download tests are not
-            # cfg(unix); the operations test hits Windows' mandatory
-            # byte-range locks (os error 33). Fixes need an eoka-server release.
-            skip: >-
-              --skip downloads::files::tests
-              --skip downloads::durable::tests::publication_recovery_requires_native_completion_and_the_original_artifact
-              --skip operations::tests::admission_is_unique_conflicts_are_rejected_and_values_are_not_saved
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: shrimp-software/eoka/.github/actions/rust@ec4b741b7c109d426a4fa07d2bb0a76d67369cfd
@@ -119,11 +111,7 @@ jobs:
       - name: Short runtime directory
         if: runner.os == 'macOS'
         run: echo "XDG_RUNTIME_DIR=/tmp" >> "$GITHUB_ENV"
-      # Published eoka-server 0.8.0 has a Windows-only unused-mut warning;
-      # clippy on Linux enforces warnings, so Windows only has to build and pass.
-      - run: cargo test ${{ matrix.packages }} --all-features --locked -- ${{ matrix.skip }}
-        env:
-          RUSTFLAGS: ${{ runner.os != 'Windows' && '-Dwarnings' || '' }}
+      - run: cargo test ${{ matrix.packages }} --all-features --locked
 
   # Static checks only: the Go and Node test suites run once, against the
   # native build and real Chrome, in the browser clients job.
