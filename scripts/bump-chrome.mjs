@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Move the pinned Chrome for Testing build to the current Stable release.
+// Run it by hand when updating Chrome; CI and qualification then test the bump.
 //
 // Rewrites the build id, download URLs and sha256 digests in the release
 // manifest (hashing each platform archive as it streams) and the build id in
