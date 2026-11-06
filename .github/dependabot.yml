@@ -1,0 +1,41 @@
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "deps"
+    groups:
+      rust-deps:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci"
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directory: /clients/node
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "deps"
+    groups:
+      node-deps:
+        patterns: ["*"]
+
+  - package-ecosystem: gomod
+    directory: /clients/go
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "deps"
+    groups:
+      go-deps:
+        patterns: ["*"]
