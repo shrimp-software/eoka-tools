@@ -334,9 +334,7 @@ jobs:
     permissions:
       issues: write
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - uses: shrimp-software/eoka/.github/actions/nightly-issue@59a5295955ce8375076d2154bdfceb488e40e85f
         with:
-          persist-credentials: false
-      - env:
-          GH_TOKEN: ${{ github.token }}
-        run: .github/scripts/nightly-issue.sh ${{ needs.collect.result }}
+          result: ${{ needs.collect.result }}
+          token: ${{ github.token }}

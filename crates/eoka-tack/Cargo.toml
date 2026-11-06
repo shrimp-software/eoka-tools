@@ -12,8 +12,8 @@ authors = ["cbxss"]
 
 [dependencies]
 async-trait = { workspace = true }
-eoka-protocol = { path = "../eoka-protocol", version = "0.8.0" }
-eoka-sdk = { path = "../eoka-sdk", version = "0.9.0" }
+eoka-protocol = { workspace = true }
+eoka-sdk = { workspace = true }
 schemars = { workspace = true }
 serde_json = { workspace = true }
 tack-core = { workspace = true }

@@ -1,10 +1,15 @@
 name: CI
 
 on:
-  push:
-    branches: [main, master]
   pull_request:
     branches: [main, master, "sdk/**"]
+  # The merge queue tests the exact commit that lands, so main is not
+  # re-tested after merge.
+  merge_group:
+  # Nightly on main: everything, which also warms the cache for pull requests.
+  schedule:
+    - cron: "37 6 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -59,28 +64,30 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0 # crate-version check compares against release tags
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: shrimp-software/eoka/.github/actions/rust@59a5295955ce8375076d2154bdfceb488e40e85f
         with:
           components: rustfmt, clippy
       - run: cargo fmt --all -- --check
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo clippy --workspace --all-features --all-targets --locked -- -D warnings
       - name: Crate versions
         run: bash scripts/check-crate-versions.sh
-      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db
-      - name: Protocol conformance
-        run: mise run conformance
+      # The conformance tests themselves run in the unit job; this is the one
+      # conformance rule that is not a test.
+      - name: CLI does not depend on eoka-mcp
+        run: "! cargo tree -p eoka-cli -e normal --depth 1 | grep -q eoka-mcp"
       - name: Lesson and media helpers
         run: python3 -m unittest discover -s tools/sketchy -p 'test_*.py'
 
   surface-parity:
-    name: Surface parity
+    name: Surface parity and versions
     needs: changes
     if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.node == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - run: node scripts/check-surface-parity.mjs
+      - name: Release versions are consistent
+        run: node scripts/bump-release.mjs --check
 
   unit:
     name: Unit (${{ matrix.os }})
@@ -93,10 +100,11 @@ jobs:
         os: [ubuntu-latest, macos-15, windows-2025]
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: shrimp-software/eoka/.github/actions/rust@59a5295955ce8375076d2154bdfceb488e40e85f
       - run: cargo test --workspace --all-features --locked
 
+  # Static checks only: the Go and Node test suites run once, against the
+  # native build and real Chrome, in the browser clients job.
   go:
     name: Go SDK
     needs: changes
@@ -114,7 +122,6 @@ jobs:
         run: test -z "$(gofmt -l .)"
       - run: go vet ./...
       - run: go build ./...
-      - run: go test ./... -race
 
   node:
     name: Node SDK
@@ -130,17 +137,44 @@ jobs:
         run: mise exec -- node clients/node/scripts/generate-protocol.mjs --check --schema clients/node/src/generated/schema-bundle.json
       - name: Build SDK
         run: mise run node-build
-      - name: Check SDK consumers and runtime
-        run: |
-          mise exec -- node clients/node/scripts/typecheck.mjs
-          mise exec -- node --test clients/node/tests/*.test.mjs
+      - name: Typecheck SDK consumers
+        run: mise exec -- node clients/node/scripts/typecheck.mjs
 
-  # Real-Chrome tests. The Rust suite is sharded; the Node and Go clients run
-  # against the same staged native build in their own job.
-  browser:
-    name: Browser (${{ matrix.suite }})
+  # Builds once for every browser job: the server and CLI, the Node SDK, and
+  # a nextest archive of all Rust test binaries.
+  browser-build:
+    name: Browser build
     needs: changes
     if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.node == 'true'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - uses: shrimp-software/eoka/.github/actions/rust@59a5295955ce8375076d2154bdfceb488e40e85f
+        with:
+          cache-key: browser
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        with:
+          tool: cargo-nextest
+      - name: Build native client, SDK and test archive
+        run: |
+          set -euo pipefail
+          cargo build --locked -p eoka-server -p eoka-cli
+          cargo nextest archive --workspace --all-features --locked --archive-file nextest.tar.zst
+          mise exec -- npm --prefix clients/node ci --ignore-scripts --omit=optional
+          mise run node-build
+          tar -czf browser-build.tgz nextest.tar.zst target/debug/eoka-server target/debug/eoka-cli clients/node/dist
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: browser-build
+          path: browser-build.tgz
+          retention-days: 1
+
+  # Real-Chrome tests from the shared build: the Rust suite in three shards,
+  # and the Node and Go test suites against the staged native client.
+  browser:
+    name: Browser (${{ matrix.suite }})
+    needs: browser-build
     runs-on: ubuntu-22.04
     timeout-minutes: 25
     strategy:
@@ -160,10 +194,6 @@ jobs:
             echo "EOKA_RELEASE_STAGE_DIR=$RUNNER_TEMP/eoka-stage"
           } >> "$GITHUB_ENV"
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          key: browser
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         if: matrix.suite == 'clients'
         with:
@@ -173,18 +203,27 @@ jobs:
         if: matrix.suite != 'clients'
         with:
           tool: cargo-nextest
-      - name: Prepare Chrome, SDK and native client
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: browser-build
+      - run: tar -xzf browser-build.tgz
+      - name: Cache the pinned Chrome download
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.EOKA_BROWSER_CACHE_DIR }}
+          key: chrome-${{ runner.os }}-${{ hashFiles('clients/node/release-manifest.json') }}
+      - name: Prepare Chrome and the staged native client
         run: .github/scripts/browser-setup.sh
       - name: Rust browser tests (shard ${{ matrix.suite }})
         if: matrix.suite != 'clients'
         env:
           SUITE: ${{ matrix.suite }}
         run: |
-          xvfb-run -a cargo nextest run --profile ci --workspace --all-features --locked \
-            --run-ignored only --partition "hash:${SUITE#rust }"
+          xvfb-run -a cargo nextest run --profile ci --archive-file nextest.tar.zst \
+            --workspace-remap . --run-ignored only --partition "hash:${SUITE#rust }"
       - name: Node tests with native artifacts and real Chrome
         if: matrix.suite == 'clients'
-        run: xvfb-run -a mise run node-check
+        run: xvfb-run -a mise exec -- node --test clients/node/tests/*.test.mjs
       - name: Go race and real-browser tests
         if: matrix.suite == 'clients'
         run: go -C clients/go test -race -count=1 ./...
@@ -212,7 +251,7 @@ jobs:
   ci-ok:
     name: CI OK
     if: always()
-    needs: [changes, lint, surface-parity, unit, go, node, browser, deny]
+    needs: [changes, lint, surface-parity, unit, go, node, browser-build, browser, deny]
     runs-on: ubuntu-latest
     steps:
       - env:
@@ -223,3 +262,16 @@ jobs:
             | map("\(.key): \(.value.result)") | .[]' <<<"$NEEDS")
           if [ -n "$failed" ]; then echo "$failed"; exit 1; fi
           echo "All required jobs passed."
+
+  notify:
+    name: Nightly status issue
+    if: always() && github.event_name == 'schedule'
+    needs: [ci-ok]
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: shrimp-software/eoka/.github/actions/nightly-issue@59a5295955ce8375076d2154bdfceb488e40e85f
+        with:
+          result: ${{ needs.ci-ok.result }}
+          token: ${{ github.token }}
