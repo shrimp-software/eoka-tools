@@ -31,6 +31,7 @@ impl Destination {
         }
         ensure_space(&parent, expected.unwrap_or(0))?;
         let staging = parent.join(format!(".eoka-download-{id}"));
+        #[cfg_attr(not(unix), allow(unused_mut))]
         let mut builder = std::fs::DirBuilder::new();
         #[cfg(unix)]
         {
@@ -41,7 +42,7 @@ impl Destination {
         Ok(Self { output, staging })
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub fn publish(
         &self,
         guid: &str,
@@ -308,6 +309,8 @@ mod tests {
         );
     }
 
+    // Downloads are Unix-only (ensure_space rejects other platforms).
+    #[cfg(unix)]
     #[test]
     fn publication_verifies_size_and_never_replaces_existing_files() {
         let root = tempfile::tempdir().unwrap();
@@ -335,6 +338,7 @@ mod tests {
         assert!(destination.retained_path().is_some());
     }
 
+    #[cfg(unix)]
     #[test]
     fn canceled_publication_retains_verified_bytes() {
         let root = tempfile::tempdir().unwrap();

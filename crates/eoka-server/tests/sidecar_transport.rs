@@ -345,11 +345,13 @@ fn managed_validation_and_invalid_executables_never_launch_a_fallback() {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&non_executable, std::fs::Permissions::from_mode(0o600)).unwrap();
     }
-    for executable in [
-        root.path().join("missing-chrome"),
-        root.path().to_owned(),
-        non_executable,
-    ] {
+    let mut invalid = vec![root.path().join("missing-chrome"), root.path().to_owned()];
+    // Windows has no execute permission, so a plain file there is only
+    // rejected when it fails to spawn, after the profile exists.
+    if cfg!(unix) {
+        invalid.push(non_executable);
+    }
+    for executable in invalid {
         let response = server.request(
             id,
             "browser.launch",

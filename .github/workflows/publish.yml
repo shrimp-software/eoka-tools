@@ -22,7 +22,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+      - uses: shrimp-software/eoka/.github/actions/rust@2e108f041f487df9acc2b04fe5508ec4bf041a56
 
       - name: Configure git
         run: |
@@ -87,6 +87,10 @@ jobs:
             if [ "$crate" = "eoka-server" ] || [ "$crate" = "eoka-cli" ]; then
               if GH_TOKEN="${{ github.token }}" gh release view "$tag" --repo "${{ github.repository }}" >/dev/null 2>&1; then
                 echo "Release ${tag} already exists — skip binary release dispatch"
+              elif [ "$crate" = "eoka-server" ]; then
+                # Released below: together with npm when both ship, so the
+                # binaries are qualified once.
+                echo "SERVER_TAG=${tag}" >> "$GITHUB_ENV"
               else
                 GH_TOKEN="${{ github.token }}" gh workflow run "release-${crate}.yml" --repo "${{ github.repository }}" --ref "$tag" -f tag="$tag"
               fi
@@ -94,7 +98,7 @@ jobs:
             echo "::endgroup::"
           done
 
-      - name: Start the npm release when the SDK version is not on npm
+      - name: Start the npm and server releases
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -104,8 +108,19 @@ jobs:
           case "$http_status" in
             200) echo "@cbxss/eoka ${version} is already on npm" ;;
             404)
-              echo "Dispatching npm publication of @cbxss/eoka ${version}"
-              gh workflow run publish-node.yml --repo "${{ github.repository }}" --ref main -f source_sha="$GITHUB_SHA"
+              ready=$(jq -r '.status == "ready" and (.blockers | length) == 0' clients/node/scripts/publication-readiness.json)
+              server_tag=""
+              # A blocked npm gate must not hold back the server release.
+              if [ "$ready" = true ] && [ -n "${SERVER_TAG:-}" ]; then
+                server_tag="$SERVER_TAG"
+                SERVER_TAG=""
+              fi
+              echo "Dispatching npm publication of @cbxss/eoka ${version} (server release: ${server_tag:-none})"
+              gh workflow run publish-node.yml --repo "${{ github.repository }}" --ref main -f source_sha="$GITHUB_SHA" -f server_tag="$server_tag"
               ;;
             *) echo "npm registry returned ${http_status} for @cbxss/eoka ${version}"; exit 1 ;;
           esac
+          if [ -n "${SERVER_TAG:-}" ]; then
+            echo "Dispatching standalone release of ${SERVER_TAG}"
+            gh workflow run release-eoka-server.yml --repo "${{ github.repository }}" --ref "$SERVER_TAG" -f tag="$SERVER_TAG"
+          fi

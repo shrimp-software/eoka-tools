@@ -1,5 +1,8 @@
 name: Release eoka-server
 
+# The GitHub release ships the exact binaries that passed native release
+# builds, recording tests and packed runtime qualification: the qualify
+# workflow builds them and this workflow only publishes its artifacts.
 on:
   push:
     tags:
@@ -9,177 +12,81 @@ on:
       tag:
         description: "Tag to build (e.g. eoka-server-v0.1.0)"
         required: true
+      dry_run:
+        description: Qualify and collect the assets without creating a release
+        type: boolean
+        default: false
+  # publish-node.yml calls this after its own qualification so a release that
+  # also publishes npm builds and qualifies the binaries once.
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+      qualified:
+        description: The calling run already qualified this tag's binaries
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
-  parse:
-    name: Parse tag
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.parse.outputs.version }}
-      tag: ${{ steps.parse.outputs.tag }}
-    steps:
-      - id: parse
-        shell: bash
-        run: |
-          set -euo pipefail
-          TAG="${{ inputs.tag || github.ref_name }}"
-          VERSION="${TAG#eoka-server-v}"
-          {
-            echo "version=$VERSION"
-            echo "tag=$TAG"
-          } >> "$GITHUB_OUTPUT"
-
-  build-linux:
-    name: Build ${{ matrix.target }} (glibc 2.35)
-    needs: parse
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-22.04
-            asset: eoka-server-linux-amd64
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-24.04-arm
-            asset: eoka-server-linux-arm64
-    runs-on: ${{ matrix.os }}
-    container: ubuntu:22.04
+  qualify:
+    name: Qualify release binaries
+    if: ${{ !inputs.qualified }}
     permissions:
       contents: read
-    steps:
-      - name: Install baseline build dependencies
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends build-essential pkg-config libssl-dev ca-certificates curl git
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
-        with:
-          targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
-        with:
-          key: glibc-2.35-${{ matrix.target }}-eoka-server
-      - name: Build
-        run: cargo build --release --locked --target ${{ matrix.target }} -p eoka-server
-      - name: Stage asset
-        run: |
-          mkdir dist
-          cp "target/${{ matrix.target }}/release/eoka-server" "dist/${{ matrix.asset }}"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: ${{ matrix.asset }}
-          path: dist/${{ matrix.asset }}
-          if-no-files-found: error
-
-  build-hosted:
-    name: Build ${{ matrix.target }}
-    needs: parse
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: x86_64-pc-windows-msvc
-            os: windows-latest
-            asset: eoka-server-windows-amd64.exe
-            ext: .exe
-    runs-on: ${{ matrix.os }}
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
-        with:
-          targets: ${{ matrix.target }}
-
-      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
-        with:
-          key: ${{ matrix.target }}-eoka-server
-
-      - name: Build
-        shell: bash
-        run: cargo build --release --locked --target ${{ matrix.target }} -p eoka-server
-
-      - name: Stage asset
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir dist
-          cp "target/${{ matrix.target }}/release/eoka-server${{ matrix.ext }}" "dist/${{ matrix.asset }}"
-
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: ${{ matrix.asset }}
-          path: dist/${{ matrix.asset }}
-          if-no-files-found: error
-
-  build-macos:
-    name: Build ${{ matrix.target }}
-    needs: parse
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: x86_64-apple-darwin
-            asset: eoka-server-darwin-amd64
-          - target: aarch64-apple-darwin
-            asset: eoka-server-darwin-arm64
-    # Use GitHub-hosted macOS runners so releases do not depend on a local pool.
-    runs-on: macos-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
-        with:
-          targets: ${{ matrix.target }}
-
-      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
-        with:
-          key: ${{ matrix.target }}-eoka-server
-
-      - name: Build
-        shell: bash
-        run: cargo build --release --locked --target ${{ matrix.target }} -p eoka-server
-
-      - name: Stage asset
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir dist
-          cp "target/${{ matrix.target }}/release/eoka-server" "dist/${{ matrix.asset }}"
-
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: ${{ matrix.asset }}
-          path: dist/${{ matrix.asset }}
-          if-no-files-found: error
+      actions: read
+    uses: ./.github/workflows/qualify-node-release.yml
+    with:
+      source_ref: ${{ inputs.tag || github.ref_name }}
+      publication: false
 
   release:
     name: Publish release
-    needs: [parse, build-linux, build-hosted, build-macos]
+    needs: qualify
+    if: always() && (needs.qualify.result == 'success' || (inputs.qualified && needs.qualify.result == 'skipped'))
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
     steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
+      - name: Tag matches the server version
+        run: |
+          version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' crates/eoka-server/Cargo.toml | head -1)
+          test "$TAG" = "eoka-server-v${version}"
+          echo "VERSION=${version}" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          path: dist
+          pattern: node-native-*
+          path: native
           merge-multiple: true
-
-      - name: Checksums
-        working-directory: dist
-        run: sha256sum * > checksums.txt
-
-      - name: List artifacts
-        run: ls -lh dist
-
-      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+      - name: Collect qualified binaries and checksums
+        run: |
+          set -euo pipefail
+          mkdir dist
+          for asset in eoka-server-linux-amd64 eoka-server-linux-arm64 eoka-server-darwin-amd64 eoka-server-darwin-arm64 eoka-server-windows-amd64.exe; do
+            cp "native/${asset}" "dist/${asset}"
+          done
+          (cd dist && sha256sum * > checksums.txt)
+          ls -lh dist
+          cat dist/checksums.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: inputs.dry_run
         with:
-          tag_name: ${{ needs.parse.outputs.tag }}
-          name: eoka-server v${{ needs.parse.outputs.version }}
+          name: release-assets
+          path: dist/
+          retention-days: 7
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        if: ${{ !inputs.dry_run }}
+        with:
+          tag_name: ${{ env.TAG }}
+          name: eoka-server v${{ env.VERSION }}
           generate_release_notes: true
           files: dist/*

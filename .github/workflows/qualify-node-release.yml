@@ -1,10 +1,8 @@
 name: Qualify Node release
 
 on:
-  # Every npm publish runs this in full; pull requests only when the release
-  # pipeline itself changes. The nightly run catches native breakage on main.
-  schedule:
-    - cron: '17 6 * * *'
+  # Every npm publish and server release runs this in full; pull requests
+  # only when the release pipeline itself changes.
   pull_request:
     paths:
       - 'clients/node/scripts/**'
@@ -325,3 +323,4 @@ jobs:
           path: qualified/
           if-no-files-found: error
           retention-days: 14
+

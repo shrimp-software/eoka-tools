@@ -16,7 +16,7 @@ const nodeRoot = fileURLToPath(new URL('../', import.meta.url));
 const loader = fileURLToPath(new URL('./fixtures/browser-install-loader.mjs', import.meta.url));
 const runner = fileURLToPath(new URL('./fixtures/browser-managed-runner.mjs', import.meta.url));
 const platform = 'linux-x64-gnu';
-const buildId = '156.0.8078.80';
+const buildId = JSON.parse(await readFile(new URL('../release-manifest.json', import.meta.url), 'utf8')).chrome.buildId;
 
 async function fixture(t, { delayMs = 0, chunks = false, packaged = true } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'eoka-bm-'));
