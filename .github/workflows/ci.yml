@@ -111,7 +111,7 @@ jobs:
       - name: Short runtime directory
         if: runner.os == 'macOS'
         run: echo "XDG_RUNTIME_DIR=/tmp" >> "$GITHUB_ENV"
-      - run: cargo test ${{ matrix.packages }} --all-features --locked
+      - run: cargo test ${{ matrix.packages }} --all-features --locked --no-fail-fast
 
   # Static checks only: the Go and Node test suites run once, against the
   # native build and real Chrome, in the browser clients job.
