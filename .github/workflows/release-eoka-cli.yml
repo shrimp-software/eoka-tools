@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           ref: ${{ inputs.tag || github.ref_name }}
-      - uses: shrimp-software/eoka/.github/actions/rust@ec4b741b7c109d426a4fa07d2bb0a76d67369cfd
+      - uses: shrimp-software/eoka/.github/actions/rust@2e108f041f487df9acc2b04fe5508ec4bf041a56
         with:
           targets: ${{ matrix.target }}
       - name: Ensure Rosetta 2 for the x86_64 macOS binary
