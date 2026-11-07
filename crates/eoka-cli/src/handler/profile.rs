@@ -34,18 +34,32 @@ fn default_profile_dir_in(root: &Path, platform: &str) -> Option<PathBuf> {
         .find(|path| path.exists())
 }
 
-pub fn clone_profile_dir(src: &Path) -> io::Result<PathBuf> {
-    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let dst = std::env::temp_dir().join(format!("eoka-profile-clone-{}-{}", std::process::id(), n));
-    fs::create_dir_all(&dst)?;
+pub struct ClonedProfile(PathBuf);
+
+impl ClonedProfile {
+    pub fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for ClonedProfile {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+pub fn clone_profile_dir(src: &Path) -> io::Result<ClonedProfile> {
+    let dst = std::env::temp_dir().join(format!("eoka-profile-clone-{}", uuid::Uuid::new_v4()));
+    let mut builder = fs::DirBuilder::new();
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(&dst, fs::Permissions::from_mode(0o700));
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
     }
-    copy_recursive(src, &dst)?;
-    Ok(dst)
+    builder.create(&dst)?;
+    let clone = ClonedProfile(dst);
+    copy_recursive(src, clone.path())?;
+    Ok(clone)
 }
 
 fn should_skip(name: &str) -> bool {
@@ -117,14 +131,16 @@ mod tests {
         fs::create_dir_all(profile.join("Default")).unwrap();
         fs::write(profile.join("Default").join("Cookies"), "cookie-bytes").unwrap();
 
-        let dst = clone_profile_dir(&profile).unwrap();
+        let clone = clone_profile_dir(&profile).unwrap();
+        let dst = clone.path().to_path_buf();
         let mode = fs::metadata(&dst).unwrap().permissions().mode() & 0o777;
         assert_eq!(
             mode, 0o700,
             "clone dir holds the cookie store: must be 0700"
         );
         assert!(dst.join("Default").join("Cookies").exists());
-        fs::remove_dir_all(&dst).unwrap();
+        drop(clone);
+        assert!(!dst.exists(), "clone must be removed when it is dropped");
         fs::remove_dir_all(&src).unwrap();
     }
 

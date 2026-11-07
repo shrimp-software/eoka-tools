@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use eoka::{Browser, Page, StealthConfig};
 use eoka_server::{InteractiveElement, ObserveConfig};
 
-use super::profile::clone_profile_dir;
+use super::profile::{clone_profile_dir, ClonedProfile};
 use super::proxy_forward::ProxyForwarder;
 
 fn tracked_tab_page(tabs: &HashMap<String, TabState>, tab_id: &str) -> eoka::Result<Page> {
@@ -54,6 +54,7 @@ pub struct BrowserState {
     pub config: ObserveConfig,
     pub is_live: bool,
     _proxy_forwarder: Option<ProxyForwarder>,
+    _cloned_profile: Option<ClonedProfile>,
 }
 
 impl BrowserState {
@@ -102,14 +103,16 @@ impl BrowserState {
             .collect();
 
         let mut user_data_dir = persist_profile_dir.map(|dir| dir.to_string_lossy().to_string());
+        let mut cloned_profile = None;
         if let Some(src) = copy_profile_from {
-            let dst = clone_profile_dir(src).map_err(eoka::Error::Io)?;
-            user_data_dir = Some(dst.to_string_lossy().to_string());
+            let clone = clone_profile_dir(src).map_err(eoka::Error::Io)?;
+            user_data_dir = Some(clone.path().to_string_lossy().to_string());
             eprintln!(
                 "[eoka] cloned profile {} → {}",
                 src.display(),
-                dst.display()
+                clone.path().display()
             );
+            cloned_profile = Some(clone);
         }
 
         if let Some(ref dir) = user_data_dir {
@@ -149,6 +152,7 @@ impl BrowserState {
             config: ObserveConfig::default(),
             is_live: false,
             _proxy_forwarder: proxy_forwarder,
+            _cloned_profile: cloned_profile,
         })
     }
 
@@ -162,6 +166,7 @@ impl BrowserState {
             config: ObserveConfig::default(),
             is_live: true,
             _proxy_forwarder: None,
+            _cloned_profile: None,
         })
     }
 

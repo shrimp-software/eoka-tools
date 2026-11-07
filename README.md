@@ -295,6 +295,16 @@ profiles, bounded disposal and uncertain action outcomes.
 Protocol schemas remain canonical in `eoka-protocol::sidecar`; the SDK's typed
 `invoke` covers that actual sidecar registry, not all CLI/MCP/Tack operations.
 
+## Local safety defaults
+
+These apply to the CLI and MCP server:
+
+- `file:` URLs are blocked unless `EOKA_ALLOW_FILE_URLS=1` is set. For the CLI, the session daemon reads this when it starts.
+- State files are written owner-only (`0600`). The path must end in `.json`, and a save can only replace an empty file or an earlier state file. Symlinks are refused.
+- Saved storage is only restored on its saved origin. Otherwise it is skipped with a warning.
+- The CLI runtime directory is `$XDG_RUNTIME_DIR/eoka`, or `$TMPDIR/eoka-<uid>` (default `/tmp/eoka-<uid>`) as a fallback. It is owner-only, and a directory owned by another user is refused.
+- On Linux, the local forwarder for authenticated HTTP proxies refuses connections from other users. Other processes run by the same user can still use it, and other platforms do not check the caller.
+
 ## Development
 
 Builds use published eoka `0.7.2` from crates.io. The workspace lockfile pins its

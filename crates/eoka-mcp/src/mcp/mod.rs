@@ -181,8 +181,9 @@ impl EokaServer {
         &self,
         req: Parameters<eoka_protocol::AgentStepArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        self.agent_command("agent_step", serde_json::to_value(req.0).map_err(internal)?)
-            .await
+        let arguments = serde_json::to_value(req.0).map_err(internal)?;
+        helpers::ensure_action_urls_allowed(&arguments)?;
+        self.agent_command("agent_step", arguments).await
     }
 
     #[tool]
@@ -190,11 +191,9 @@ impl EokaServer {
         &self,
         req: Parameters<eoka_protocol::ActionPerformArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        self.perform_command(
-            "action_perform",
-            serde_json::to_value(req.0).map_err(internal)?,
-        )
-        .await
+        let arguments = serde_json::to_value(req.0).map_err(internal)?;
+        helpers::ensure_action_urls_allowed(&arguments)?;
+        self.perform_command("action_perform", arguments).await
     }
     #[tool]
     async fn operation_get(
@@ -261,6 +260,9 @@ impl EokaServer {
         &self,
         req: Parameters<DownloadStartRequest>,
     ) -> Result<CallToolResult, ErrorData> {
+        if let Some(url) = &req.0.url {
+            helpers::ensure_url_allowed(url)?;
+        }
         match self.downloads.existing(&req.0).await {
             Ok(Some(record)) => {
                 return protocol_tool_response(eoka_server::downloads::start_response(Ok(record)))
@@ -393,6 +395,9 @@ impl EokaServer {
 
     #[tool(description = "Open a new browser tab. Optionally navigate to URL. Returns new tab ID.")]
     async fn new_tab(&self, req: Parameters<NewTabRequest>) -> Result<CallToolResult, ErrorData> {
+        if let Some(url) = &req.0.url {
+            helpers::ensure_url_allowed(url)?;
+        }
         self.ensure_browser().await?;
         let mut guard = self.state.lock().await;
         let state = guard.as_mut().unwrap();
@@ -454,6 +459,7 @@ impl EokaServer {
             .operation_id
             .clone()
             .ok_or_else(|| invalid("operation_id is required"))?;
+        helpers::ensure_url_allowed(&req.0.url)?;
         self.ensure_browser().await?;
         let page = {
             let mut guard = self.state.lock().await;
@@ -1651,7 +1657,7 @@ impl EokaServer {
     }
 
     #[tool(
-        description = "Save browser auth state (cookies + localStorage + sessionStorage) to a JSON file. Use after login to persist sessions across restarts. Captures httpOnly cookies via CDP for full fidelity."
+        description = "Save browser auth state (cookies + localStorage + sessionStorage) to a JSON file. Use after login to persist sessions across restarts. Captures httpOnly cookies via CDP for full fidelity. The path must end in .json and can only replace an empty file or an earlier state file."
     )]
     async fn save_state(
         &self,
@@ -1667,8 +1673,11 @@ impl EokaServer {
 
         let saved = helpers::capture_state(&tab.page).await?;
         let json = serde_json::to_string_pretty(&saved).map_err(internal)?;
-        std::fs::write(&req.0.path, &json)
-            .map_err(|e| invalid(format!("Failed to write '{}': {}", req.0.path, e)))?;
+        eoka_server::saved_state::write_state_file(
+            std::path::Path::new(&req.0.path),
+            json.as_bytes(),
+        )
+        .map_err(|e| invalid(format!("Failed to write '{}': {}", req.0.path, e)))?;
 
         text_ok(format!(
             "Saved {} cookies, {} localStorage keys, {} sessionStorage keys to {}",
@@ -1691,13 +1700,15 @@ impl EokaServer {
         let saved: helpers::SavedState = serde_json::from_str(&contents)
             .map_err(|e| invalid(format!("Invalid state JSON: {}", e)))?;
 
+        let navigate = req.0.navigate.unwrap_or(true);
+        if navigate {
+            helpers::ensure_url_allowed(&saved.url)?;
+        }
         self.ensure_browser().await?;
         let mut guard = self.state.lock().await;
         let state = guard
             .as_mut()
             .ok_or_else(|| ErrorData::from(AgentError::NoBrowser))?;
-
-        let navigate = req.0.navigate.unwrap_or(true);
 
         if navigate {
             let tab = state.ensure_tab(&saved.url).await.map_err(internal)?;
@@ -1710,7 +1721,7 @@ impl EokaServer {
             .current_tab()
             .ok_or_else(|| ErrorData::from(AgentError::NoTab))?;
 
-        helpers::restore_state(&tab.page, &saved).await?;
+        let restored = helpers::restore_state(&tab.page, &saved).await?;
 
         if navigate {
             let _: String = tab
@@ -1724,11 +1735,12 @@ impl EokaServer {
         }
 
         text_ok(format!(
-            "Loaded {} cookies, {} localStorage keys, {} sessionStorage keys from {}",
+            "Loaded {} cookies, {} localStorage keys, {} sessionStorage keys from {}.{}",
             saved.cookies.len(),
-            saved.local_storage.len(),
-            saved.session_storage.len(),
-            req.0.path
+            restored.local_restored,
+            restored.session_restored,
+            req.0.path,
+            restored.notice(&saved.url)
         ))
     }
 

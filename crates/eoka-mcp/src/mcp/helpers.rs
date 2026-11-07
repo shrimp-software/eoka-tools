@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 
 use eoka_server::InteractiveElement;
 
+use eoka_server::saved_state::StorageRestoreReport;
+
 use super::error::{internal, invalid};
 use super::types::JsRequest;
 
@@ -169,24 +171,24 @@ pub(crate) async fn capture_state(page: &Page) -> Result<SavedState, ErrorData> 
             "(() => { try { return Object.fromEntries(Object.entries(localStorage)) } catch(e) { return {} } })()",
         )
         .await
-        .unwrap_or_default();
+        .map_err(internal)?;
 
     let session_storage: HashMap<String, String> = page
         .evaluate_sync(
             "(() => { try { return Object.fromEntries(Object.entries(sessionStorage)) } catch(e) { return {} } })()",
         )
         .await
-        .unwrap_or_default();
+        .map_err(internal)?;
 
     let url: String = page
         .evaluate_sync("location.href")
         .await
-        .unwrap_or_default();
+        .map_err(internal)?;
 
     let user_agent: String = page
         .evaluate_sync("navigator.userAgent")
         .await
-        .unwrap_or_default();
+        .map_err(internal)?;
 
     let saved_at = {
         let d = std::time::SystemTime::now()
@@ -205,7 +207,10 @@ pub(crate) async fn capture_state(page: &Page) -> Result<SavedState, ErrorData> 
     })
 }
 
-pub(crate) async fn restore_state(page: &Page, state: &SavedState) -> Result<(), ErrorData> {
+pub(crate) async fn restore_state(
+    page: &Page,
+    state: &SavedState,
+) -> Result<StorageRestoreReport, ErrorData> {
     page.clear_all_cookies().await.map_err(internal)?;
     let set_cookies: Vec<eoka_server::eoka::SessionCookie> = state
         .cookies
@@ -216,25 +221,22 @@ pub(crate) async fn restore_state(page: &Page, state: &SavedState) -> Result<(),
         page.set_cookies_bulk(set_cookies).await.map_err(internal)?;
     }
 
-    if !state.local_storage.is_empty() {
-        let json = serde_json::to_string(&state.local_storage).map_err(internal)?;
-        let js = format!(
-            "(() => {{ localStorage.clear(); const d = {}; for (const [k,v] of Object.entries(d)) localStorage.setItem(k,v); }})()",
-            json
-        );
-        let _: String = page.evaluate_sync(&js).await.unwrap_or_default();
-    }
+    eoka_server::saved_state::restore_storage(
+        page,
+        &state.url,
+        &state.local_storage,
+        &state.session_storage,
+    )
+    .await
+    .map_err(internal)
+}
 
-    if !state.session_storage.is_empty() {
-        let json = serde_json::to_string(&state.session_storage).map_err(internal)?;
-        let js = format!(
-            "(() => {{ sessionStorage.clear(); const d = {}; for (const [k,v] of Object.entries(d)) sessionStorage.setItem(k,v); }})()",
-            json
-        );
-        let _: String = page.evaluate_sync(&js).await.unwrap_or_default();
-    }
+pub(crate) fn ensure_url_allowed(url: &str) -> Result<(), ErrorData> {
+    eoka_server::url_policy::ensure_url_allowed(url).map_err(invalid)
+}
 
-    Ok(())
+pub(crate) fn ensure_action_urls_allowed(arguments: &serde_json::Value) -> Result<(), ErrorData> {
+    eoka_server::url_policy::ensure_args_allowed(arguments).map_err(invalid)
 }
 
 #[cfg(test)]

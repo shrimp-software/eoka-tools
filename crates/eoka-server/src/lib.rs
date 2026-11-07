@@ -14,11 +14,13 @@ pub mod operations;
 pub mod page_context;
 pub mod recordings;
 pub mod runtime;
+pub mod saved_state;
 pub mod snapshot;
 pub mod spa;
 pub mod state;
 pub mod target;
 pub mod transport;
+pub mod url_policy;
 
 pub use browser::{InteractiveElement, ObserveConfig, ObserveDiff, Session};
 pub use eoka;

@@ -19,9 +19,9 @@ fn idle_timeout() -> Duration {
 }
 
 pub async fn run(session_name: &str, spec: LaunchSpec) -> anyhow::Result<()> {
-    session::ensure_runtime_dir()?;
+    let _session_lock = session::acquire_daemon_lock(session_name)?;
 
-    let sock_path = session::socket_path(session_name);
+    let sock_path = session::trusted_socket_path(session_name)?;
     let pid_path = session::pid_path(session_name);
 
     if sock_path.exists() {
@@ -29,7 +29,7 @@ pub async fn run(session_name: &str, spec: LaunchSpec) -> anyhow::Result<()> {
     }
 
     let listener = UnixListener::bind(&sock_path)?;
-    std::fs::write(&pid_path, std::process::id().to_string())?;
+    session::write_pid_file(session_name)?;
 
     eprintln!(
         "[eoka] daemon started (session={}, pid={}, mode={})",

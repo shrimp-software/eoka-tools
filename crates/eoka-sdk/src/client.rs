@@ -428,7 +428,7 @@ pub async fn send_command(
     spec: LaunchSpec,
 ) -> anyhow::Result<Response> {
     if !matches!(request, Request::SessionHello) {
-        if let Ok(stream) = UnixStream::connect(session::socket_path(session_name)).await {
+        if let Ok(stream) = connect_session(session_name).await {
             let hello = tokio::time::timeout(
                 Duration::from_secs(5),
                 exchange_request(stream, &Request::SessionHello),
@@ -610,7 +610,7 @@ async fn send_existing_session(
     transport_error: &str,
     unsupported_message: &str,
 ) -> Response {
-    let Ok(stream) = UnixStream::connect(session::socket_path(session_name)).await else {
+    let Ok(stream) = connect_session(session_name).await else {
         return non_retryable_error(
             "session_unavailable",
             "Existing session unavailable; open the intended page first. No browser was launched.",
@@ -629,8 +629,7 @@ async fn send_command_once(
     request: Request,
     spec: &LaunchSpec,
 ) -> anyhow::Result<Response> {
-    let sock = session::socket_path(session_name);
-    let stream = match UnixStream::connect(&sock).await {
+    let stream = match connect_session(session_name).await {
         Ok(s) => s,
         Err(_)
             if matches!(request, Request::Open(_))
@@ -658,6 +657,10 @@ async fn send_command_once(
     exchange_request(stream, &request).await
 }
 
+async fn connect_session(session_name: &str) -> std::io::Result<UnixStream> {
+    UnixStream::connect(session::trusted_socket_path(session_name)?).await
+}
+
 async fn exchange_request(stream: UnixStream, request: &Request) -> anyhow::Result<Response> {
     let (mut reader, mut writer) = stream.into_split();
     let mut wire = serde_json::to_value(request)?;
@@ -677,7 +680,7 @@ async fn wait_for_socket(session_name: &str) -> anyhow::Result<UnixStream> {
             );
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
-        if let Ok(s) = UnixStream::connect(&sock).await {
+        if let Ok(s) = connect_session(session_name).await {
             return Ok(s);
         }
     }
@@ -688,6 +691,7 @@ fn launch_daemon(session_name: &str, spec: &LaunchSpec) -> anyhow::Result<()> {
     let exe = std::env::current_exe()?;
     let mut cmd = StdCommand::new(exe);
     cmd.arg("--daemon").arg("--session").arg(session_name);
+    let mut proxy_for_stdin = None;
 
     match spec {
         LaunchSpec::Reuse => {}
@@ -730,7 +734,8 @@ fn launch_daemon(session_name: &str, spec: &LaunchSpec) -> anyhow::Result<()> {
                 cmd.arg("--no-sandbox");
             }
             if let Some(p) = proxy {
-                cmd.arg("--proxy").arg(p);
+                cmd.arg("--proxy-stdin");
+                proxy_for_stdin = Some(p.clone());
             }
             if *no_js {
                 cmd.arg("--no-js");
@@ -747,12 +752,15 @@ fn launch_daemon(session_name: &str, spec: &LaunchSpec) -> anyhow::Result<()> {
         }
     }
 
-    let log_path = session::socket_path(session_name).with_extension("log");
-    let log_file = std::fs::File::create(&log_path)?;
+    let (log_file, log_path) = session::open_daemon_log(session_name)?;
 
-    cmd.stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(log_file);
+    cmd.stdin(if proxy_for_stdin.is_some() {
+        std::process::Stdio::piped()
+    } else {
+        std::process::Stdio::null()
+    })
+    .stdout(std::process::Stdio::null())
+    .stderr(log_file);
 
     #[cfg(unix)]
     {
@@ -760,7 +768,15 @@ fn launch_daemon(session_name: &str, spec: &LaunchSpec) -> anyhow::Result<()> {
         cmd.process_group(0);
     }
 
-    cmd.spawn()?;
+    let mut child = cmd.spawn()?;
+    if let Some(proxy) = proxy_for_stdin {
+        use std::io::Write;
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("Daemon stdin was not captured"))?;
+        stdin.write_all(format!("{proxy}\n").as_bytes())?;
+    }
     eprintln!(
         "[eoka] daemon starting (session={}, log={})",
         session_name,
@@ -769,17 +785,15 @@ fn launch_daemon(session_name: &str, spec: &LaunchSpec) -> anyhow::Result<()> {
     Ok(())
 }
 pub fn is_daemon_running(session_name: &str) -> bool {
-    let sock = session::socket_path(session_name);
-    std::os::unix::net::UnixStream::connect(&sock).is_ok()
+    session::trusted_socket_path(session_name)
+        .is_ok_and(|sock| std::os::unix::net::UnixStream::connect(sock).is_ok())
 }
 pub fn kill_daemon(session_name: &str) -> anyhow::Result<bool> {
-    let sock = session::socket_path(session_name);
-    if let Ok(stream) = std::os::unix::net::UnixStream::connect(&sock) {
-        drop(stream);
-    }
+    let sock = session::trusted_socket_path(session_name)?;
+    let daemon_is_listening = std::os::unix::net::UnixStream::connect(&sock).is_ok();
     let pid_path = session::pid_path(session_name);
     let original_pid = std::fs::read_to_string(&pid_path).ok();
-    let killed = if let Some(pid_str) = &original_pid {
+    let killed = if let Some(pid_str) = original_pid.as_ref().filter(|_| daemon_is_listening) {
         if let Ok(pid) = pid_str.trim().parse::<u32>() {
             StdCommand::new("kill")
                 .arg(pid.to_string())
@@ -839,7 +853,7 @@ async fn send_operation(
         wire["operation_id"] = serde_json::json!(id);
     }
     wire["protocol_major"] = serde_json::json!(eoka_protocol::sidecar::PROTOCOL_VERSION.major);
-    let stream = match UnixStream::connect(session::socket_path(session_name)).await {
+    let stream = match connect_session(session_name).await {
         Ok(stream) => stream,
         Err(_) if request.cmd().starts_with("operation_") => {
             launch_daemon(session_name, spec)?;

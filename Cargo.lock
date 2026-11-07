@@ -782,6 +782,7 @@ dependencies = [
  "anyhow",
  "eoka",
  "eoka-protocol",
+ "libc",
  "serde",
  "serde_json",
  "sha2",

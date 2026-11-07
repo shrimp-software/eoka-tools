@@ -108,6 +108,8 @@ pub struct Cli {
         help = "Proxy URL for launched browser"
     )]
     pub proxy: Option<String>,
+    #[arg(long, hide = true, requires = "daemon")]
+    pub proxy_stdin: bool,
     #[arg(
         long,
         global = true,
