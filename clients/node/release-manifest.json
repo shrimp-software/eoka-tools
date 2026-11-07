@@ -3,7 +3,7 @@
   "sdkVersion": "0.1.0-beta.8",
   "installerVersion": "3.2.4",
   "server": {
-    "version": "0.8.4",
+    "version": "0.8.5",
     "protocolVersion": "2.0",
     "platforms": {
       "linux-x64-gnu": { "packageName": "@cbxss/eoka-server-linux-x64-gnu", "packageVersion": "0.1.0-beta.8", "target": "x86_64-unknown-linux-gnu", "asset": "eoka-server-linux-amd64", "executablePath": "bin/eoka-server", "sha256": null, "size": null, "minimumGlibc": "2.35", "development": false },
