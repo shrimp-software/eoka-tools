@@ -176,7 +176,12 @@ pub(super) fn verify(
     use sha2::{Digest, Sha256};
     let mut hash = Sha256::new();
     let (device, inode) = verify_file(path, received, total, expected, Some(&mut hash))?;
-    Ok((format!("{:x}", hash.finalize()), device, inode))
+    let digest = hash
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    Ok((digest, device, inode))
 }
 
 fn verify_file(

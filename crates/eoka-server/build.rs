@@ -5,7 +5,7 @@ fn main() {
         PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("Cargo manifest directory"))
             .join("Cargo.toml");
     println!("cargo:rerun-if-changed={}", manifest.display());
-    let manifest: toml::Value = fs::read_to_string(manifest)
+    let manifest: toml::Table = fs::read_to_string(manifest)
         .expect("read server manifest")
         .parse()
         .expect("parse server manifest");
