@@ -142,7 +142,8 @@ pub async fn restore_state(
     .map_err(|e| e.to_string())
 }
 
-/// Replace the cookies of the sites this state covers, leaving other sites' alone.
+/// Replace the cookies of the sites this state covers, including their parent domains
+/// and subdomains, leaving unrelated sites' alone.
 pub async fn restore_cookies(page: &Page, state: &SavedState) -> Result<(), String> {
     eoka_server::saved_state::clear_covered_cookies(
         page,
@@ -261,6 +262,7 @@ mod tests {
         page.set_cookies_bulk(vec![
             cookie("session", "current", "app.test"),
             cookie("added_later", "1", "app.test"),
+            cookie("other_account", "1", "auth.app.test"),
             cookie("sso", "keep-me", "sso.test"),
         ])
         .await
@@ -298,6 +300,39 @@ mod tests {
             .collect();
         cookies.sort();
         assert_eq!(cookies, [("session", "saved"), ("sso", "keep-me")]);
+
+        // A page in another browser context restores into its own cookies.
+        let transport = page.session().transport();
+        let context: Value = transport
+            .send("Target.createBrowserContext", &json!({}))
+            .await
+            .unwrap();
+        let target: Value = transport
+            .send(
+                "Target.createTarget",
+                &json!({"url": "about:blank", "browserContextId": context["browserContextId"]}),
+            )
+            .await
+            .unwrap();
+        let isolated = browser
+            .attach_page(target["targetId"].as_str().unwrap())
+            .await
+            .unwrap();
+        isolated
+            .set_cookies_bulk(vec![cookie("session", "isolated", "app.test")])
+            .await
+            .unwrap();
+        restore_cookies(&isolated, &state).await.unwrap();
+        let jar: Value = transport
+            .send(
+                "Storage.getCookies",
+                &json!({"browserContextId": context["browserContextId"]}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(jar["cookies"].as_array().unwrap().len(), 1);
+        assert_eq!(jar["cookies"][0]["value"], "saved");
+
         browser.close().await.unwrap();
     }
 
