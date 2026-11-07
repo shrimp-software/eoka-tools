@@ -12,3 +12,10 @@ claude mcp add eoka -- eoka-mcp
 ```
 
 Includes CAPTCHA tools. For AWS WAF, provide `website_key`, `iv`, and `context` from `window.gokuProps`; use the returned `token` as the `aws-waf-token` cookie and retain the returned `user_agent`.
+
+## Action defaults
+
+- `operation_id` is optional. One is generated when omitted and returned as `id`. Send your own UUID to retry safely after a lost response.
+- `click`, double click and `type_key` can omit `expect`. They then run unverified and return `status: outcome_unknown` with a `note`, so read the page next and do not repeat the action blindly.
+- `fill` and `select` find fields by label. Several matches return `ambiguous_target` instead of a guess.
+- `agent_step` accepts the same targets as `click` and `fill`, as well as refs.

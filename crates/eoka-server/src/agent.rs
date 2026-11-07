@@ -8,6 +8,8 @@ use eoka_protocol::{
 };
 use tokio::time::{timeout_at, Instant};
 
+use crate::snapshot::SnapshotRef;
+use crate::target::LivePattern;
 use crate::{
     operations::{Execution, OperationManager},
     page_context, snapshot,
@@ -54,6 +56,45 @@ async fn document_identity(page: &Page) -> Result<String> {
         .as_str()
         .ok_or_else(|| anyhow!("Document identity unavailable"))?;
     Ok(format!("{id}:{loader}"))
+}
+
+fn named_field(refs: &[SnapshotRef], command: &str, text: &str) -> Result<Option<i64>> {
+    let wanted = text.trim().to_lowercase();
+    let fields: Vec<(&SnapshotRef, String)> = refs
+        .iter()
+        .filter(|node| {
+            !node.disabled
+                && if command == "select" {
+                    matches!(node.role.as_str(), "combobox" | "listbox")
+                } else {
+                    node.editable && !node.readonly
+                }
+        })
+        .map(|node| (node, node.name.trim().to_lowercase()))
+        .filter(|(_, name)| !name.is_empty())
+        .collect();
+    let exact: Vec<i64> = fields
+        .iter()
+        .filter(|(_, name)| *name == wanted)
+        .map(|(node, _)| node.backend_node_id)
+        .collect();
+    let matched = if exact.is_empty() {
+        fields
+            .iter()
+            .filter(|(_, name)| name.contains(&wanted))
+            .map(|(node, _)| node.backend_node_id)
+            .collect()
+    } else {
+        exact
+    };
+    match matched.as_slice() {
+        [] => Ok(None),
+        [id] => Ok(Some(*id)),
+        many => bail!(
+            "ambiguous_target: {} fields match {text:?}; use placeholder:, css:, or a ref from view",
+            many.len()
+        ),
+    }
 }
 
 fn control_role(role: &str) -> bool {
@@ -292,7 +333,7 @@ impl AgentSession {
             return Ok(record);
         }
         let target = match arguments["target"].as_str() {
-            Some(target) => Some(self.resolve_target(page, target).await?),
+            Some(target) => Some(self.resolve_command_target(page, command, target).await?),
             None => None,
         };
         let action = crate::operations::commands::action(command, &arguments, target)?;
@@ -304,10 +345,32 @@ impl AgentSession {
                 options,
                 Execution {
                     canonical: Some(canonical),
-                    exploratory: false,
+                    exploratory: arguments["exploratory"].as_bool().unwrap_or(false),
                 },
             )
             .await
+    }
+
+    async fn resolve_command_target(
+        &self,
+        page: &Page,
+        command: &str,
+        target: &str,
+    ) -> Result<LocatorSpec> {
+        if matches!(command, "fill" | "select") {
+            if let crate::Target::Live(LivePattern::Text(text)) = crate::Target::parse(target) {
+                if let Ok(snapshot) = snapshot::snapshot(page, false).await {
+                    if let Some(id) = named_field(&snapshot.refs, command, &text)? {
+                        return Ok(LocatorSpec {
+                            query: LocatorQuery::BackendNode { id },
+                            frame_id: None,
+                            index: None,
+                        });
+                    }
+                }
+            }
+        }
+        self.resolve_target(page, target).await
     }
 
     pub async fn resolve_target(&self, page: &Page, target: &str) -> Result<LocatorSpec> {
@@ -350,8 +413,13 @@ impl AgentSession {
             | AgentAction::ScrollIntoView { target } => Some(target),
             _ => None,
         };
+        let command = match action {
+            AgentAction::Fill { .. } | AgentAction::Type { .. } => "fill",
+            AgentAction::Select { .. } => "select",
+            _ => "click",
+        };
         let locator = if let Some(target) = target {
-            Some(self.resolve_reference(page, target).await?)
+            Some(self.resolve_command_target(page, command, target).await?)
         } else {
             None
         };
@@ -570,4 +638,79 @@ fn paginate(
         .truncated
         .then(|| format!("{}:{end}", observation.observation_id));
     Ok(page)
+}
+
+#[cfg(test)]
+mod named_field_tests {
+    use super::*;
+
+    fn node(id: i64, role: &str, name: &str, editable: bool) -> SnapshotRef {
+        SnapshotRef {
+            ref_label: String::new(),
+            backend_node_id: id,
+            role: role.into(),
+            name: name.into(),
+            disabled: false,
+            checked: None,
+            expanded: None,
+            focused: false,
+            readonly: false,
+            editable,
+            required: false,
+            invalid: false,
+            validation_message: None,
+        }
+    }
+
+    #[test]
+    fn a_label_finds_the_input_and_ignores_buttons() {
+        let refs = [
+            node(1, "button", "Name", false),
+            node(2, "textbox", "Name", true),
+        ];
+        assert_eq!(named_field(&refs, "fill", "name").unwrap(), Some(2));
+    }
+
+    #[test]
+    fn an_exact_name_beats_a_partial_one() {
+        let refs = [
+            node(1, "textbox", "Name", true),
+            node(2, "textbox", "Company name", true),
+        ];
+        assert_eq!(named_field(&refs, "fill", "Name").unwrap(), Some(1));
+        assert_eq!(named_field(&refs, "fill", "Company").unwrap(), Some(2));
+    }
+
+    #[test]
+    fn several_matches_are_an_error_instead_of_a_guess() {
+        let refs = [
+            node(1, "textbox", "First name", true),
+            node(2, "textbox", "Last name", true),
+        ];
+        let error = named_field(&refs, "fill", "name").unwrap_err();
+        assert!(error.to_string().contains("ambiguous_target"));
+    }
+
+    #[test]
+    fn locked_fields_and_unknown_names_do_not_match() {
+        let mut readonly = node(1, "textbox", "Name", true);
+        readonly.readonly = true;
+        let mut disabled = node(2, "textbox", "Name", true);
+        disabled.disabled = true;
+        assert_eq!(
+            named_field(&[readonly, disabled], "fill", "Name").unwrap(),
+            None
+        );
+        let refs = [node(3, "textbox", "Email", true)];
+        assert_eq!(named_field(&refs, "fill", "Name").unwrap(), None);
+    }
+
+    #[test]
+    fn select_only_matches_dropdowns() {
+        let refs = [
+            node(1, "textbox", "Country", true),
+            node(2, "combobox", "Country", false),
+        ];
+        assert_eq!(named_field(&refs, "select", "Country").unwrap(), Some(2));
+    }
 }

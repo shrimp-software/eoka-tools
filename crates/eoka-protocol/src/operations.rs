@@ -14,11 +14,15 @@ pub struct ActionPerformArgs {
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OperationIdArgs {
+    #[serde(alias = "operation_id")]
+    #[schemars(description = "Operation ID: the id field of the action's result.")]
     pub id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OperationWaitArgs {
+    #[serde(alias = "operation_id")]
+    #[schemars(description = "Operation ID: the id field of the action's result.")]
     pub id: String,
     #[serde(default = "wait_timeout")]
     #[schemars(range(max = 86400000))]
@@ -101,8 +105,14 @@ impl OperationRecord {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ActionSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Optional UUID. Generated when omitted and returned as id. Send your own to retry safely after a lost response."
+    )]
     pub operation_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "A condition that is false now and true after the action, for example {\"kind\":\"url\",\"value\":\"/submit\",\"contains\":true}. A wrong guess fails after the action has already run."
+    )]
     pub expect: Option<Expectation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_ms: Option<u64>,

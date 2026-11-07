@@ -446,7 +446,7 @@ impl EokaServer {
     }
 
     #[tool(
-        description = "Navigate to a URL and return a durable operation record. Requires operation_id. Launches browser on first call. \
+        description = "Navigate to a URL and return a durable operation record. operation_id is optional and is generated when omitted. Launches browser on first call. \
         Optional: headers (e.g. CVE-2025-29927 bypass), user_agent override, bypass_csp."
     )]
     async fn navigate(
@@ -458,7 +458,7 @@ impl EokaServer {
             .operation
             .operation_id
             .clone()
-            .ok_or_else(|| invalid("operation_id is required"))?;
+            .unwrap_or_else(operations::new_operation_id);
         helpers::ensure_url_allowed(&req.0.url)?;
         self.ensure_browser().await?;
         let page = {
@@ -1089,7 +1089,7 @@ impl EokaServer {
             .operation
             .operation_id
             .clone()
-            .ok_or_else(|| invalid("operation_id is required"))?;
+            .unwrap_or_else(operations::new_operation_id);
         self.perform_command("action_perform",serde_json::json!({"operation_id":id,"action":{"kind":"history","delta":req.0.delta},"options":{"timeout_ms":req.0.operation.timeout_ms.unwrap_or(30000),"expect":req.0.operation.expect}})).await
     }
 
@@ -1290,15 +1290,18 @@ impl EokaServer {
     }
 
     #[tool(
-        description = "Install a page navigation diagnostic and admit a durable click. Requires operation_id and an explicit expect condition. Returns the operation record; wait with operation_wait, then inspect window.__eoka_nav using extract. Intercepts history.pushState/replaceState; location navigation cannot be reliably intercepted by page JavaScript. allow_nav=true preserves history navigation."
+        description = "Install a page navigation diagnostic and admit a durable click. Requires an explicit expect condition. Returns the operation record; wait with operation_wait, then inspect window.__eoka_nav using extract. Intercepts history.pushState/replaceState; location navigation cannot be reliably intercepted by page JavaScript. allow_nav=true preserves history navigation."
     )]
     async fn click_intercept_nav(
         &self,
         req: Parameters<ClickInterceptNavRequest>,
     ) -> Result<CallToolResult, ErrorData> {
-        let id = req.0.operation.operation_id.clone().ok_or_else(|| {
-            invalid("operation_id is required; generate a UUID before requesting an action")
-        })?;
+        let id = req
+            .0
+            .operation
+            .operation_id
+            .clone()
+            .unwrap_or_else(operations::new_operation_id);
         if req.0.operation.expect.is_none() {
             return Err(invalid("expect is required to verify the click outcome"));
         }
