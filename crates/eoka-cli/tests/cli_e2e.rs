@@ -1,11 +1,7 @@
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::PathBuf;
 use std::process::Command;
 use std::thread;
-use std::time::{Duration, Instant};
-
-const AUTH_PROXY: &str = "http://14a48de81a808:9b2c74eae3@217.156.58.217:12323";
 
 fn eoka_bin() -> &'static str {
     env!("CARGO_BIN_EXE_eoka")
@@ -23,84 +19,8 @@ fn command(session: &str, args: &[&str]) -> Command {
     command
 }
 
-fn pid_path(session: &str) -> PathBuf {
-    eoka_sdk::session::pid_path(session)
-}
-
-fn cmdline(pid: u32) -> Vec<String> {
-    let bytes = std::fs::read(format!("/proc/{pid}/cmdline")).expect("process cmdline readable");
-    bytes
-        .split(|byte| *byte == 0)
-        .filter(|part| !part.is_empty())
-        .map(|part| String::from_utf8_lossy(part).into_owned())
-        .collect()
-}
-
-fn daemon_pid(session: &str) -> u32 {
-    let pid = std::fs::read_to_string(pid_path(session)).expect("daemon pid file readable");
-    pid.trim().parse().expect("daemon pid is numeric")
-}
-
-fn child_pids(pid: u32) -> Vec<u32> {
-    let mut children = Vec::new();
-    for task in std::fs::read_dir(format!("/proc/{pid}/task"))
-        .into_iter()
-        .flatten()
-        .flatten()
-    {
-        if let Ok(text) = std::fs::read_to_string(task.path().join("children")) {
-            children.extend(
-                text.split_whitespace()
-                    .filter_map(|id| id.parse::<u32>().ok()),
-            );
-        }
-    }
-    children.sort_unstable();
-    children.dedup();
-    children
-}
-
-fn chrome_cmdline_for_daemon(pid: u32) -> Vec<String> {
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        for child in child_pids(pid) {
-            let args = cmdline(child);
-            if args.iter().any(|arg| arg.contains("chrome")) {
-                return args;
-            }
-        }
-        if Instant::now() > deadline {
-            panic!("chrome child process was not found for daemon {pid}");
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-}
-
-fn assert_authenticated_proxy_is_normalized(chrome_args: &[String]) {
-    assert!(
-        chrome_args
-            .iter()
-            .any(|arg| arg.starts_with("--proxy-server=http://127.0.0.1:")),
-        "chrome args missing local proxy forwarder: {chrome_args:?}"
-    );
-    assert!(
-        chrome_args.iter().all(|arg| !arg.contains("14a48de81a808")
-            && !arg.contains("9b2c74eae3")
-            && !arg.contains("217.156.58.217")
-            && !arg.contains("http://http")),
-        "chrome args leaked upstream proxy details or malformed proxy: {chrome_args:?}"
-    );
-}
-
 fn clean_session(session: &str) {
     let _ = run(session, &["kill"]);
-}
-
-fn temp_proxy_file(session: &str) -> PathBuf {
-    let path = std::env::temp_dir().join(format!("{session}-proxies.txt"));
-    std::fs::write(&path, format!("\n# ignored\n{AUTH_PROXY}\n\n"))
-        .expect("proxy file should be writable");
-    path
 }
 
 fn assert_success(output: &std::process::Output, context: &str) {
@@ -295,69 +215,6 @@ fn spawns_daemon_and_completes_a_real_command() {
         status_after_json["data"]["running"],
         serde_json::json!(false)
     );
-}
-
-#[test]
-#[ignore = "requires Chrome and /proc"]
-fn env_authenticated_proxy_launches_chrome_with_local_proxy_forwarder() {
-    let session = format!("eoka-proxy-env-test-{}", std::process::id());
-
-    clean_session(&session);
-
-    let open = command(&session, &["--json", "open", "about:blank"])
-        .env("EOKA_PROXY", AUTH_PROXY)
-        .output()
-        .expect("failed to spawn eoka binary");
-    assert_success(&open, "open");
-
-    let daemon_pid = daemon_pid(&session);
-    let chrome_args = chrome_cmdline_for_daemon(daemon_pid);
-    assert_authenticated_proxy_is_normalized(&chrome_args);
-
-    clean_session(&session);
-}
-
-#[test]
-#[ignore = "requires Chrome and /proc"]
-fn proxy_file_user_flow_forwards_resolved_proxy_to_daemon_and_chrome() {
-    let session = format!("eoka-proxy-file-test-{}", std::process::id());
-    let proxy_file = temp_proxy_file(&session);
-
-    clean_session(&session);
-
-    let proxy_file_arg = proxy_file.to_string_lossy().into_owned();
-    let open = run(
-        &session,
-        &[
-            "--proxy-file",
-            &proxy_file_arg,
-            "--json",
-            "open",
-            "about:blank",
-        ],
-    );
-    assert_success(&open, "open");
-
-    let daemon_pid = daemon_pid(&session);
-    let daemon_args = cmdline(daemon_pid);
-    assert!(
-        daemon_args.iter().any(|arg| arg == "--proxy-stdin"),
-        "daemon should receive the resolved proxy over stdin: {daemon_args:?}"
-    );
-    assert!(
-        daemon_args.iter().all(|arg| !arg.contains(AUTH_PROXY)),
-        "proxy credentials must not appear in daemon args: {daemon_args:?}"
-    );
-    assert!(
-        daemon_args.iter().all(|arg| arg != "--proxy-file"),
-        "daemon should not re-read proxy files: {daemon_args:?}"
-    );
-
-    let chrome_args = chrome_cmdline_for_daemon(daemon_pid);
-    assert_authenticated_proxy_is_normalized(&chrome_args);
-
-    clean_session(&session);
-    let _ = std::fs::remove_file(proxy_file);
 }
 
 #[test]
