@@ -1,6 +1,6 @@
 [package]
 name = "eoka-mcp"
-version = "0.7.1"
+version = "0.7.2"
 edition = "2021"
 license = "MIT"
 description = "MCP server for eoka browser automation tools"
@@ -27,6 +27,6 @@ tokio = { version = "1", features = ["full"] }
 rmcp = { version = "3.0.1", features = ["server", "transport-io"] }
 schemars = "1.0"
 anyhow = "1"
-base64 = "0.22"
-dirs = "5"
+base64 = "0.23"
+dirs = "7"
 uuid = { version = "1", features = ["v4"] }
