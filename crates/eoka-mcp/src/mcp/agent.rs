@@ -107,6 +107,97 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "requires Chrome; MCP agent loop"]
+    async fn actions_work_without_ids_and_find_fields_by_label() {
+        let directory = tempfile_directory();
+        let mut server = EokaServer::new();
+        server.operations =
+            eoka_server::operations::OperationManager::in_directory(directory.clone());
+        server.ensure_browser().await.unwrap();
+        let page = {
+            let mut guard = server.state.lock().await;
+            let state = guard.as_mut().unwrap();
+            state
+                .new_tab(Some("about:blank"))
+                .await
+                .unwrap()
+                .1
+                .page
+                .clone()
+        };
+        page.execute("document.body.innerHTML='<label>Name<input id=name></label><button id=go onclick=\\'document.body.insertAdjacentHTML(`beforeend`,`<p id=done>Done</p>`)\\'>Join</button>'")
+            .await
+            .unwrap();
+
+        let fill = data(
+            server
+                .fill(Parameters(
+                    serde_json::from_value(serde_json::json!({"target":"Name","text":"Ada"}))
+                        .unwrap(),
+                ))
+                .await
+                .unwrap(),
+        );
+        assert_eq!(fill["outcome"], "verified_complete");
+        assert!(uuid::Uuid::parse_str(fill["id"].as_str().unwrap()).is_ok());
+        assert_eq!(
+            page.evaluate::<String>("document.querySelector('#name').value")
+                .await
+                .unwrap(),
+            "Ada"
+        );
+
+        let unverified = data(
+            server
+                .click(Parameters(
+                    serde_json::from_value(serde_json::json!({"target":"Join"})).unwrap(),
+                ))
+                .await
+                .unwrap(),
+        );
+        assert_eq!(unverified["status"], "outcome_unknown");
+        assert!(unverified["note"]
+            .as_str()
+            .unwrap()
+            .contains("not verified"));
+        assert!(page
+            .evaluate::<bool>("!!document.querySelector('#done')")
+            .await
+            .unwrap());
+        page.execute("document.querySelector('#done').remove()")
+            .await
+            .unwrap();
+
+        let click = data(
+            server
+                .click(Parameters(
+                    serde_json::from_value(serde_json::json!({
+                        "target":"Join",
+                        "expect":{"kind":"visible","target":{"query":{"kind":"css","selector":"#done"}}}
+                    }))
+                    .unwrap(),
+                ))
+                .await
+                .unwrap(),
+        );
+        assert_eq!(click["outcome"], "verified_complete");
+        let step = data(
+            server
+                .agent_step(Parameters(
+                    serde_json::from_value(serde_json::json!({
+                        "action":{"kind":"fill","target":"Name","text":"Grace"}
+                    }))
+                    .unwrap(),
+                ))
+                .await
+                .unwrap(),
+        );
+        assert_eq!(step["operation"]["outcome"], "verified_complete");
+        server.close().await.unwrap();
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "requires Chrome; MCP agent loop"]
     async fn mcp_agent_step_returns_fresh_state_and_preserves_unchanged_targets() {
         let directory = tempfile_directory();
         let mut server = EokaServer::new();

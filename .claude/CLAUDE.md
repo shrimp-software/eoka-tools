@@ -58,6 +58,13 @@ batch([
 ])
 ```
 
+## Action defaults
+
+- `operation_id` is optional in MCP action tools. One is generated when omitted and returned as `id`. Send your own UUID to retry safely after a lost response.
+- `click`, double click and `type_key` can omit `expect` in MCP. They then run unverified and return `status: outcome_unknown` with a `note`, so read the page next and do not repeat the action blindly. The CLI and SDKs still require `expect`.
+- `fill` and `select` find fields by label through the accessibility tree. Several matches return `ambiguous_target` instead of a guess.
+- `agent_step` accepts the same live targets as `click` and `fill`, as well as refs.
+
 ## Auto-retry
 
 `click` and `fill` automatically retry once on stale element errors (re-observe and re-resolve).
