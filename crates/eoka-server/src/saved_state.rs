@@ -128,6 +128,72 @@ async fn restore_one(
     Ok(outcome == "restored")
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct JarCookies {
+    cookies: Vec<JarCookie>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct JarCookie {
+    name: String,
+    domain: String,
+    path: String,
+}
+
+/// Delete the cookies a saved state replaces: those on a domain it holds cookies
+/// for, and those applying to its URL. A state only holds the cookies of the page
+/// it was captured from, so other sites' cookies are left alone.
+pub async fn clear_covered_cookies<'a>(
+    page: &eoka::Page,
+    url: &str,
+    saved_domains: impl IntoIterator<Item = &'a str>,
+) -> eoka::Result<()> {
+    let session = page.session();
+    let jar: JarCookies = session
+        .send("Storage.getCookies", &serde_json::json!({}))
+        .await?;
+    // Chrome's own matching finds cookies that apply to the saved URL but whose
+    // domain isn't in the state, such as a login made after it was saved.
+    let at_url = if url.starts_with("http://") || url.starts_with("https://") {
+        session
+            .send::<_, JarCookies>("Network.getCookies", &serde_json::json!({"urls": [url]}))
+            .await?
+            .cookies
+    } else {
+        Vec::new()
+    };
+    for cookie in cookies_to_clear(jar.cookies, at_url, saved_domains) {
+        session
+            .send::<_, serde_json::Value>(
+                "Network.deleteCookies",
+                &serde_json::json!({
+                    "name": cookie.name,
+                    "domain": cookie.domain,
+                    "path": cookie.path,
+                }),
+            )
+            .await?;
+    }
+    Ok(())
+}
+
+fn cookies_to_clear<'a>(
+    jar: Vec<JarCookie>,
+    at_url: Vec<JarCookie>,
+    saved_domains: impl IntoIterator<Item = &'a str>,
+) -> Vec<JarCookie> {
+    fn site(domain: &str) -> String {
+        domain.trim_start_matches('.').to_ascii_lowercase()
+    }
+    let covered: std::collections::HashSet<String> = saved_domains.into_iter().map(site).collect();
+    let mut seen = std::collections::HashSet::new();
+    jar.into_iter()
+        .filter(|c| covered.contains(&site(&c.domain)))
+        .chain(at_url)
+        .filter(|c| seen.insert((c.name.clone(), c.domain.clone(), c.path.clone())))
+        .collect()
+}
+
 pub async fn restore_storage(
     page: &Page,
     saved_url: &str,
@@ -156,6 +222,54 @@ pub async fn restore_storage(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn jar(name: &str, domain: &str) -> JarCookie {
+        JarCookie {
+            name: name.into(),
+            domain: domain.into(),
+            path: "/".into(),
+        }
+    }
+
+    fn cleared(jar: Vec<JarCookie>, at_url: Vec<JarCookie>, domains: &[&str]) -> Vec<String> {
+        let mut names: Vec<_> = cookies_to_clear(jar, at_url, domains.iter().copied())
+            .into_iter()
+            .map(|c| c.name)
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn only_covered_sites_are_cleared() {
+        let names = cleared(
+            vec![
+                jar("stale", "app.test"),
+                jar("dotted", ".APP.test"),
+                jar("sso", "sso.test"),
+                jar("lookalike", "notapp.test"),
+                jar("sub", "sub.app.test"),
+            ],
+            vec![],
+            &["app.test"],
+        );
+        assert_eq!(names, ["dotted", "stale"]);
+    }
+
+    #[test]
+    fn cookies_applying_to_the_url_are_cleared_once() {
+        let names = cleared(
+            vec![jar("stale", "app.test"), jar("parent", ".parent.test")],
+            vec![jar("stale", "app.test"), jar("parent", ".parent.test")],
+            &["app.test"],
+        );
+        assert_eq!(names, ["parent", "stale"]);
+    }
+
+    #[test]
+    fn a_state_with_no_cookies_clears_nothing_elsewhere() {
+        assert!(cleared(vec![jar("sso", "sso.test")], vec![], &[]).is_empty());
+    }
 
     #[test]
     fn private_write_is_owner_only_and_replaces_lax_files() {

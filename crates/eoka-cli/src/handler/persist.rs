@@ -125,7 +125,8 @@ pub async fn capture_state(page: &Page) -> Result<SavedState, String> {
     })
 }
 
-/// Restore browser state: clear + set cookies, clear + set localStorage/sessionStorage.
+/// Restore browser state: replace the covered sites' cookies, then clear + set
+/// localStorage/sessionStorage.
 pub async fn restore_state(
     page: &Page,
     state: &SavedState,
@@ -141,8 +142,15 @@ pub async fn restore_state(
     .map_err(|e| e.to_string())
 }
 
+/// Replace the cookies of the sites this state covers, leaving other sites' alone.
 pub async fn restore_cookies(page: &Page, state: &SavedState) -> Result<(), String> {
-    page.clear_all_cookies().await.map_err(|e| e.to_string())?;
+    eoka_server::saved_state::clear_covered_cookies(
+        page,
+        &state.url,
+        state.cookies.iter().map(|c| c.domain.as_str()),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
     let set_cookies: Vec<eoka::SessionCookie> = state
         .cookies
         .iter()
@@ -223,7 +231,75 @@ pub async fn ensure_console_capture(tab: &mut TabState) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::SavedState;
+    use super::{restore_cookies, SavedCookie, SavedState};
+    use serde_json::{json, Value};
+    use std::collections::HashMap;
+
+    fn cookie(name: &str, value: &str, domain: &str) -> eoka::SessionCookie {
+        eoka::SessionCookie {
+            name: name.into(),
+            value: value.into(),
+            domain: domain.into(),
+            path: "/".into(),
+            secure: false,
+            http_only: false,
+            same_site: None,
+            expires: None,
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "requires Chrome"]
+    async fn restore_replaces_covered_cookies_and_keeps_other_sites() {
+        let browser = eoka::Browser::launch_with(|config| {
+            config.patch_binary = false;
+            config.chrome_path = std::env::var("EOKA_TEST_CHROME_PATH").ok();
+        })
+        .await
+        .unwrap();
+        let page = browser.new_blank_page().await.unwrap();
+        page.set_cookies_bulk(vec![
+            cookie("session", "current", "app.test"),
+            cookie("added_later", "1", "app.test"),
+            cookie("sso", "keep-me", "sso.test"),
+        ])
+        .await
+        .unwrap();
+
+        let state = SavedState {
+            url: "http://app.test/".into(),
+            cookies: vec![SavedCookie {
+                name: "session".into(),
+                value: "saved".into(),
+                domain: "app.test".into(),
+                path: "/".into(),
+                expires: 0.0,
+                http_only: false,
+                secure: false,
+                same_site: None,
+            }],
+            local_storage: HashMap::new(),
+            session_storage: HashMap::new(),
+            user_agent: String::new(),
+            saved_at: String::new(),
+        };
+        restore_cookies(&page, &state).await.unwrap();
+
+        let jar: Value = page
+            .session()
+            .send("Storage.getCookies", &json!({}))
+            .await
+            .unwrap();
+        let mut cookies: Vec<_> = jar["cookies"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| (c["name"].as_str().unwrap(), c["value"].as_str().unwrap()))
+            .collect();
+        cookies.sort();
+        assert_eq!(cookies, [("session", "saved"), ("sso", "keep-me")]);
+        browser.close().await.unwrap();
+    }
 
     #[test]
     fn loads_saved_state_shape() {
