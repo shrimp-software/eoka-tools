@@ -211,7 +211,13 @@ pub(crate) async fn restore_state(
     page: &Page,
     state: &SavedState,
 ) -> Result<StorageRestoreReport, ErrorData> {
-    page.clear_all_cookies().await.map_err(internal)?;
+    eoka_server::saved_state::clear_covered_cookies(
+        page,
+        &state.url,
+        state.cookies.iter().map(|c| c.domain.as_str()),
+    )
+    .await
+    .map_err(internal)?;
     let set_cookies: Vec<eoka_server::eoka::SessionCookie> = state
         .cookies
         .iter()

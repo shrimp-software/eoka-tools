@@ -128,6 +128,82 @@ async fn restore_one(
     Ok(outcome == "restored")
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct JarCookies {
+    cookies: Vec<JarCookie>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct JarCookie {
+    name: String,
+    domain: String,
+    path: String,
+}
+
+/// Delete the cookies a saved state replaces, in this page's browser context: those
+/// on a domain the state holds cookies for or on its URL's host, including parent
+/// domains and subdomains. Related domains go together so that a leftover session on
+/// `auth.app.test` can't mix with a restored one on `app.test`. Unrelated sites stay.
+pub async fn clear_covered_cookies<'a>(
+    page: &eoka::Page,
+    url: &str,
+    saved_domains: impl IntoIterator<Item = &'a str>,
+) -> eoka::Result<()> {
+    let session = page.session();
+    let transport = session.transport();
+    let info: serde_json::Value = transport
+        .send(
+            "Target.getTargetInfo",
+            &serde_json::json!({"targetId": page.target_id()}),
+        )
+        .await?;
+    // Without a named context, Storage.getCookies reads the default context, even
+    // from a session in a different one.
+    let jar: JarCookies = transport
+        .send(
+            "Storage.getCookies",
+            &serde_json::json!({"browserContextId": info["targetInfo"]["browserContextId"]}),
+        )
+        .await?;
+    let host = url::Url::parse(url)
+        .ok()
+        .filter(|parsed| matches!(parsed.scheme(), "http" | "https"))
+        .and_then(|parsed| parsed.host_str().map(str::to_owned));
+    let covered = saved_domains.into_iter().map(str::to_owned).chain(host);
+    for cookie in cookies_to_clear(jar.cookies, covered) {
+        session
+            .send::<_, serde_json::Value>(
+                "Network.deleteCookies",
+                &serde_json::json!({
+                    "name": cookie.name,
+                    "domain": cookie.domain,
+                    "path": cookie.path,
+                }),
+            )
+            .await?;
+    }
+    Ok(())
+}
+
+fn cookies_to_clear(
+    jar: Vec<JarCookie>,
+    covered: impl IntoIterator<Item = impl AsRef<str>>,
+) -> Vec<JarCookie> {
+    fn site(domain: &str) -> String {
+        domain.trim_start_matches('.').to_ascii_lowercase()
+    }
+    fn related(a: &str, b: &str) -> bool {
+        a == b || a.ends_with(&format!(".{b}")) || b.ends_with(&format!(".{a}"))
+    }
+    let covered: Vec<String> = covered.into_iter().map(|d| site(d.as_ref())).collect();
+    jar.into_iter()
+        .filter(|c| {
+            let domain = site(&c.domain);
+            covered.iter().any(|site| related(&domain, site))
+        })
+        .collect()
+}
+
 pub async fn restore_storage(
     page: &Page,
     saved_url: &str,
@@ -156,6 +232,57 @@ pub async fn restore_storage(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn jar(name: &str, domain: &str) -> JarCookie {
+        JarCookie {
+            name: name.into(),
+            domain: domain.into(),
+            path: "/".into(),
+        }
+    }
+
+    fn cleared(jar: Vec<JarCookie>, covered: &[&str]) -> Vec<String> {
+        let mut names: Vec<_> = cookies_to_clear(jar, covered.iter().copied())
+            .into_iter()
+            .map(|c| c.name)
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn related_domains_are_cleared_and_unrelated_sites_stay() {
+        let names = cleared(
+            vec![
+                jar("exact", "app.test"),
+                jar("dotted", ".APP.test"),
+                jar("subdomain", "auth.app.test"),
+                jar("deeper", ".deep.app.test"),
+                jar("sso", "sso.test"),
+                jar("lookalike", "notapp.test"),
+            ],
+            &["app.test"],
+        );
+        assert_eq!(names, ["deeper", "dotted", "exact", "subdomain"]);
+    }
+
+    #[test]
+    fn a_parent_domain_of_the_covered_host_is_cleared() {
+        let names = cleared(
+            vec![
+                jar("parent", ".app.test"),
+                jar("sibling", "mail.app.test"),
+                jar("other", "other.test"),
+            ],
+            &["www.app.test"],
+        );
+        assert_eq!(names, ["parent"]);
+    }
+
+    #[test]
+    fn nothing_covered_clears_nothing() {
+        assert!(cleared(vec![jar("sso", "sso.test")], &[]).is_empty());
+    }
 
     #[test]
     fn private_write_is_owner_only_and_replaces_lax_files() {

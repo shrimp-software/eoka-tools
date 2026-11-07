@@ -655,7 +655,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-cli"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -717,7 +717,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-mcp"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "anyhow",
  "base64 0.23.0",
@@ -792,7 +792,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-server"
-version = "0.8.4"
+version = "0.8.5"
 dependencies = [
  "anyhow",
  "base64 0.23.0",
