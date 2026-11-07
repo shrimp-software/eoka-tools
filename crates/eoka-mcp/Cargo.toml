@@ -1,6 +1,6 @@
 [package]
 name = "eoka-mcp"
-version = "0.7.2"
+version = "0.8.0"
 edition = "2021"
 license = "MIT"
 description = "MCP server for eoka browser automation tools"
