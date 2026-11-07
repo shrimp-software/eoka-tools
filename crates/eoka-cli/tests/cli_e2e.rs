@@ -23,15 +23,8 @@ fn command(session: &str, args: &[&str]) -> Command {
     command
 }
 
-fn runtime_dir() -> PathBuf {
-    let base = std::env::var("XDG_RUNTIME_DIR")
-        .or_else(|_| std::env::var("TMPDIR"))
-        .unwrap_or_else(|_| "/tmp".to_string());
-    PathBuf::from(base).join("eoka")
-}
-
 fn pid_path(session: &str) -> PathBuf {
-    runtime_dir().join(format!("eoka-{session}.pid"))
+    eoka_sdk::session::pid_path(session)
 }
 
 fn cmdline(pid: u32) -> Vec<String> {
@@ -348,12 +341,12 @@ fn proxy_file_user_flow_forwards_resolved_proxy_to_daemon_and_chrome() {
     let daemon_pid = daemon_pid(&session);
     let daemon_args = cmdline(daemon_pid);
     assert!(
-        daemon_args.iter().any(|arg| arg == "--proxy"),
-        "daemon args did not receive resolved --proxy: {daemon_args:?}"
+        daemon_args.iter().any(|arg| arg == "--proxy-stdin"),
+        "daemon should receive the resolved proxy over stdin: {daemon_args:?}"
     );
     assert!(
-        daemon_args.iter().any(|arg| arg == AUTH_PROXY),
-        "daemon args did not receive the proxy file entry: {daemon_args:?}"
+        daemon_args.iter().all(|arg| !arg.contains(AUTH_PROXY)),
+        "proxy credentials must not appear in daemon args: {daemon_args:?}"
     );
     assert!(
         daemon_args.iter().all(|arg| arg != "--proxy-file"),

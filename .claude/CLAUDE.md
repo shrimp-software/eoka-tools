@@ -105,7 +105,11 @@ The server maintains `BrowserState` with:
 
 **State Persistence:**
 - `save_state(path)` — save cookies + localStorage + sessionStorage to JSON file (captures httpOnly via CDP)
-- `load_state(path, navigate?)` — restore saved state, optionally navigate to saved URL first
+- `load_state(path, navigate?)` — restore saved state, optionally navigate to saved URL first. Storage is only written when the tab is on the saved origin; otherwise it is skipped and the result warns
+
+State files are written owner-only (0600) and atomically. The path must end in `.json`, and a save can only replace an empty file or an earlier state file. Symlinks are refused.
+
+**URL policy:** `file:` URLs are blocked in MCP tools and CLI commands unless `EOKA_ALLOW_FILE_URLS=1` is set. For the CLI, the daemon reads this when it starts.
 
 **Other:**
 `cookies`, `set_cookie`, `close`

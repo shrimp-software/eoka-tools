@@ -43,7 +43,11 @@ pub(crate) fn resolve_launch_spec(cli: &Cli) -> Result<LaunchSpec, String> {
             .transpose()?,
         clone_state_from: cli.clone_state_from.clone(),
         no_stealth: cli.no_stealth,
-        proxy: launch_spec::resolve_proxy_spec(cli.proxy.as_deref(), cli.proxy_file.as_deref())?,
+        proxy: if cli.proxy_stdin {
+            Some(read_proxy_from_stdin()?)
+        } else {
+            launch_spec::resolve_proxy_spec(cli.proxy.as_deref(), cli.proxy_file.as_deref())?
+        },
         no_js: cli.no_js,
         js_allow: cli.js_allow.clone(),
         js_block: cli.js_block.clone(),
@@ -52,6 +56,18 @@ pub(crate) fn resolve_launch_spec(cli: &Cli) -> Result<LaunchSpec, String> {
         auto_solve_cloudflare: cli.auto_solve_cloudflare,
         sandbox: !cli.no_sandbox,
     })
+}
+
+fn read_proxy_from_stdin() -> Result<String, String> {
+    let mut line = String::new();
+    std::io::stdin()
+        .read_line(&mut line)
+        .map_err(|error| format!("Failed to read proxy from stdin: {error}"))?;
+    let proxy = line.trim();
+    if proxy.is_empty() {
+        return Err("--proxy-stdin received no proxy".into());
+    }
+    Ok(proxy.to_owned())
 }
 
 fn resolve_profile_spec(spec: &str) -> Result<std::path::PathBuf, String> {

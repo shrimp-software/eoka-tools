@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use eoka::Page;
+use eoka_server::saved_state::StorageRestoreReport;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -125,14 +126,21 @@ pub async fn capture_state(page: &Page) -> Result<SavedState, String> {
 }
 
 /// Restore browser state: clear + set cookies, clear + set localStorage/sessionStorage.
-pub async fn restore_state(page: &Page, state: &SavedState) -> Result<(), String> {
+pub async fn restore_state(
+    page: &Page,
+    state: &SavedState,
+) -> Result<StorageRestoreReport, String> {
     restore_cookies(page, state).await?;
-    restore_storage(page, "localStorage", &state.local_storage).await?;
-    restore_storage(page, "sessionStorage", &state.session_storage).await?;
-    Ok(())
+    eoka_server::saved_state::restore_storage(
+        page,
+        &state.url,
+        &state.local_storage,
+        &state.session_storage,
+    )
+    .await
+    .map_err(|e| e.to_string())
 }
 
-/// Restore cookies only. Storage must be restored in the destination origin.
 pub async fn restore_cookies(page: &Page, state: &SavedState) -> Result<(), String> {
     page.clear_all_cookies().await.map_err(|e| e.to_string())?;
     let set_cookies: Vec<eoka::SessionCookie> = state
@@ -145,24 +153,6 @@ pub async fn restore_cookies(page: &Page, state: &SavedState) -> Result<(), Stri
             .await
             .map_err(|e| e.to_string())?;
     }
-    Ok(())
-}
-
-async fn restore_storage(
-    page: &Page,
-    storage_name: &str,
-    data: &HashMap<String, String>,
-) -> Result<(), String> {
-    if data.is_empty() {
-        return Ok(());
-    }
-    let json = serde_json::to_string(data).map_err(|e| e.to_string())?;
-    let js = format!(
-        "(() => {{ {s}.clear(); const d = {j}; for (const [k,v] of Object.entries(d)) {s}.setItem(k,v); return 'ok'; }})()",
-        s = storage_name,
-        j = json
-    );
-    let _: String = page.evaluate_sync(&js).await.map_err(|e| e.to_string())?;
     Ok(())
 }
 

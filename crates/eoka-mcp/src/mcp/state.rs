@@ -112,13 +112,7 @@ impl BrowserState {
         let tab_id = if let Some(existing_id) = &self.current_tab_id {
             if let Some(tab) = self.tabs.get_mut(existing_id) {
                 tab.invalidate();
-                dispatch(
-                    &mut self.server,
-                    "page.goto",
-                    json!({ "pageId": existing_id, "url": url }),
-                )
-                .await
-                .map_err(|error| eoka_server::eoka::Error::cdp_msg(error.message))?;
+                tab.page.goto(url).await?;
             }
             existing_id.clone()
         } else {

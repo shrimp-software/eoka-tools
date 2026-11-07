@@ -302,11 +302,21 @@ fn link_allowed(link: &str, filter: &LinkFilter) -> bool {
 
     if let Ok(url) = url::Url::parse(link) {
         if let Some(host) = url.host_str() {
-            return allow.iter().any(|d| host.ends_with(d));
+            return allow.iter().any(|domain| host_matches_domain(host, domain));
         }
     }
 
     false
+}
+
+fn host_matches_domain(host: &str, domain: &str) -> bool {
+    let domain = domain.trim_start_matches('.').to_ascii_lowercase();
+    let host = host.to_ascii_lowercase();
+    !domain.is_empty()
+        && (host == domain
+            || host
+                .strip_suffix(domain.as_str())
+                .is_some_and(|prefix| prefix.ends_with('.')))
 }
 
 pub fn extract_code(msg: &EmailMessage, regex: &Regex) -> Option<String> {
@@ -563,5 +573,21 @@ mod tests {
         let msg = parse_message(1, raw.to_vec()).unwrap();
         assert!(msg.body_html.as_ref().unwrap().contains("<b>bold</b>"));
         assert!(msg.body_text.is_none());
+    }
+
+    #[test]
+    fn allow_list_matches_whole_domain_labels_only() {
+        for host in ["example.com", "sub.example.com", "EXAMPLE.com"] {
+            assert!(host_matches_domain(host, "example.com"), "{host}");
+        }
+        assert!(host_matches_domain("sub.example.com", ".example.com"));
+        for host in [
+            "evil-example.com",
+            "notexample.com",
+            "example.com.evil.test",
+        ] {
+            assert!(!host_matches_domain(host, "example.com"), "{host}");
+        }
+        assert!(!host_matches_domain("example.com", ""));
     }
 }

@@ -142,7 +142,10 @@ impl Handler {
                         s.ensure_blank_tab().await.map_err(|e| e.to_string())?
                     };
                     let _ = wait_for_stable(&tab.page).await;
-                    restore_state_and_maybe_reload(tab, &saved, state_url_can_reload(&url)).await?;
+                    let restored =
+                        restore_state_and_maybe_reload(tab, &saved, state_url_can_reload(&url))
+                            .await?;
+                    eprintln!("[eoka]{}", restored.notice(&saved.url));
                 }
                 s
             }
@@ -221,6 +224,9 @@ impl Handler {
             return Response::ok(
                 json!({"protocol_major": eoka_protocol::sidecar::PROTOCOL_VERSION.major, "daemon_version":env!("CARGO_PKG_VERSION"), "session":self.session_name, "mode":mode, "configuration_fingerprint":self.spec.configuration_fingerprint()}),
             );
+        }
+        if let Err(error) = eoka_server::url_policy::ensure_args_allowed(args) {
+            return Response::err(error);
         }
         if matches!(cmd, "agent_observe" | "agent_step") {
             return self.handle_agent(cmd, args).await;
@@ -1099,7 +1105,8 @@ impl Handler {
         let tab = self.require_tab()?;
         let state = capture_state(&tab.page).await?;
         let json = serde_json::to_string_pretty(&state).map_err(|e| e.to_string())?;
-        std::fs::write(path, &json).map_err(|e| e.to_string())?;
+        eoka_server::saved_state::write_state_file(std::path::Path::new(path), json.as_bytes())
+            .map_err(|e| e.to_string())?;
         Ok(Response::ok_text(format!(
             "Saved state to {} ({} cookies, {} localStorage, {} sessionStorage)",
             path,
@@ -1132,14 +1139,15 @@ impl Handler {
         } else {
             page_url_can_reload_state(&tab.page).await
         };
-        restore_state_and_maybe_reload(tab, &saved, reload_after_restore).await?;
+        let restored = restore_state_and_maybe_reload(tab, &saved, reload_after_restore).await?;
 
         Ok(Response::ok_text(format!(
-            "Loaded state from {} ({} cookies, {} localStorage, {} sessionStorage)",
+            "Loaded state from {} ({} cookies, {} localStorage, {} sessionStorage).{}",
             path,
             saved.cookies.len(),
-            saved.local_storage.len(),
-            saved.session_storage.len()
+            restored.local_restored,
+            restored.session_restored,
+            restored.notice(&saved.url)
         )))
     }
 
@@ -1297,7 +1305,8 @@ impl Handler {
 
         if let Some(path) = to {
             let json = serde_json::to_string_pretty(&saved).map_err(|e| e.to_string())?;
-            std::fs::write(&path, &json).map_err(|e| e.to_string())?;
+            eoka_server::saved_state::write_state_file(&path, json.as_bytes())
+                .map_err(|e| e.to_string())?;
             return Ok(Response::ok_text(format!(
                 "Saved state from {} to {} ({} cookies, {} localStorage, {} sessionStorage)",
                 source,
@@ -1317,13 +1326,15 @@ impl Handler {
             state.ensure_blank_tab().await.map_err(|e| e.to_string())?
         };
         let _ = wait_for_stable(&tab.page).await;
-        restore_state_and_maybe_reload(tab, &saved, state_url_can_reload(&url)).await?;
+        let restored =
+            restore_state_and_maybe_reload(tab, &saved, state_url_can_reload(&url)).await?;
         Ok(Response::ok_text(format!(
-            "Hydrated session from {} ({} cookies, {} localStorage, {} sessionStorage)",
+            "Hydrated session from {} ({} cookies, {} localStorage, {} sessionStorage).{}",
             source,
             saved.cookies.len(),
-            saved.local_storage.len(),
-            saved.session_storage.len()
+            restored.local_restored,
+            restored.session_restored,
+            restored.notice(&saved.url)
         )))
     }
 
@@ -2257,8 +2268,8 @@ async fn restore_state_and_maybe_reload(
     tab: &mut TabState,
     saved: &SavedState,
     reload_after_restore: bool,
-) -> Result<(), String> {
-    restore_state(&tab.page, saved).await?;
+) -> Result<eoka_server::saved_state::StorageRestoreReport, String> {
+    let restored = restore_state(&tab.page, saved).await?;
     tab.invalidate();
 
     if reload_after_restore {
@@ -2267,7 +2278,7 @@ async fn restore_state_and_maybe_reload(
         tab.invalidate();
     }
 
-    Ok(())
+    Ok(restored)
 }
 
 async fn page_url_can_reload_state(page: &eoka::Page) -> bool {
@@ -2308,7 +2319,9 @@ fn same_web_origin(left: &str, right: &str) -> bool {
 
 fn read_saved_state_file(path: &str) -> Result<SavedState, String> {
     let json = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
-    serde_json::from_str(&json).map_err(|e| format!("{path}: {e}"))
+    let saved: SavedState = serde_json::from_str(&json).map_err(|e| format!("{path}: {e}"))?;
+    eoka_server::url_policy::ensure_url_allowed(&saved.url).map_err(|e| format!("{path}: {e}"))?;
+    Ok(saved)
 }
 
 fn resolve_open_url_for_state(url: &str, saved: Option<&SavedState>) -> Result<String, String> {

@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde_json::{json, Map, Value};
 
@@ -250,21 +250,8 @@ pub(super) fn atomic_write_json(path: &Path, value: &Value) -> Result<(), String
     {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    let temp = temp_path(path);
     let json = serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?;
-    std::fs::write(&temp, json).map_err(|e| e.to_string())?;
-    std::fs::rename(&temp, path).map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-fn temp_path(path: &Path) -> PathBuf {
-    let mut temp = path.to_path_buf();
-    let name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("network.har");
-    temp.set_file_name(format!(".{}.{}.tmp", name, std::process::id()));
-    temp
+    eoka_server::saved_state::write_private_atomic(path, &json).map_err(|e| e.to_string())
 }
 
 fn header_value<'a>(headers: &'a Map<String, Value>, lowercase_name: &str) -> Option<&'a str> {

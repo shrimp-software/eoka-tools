@@ -194,7 +194,7 @@ pub struct LoadStateRequest {
     #[schemars(description = "File path to load state from (JSON). Absolute path required.")]
     pub path: String,
     #[schemars(
-        description = "Navigate to the saved URL after loading state (default: true). Set false to restore state then navigate somewhere else."
+        description = "Navigate to the saved URL before restoring (default: true). Set false to restore into the current tab. localStorage and sessionStorage are only restored when the tab is on the saved origin; otherwise they are skipped and the result says so."
     )]
     pub navigate: Option<bool>,
 }
