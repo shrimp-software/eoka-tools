@@ -1746,8 +1746,8 @@ impl EokaServer {
 
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for EokaServer {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_protocol_version(ProtocolVersion::V_2026_07_28)
             .with_server_info(Implementation::new("eoka-tools", env!("CARGO_PKG_VERSION")))
             .with_instructions(

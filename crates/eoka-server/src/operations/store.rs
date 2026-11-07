@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Context, Result};
 use eoka_protocol::{ActionOutcome, OperationRecord, OperationState};
 use fs2::FileExt;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use rusqlite::{params, Connection, OptionalExtension};
 use sha2::Sha256;
 use std::{

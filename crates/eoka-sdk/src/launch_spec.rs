@@ -56,10 +56,10 @@ pub fn resolve_proxy_spec(
 impl LaunchSpec {
     pub fn configuration_fingerprint(&self) -> String {
         use sha2::{Digest, Sha256};
-        format!(
-            "{:x}",
-            Sha256::digest(serde_json::to_vec(self).unwrap_or_default())
-        )
+        Sha256::digest(serde_json::to_vec(self).unwrap_or_default())
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
     }
 
     pub fn has_creation_settings(&self) -> bool {

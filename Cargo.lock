@@ -791,7 +791,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-server"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "anyhow",
  "base64 0.23.0",
