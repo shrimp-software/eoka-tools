@@ -39,7 +39,7 @@ func (b *Browser) hello(ctx context.Context, requiredMethods ...string) error {
 		if HasCode(err, ErrCodeUnknownMethod) || HasCode(err, ErrCodeProtocolMismatch) {
 			var serverError *Error
 			errors.As(err, &serverError)
-			return &Error{Code: ErrCodeProtocolMismatch, Data: serverError.Data, Message: fmt.Sprintf("server does not support sidecar protocol 2.0 (%v); provide a compatible eoka-server with WithServerPath or EOKA_SERVER_BIN; the pinned 0.8.0 download is not upgraded automatically", err)}
+			return &Error{Code: ErrCodeProtocolMismatch, Data: serverError.Data, Message: fmt.Sprintf("server does not support sidecar protocol 2.0 (%v); provide a compatible eoka-server with WithServerPath or EOKA_SERVER_BIN; the pinned %s download is not upgraded automatically", err, serverReleaseVersion)}
 		}
 		return fmt.Errorf("eoka: server.hello failed before browser session creation: %w", err)
 	}

@@ -43,22 +43,28 @@ cargo check --workspace --all-features
 cargo test --workspace --all-features
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 
+workspace_version() {
+  node --input-type=module -e "import { workspaceDependencyVersion } from './clients/node/scripts/release-versions.mjs'; import { readFileSync } from 'node:fs'; console.log(workspaceDependencyVersion(readFileSync('Cargo.toml', 'utf8'), process.argv[1]))" "$1"
+}
+eoka_version="$(workspace_version eoka)"
+tack_version="$(workspace_version tack-core)"
+
 core_dependency="$(cargo tree --locked -p eoka --depth 0 --prefix none)"
-if [[ "${core_dependency}" != "eoka v0.9.1" ]]; then
-  echo "Release requires registry eoka 0.9.1; local, path and git overrides do not qualify."
+if [[ "${core_dependency}" != "eoka v${eoka_version}" ]]; then
+  echo "Release requires registry eoka ${eoka_version} (found ${core_dependency}); local, path and git overrides do not qualify."
   exit 1
 fi
 
 cargo package -p eoka-protocol --allow-dirty
 cargo package --workspace --allow-dirty --no-verify
 
-cat <<'MSG'
+cat <<MSG
 
 Release check passed.
 
 Publish order:
-  0. use the published eoka 0.9.1 registry dependency
-  1. publish tack-rs 0.0.2 crates first
+  0. use the published eoka ${eoka_version} registry dependency
+  1. publish tack-rs ${tack_version} crates first
   2. cargo publish -p eoka-captcha
   3. cargo publish -p eoka-proxy
   4. cargo publish -p eoka-protocol
