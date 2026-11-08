@@ -4,7 +4,7 @@
       "params": {
         "$defs": {
           "Action": {
-            "description": "Native input or document action to perform once.",
+            "description": "Native input or document action to perform once. `Debug` prints only the kind\nand target, because values and headers can hold secrets.",
             "oneOf": [
               {
                 "description": "Navigate by a relative history offset; zero reloads the current document.",
@@ -502,7 +502,7 @@
             ]
           },
           "Expectation": {
-            "description": "An observable completion condition. Values are not copied into receipts.",
+            "description": "An observable completion condition. Values are not copied into receipts, and\n`Debug` prints only the kind.",
             "oneOf": [
               {
                 "description": "Wait for the document to be interactive or complete, without claiming application readiness.",
@@ -1792,7 +1792,7 @@
             ]
           },
           "Expectation": {
-            "description": "An observable completion condition. Values are not copied into receipts.",
+            "description": "An observable completion condition. Values are not copied into receipts, and\n`Debug` prints only the kind.",
             "oneOf": [
               {
                 "description": "Wait for the document to be interactive or complete, without claiming application readiness.",
@@ -3218,6 +3218,7 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
           "id": {
+            "description": "Operation ID: the id field of the action's result.",
             "type": "string"
           }
         },
@@ -3589,6 +3590,7 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
           "id": {
+            "description": "Operation ID: the id field of the action's result.",
             "type": "string"
           }
         },
@@ -4351,6 +4353,7 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
           "id": {
+            "description": "Operation ID: the id field of the action's result.",
             "type": "string"
           },
           "timeout_ms": {
@@ -4894,7 +4897,7 @@
             ]
           },
           "Expectation": {
-            "description": "An observable completion condition. Values are not copied into receipts.",
+            "description": "An observable completion condition. Values are not copied into receipts, and\n`Debug` prints only the kind.",
             "oneOf": [
               {
                 "description": "Wait for the document to be interactive or complete, without claiming application readiness.",
@@ -5807,7 +5810,7 @@
             ]
           },
           "Expectation": {
-            "description": "An observable completion condition. Values are not copied into receipts.",
+            "description": "An observable completion condition. Values are not copied into receipts, and\n`Debug` prints only the kind.",
             "oneOf": [
               {
                 "description": "Wait for the document to be interactive or complete, without claiming application readiness.",
@@ -7083,7 +7086,7 @@
             ]
           },
           "Expectation": {
-            "description": "An observable completion condition. Values are not copied into receipts.",
+            "description": "An observable completion condition. Values are not copied into receipts, and\n`Debug` prints only the kind.",
             "oneOf": [
               {
                 "description": "Wait for the document to be interactive or complete, without claiming application readiness.",
@@ -8074,7 +8077,7 @@
             ]
           },
           "Expectation": {
-            "description": "An observable completion condition. Values are not copied into receipts.",
+            "description": "An observable completion condition. Values are not copied into receipts, and\n`Debug` prints only the kind.",
             "oneOf": [
               {
                 "description": "Wait for the document to be interactive or complete, without claiming application readiness.",
@@ -8928,7 +8931,7 @@
             ]
           },
           "Expectation": {
-            "description": "An observable completion condition. Values are not copied into receipts.",
+            "description": "An observable completion condition. Values are not copied into receipts, and\n`Debug` prints only the kind.",
             "oneOf": [
               {
                 "description": "Wait for the document to be interactive or complete, without claiming application readiness.",
@@ -9782,7 +9785,7 @@
             ]
           },
           "Expectation": {
-            "description": "An observable completion condition. Values are not copied into receipts.",
+            "description": "An observable completion condition. Values are not copied into receipts, and\n`Debug` prints only the kind.",
             "oneOf": [
               {
                 "description": "Wait for the document to be interactive or complete, without claiming application readiness.",
@@ -10636,7 +10639,7 @@
             ]
           },
           "Expectation": {
-            "description": "An observable completion condition. Values are not copied into receipts.",
+            "description": "An observable completion condition. Values are not copied into receipts, and\n`Debug` prints only the kind.",
             "oneOf": [
               {
                 "description": "Wait for the document to be interactive or complete, without claiming application readiness.",
@@ -11490,7 +11493,7 @@
             ]
           },
           "Expectation": {
-            "description": "An observable completion condition. Values are not copied into receipts.",
+            "description": "An observable completion condition. Values are not copied into receipts, and\n`Debug` prints only the kind.",
             "oneOf": [
               {
                 "description": "Wait for the document to be interactive or complete, without claiming application readiness.",
@@ -12311,7 +12314,7 @@
       "params": {
         "$defs": {
           "Expectation": {
-            "description": "An observable completion condition. Values are not copied into receipts.",
+            "description": "An observable completion condition. Values are not copied into receipts, and\n`Debug` prints only the kind.",
             "oneOf": [
               {
                 "description": "Wait for the document to be interactive or complete, without claiming application readiness.",
@@ -12729,13 +12732,15 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "A condition that is false now and true after the action, for example {\"kind\":\"url\",\"value\":\"/submit\",\"contains\":true}. A wrong guess fails after the action has already run."
           },
           "key": {
             "description": "Key to press, for example Enter, Tab, Escape, ArrowDown, or Backspace.",
             "type": "string"
           },
           "operation_id": {
+            "description": "Optional UUID. Generated when omitted and returned as id. Send your own to retry safely after a lost response.",
             "type": [
               "string",
               "null"
@@ -12772,7 +12777,7 @@
       "params": {
         "$defs": {
           "Expectation": {
-            "description": "An observable completion condition. Values are not copied into receipts.",
+            "description": "An observable completion condition. Values are not copied into receipts, and\n`Debug` prints only the kind.",
             "oneOf": [
               {
                 "description": "Wait for the document to be interactive or complete, without claiming application readiness.",
@@ -13190,13 +13195,15 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "A condition that is false now and true after the action, for example {\"kind\":\"url\",\"value\":\"/submit\",\"contains\":true}. A wrong guess fails after the action has already run."
           },
           "key": {
             "description": "Key to press, for example Enter, Tab, Escape, ArrowDown, or Backspace.",
             "type": "string"
           },
           "operation_id": {
+            "description": "Optional UUID. Generated when omitted and returned as id. Send your own to retry safely after a lost response.",
             "type": [
               "string",
               "null"
@@ -13422,7 +13429,7 @@
             ]
           },
           "Expectation": {
-            "description": "An observable completion condition. Values are not copied into receipts.",
+            "description": "An observable completion condition. Values are not copied into receipts, and\n`Debug` prints only the kind.",
             "oneOf": [
               {
                 "description": "Wait for the document to be interactive or complete, without claiming application readiness.",
@@ -14662,7 +14669,7 @@
             ]
           },
           "Expectation": {
-            "description": "An observable completion condition. Values are not copied into receipts.",
+            "description": "An observable completion condition. Values are not copied into receipts, and\n`Debug` prints only the kind.",
             "oneOf": [
               {
                 "description": "Wait for the document to be interactive or complete, without claiming application readiness.",
@@ -15794,7 +15801,7 @@
             ]
           },
           "Expectation": {
-            "description": "An observable completion condition. Values are not copied into receipts.",
+            "description": "An observable completion condition. Values are not copied into receipts, and\n`Debug` prints only the kind.",
             "oneOf": [
               {
                 "description": "Wait for the document to be interactive or complete, without claiming application readiness.",
@@ -17827,7 +17834,7 @@
         }
       },
       "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "description": "Native input or document action to perform once.",
+      "description": "Native input or document action to perform once. `Debug` prints only the kind\nand target, because values and headers can hold secrets.",
       "oneOf": [
         {
           "description": "Navigate by a relative history offset; zero reloads the current document.",
@@ -18292,7 +18299,7 @@
           ]
         },
         "Expectation": {
-          "description": "An observable completion condition. Values are not copied into receipts.",
+          "description": "An observable completion condition. Values are not copied into receipts, and\n`Debug` prints only the kind.",
           "oneOf": [
             {
               "description": "Wait for the document to be interactive or complete, without claiming application readiness.",
@@ -20996,7 +21003,7 @@
         }
       },
       "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "description": "An observable completion condition. Values are not copied into receipts.",
+      "description": "An observable completion condition. Values are not copied into receipts, and\n`Debug` prints only the kind.",
       "oneOf": [
         {
           "description": "Wait for the document to be interactive or complete, without claiming application readiness.",
