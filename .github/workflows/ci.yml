@@ -147,6 +147,9 @@ jobs:
         with:
           cache-key: node-schema
       - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c
+        with:
+          # Pinned: the newest release can be unreachable on release CDNs.
+          version: 2026.11.3
       - name: Install SDK dependencies
         run: mise exec -- npm --prefix clients/node ci --ignore-scripts --omit=optional
       - name: Check generated contracts against the Rust schema export
@@ -169,6 +172,9 @@ jobs:
         with:
           cache-key: browser
       - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c
+        with:
+          # Pinned: the newest release can be unreachable on release CDNs.
+          version: 2026.11.3
       - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
           tool: cargo-nextest
@@ -215,6 +221,9 @@ jobs:
         with:
           go-version: "1.21"
       - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c
+        with:
+          # Pinned: the newest release can be unreachable on release CDNs.
+          version: 2026.11.3
       - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         if: matrix.suite != 'clients'
         with:
