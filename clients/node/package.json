@@ -47,14 +47,14 @@
     "example:capture": "node examples/capture.mjs"
   },
   "dependencies": {
-    "@puppeteer/browsers": "3.2.4",
-    "ajv": "8.17.1",
-    "proxy-agent": "8.0.1",
+    "@puppeteer/browsers": "3.2.6",
+    "ajv": "8.20.0",
+    "proxy-agent": "8.0.2",
     "yauzl": "3.4.0"
   },
   "devDependencies": {
-    "@types/node": "24.19.2",
-    "sigstore": "4.1.1",
-    "typescript": "5.9.3"
+    "@types/node": "26.6.6",
+    "sigstore": "5.0.1",
+    "typescript": "7.0.2"
   }
 }
