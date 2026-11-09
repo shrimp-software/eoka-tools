@@ -21,28 +21,47 @@ pub struct DownloadCli {
         help = "New output filename; parent must exist"
     )]
     pub output: Option<PathBuf>,
-    #[arg(long)]
+    #[arg(long, help = "Fail unless the file has exactly this many bytes")]
     pub expect_bytes: Option<u64>,
-    #[arg(long, default_value_t = 30_000)]
+    #[arg(
+        long,
+        default_value_t = 30_000,
+        help = "Deadline for the native download to start, at most 300000"
+    )]
     pub start_timeout_ms: u64,
     #[arg(long, help = "Wait for this job without blocking other commands")]
     pub wait: bool,
-    #[arg(long, default_value_t = 30_000)]
+    #[arg(
+        long,
+        default_value_t = 30_000,
+        help = "How long --wait waits; the job keeps running after it"
+    )]
     pub timeout_ms: u64,
 }
 
 #[derive(Subcommand)]
 pub enum DownloadAction {
+    #[command(about = "List download jobs in this session")]
     List,
+    #[command(about = "Show one job")]
     Status {
+        #[arg(help = "Job ID returned by download")]
         id: String,
     },
+    #[command(about = "Wait for a job; a timeout leaves it running")]
     Wait {
+        #[arg(help = "Job ID returned by download")]
         id: String,
-        #[arg(long, default_value_t = 30_000)]
+        #[arg(
+            long,
+            default_value_t = 30_000,
+            help = "How long to wait; the job keeps running after it"
+        )]
         timeout_ms: u64,
     },
+    #[command(about = "Cancel a job")]
     Cancel {
+        #[arg(help = "Job ID returned by download")]
         id: String,
     },
 }

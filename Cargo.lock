@@ -624,8 +624,6 @@ dependencies = [
 [[package]]
 name = "eoka"
 version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc347d3ae9b803c7c1911e65ee7a4736b22043246a013ef0b05a7195a2aaffe7"
 dependencies = [
  "aho-corasick",
  "base64 0.23.0",
@@ -674,6 +672,7 @@ dependencies = [
  "libc",
  "serde",
  "serde_json",
+ "shlex",
  "tack-core",
  "tack-runtime-quickjs",
  "tempfile",

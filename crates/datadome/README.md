@@ -205,7 +205,7 @@ mise exec -- cargo test -p eoka-datadome --test nested_fixture -- --ignored
 mise exec -- cargo test -p eoka-datadome --example datadome_solve -- --ignored
 mise exec -- cargo clippy -p eoka-datadome --all-targets --all-features -- -D warnings
 mise exec -- cargo test -p eoka-cli --test datadome_cli -- --ignored
-mise run conformance
+mise run drift
 mise run release-check
 ```
 

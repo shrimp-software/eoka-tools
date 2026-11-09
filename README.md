@@ -313,7 +313,7 @@ registry source and checksum
 no sibling core checkout or Cargo patch is required.
 
 ```sh
-mise run conformance
+mise run drift
 mise run release-check
 cd clients/go && go test ./...
 ```

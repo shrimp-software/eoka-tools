@@ -96,5 +96,5 @@ Treat its results as a controlled pilot, not proof about arbitrary websites.
 
 This development release requires the core eoka version set in the root
 `Cargo.toml` `[workspace.dependencies]`. Publish core first, then run
-`mise run conformance` and `mise run release-check` against its registry release.
+`mise run drift` and `mise run release-check` against its registry release.
 A local override is not registry or macOS authenticated-workflow qualification.

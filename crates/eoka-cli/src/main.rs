@@ -7,12 +7,16 @@ mod command_request;
 mod daemon;
 mod download_cmd;
 mod handler;
+#[cfg(test)]
+mod help_coverage;
 mod launch;
 mod launch_spec;
 mod output;
 mod protocol;
 mod session;
 mod sessions;
+#[cfg(test)]
+mod skill_examples;
 
 use clap::Parser;
 use cli::{CaptchaAction, Cli, Command, ToolsAction};
