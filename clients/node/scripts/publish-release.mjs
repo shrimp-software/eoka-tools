@@ -294,7 +294,7 @@ async function registryBoundary(directory, env, { bootstrap = false, publishEnv 
   let verifier;
   const loadVerifier = async () => {
     const sigstore = await import('sigstore');
-    assert.equal((await json(join(root, 'package.json'))).devDependencies.sigstore, '4.1.1', 'The fixed public Sigstore verifier must be pinned');
+    assert.equal((await json(join(root, 'package.json'))).devDependencies.sigstore, '5.0.1', 'The fixed public Sigstore verifier must be pinned');
     const verifySignatures = async item => {
       const consumer = join(directory, `signature-${item.name.replace(/[@/]/g, '-')}`);
       await mkdir(consumer);

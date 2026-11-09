@@ -29,6 +29,13 @@ updates:
     groups:
       node-deps:
         patterns: ["*"]
+    ignore:
+      # TypeScript 7 has no compiler API yet; scripts/typecheck.mjs needs it.
+      - dependency-name: typescript
+        versions: [">=7"]
+      # Keep Node types on the major in package.json "engines".
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: gomod
     directory: /clients/go

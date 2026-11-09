@@ -39,11 +39,11 @@ jobs:
       SOURCE_SHA: ${{ inputs.source_sha }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c
       - name: Fail closed before qualification or deployment
         run: mise exec -- node clients/node/scripts/publish-release.mjs gate
 
@@ -86,11 +86,11 @@ jobs:
       QUALIFICATION_ARTIFACT_ID: ${{ needs.qualify.outputs.artifact-id }}
       QUALIFICATION_ARTIFACT_DIGEST: ${{ needs.qualify.outputs.artifact-digest }}
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c
       - name: Recheck approved source and protections
         run: mise exec -- node clients/node/scripts/publish-release.mjs gate
       - name: Install SDK build dependencies without scripts
@@ -121,11 +121,11 @@ jobs:
       QUALIFICATION_ARTIFACT_ID: ${{ needs.qualify.outputs.artifact-id }}
       QUALIFICATION_ARTIFACT_DIGEST: ${{ needs.qualify.outputs.artifact-digest }}
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c
       - name: Install Chrome runtime dependencies
         run: |
           sudo apt-get update
