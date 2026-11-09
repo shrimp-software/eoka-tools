@@ -28,7 +28,7 @@ cannot drift.
 
 ## Tasks
 
-Use `mise` for repo workflows. Prefer `mise run conformance` after protocol,
+Use `mise` for repo workflows. Prefer `mise run drift` after protocol,
 CLI, MCP, SDK, or Tack changes, and `mise run release-check` before release or
 PR handoff.
 

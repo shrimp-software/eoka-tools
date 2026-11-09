@@ -194,5 +194,5 @@ records registry checksum
 `bb088753bbef0585bcbaa1e868e4e59b5ee99db40844ba9cb3ec4822ca95e019`.
 Publish protocol,
 SDK, server, runner, MCP/Tack and CLI in dependency order (and the updated
-DataDome adapter before CLI). Run `mise run conformance` and
+DataDome adapter before CLI). Run `mise run drift` and
 `mise run release-check` against registry dependencies before release.

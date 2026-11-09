@@ -73,7 +73,7 @@ Network recording start, stop, clear and session updates acknowledge application
 
 The three reconstructed Sketchy helpers are in [tools/sketchy](tools/sketchy/README.md). They require an explicit authenticated session, navigate to the requested lesson, validate video identity, and publish verified media without overwriting an existing file.
 
-Before release, run core formatting, Clippy, all unit/browser tests, examples and Rust 1.85; tools conformance, all unit/browser tests, Clippy, Go race tests, Node generation/type/runtime/package checks, and helper tests. Use a short disk-backed `TMPDIR`, such as `/var/tmp/er`, for Chrome Unix sockets.
+Before release, run core formatting, Clippy, all unit/browser tests, examples and Rust 1.85; `mise run drift`, all unit/browser tests, Clippy, Go race tests, Node generation/type/runtime/package checks, and helper tests. Use a short disk-backed `TMPDIR`, such as `/var/tmp/er`, for Chrome Unix sockets.
 
 Authenticated macOS qualification must use the actual revised CLI and helpers: headed login with real blur and sequential input, validation and submit, popup navigation if present, correct lesson selection from a different current lesson, lesson listing, verified download, and repeat invocation without duplicate actions. Record versions, operation IDs and result states; do not record passwords, cookies or signed stream URLs.
 

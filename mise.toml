@@ -17,8 +17,8 @@ run = "cargo test --workspace --all-features"
 description = "Lint all workspace targets"
 run = "cargo clippy --workspace --all-targets --all-features -- -D warnings"
 
-[tasks.conformance]
-description = "Run protocol projection conformance tests"
+[tasks.drift]
+description = "Check the CLI, MCP, Tack and docs still match eoka-protocol"
 run = [
   "cargo test -p eoka-protocol operation_catalog",
   "cargo test -p eoka-protocol manifest_uses_catalog_metadata_and_schemas",
@@ -30,6 +30,8 @@ run = [
   "! cargo tree -p eoka-cli -e normal --depth 1 | grep -q 'eoka-mcp'",
   "cargo test -p eoka-cli tools_manifest_matches_protocol_catalog",
   "cargo test -p eoka-cli tack_executes_without_browser_tools",
+  "cargo test -p eoka-cli skill_examples_parse_with_the_real_cli",
+  "cargo test -p eoka-cli every_cli_command_and_arg_has_help",
 ]
 
 [tasks.release-check]

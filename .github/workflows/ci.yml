@@ -75,8 +75,8 @@ jobs:
       - name: Crate versions
         if: env.RUST == 'true'
         run: bash scripts/check-crate-versions.sh
-      # The conformance tests themselves run in the unit job; this is the one
-      # conformance rule that is not a test.
+      # The drift tests themselves run in the unit job; this is the one
+      # drift rule that is not a test.
       - name: CLI does not depend on eoka-mcp
         if: env.RUST == 'true'
         run: "! cargo tree -p eoka-cli -e normal --depth 1 | grep -q eoka-mcp"

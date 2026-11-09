@@ -73,7 +73,7 @@ fn read_batch_source(
     Ok(source)
 }
 
-fn parse_batch_requests(source: &str) -> Result<Vec<Request>, String> {
+pub(crate) fn parse_batch_requests(source: &str) -> Result<Vec<Request>, String> {
     let value: Value =
         serde_json::from_str(source).map_err(|e| format!("Invalid batch JSON: {}", e))?;
     let steps = match value {
