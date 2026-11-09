@@ -623,9 +623,9 @@ dependencies = [
 
 [[package]]
 name = "eoka"
-version = "0.10.1"
+version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc347d3ae9b803c7c1911e65ee7a4736b22043246a013ef0b05a7195a2aaffe7"
+checksum = "054adf64ef77e226140c2bb830ae8f67af53bb9a0320cbb6adceb492fe389b4e"
 dependencies = [
  "aho-corasick",
  "base64 0.23.0",
@@ -655,7 +655,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-cli"
-version = "0.10.1"
+version = "0.10.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -685,7 +685,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-datadome"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "base64 0.23.0",
  "eoka",
@@ -736,7 +736,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-protocol"
-version = "0.9.1"
+version = "0.9.2"
 dependencies = [
  "eoka",
  "schemars",
@@ -755,7 +755,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-runner"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "chrono",
  "clap",
@@ -777,7 +777,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-sdk"
-version = "0.10.1"
+version = "0.10.2"
 dependencies = [
  "anyhow",
  "eoka",
@@ -792,7 +792,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-server"
-version = "0.9.1"
+version = "0.9.2"
 dependencies = [
  "anyhow",
  "base64 0.23.0",

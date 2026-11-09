@@ -12,7 +12,7 @@ authors = ["cbxss"]
 [workspace.dependencies]
 # eoka and the workspace crates, versioned once here. eoka-server pins eoka
 # exactly in its own manifest so its release binaries match qualification.
-eoka = "0.10.1"
+eoka = "0.10.2"
 captcha = { package = "eoka-captcha", version = "0.1.1", path = "crates/captcha" }
 eoka-datadome = { version = "0.6.0", path = "crates/datadome" }
 eoka-email = { version = "0.1.1", path = "crates/eoka-email" }
