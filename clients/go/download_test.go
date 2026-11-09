@@ -14,7 +14,7 @@ import (
 )
 
 func TestReleaseAssetURLUsesCurrentServerRelease(t *testing.T) {
-	if got, want := releaseAssetURL("checksums.txt"), defaultReleaseBaseURL+"/eoka-server-v0.8.0/checksums.txt"; got != want {
+	if got, want := releaseAssetURL("checksums.txt"), defaultReleaseBaseURL+"/eoka-server-v"+serverReleaseVersion+"/checksums.txt"; got != want {
 		t.Fatalf("releaseAssetURL = %q, want %q", got, want)
 	}
 }

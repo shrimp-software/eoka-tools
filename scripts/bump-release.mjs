@@ -1,13 +1,13 @@
 #!/usr/bin/env node
-// Set the Node SDK release version and propagate it, plus the eoka-server crate
-// version, into every file that repeats them.
+// Set the Node SDK release version and propagate it, the eoka-server crate
+// version and the workspace eoka version into every file that repeats them.
 //
 //   node scripts/bump-release.mjs [--sdk <version>]   write the derived files
 //   node scripts/bump-release.mjs --check             fail if any file drifted
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
-import { releaseVersions, versionDrift } from '../clients/node/scripts/release-versions.mjs';
+import { releaseVersions, repoVersionDrift, versionDrift, writeRepoPins } from '../clients/node/scripts/release-versions.mjs';
 
 const { values: args } = parseArgs({ options: { sdk: { type: 'string' }, check: { type: 'boolean', default: false } } });
 const root = join(import.meta.dirname, '..', 'clients', 'node');
@@ -15,7 +15,7 @@ const path = file => join(root, file);
 const writeJson = (file, value) => writeFile(path(file), `${JSON.stringify(value, null, 2)}\n`);
 
 if (args.check) {
-  const drift = await versionDrift(root);
+  const drift = [...(await versionDrift(root)), ...(await repoVersionDrift())];
   for (const line of drift) console.error(`::error::${line}`);
   if (drift.length) process.exit(1);
   console.log('Release versions are consistent.');
@@ -47,6 +47,8 @@ const readiness = JSON.parse(await readFile(path('scripts/publication-readiness.
 readiness.sdkVersion = sdk;
 await writeJson('scripts/publication-readiness.json', readiness);
 
-const drift = await versionDrift(root);
+await writeRepoPins();
+
+const drift = [...(await versionDrift(root)), ...(await repoVersionDrift())];
 if (drift.length) throw new Error(`Still inconsistent:\n${drift.join('\n')}`);
 console.log(`SDK ${sdk}, server ${server}`);
