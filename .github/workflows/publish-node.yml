@@ -43,7 +43,7 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b
       - name: Fail closed before qualification or deployment
         run: mise exec -- node clients/node/scripts/publish-release.mjs gate
 
@@ -90,7 +90,7 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b
       - name: Recheck approved source and protections
         run: mise exec -- node clients/node/scripts/publish-release.mjs gate
       - name: Install SDK build dependencies without scripts
@@ -125,7 +125,7 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b
       - name: Install Chrome runtime dependencies
         run: |
           sudo apt-get update
