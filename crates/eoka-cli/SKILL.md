@@ -6,7 +6,7 @@ description: "Control a real Chrome browser with the Eoka CLI. Use for browser n
 # eoka
 
 Use `eoka` when the task needs a real Chrome browser. This guide targets CLI
-**0.10 / protocol 2**. Check the binary first:
+**0.11 / protocol 2**. Check the binary first:
 
 ```bash
 command -v eoka
