@@ -45,11 +45,12 @@ String targets are CSS selectors. An action resolves only after its result is ve
 - **Waits:** `waitFor`, `waitForVisible`, `waitForText`
 - **Actions:** `goto`, `fill`, `select`, `hover`, `click`, `type`, `pressKey`, `submit`, `drag`
 
-Everything the `eoka` CLI can do is also callable by its catalog name through the typed `page.invoke`, for operations without a dedicated method yet (console and error logs, cookies and storage, network recording and interception, downloads, JavaScript policy, and more). Params are the operation's input plus the page ID; results are untyped for now.
+Everything the `eoka` CLI can do is available under `page.ops`, generated from the same operation catalog: console and error logs, cookies and storage, network recording and interception, downloads, JavaScript policy and more. Each takes the operation's input; results are untyped for now.
 
 ```js
-await page.invoke("network.record.start", { pageId: page.id });
-const logs = await page.invoke("console", { pageId: page.id });
+await page.ops.networkRecordStart();
+const logs = await page.ops.console({ clear: true });
+const cookies = await page.ops.cookies();
 ```
 
 ## Shadow DOM and Turnstile
