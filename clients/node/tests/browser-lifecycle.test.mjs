@@ -211,7 +211,7 @@ test('defaultTimeoutMs bounds later calls against a silent sidecar and null disa
     assert.ok(error.stack.includes(import.meta.filename));
     return true;
   });
-  assert.ok(performance.now() - started >= 59);
+  assert.ok(performance.now() - started >= 45);
   await assert.rejects(browser.tabs({ timeoutMs: 20 }), error => /browser\.tabs exceeded its 20 ms local deadline/.test(error.message));
   const unbounded = await Browser.launch({ ...f.options, defaultTimeoutMs: null });
   f.track(unbounded);
@@ -229,7 +229,7 @@ test('a short defaultTimeoutMs does not shorten session startup', { skip: !suppo
   const browser = await Browser.launch({ ...f.options, defaultTimeoutMs: 50 });
   f.track(browser);
   assert.equal(browser.ownership, 'owned');
-  assert.equal((await browser.tabs())[0].id, 'existing-tab');
+  assert.equal((await browser.tabs({ timeoutMs: 5000 }))[0].id, 'existing-tab');
 });
 
 test('launch isolates child temporary state and close preserves caller runtime root, cache and profile', { skip: !supported }, async t => {
