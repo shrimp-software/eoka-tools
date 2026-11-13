@@ -16,6 +16,8 @@ export { detectPlatform, selectPlatform } from "./platform.js";
 export type { PlatformId } from "./platform.js";
 export { Page } from "./page.js";
 export type {
+  ActionOptions,
+  PageFunction,
   PerformOptions,
   LocatorInput,
   PageWaitOptions,
@@ -45,7 +47,6 @@ export type { CallOptions, InvokeClient } from "./client.js";
 export { protocolVersion, methodNames } from "./generated/protocol.js";
 export type {
   Action,
-  ActionOptions,
   ActionOutcome,
   ActionReceipt,
   AgentAction,
