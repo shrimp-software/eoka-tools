@@ -512,9 +512,15 @@ pub async fn send_command(
     send_command_once(session_name, request, &spec, reply_limit).await
 }
 
+#[cfg(not(test))]
 const HELLO_LIMIT: Duration = Duration::from_secs(5);
+#[cfg(test)]
+const HELLO_LIMIT: Duration = Duration::from_millis(1000);
 const STATUS_LIMIT: Duration = Duration::from_millis(1500);
+#[cfg(not(test))]
 const REPLY_MARGIN_MS: u64 = 15_000;
+#[cfg(test)]
+const REPLY_MARGIN_MS: u64 = 200;
 const LAUNCH_MARGIN_MS: u64 = 30_000;
 const UNKNOWN_COMMAND_LIMIT_MS: u64 = 90_000;
 
@@ -629,8 +635,8 @@ fn silent_daemon(session_name: &str) -> Response {
         eoka_protocol::ErrorDetail::new(
             "daemon_unresponsive",
             format!(
-                "Session `{session_name}` accepted the connection but did not answer within {} s; its daemon is suspended, overloaded or shutting down. No command was sent.",
-                HELLO_LIMIT.as_secs()
+                "Session `{session_name}` accepted the connection but did not answer within {:.1} s; its daemon is suspended, overloaded or shutting down. No command was sent.",
+                HELLO_LIMIT.as_secs_f64()
             ),
         )
         .retryable(true)
@@ -691,8 +697,8 @@ async fn unanswered(session_name: &str, request: &Request, lost: Lost) -> Respon
         Lost::Timeout(limit) => (
             "reply_timeout",
             format!(
-                "No reply to `{command}` from session `{session_name}` within {} s.",
-                limit.as_secs()
+                "No reply to `{command}` from session `{session_name}` within {:.1} s.",
+                limit.as_secs_f64()
             ),
         ),
         Lost::Disconnected => (
@@ -1135,11 +1141,270 @@ mod tests {
     use tokio::net::UnixListener;
 
     async fn handshake(listener: &UnixListener) {
+        handshake_with(listener, serde_json::json!({})).await;
+    }
+
+    async fn handshake_with(listener: &UnixListener, extra: serde_json::Value) {
         let (stream, _) = listener.accept().await.unwrap();
         let (mut reader, mut writer) = stream.into_split();
         let request: Request = read_msg(&mut reader).await.unwrap();
         assert!(matches!(request, Request::SessionHello));
-        write_msg(&mut writer, &Response::ok(serde_json::json!({"protocol_major":2,"mode":"headless","configuration_fingerprint":test_client("fixture").spec.configuration_fingerprint()}))).await.unwrap();
+        let mut hello = serde_json::json!({"protocol_major":2,"mode":"headless","configuration_fingerprint":test_client("fixture").spec.configuration_fingerprint()});
+        for (key, value) in extra.as_object().into_iter().flatten() {
+            hello[key] = value.clone();
+        }
+        write_msg(&mut writer, &Response::ok(hello)).await.unwrap();
+    }
+
+    fn fake_daemon(prefix: &str) -> (String, std::path::PathBuf, UnixListener) {
+        let session = format!("{prefix}-{}", uuid::Uuid::new_v4());
+        session::ensure_runtime_dir().unwrap();
+        let socket = session::socket_path(&session);
+        let listener = UnixListener::bind(&socket).unwrap();
+        (session, socket, listener)
+    }
+
+    #[tokio::test]
+    async fn a_daemon_that_accepts_but_stays_silent_is_reported_as_unresponsive() {
+        let (session, socket, listener) = fake_daemon("silent-daemon");
+        let server = tokio::spawn(async move {
+            let (held, _) = listener.accept().await.unwrap();
+            assert!(
+                tokio::time::timeout(Duration::from_millis(1500), listener.accept())
+                    .await
+                    .is_err(),
+                "nothing may be sent after an unanswered handshake"
+            );
+            drop(held);
+        });
+        let started = std::time::Instant::now();
+        let response = test_client(&session).info().await.unwrap();
+        assert!(started.elapsed() < Duration::from_secs(3));
+        let detail = response.error_detail.unwrap();
+        assert_eq!(detail.code, "daemon_unresponsive");
+        assert!(detail.message.contains("No command was sent"));
+        let hint = detail.hint.unwrap();
+        assert!(hint.contains(&format!("eoka --session {session} status")));
+        assert!(hint.contains(&format!("eoka --session {session} kill")));
+        assert_eq!(
+            detail.context.unwrap().action_status,
+            Some(eoka_protocol::ActionStatus::NotAttempted)
+        );
+        server.await.unwrap();
+        std::fs::remove_file(socket).unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_unanswered_read_times_out_with_the_daemon_activity_and_is_not_replayed() {
+        let (session, socket, listener) = fake_daemon("reply-timeout");
+        let server = tokio::spawn(async move {
+            handshake_with(&listener, serde_json::json!({"command_limit_ms":100})).await;
+            let (stream, _) = listener.accept().await.unwrap();
+            let (mut reader, _held) = stream.into_split();
+            let request: Request = read_msg(&mut reader).await.unwrap();
+            assert_eq!(request.cmd(), "info");
+            handshake_with(
+                &listener,
+                serde_json::json!({"activity":{"busy":{"cmd":"info","for_ms":400},"queued":0,"blocker":null}}),
+            )
+            .await;
+            assert!(
+                tokio::time::timeout(Duration::from_millis(300), listener.accept())
+                    .await
+                    .is_err(),
+                "an unanswered command must not be sent again"
+            );
+        });
+        let started = std::time::Instant::now();
+        let response = test_client(&session).info().await.unwrap();
+        assert!(started.elapsed() < Duration::from_secs(3));
+        assert!(!response.ok);
+        let detail = response.error_detail.unwrap();
+        assert_eq!(detail.code, "reply_timeout");
+        assert!(
+            detail.message.contains("No reply to `info`"),
+            "{}",
+            detail.message
+        );
+        assert!(
+            detail.message.contains("still running `info`"),
+            "{}",
+            detail.message
+        );
+        assert!(detail.message.contains("Nothing was sent again"));
+        assert_eq!(detail.retryable, Some(true));
+        assert!(detail.context.is_none());
+        assert!(detail.hint.unwrap().contains("status"));
+        server.await.unwrap();
+        std::fs::remove_file(socket).unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_unanswered_script_reports_that_it_may_have_run() {
+        let (session, socket, listener) = fake_daemon("script-timeout");
+        let server = tokio::spawn(async move {
+            handshake_with(&listener, serde_json::json!({"command_limit_ms":100})).await;
+            let (stream, _) = listener.accept().await.unwrap();
+            let (mut reader, held) = stream.into_split();
+            let request: Request = read_msg(&mut reader).await.unwrap();
+            assert_eq!(request.cmd(), "exec");
+            let (probe, _) = listener.accept().await.unwrap();
+            tokio::time::sleep(Duration::from_millis(1700)).await;
+            drop((probe, held));
+        });
+        let response = test_client(&session)
+            .exec(serde_json::from_value(serde_json::json!({"code":"() => 1"})).unwrap())
+            .await
+            .unwrap();
+        let detail = response.error_detail.unwrap();
+        assert_eq!(detail.code, "reply_timeout");
+        assert!(detail.message.contains("does not answer status probes"));
+        assert!(detail
+            .message
+            .contains("may have run; it was not sent again"));
+        assert_eq!(detail.retryable, Some(false));
+        assert_eq!(
+            detail.context.unwrap().action_status,
+            Some(eoka_protocol::ActionStatus::MayHaveExecuted)
+        );
+        assert!(detail.hint.unwrap().contains("kill"));
+        server.await.unwrap();
+        std::fs::remove_file(socket).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_busy_refusal_is_returned_as_is_and_never_replayed() {
+        let (session, socket, listener) = fake_daemon("busy-daemon");
+        let server = tokio::spawn(async move {
+            handshake(&listener).await;
+            let (stream, _) = listener.accept().await.unwrap();
+            let (mut reader, mut writer) = stream.into_split();
+            let _: Request = read_msg(&mut reader).await.unwrap();
+            let busy = Response::err_detail(
+                eoka_protocol::ErrorDetail::new(
+                    "daemon_busy",
+                    "Session `work` is busy: `wait` has been running for 9.0 s. `text` was not started.",
+                )
+                .retryable(true)
+                .hint("Run it again once the running command returns."),
+            );
+            write_msg(&mut writer, &busy).await.unwrap();
+            assert!(
+                tokio::time::timeout(Duration::from_millis(200), listener.accept())
+                    .await
+                    .is_err(),
+                "a refused command must not be retried by the client"
+            );
+        });
+        let response = test_client(&session).text().await.unwrap();
+        let detail = response.error_detail.unwrap();
+        assert_eq!(detail.code, "daemon_busy");
+        assert!(detail.message.contains("`wait` has been running"));
+        server.await.unwrap();
+        std::fs::remove_file(socket).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_missing_session_names_the_command_that_starts_it() {
+        let name = format!("absent-{}", uuid::Uuid::new_v4());
+        let client = test_client(&name);
+        let read = client.info().await.unwrap();
+        let detail = read.error_detail.unwrap();
+        assert_eq!(detail.code, "session_unavailable");
+        assert!(detail.message.contains(&name));
+        assert!(detail
+            .hint
+            .unwrap()
+            .contains(&format!("eoka --session {name} open URL")));
+        let observed = client
+            .agent_observe(Default::default())
+            .await
+            .unwrap()
+            .error_detail
+            .unwrap();
+        assert_eq!(observed.code, "session_unavailable");
+        let step = client
+            .agent_step(
+                serde_json::from_value(
+                    serde_json::json!({"action":{"kind":"press_key","key":"Tab"}}),
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(step.data.unwrap()["status"], "not_dispatched");
+        assert!(!session::socket_path(&name).exists());
+    }
+
+    #[test]
+    fn every_request_has_a_reply_deadline_derived_from_its_own_timeout() {
+        let request = |cmd: &str, args: serde_json::Value| {
+            eoka_protocol::request_from_cmd(cmd, args).unwrap()
+        };
+        let budget = |cmd: &str, args: serde_json::Value, limit: Option<u64>| {
+            reply_budget(&request(cmd, args), limit).as_millis() as u64
+        };
+        let none = serde_json::json!({});
+        assert_eq!(
+            budget("info", none.clone(), Some(30_000)),
+            30_000 + REPLY_MARGIN_MS
+        );
+        assert_eq!(
+            budget("info", none.clone(), Some(90_000)),
+            90_000 + REPLY_MARGIN_MS
+        );
+        assert_eq!(
+            budget("info", none.clone(), None),
+            UNKNOWN_COMMAND_LIMIT_MS + REPLY_MARGIN_MS
+        );
+        assert_eq!(
+            budget(
+                "wait",
+                serde_json::json!({"text":"Done","timeout":45_000}),
+                Some(30_000)
+            ),
+            45_000 + REPLY_MARGIN_MS
+        );
+        assert_eq!(
+            budget("wait", serde_json::json!({"ms":2_000}), Some(30_000)),
+            2_000 + REPLY_MARGIN_MS
+        );
+        assert_eq!(
+            budget(
+                "open",
+                serde_json::json!({"url":"https://example.test/","timeout_ms":5_000}),
+                None
+            ),
+            5_000 + LAUNCH_MARGIN_MS + REPLY_MARGIN_MS
+        );
+        assert_eq!(
+            budget(
+                "agent_observe",
+                serde_json::json!({"timeout_ms":3_000}),
+                None
+            ),
+            4_000
+        );
+        assert_eq!(
+            budget(
+                "agent_step",
+                serde_json::json!({"action":{"kind":"back"},"timeout_ms":120_000}),
+                None
+            ),
+            61_000
+        );
+        assert_eq!(
+            budget(
+                "operation_wait",
+                serde_json::json!({"id":"x","timeout_ms":70_000}),
+                None
+            ),
+            70_000 + REPLY_MARGIN_MS
+        );
+        assert_eq!(
+            budget("session_hello", none, None),
+            HELLO_LIMIT.as_millis() as u64
+        );
     }
 
     #[tokio::test]

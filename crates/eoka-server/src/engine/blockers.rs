@@ -524,6 +524,70 @@ pub async fn wait_unless_dialog(
     }
 }
 
+fn navigates(action: &str) -> bool {
+    matches!(
+        action,
+        "navigate" | "navigate_with_headers" | "reload" | "back" | "forward" | "history"
+    )
+}
+
+async fn running_on(
+    operations: &crate::operations::OperationManager,
+    page: &Page,
+) -> Vec<eoka_protocol::OperationRecord> {
+    operations
+        .list(eoka_protocol::OperationListArgs {
+            limit: Some(100),
+            before_ms: None,
+        })
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|record| {
+            matches!(record.state, eoka_protocol::OperationState::Running)
+                && record.target_id == page.target_id()
+        })
+        .collect()
+}
+
+pub async fn supersede_navigation(operations: &crate::operations::OperationManager, page: &Page) {
+    let mut canceled = Vec::new();
+    for record in running_on(operations, page).await {
+        if navigates(&record.action) && operations.cancel(&record.id).await.is_ok() {
+            canceled.push(record.id);
+        }
+    }
+    stop_loading(page).await;
+    for id in canceled {
+        settle(operations, &id).await;
+    }
+}
+
+pub async fn finish_navigation(
+    operations: &crate::operations::OperationManager,
+    page: &Page,
+    navigation_action: bool,
+) -> Option<Navigation> {
+    if !matches!(current(page), Some(Blocker::Navigation(_))) {
+        return None;
+    }
+    let mut running = false;
+    for record in running_on(operations, page).await {
+        running = true;
+        let navigation = navigation_action || navigates(&record.action);
+        release_when_finished(page.clone(), operations.clone(), record.id, navigation);
+    }
+    if running {
+        return None;
+    }
+    let grace = if navigation_action {
+        Duration::ZERO
+    } else {
+        NAVIGATION_GRACE
+    };
+    abandon_navigation(page, grace).await
+}
+
 fn operation_id(response: &Response) -> Option<String> {
     let data = response.data.as_ref()?;
     data["operation_id"]
@@ -625,7 +689,7 @@ impl super::Engine {
         };
         let blocker = match confirmed(&page, grace).await? {
             Blocker::Navigation(_) if policy == Policy::Navigate => {
-                self.supersede_navigation(&page).await;
+                supersede_navigation(&self.operations, &page).await;
                 return None;
             }
             Blocker::Navigation(_) if matches!(policy, Policy::Wait | Policy::Capture) => {
@@ -646,41 +710,6 @@ impl super::Engine {
             }));
         }
         Some(response)
-    }
-
-    async fn supersede_navigation(&self, page: &Page) {
-        let running = self
-            .operations
-            .list(eoka_protocol::OperationListArgs {
-                limit: Some(100),
-                before_ms: None,
-            })
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|record| {
-                matches!(record.state, eoka_protocol::OperationState::Running)
-                    && record.target_id == page.target_id()
-                    && matches!(
-                        record.action.as_str(),
-                        "navigate"
-                            | "navigate_with_headers"
-                            | "reload"
-                            | "back"
-                            | "forward"
-                            | "history"
-                    )
-            });
-        let mut canceled = Vec::new();
-        for record in running {
-            if self.operations.cancel(&record.id).await.is_ok() {
-                canceled.push(record.id);
-            }
-        }
-        stop_loading(page).await;
-        for id in canceled {
-            settle(&self.operations, &id).await;
-        }
     }
 
     pub(super) async fn dispatch_guarded(
@@ -1059,6 +1088,7 @@ pub fn explain(response: &mut Response, remedies: &Remedies<'_>) {
         return;
     }
     let hint = match detail.code.as_str() {
+        "expectation_required" if remedies.surface == Surface::Mcp => return,
         "expectation_required" => match remedies.surface {
             Surface::Cli => "Nothing was sent to the page. State the result you expect and run it again, for example `--expect '{\"kind\":\"url\",\"value\":\"/next\",\"contains\":true}'` (or `\"expect\":{...}` inside `step`). For deliberate unverified input use `step` with `\"mode\":\"explore\"`, then read the page with `view`.".to_owned(),
             _ => "Nothing was sent to the page. Pass an `expect` condition that is false now and true after the action, or use explore mode for deliberate unverified input and observe afterwards.".to_owned(),
