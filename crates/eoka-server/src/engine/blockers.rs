@@ -13,6 +13,7 @@ use tokio::sync::{broadcast, watch};
 pub const NAVIGATION_GRACE: Duration = Duration::from_secs(5);
 pub const READ_LIMIT: Duration = Duration::from_secs(15);
 const PROBE_LIMIT: Duration = Duration::from_millis(400);
+const PROBE_REUSE: Duration = Duration::from_secs(1);
 const CONTROL_LIMIT: Duration = Duration::from_secs(2);
 const SETTLE_LIMIT: Duration = Duration::from_secs(1);
 const RECENTLY_STOPPED: Duration = Duration::from_secs(5);
@@ -187,6 +188,7 @@ struct SessionState {
     dialog: Option<Dialog>,
     navigations: HashMap<String, Navigation>,
     ended: Option<Ended>,
+    probed: Option<Instant>,
 }
 
 #[derive(Default)]
@@ -202,6 +204,16 @@ impl Sessions {
         let Some(session) = session else {
             return false;
         };
+        let changed = self.record(session, method, params, now);
+        if changed {
+            if let Some(state) = self.0.get_mut(session) {
+                state.probed = None;
+            }
+        }
+        changed
+    }
+
+    fn record(&mut self, session: &str, method: &str, params: &Value, now: Instant) -> bool {
         match method {
             "Page.javascriptDialogOpening" => {
                 self.0.entry(session.to_owned()).or_default().dialog = Some(Dialog {
@@ -433,9 +445,23 @@ pub async fn confirmed(page: &Page, grace: Duration) -> Option<Blocker> {
         Blocker::Navigation(navigation) if navigation.since.elapsed() < grace => return None,
         blocker => blocker,
     };
+    let session = page.session().session_id();
+    let watcher = watcher(page);
+    let fresh = watcher
+        .sessions()
+        .0
+        .get(session)
+        .and_then(|state| state.probed)
+        .is_some_and(|probed| probed.elapsed() < PROBE_REUSE);
+    if fresh {
+        return Some(blocker);
+    }
     if responsive(page).await {
         clear(page);
         return None;
+    }
+    if let Some(state) = watcher.sessions().0.get_mut(session) {
+        state.probed = Some(Instant::now());
     }
     Some(blocker)
 }
@@ -800,7 +826,11 @@ impl super::Engine {
         let id = operation_id(response);
         let navigation_action = policy == Policy::Navigate;
         let pending = || matches!(current(&page), Some(Blocker::Navigation(_)));
-        if let Some(id) = id.as_deref().filter(|_| navigation_action || pending()) {
+        let dialog = matches!(current(&page), Some(Blocker::Dialog(_)));
+        if let Some(id) = id
+            .as_deref()
+            .filter(|_| !dialog && (navigation_action || pending()))
+        {
             settle(&self.operations, id).await;
             let record = self.operations.get(id).await.ok();
             let running = record.as_ref().is_some_and(|record| {
