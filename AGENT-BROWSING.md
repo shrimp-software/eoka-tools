@@ -67,6 +67,38 @@ failures return 1. Operation and observation errors retain the action receipt.
 See [RELIABILITY-MIGRATION.md](RELIABILITY-MIGRATION.md) for popup destinations,
 pagination, function evaluation and session migration.
 
+## Blocked and busy sessions
+
+Chrome answers no page command while a JavaScript dialog is open or while a tab
+waits for a server's first response. Eoka tracks both states per tab and reports
+them instead of waiting for a protocol timeout. Every adapter returns the same
+`error_detail.code` with a `hint` that names the next command in that adapter's
+vocabulary (CLI command, MCP tool or Tack path).
+
+| Code | Meaning | Recovery |
+| --- | --- | --- |
+| `dialog_open` | An alert, confirm, prompt or beforeunload dialog is open | `dialog accept` / `dialog dismiss` (MCP `accept_dialog` / `dismiss_dialog`) |
+| `navigation_pending` | The tab has waited more than 5 s for a response | Wait with a bounded `wait`, or abandon the load with `reload` or `open` |
+| `navigation_timeout` | A navigation command got no response before its deadline | The load was stopped and the tab kept its page; retry with a longer deadline |
+| `page_unresponsive` | The page did not answer and no blocker is known | Retry later or continue in a new tab |
+| `daemon_busy` | CLI only: another command is running and this one was not started | Run it again when the running command returns |
+
+An observation or step that meets a blocker returns within about half a second.
+A step that opens a dialog returns as soon as the dialog appears, with status
+`running` and `operation_error.code` `dialog_open`; handle the dialog, then
+inspect the same operation ID. The action is never repeated. A new navigation
+replaces a pending one and cancels the navigation operation that started it. An
+action whose deadline passes while the tab still waits for a server stops that
+load, so the tab stays usable; its record reports the outcome as unknown.
+
+The CLI daemon runs one command at a time. A command waits up to 5 s
+(`EOKA_QUEUE_WAIT_MS`) for its turn and is then refused with `daemon_busy`,
+naming the running command and its age. `eoka status` answers at any time with
+`busy`, `queued` and `blocker`. When a caller disconnects, the daemon stops
+waiting for its read, script or wait; an action already admitted keeps running
+under its operation ID. The CLI applies a reply deadline to every request and
+reports `reply_timeout` or `daemon_unresponsive` rather than blocking.
+
 ## Recovery identity
 
 CLI and Rust/Go SDK adapters generate an operation UUID before sending when one

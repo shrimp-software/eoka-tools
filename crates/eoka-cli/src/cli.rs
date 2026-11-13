@@ -9,8 +9,15 @@ const TAB_ID: &str = "Tab ID from tab list";
 const OPERATION_ID: &str = "Operation ID returned by the action";
 const CODE: &str = "JavaScript source; omit to use --file";
 
+const DEADLINES: &str = "Deadlines:\n  Every command returns within a bounded time and never replays an action.\n  A failure carries error_detail.code and a hint naming the next command:\n    dialog_open          a JavaScript dialog blocks the tab: dialog accept | dialog dismiss\n    navigation_pending   the tab waits for a server: wait --url, or reload | open URL to abandon it\n    navigation_timeout   no response before the deadline; the load was stopped and the tab kept its page\n    daemon_busy          another command is running; this one was not started (EOKA_QUEUE_WAIT_MS, default 5000)\n    page_unresponsive    the page's main thread is frozen: retry, or tab new URL\n    reply_timeout        the daemon did not reply in time (EOKA_REPLY_TIMEOUT_MS overrides the default)\n    daemon_unresponsive  the daemon did not answer its handshake within 5 s\n  Page reads answer within 15 s, view within --timeout-ms (3000), open and actions\n  within --action-timeout-ms (30000). status shows what a session is running.";
+
 #[derive(Parser)]
-#[command(name = "eoka", about = "Browser automation CLI", version)]
+#[command(
+    name = "eoka",
+    about = "Browser automation CLI",
+    version,
+    after_long_help = DEADLINES
+)]
 pub struct Cli {
     #[arg(long, global = true, help = "Expected action result as typed JSON")]
     pub expect: Option<String>,
@@ -161,7 +168,10 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    #[command(about = "Compact agent page state with scoped control references")]
+    #[command(
+        about = "Compact agent page state with scoped control references",
+        long_about = "Compact agent page state with scoped control references.\n\nAnswers within --timeout-ms. When the tab cannot answer, it fails at once with the reason and the next command: dialog_open, navigation_pending, page_unresponsive, or daemon_busy while another command is running."
+    )]
     View {
         #[arg(long, help = "Continue from a cursor returned by a previous view")]
         cursor: Option<String>,
@@ -202,7 +212,7 @@ pub enum Command {
     },
     #[command(
         about = "Navigate to URL",
-        long_about = "Navigate to URL. file: URLs are blocked unless EOKA_ALLOW_FILE_URLS=1 was set when the daemon started."
+        long_about = "Navigate to URL. file: URLs are blocked unless EOKA_ALLOW_FILE_URLS=1 was set when the daemon started.\n\nA load still pending from an earlier command is replaced. If the server sends no response before --action-timeout-ms (default 30000), the load is stopped, the tab keeps the page it had, and the command fails with navigation_timeout."
     )]
     Open {
         #[arg(help = "URL, or a path relative to the current page")]
@@ -310,7 +320,10 @@ pub enum Command {
     },
     #[command(about = "Get the page HTML")]
     Content,
-    #[command(about = "Accept or dismiss an open alert, confirm or prompt dialog")]
+    #[command(
+        about = "Accept or dismiss an open alert, confirm or prompt dialog",
+        long_about = "Accept or dismiss an open alert, confirm, prompt or beforeunload dialog.\n\nChrome answers no page command while a dialog is open, so other commands fail with dialog_open until it is handled. These two commands also work while another command is still running."
+    )]
     Dialog {
         #[command(subcommand)]
         action: DialogAction,
@@ -638,7 +651,10 @@ pub enum Command {
         #[command(subcommand)]
         action: TabAction,
     },
-    #[command(about = "Wait for time, text, URL, selector, or load state")]
+    #[command(
+        about = "Wait for time, text, URL, selector, or load state",
+        long_about = "Wait for time, text, URL, selector, or load state.\n\nA condition wait returns by --timeout (default 10000 ms). It keeps waiting through a navigation that has not answered yet and reports navigation_pending if that is why it timed out."
+    )]
     Wait {
         #[arg(help = "Fixed delay in milliseconds")]
         ms: Option<u64>,
@@ -695,11 +711,17 @@ pub enum Command {
     },
     #[command(about = "List all sessions")]
     Sessions,
-    #[command(about = "Show daemon status")]
+    #[command(
+        about = "Show whether the session is running, what it is running and what blocks its tab",
+        long_about = "Show whether the session is running, what it is running and what blocks its tab.\n\nAnswers even while another command runs. Reports the running command and its age (busy), queued commands, and an open dialog or pending navigation (blocker) with the command that clears it. A daemon that accepts connections but does not answer is reported as not responsive."
+    )]
     Status,
     #[command(about = "Diagnose local eoka runtime state")]
     Doctor,
-    #[command(about = "Force-kill daemon")]
+    #[command(
+        about = "Force-kill daemon",
+        long_about = "Force-kill the session daemon and its browser. Page state is lost.\n\nA last resort for a daemon that status reports as not responsive. A busy or blocked session is recovered with the command its error names instead."
+    )]
     Kill,
     #[command(
         visible_alias = "upgrade",

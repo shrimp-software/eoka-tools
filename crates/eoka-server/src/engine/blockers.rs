@@ -803,14 +803,13 @@ impl super::Engine {
         if !timed_out(response) {
             return;
         }
-        if let Some(blocker) = confirmed(&page, Duration::ZERO).await {
-            let detail = blocker.detail(
-                &remedies,
-                &remedies.name(command, arguments),
-                policy.interrupted(),
-            );
-            replace_error(response, with_operation(detail, &remedies, id.as_deref()));
-        }
+        let name = remedies.name(command, arguments);
+        let detail = match confirmed(&page, Duration::ZERO).await {
+            Some(blocker) => blocker.detail(&remedies, &name, policy.interrupted()),
+            None if !responsive(&page).await => frozen(&remedies, &name),
+            None => return,
+        };
+        replace_error(response, with_operation(detail, &remedies, id.as_deref()));
     }
 }
 
@@ -947,6 +946,21 @@ pub fn unresponsive(remedies: &Remedies<'_>, command: &str, limit: Duration) -> 
         format!(
             "`{command}` got no answer from the page within {} s. No dialog or pending navigation is known, so the page's main thread is busy or frozen.",
             limit.as_secs()
+        ),
+    )
+    .retryable(false)
+    .hint(format!(
+        "Retry once the page settles. If it stays frozen, continue in a fresh tab with {}. {} clears a dialog that was already open before this session attached.",
+        remedies.new_tab(),
+        remedies.dismiss()
+    ))
+}
+
+pub fn frozen(remedies: &Remedies<'_>, command: &str) -> ErrorDetail {
+    ErrorDetail::new(
+        "page_unresponsive",
+        format!(
+            "`{command}` timed out and the page does not answer a liveness probe. No dialog or pending navigation is known, so the page's main thread is busy or frozen."
         ),
     )
     .retryable(false)
