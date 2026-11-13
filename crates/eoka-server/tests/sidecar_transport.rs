@@ -2142,3 +2142,163 @@ fn diagnostics_keep_their_wording_and_file_output_names_the_occupied_path() {
     assert_eq!(std::fs::read(&occupied).unwrap(), b"keep");
     server.shutdown(14);
 }
+
+const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
+
+fn png(reply: &Value) -> Vec<u8> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(
+            reply["result"]["dataBase64"]
+                .as_str()
+                .unwrap_or_else(|| panic!("{reply}")),
+        )
+        .unwrap();
+    assert_eq!(&bytes[..8], PNG_SIGNATURE);
+    bytes
+}
+
+fn visibility(server: &mut Sidecar, id: u64, page: &str) -> Value {
+    let seen = server.request(
+        id,
+        "page.evaluate",
+        json!({"pageId":page,"function":"()=>({now:document.visibilityState,changes:window.visibilityChanges})"}),
+    );
+    seen["result"]["result"].clone()
+}
+
+#[test]
+#[ignore = "requires Chrome"]
+fn a_tab_behind_another_is_captured_promptly_and_stays_behind() {
+    let prompt = Duration::from_secs(5);
+    let (root, state, scratch) = directories();
+    let mut server = Sidecar::start(&state, &scratch);
+    launch(&mut server, &root.path().join("profile"));
+    let mut open = |id: u64| {
+        let response = server.request(
+            id,
+            "browser.new_page",
+            json!({"url":"data:text/html,<title>t</title><h1>hello</h1>"}),
+        );
+        response["result"]["pageId"].as_str().unwrap().to_owned()
+    };
+    let (behind, front) = (open(3), open(4));
+    for (id, page) in [(5, &behind), (6, &front)] {
+        let watched = server.request(
+            id,
+            "page.execute",
+            json!({"pageId":page,"function":"()=>{window.visibilityChanges=[];document.addEventListener('visibilitychange',()=>window.visibilityChanges.push(document.visibilityState))}"}),
+        );
+        assert!(watched.get("result").is_some(), "{watched}");
+    }
+    std::thread::sleep(Duration::from_secs(3));
+    let mut inbox = Inbox::default();
+
+    let (first, elapsed) =
+        inbox.timed(&mut server, 10, "page.screenshot", json!({"pageId":behind}));
+    assert!(elapsed < prompt, "{elapsed:?}");
+    let before = png(&first);
+    let output = std::fs::canonicalize(root.path())
+        .unwrap()
+        .join("behind.png");
+    let (saved, elapsed) = inbox.timed(
+        &mut server,
+        11,
+        "page.screenshot_to_file",
+        json!({"pageId":behind,"path":output}),
+    );
+    assert!(elapsed < prompt, "{elapsed:?}");
+    assert!(saved["result"]["bytes"].as_u64().unwrap() > 0, "{saved}");
+    assert_eq!(&std::fs::read(&output).unwrap()[..8], PNG_SIGNATURE);
+    let (ahead, elapsed) = inbox.timed(&mut server, 12, "page.screenshot", json!({"pageId":front}));
+    assert!(elapsed < prompt, "{elapsed:?}");
+    png(&ahead);
+
+    let started = Instant::now();
+    server.send(json!({"id":13,"method":"page.screenshot","params":{"pageId":behind}}));
+    server.send(json!({"id":14,"method":"page.screenshot","params":{"pageId":front}}));
+    for id in [13, 14] {
+        png(&inbox.take(&server, id, Duration::from_secs(40)).unwrap());
+    }
+    assert!(started.elapsed() < Duration::from_secs(10));
+
+    let painted = server.request(
+        15,
+        "page.execute",
+        json!({"pageId":behind,"function":"()=>{document.body.style.background='rgb(200,0,0)'}"}),
+    );
+    assert!(painted.get("result").is_some(), "{painted}");
+    std::thread::sleep(Duration::from_secs(3));
+    let (repainted, elapsed) =
+        inbox.timed(&mut server, 16, "page.screenshot", json!({"pageId":behind}));
+    assert!(elapsed < prompt, "{elapsed:?}");
+    assert_ne!(png(&repainted), before, "a stale frame was captured");
+    let (whole, elapsed) = inbox.timed(
+        &mut server,
+        17,
+        "page.screenshot",
+        json!({"pageId":behind,"fullPage":true,"format":"jpeg","quality":40}),
+    );
+    assert!(elapsed < prompt, "{elapsed:?}");
+    assert!(
+        whole["result"]["dataBase64"]
+            .as_str()
+            .is_some_and(|data| !data.is_empty()),
+        "{whole}"
+    );
+    let catalogued = std::fs::canonicalize(root.path())
+        .unwrap()
+        .join("catalog.png");
+    let (catalog, elapsed) = inbox.timed(
+        &mut server,
+        18,
+        "screenshot",
+        json!({"pageId":behind,"output":catalogued}),
+    );
+    assert!(elapsed < prompt, "{elapsed:?}");
+    assert!(catalog["result"]["size"].as_u64().unwrap() > 0, "{catalog}");
+    assert_eq!(&std::fs::read(&catalogued).unwrap()[..8], PNG_SIGNATURE);
+
+    assert_eq!(
+        visibility(&mut server, 19, &behind),
+        json!({"now":"hidden","changes":[]})
+    );
+    assert_eq!(
+        visibility(&mut server, 20, &front),
+        json!({"now":"visible","changes":[]})
+    );
+
+    let recording = uuid::Uuid::new_v4().to_string();
+    let video = std::fs::canonicalize(root.path())
+        .unwrap()
+        .join("behind.mp4");
+    let record = server.request(
+        30,
+        "recording.start",
+        json!({"recordingId":recording,"pageId":behind,"path":video}),
+    );
+    assert_eq!(record["result"]["state"], "running", "{record}");
+    let animated = server.request(
+        31,
+        "page.execute",
+        json!({"pageId":behind,"function":"()=>{let n=0;setInterval(()=>{document.body.style.background=++n%2?'rgb(0,0,200)':'rgb(0,200,0)'},100)}"}),
+    );
+    assert!(animated.get("result").is_some(), "{animated}");
+    std::thread::sleep(Duration::from_millis(1500));
+    let (during, elapsed) =
+        inbox.timed(&mut server, 32, "page.screenshot", json!({"pageId":behind}));
+    assert!(elapsed < prompt, "{elapsed:?}");
+    png(&during);
+    std::thread::sleep(Duration::from_millis(1000));
+    let stopped = server.request(33, "recording.stop", json!({"recordingId":recording}));
+    assert_eq!(stopped["result"]["state"], "completed", "{stopped}");
+    assert!(
+        stopped["result"]["artifact"]["bytes"].as_u64().unwrap() > 4096,
+        "{stopped}"
+    );
+    assert_eq!(
+        std::fs::metadata(&video).unwrap().len(),
+        stopped["result"]["artifact"]["bytes"].as_u64().unwrap()
+    );
+    server.shutdown(34);
+}

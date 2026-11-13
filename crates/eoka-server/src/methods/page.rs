@@ -323,10 +323,8 @@ fn screenshot_bytes(bytes: &[u8]) -> Result<Value, ServerError> {
 pub async fn screenshot(state: &AppState, params: Value) -> Result<Value, ServerError> {
     let params: ScreenshotParams = parse_params(params)?;
     params.validate()?;
-    let bytes = state
-        .page(&params.page_id)?
-        .screenshot_with_options(&params.options())
-        .await?;
+    let page = state.page(&params.page_id)?;
+    let bytes = crate::capture::screenshot(&page, &params.options()).await?;
     screenshot_bytes(&bytes)
 }
 
@@ -337,7 +335,7 @@ pub async fn screenshot_to_file(state: &AppState, params: Value) -> Result<Value
     let mut staging = crate::artifacts::StagedArtifact::prepare(&params.path)
         .await
         .map_err(|error| error.server_error())?;
-    let bytes = match page.screenshot_with_options(&params.options()).await {
+    let bytes = match crate::capture::screenshot(&page, &params.options()).await {
         Ok(bytes) => bytes,
         Err(error) => {
             let mut error = ServerError::from(error);
