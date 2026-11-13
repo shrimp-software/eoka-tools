@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { SidecarTransport } from '../dist/transport.js';
-import { EokaError, ProtocolError, ServerOperationError, TransportError } from '../dist/errors.js';
+import { ConfigurationError, EokaError, ProtocolError, ServerOperationError, TransportError } from '../dist/errors.js';
 import { protocolVersion } from '../dist/generated/protocol.js';
 
 const serverPath = fileURLToPath(new URL('../fixtures/wire/transport-peer.mjs', import.meta.url));
@@ -157,11 +157,157 @@ test('deadline after dispatch retains its slot until a correlated late response'
   });
   assert.equal(getEventListeners(controller.signal, 'abort').length, 0);
   assert.equal(transport.pending.size, 1);
-  await assert.rejects(evaluate(transport), error => error.code === 'PendingLimit' && error.requestState === 'not_sent');
-  await once(transport.child.stdout, 'data');
+  const queued = evaluate(transport);
+  assert.equal(transport.pending.size, 2);
+  assert.equal(transport.inFlight, 1);
+  assert.deepEqual(await queued, { result: null });
   assert.equal(transport.pending.size, 0);
+  assert.equal(transport.inFlight, 0);
   assert.equal(transport.failure, undefined);
   assert.deepEqual(await evaluate(transport), { result: null });
+});
+
+test('calls beyond the negotiated in-flight limit queue locally and all resolve', async t => {
+  const transport = await start(t, 'concurrency', { EOKA_TRANSPORT_TEST_IN_FLIGHT: '4' });
+  const calls = Array.from({ length: 300 }, () => evaluate(transport, 'null', { timeoutMs: 10_000 }));
+  assert.equal(transport.pending.size, 300);
+  assert.equal(transport.inFlight, 3);
+  const results = await Promise.all(calls);
+  assert.equal(Math.max(...results.map(result => result.result.peak)), 3);
+  assert.deepEqual(results.map(result => result.result.received), Array.from({ length: 300 }, (_, index) => index + 1));
+  assert.equal(transport.pending.size, 0);
+  assert.equal(transport.inFlight, 0);
+  assert.equal(transport.queuedBytes, 0);
+});
+
+test('queued calls that expire or abort before being sent report not_sent and never reach the peer', async t => {
+  const transport = await start(t, 'concurrency', { EOKA_TRANSPORT_TEST_IN_FLIGHT: '2' });
+  const controller = new AbortController();
+  const first = evaluate(transport);
+  const expired = evaluate(transport, 'null', { timeoutMs: 0.01 });
+  const aborted = evaluate(transport, 'null', { signal: controller.signal });
+  const last = evaluate(transport);
+  controller.abort();
+  const [deadline, abort] = await Promise.allSettled([expired, aborted]);
+  assert.equal(deadline.reason.code, 'DeadlineExceeded');
+  assert.equal(deadline.reason.requestState, 'not_sent');
+  assert.match(deadline.reason.message, /page\.evaluate exceeded its 0\.01 ms local deadline before dispatch/);
+  assert.equal(abort.reason.code, 'Aborted');
+  assert.equal(abort.reason.requestState, 'not_sent');
+  assert.equal(getEventListeners(controller.signal, 'abort').length, 0);
+  assert.equal((await first).result.received, 1);
+  assert.equal((await last).result.received, 2);
+  assert.equal(transport.pending.size, 0);
+  assert.equal(transport.queuedBytes, 0);
+});
+
+test('a peer that refuses admission as busy has the refused calls resent at a lower limit', async t => {
+  const transport = await start(t, 'concurrency', { EOKA_TRANSPORT_TEST_IN_FLIGHT: '9', EOKA_TRANSPORT_TEST_CAPACITY: '3' });
+  assert.equal(transport.pendingLimit, 8);
+  const results = await Promise.all(Array.from({ length: 60 }, () => evaluate(transport, 'null', { timeoutMs: 10_000 })));
+  assert.equal(Math.max(...results.map(result => result.result.peak)), 3);
+  assert.equal(results.length, 60);
+  assert.equal(transport.pendingLimit, 3);
+  assert.equal(transport.pending.size, 0);
+  assert.equal(transport.inFlight, 0);
+  assert.equal(transport.queuedBytes, 0);
+});
+
+test('the local queue stays bounded by buffered bytes', async t => {
+  const transport = await start(t, 'late', { EOKA_TRANSPORT_TEST_IN_FLIGHT: '1' });
+  const large = 'null' + ' '.repeat(17 * 1024 * 1024);
+  const sent = evaluate(transport, large, { timeoutMs: 20_000 });
+  const queued = evaluate(transport, large, { timeoutMs: 20_000 });
+  await assert.rejects(evaluate(transport, large, { timeoutMs: 20_000 }), error => {
+    assert.equal(error.code, 'PendingLimit');
+    assert.equal(error.requestState, 'not_sent');
+    assert.match(error.message, /byte limit/);
+    return true;
+  });
+  assert.deepEqual(await sent, { result: null });
+  assert.deepEqual(await queued, { result: null });
+  assert.equal(transport.queuedBytes, 0);
+});
+
+test('rejected calls carry the frame of the code that made them', async t => {
+  const here = fileURLToPath(import.meta.url);
+  const late = await start(t, 'late');
+  const failing = await start(t, 'operation-error');
+  const controller = new AbortController();
+  const settled = call => new Promise(resolve => { call.then(resolve, resolve); });
+  const cases = [
+    ['DeadlineExceeded', () => late.invoke('page.evaluate', { pageId: 'page', function: 'null' }, { timeoutMs: 5 })],
+    ['Aborted', () => {
+      const call = late.invoke('page.evaluate', { pageId: 'page', function: 'null' }, { signal: controller.signal });
+      setImmediate(() => controller.abort());
+      return call;
+    }],
+    ['Configuration', () => late.invoke('page.evaluate', { pageId: 'page' })],
+    ['Action', () => failing.invoke('page.title', { pageId: 'page' })],
+  ];
+  for (const [code, call] of cases) {
+    const error = await settled(call());
+    assert.equal(error.code, code);
+    assert.ok(error.stack.split('\n').slice(1).some(frame => frame.includes(here)), `${code} stack has no caller frame:\n${error.stack}`);
+    assert.doesNotMatch(error.stack, /eokaTracedCall/);
+  }
+});
+
+test('a call without timeoutMs gets the configured default deadline against a silent peer', async t => {
+  const transport = await start(t, 'silent', {}, { defaultTimeoutMs: 40 });
+  const started = performance.now();
+  await assert.rejects(transport.invoke('page.evaluate', { pageId: 'page', function: 'null' }, { operationId }), error => {
+    assert.ok(error instanceof TransportError);
+    assert.equal(error.code, 'DeadlineExceeded');
+    assert.equal(error.requestState, 'may_have_been_sent');
+    assert.equal(error.operationId, operationId);
+    assert.match(error.message, /page\.evaluate exceeded the 40 ms default deadline \(defaultTimeoutMs\)/);
+    return true;
+  });
+  assert.ok(performance.now() - started >= 39);
+  await assert.rejects(transport.invoke('page.evaluate', { pageId: 'page', function: 'null' }, { timeoutMs: 5 }), error => /its 5 ms local deadline/.test(error.message));
+});
+
+test('the default deadline never undercuts a requested server-side wait and skips terminal calls', async t => {
+  const transport = await start(t, 'silent', {}, { defaultTimeoutMs: 40 });
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const outcomes = new Map();
+  const watch = (name, call) => { call.then(() => outcomes.set(name, 'resolved'), error => outcomes.set(name, error.code)); };
+  const turn = () => new Promise(resolve => setImmediate(resolve));
+  watch('explicit wait', transport.invoke('operations.wait', { id: operationId, timeout_ms: 500 }));
+  watch('schema default wait', transport.invoke('operations.wait', { id: operationId }));
+  watch('nested action wait', transport.invoke('actions.perform', { pageId: 'page', operation_id: operationId, action: { kind: 'reload' }, options: { timeout_ms: 6_000 } }));
+  watch('page wait', transport.invoke('page.wait_for', { pageId: 'page', selector: '#late', timeoutMs: 3_000 }));
+  watch('no wait', transport.invoke('page.title', { pageId: 'page' }));
+  let elapsed = 0;
+  const settledAt = async time => {
+    t.mock.timers.tick(time - elapsed);
+    elapsed = time;
+    await turn();
+    return [...outcomes.keys()];
+  };
+  assert.deepEqual(await settledAt(9_000), ['no wait']);
+  assert.deepEqual(await settledAt(10_510), ['no wait', 'explicit wait']);
+  assert.deepEqual(await settledAt(12_000), ['no wait', 'explicit wait']);
+  assert.deepEqual(await settledAt(13_010), ['no wait', 'explicit wait', 'page wait']);
+  assert.deepEqual(await settledAt(15_000), ['no wait', 'explicit wait', 'page wait']);
+  assert.deepEqual(await settledAt(16_010), ['no wait', 'explicit wait', 'page wait', 'nested action wait']);
+  assert.deepEqual(await settledAt(39_000), ['no wait', 'explicit wait', 'page wait', 'nested action wait']);
+  assert.deepEqual(await settledAt(40_010), ['no wait', 'explicit wait', 'page wait', 'nested action wait', 'schema default wait']);
+  assert.deepEqual([...new Set(outcomes.values())], ['DeadlineExceeded']);
+  void transport.invoke('browser.close', {}).catch(() => {});
+  const terminal = [...transport.pending.values()].find(entry => entry.method === 'browser.close');
+  assert.equal(terminal.timer, undefined);
+  t.mock.timers.reset();
+});
+
+test('the default deadline can be disabled and rejects unusable values', async t => {
+  const transport = await start(t, 'silent', {}, { defaultTimeoutMs: null });
+  void transport.invoke('page.title', { pageId: 'page' }).catch(() => {});
+  assert.equal([...transport.pending.values()][0].timer, undefined);
+  for (const defaultTimeoutMs of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+    await assert.rejects(SidecarTransport.start({ serverPath, defaultTimeoutMs }), error => error instanceof ConfigurationError && error.requestState === 'not_sent' && /defaultTimeoutMs/.test(error.message));
+  }
 });
 
 test('backpressure cancellation differentiates queued and dispatched work without replay', async t => {

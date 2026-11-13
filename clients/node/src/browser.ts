@@ -2,13 +2,14 @@ import { access, chmod, mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { traceCallSites, withCallSite } from './call-site.js';
 import type { CallOptions, InvokeClient } from './client.js';
 import { ConfigurationError, EokaError, ProtocolError, TransportError } from './errors.js';
 import type { MethodName, MethodParams, MethodResults } from './generated/protocol.js';
 import { Operation } from './operations.js';
 import { Page, type PerformOptions } from './page.js';
 import { Recording } from './recording.js';
-import { SidecarTransport } from './transport.js';
+import { SidecarTransport, defaultCallTimeoutMs } from './transport.js';
 import { installBrowser, type InstallProgress } from './browser-install.js';
 import { resolveCloudflareOptions, type CloudflareOptions } from './cloudflare.js';
 import { resolveServerBinary } from './server-binary.js';
@@ -19,6 +20,8 @@ export interface BrowserOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
   shutdownTimeoutMs?: number;
+  /** Local deadline for each later call that passes no `timeoutMs`; `null` disables it. Defaults to 120000. */
+  defaultTimeoutMs?: number | null;
   /** Have the server watch every tab and solve full-page Cloudflare challenges. */
   autoSolveCloudflare?: boolean | CloudflareOptions;
 }
@@ -92,6 +95,7 @@ function localOptions(options: CallOptions, deadline: number | undefined): CallO
 function lifecycleScope(options: BrowserOptions): { options: BrowserOptions; deadline: number | undefined; dispose: () => void } {
   validateTimeout(options.timeoutMs, 'timeoutMs');
   validateTimeout(options.shutdownTimeoutMs, 'shutdownTimeoutMs');
+  validateTimeout(options.defaultTimeoutMs ?? undefined, 'defaultTimeoutMs');
   checkAbort(options.signal);
   const deadline = options.timeoutMs === undefined ? undefined : performance.now() + options.timeoutMs;
   const controller = new AbortController();
@@ -305,6 +309,7 @@ export class Browser implements InvokeClient {
       redactionValues,
       ...localOptions(options, deadline),
       ...(options.shutdownTimeoutMs === undefined ? {} : { shutdownTimeoutMs: options.shutdownTimeoutMs }),
+      ...(options.defaultTimeoutMs === undefined ? {} : { defaultTimeoutMs: options.defaultTimeoutMs }),
       ...(runtimeOwner === undefined ? {} : { onTransport: (transport: SidecarTransport) => { runtimeOwner.transport = transport; } }),
     });
     try {
@@ -316,7 +321,9 @@ export class Browser implements InvokeClient {
         if (!transport.hasCapability('cloudflareAutoSolve')) throw new ConfigurationError('autoSolveCloudflare requires a server with the cloudflareAutoSolve capability');
         params = { ...params, autoSolveCloudflare: cloudflare };
       }
-      const session = await transport.invoke(method, params, localOptions(options, deadline));
+      const sessionOptions = localOptions(options, deadline);
+      if (sessionOptions.timeoutMs === undefined && options.defaultTimeoutMs != null) sessionOptions.timeoutMs = Math.max(options.defaultTimeoutMs, defaultCallTimeoutMs);
+      const session = await transport.invoke(method, params, sessionOptions);
       if (!session || !['owned', 'borrowed'].includes(session.ownership) || typeof session.browserVersion !== 'string' || !session.browserVersion.trim() || (method === 'browser.connect' && session.ownership !== 'borrowed')) {
         throw new ProtocolError('Invalid browser session ownership or browserVersion', { requestState: 'acknowledged' });
       }
@@ -440,7 +447,7 @@ export class Browser implements InvokeClient {
   }
 
   close(): Promise<void> {
-    this.#closePromise ??= (async () => {
+    this.#closePromise ??= withCallSite(this.close, async () => {
       this.#transport.quiesce();
       await Promise.all(this.#pageOwners);
       let transportFailure: unknown;
@@ -460,9 +467,12 @@ export class Browser implements InvokeClient {
       if (runtimeFailure !== undefined) failures.push(runtimeFailure);
       if (failures.length === 1 && this.#creationCleanupFailures.length === 0 && runtimeFailure === undefined) throw transportFailure;
       if (failures.length) throw new AggregateError(failures, 'Browser disposal includes resource cleanup failures', { cause: failures[0] });
-    })();
+    });
     return this.#closePromise;
   }
 
   [Symbol.asyncDispose](): Promise<void> { return this.close(); }
 }
+
+traceCallSites(Browser);
+traceCallSites(Browser.prototype, ['close']);

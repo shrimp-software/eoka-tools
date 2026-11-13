@@ -72,6 +72,7 @@ input.on('line', line => {
       }, mode === 'delayed-creation' ? 150 : 0);
       break;
     case 'browser.tabs':
+      if (mode === 'pending-tabs') break;
       reply(id, { tabs: [{ id: 'existing-tab', url: 'about:blank', title: 'Existing' }] });
       break;
     case 'actions.perform':

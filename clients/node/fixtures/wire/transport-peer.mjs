@@ -7,8 +7,11 @@ import { methodNames, protocolVersion } from '../../dist/generated/protocol.js';
 const mode = process.env.EOKA_TRANSPORT_TEST_MODE ?? 'normal';
 const maxInFlight = Number(process.env.EOKA_TRANSPORT_TEST_IN_FLIGHT ?? 128);
 const maxMessageBytes = Number(process.env.EOKA_TRANSPORT_TEST_MESSAGE_BYTES ?? 33554432);
+const capacity = Number(process.env.EOKA_TRANSPORT_TEST_CAPACITY ?? Infinity);
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
 let evaluations = 0;
+let outstanding = 0;
+let peak = 0;
 let pair = [];
 let terminalReaderClosed = false;
 let recording;
@@ -115,6 +118,20 @@ input.on('line', async line => {
       await finalization;
       reply(request.id, recording);
     }
+    return;
+  }
+  if (mode === 'silent') return;
+  if (mode === 'concurrency') {
+    if (outstanding >= capacity) {
+      process.stdout.write(`${JSON.stringify({ id: request.id, error: { code: 'ServerBusy', message: 'maxInFlight pending requests exceeded' } })}\n`);
+      return;
+    }
+    outstanding++;
+    peak = Math.max(peak, outstanding);
+    setTimeout(() => {
+      outstanding--;
+      reply(request.id, { result: { peak, received: ++evaluations } });
+    }, 2);
     return;
   }
   evaluations++;
