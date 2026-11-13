@@ -224,3 +224,95 @@ fn redaction_leaves_a_value_embedded_in_a_longer_word_alone() {
         "id=sessionid42 rejected [redacted]"
     );
 }
+
+fn receipt(dispatch: DispatchState) -> ActionReceipt {
+    ActionReceipt {
+        destination_target_id: None,
+        started_at_ms: 0,
+        finished_at_ms: 0,
+        download_guid: None,
+        action: "navigate".into(),
+        target_id: "target".into(),
+        outcome: ActionOutcome::OutcomeUnknown,
+        dispatch,
+        preparation_may_have_executed: false,
+        verification: None,
+        elapsed_ms: 0,
+        already_satisfied: false,
+        cleanup_pending: false,
+    }
+}
+
+fn failed(dispatch: DispatchState) -> Option<eoka::Result<ActionReceipt>> {
+    Some(Err(Error::Action {
+        code: "action_timeout".into(),
+        receipt: Box::new(receipt(dispatch)),
+        source: Box::new(Error::Timeout(
+            "Action deadline exceeded during preparation".into(),
+        )),
+    }))
+}
+
+#[test]
+fn only_a_navigation_whose_command_never_returned_is_abandoned() {
+    assert!(navigation_unanswered(
+        &failed(DispatchState::MayHaveBeenSent),
+        true
+    ));
+    assert!(!navigation_unanswered(
+        &failed(DispatchState::Acknowledged),
+        true
+    ));
+    assert!(!navigation_unanswered(
+        &failed(DispatchState::NotSent),
+        false
+    ));
+    assert!(!navigation_unanswered(
+        &Some(Ok(receipt(DispatchState::Acknowledged))),
+        true
+    ));
+    assert!(!navigation_unanswered(
+        &Some(Err(Error::Timeout("unrelated".into()))),
+        true
+    ));
+    assert!(navigation_unanswered(&None, true));
+    assert!(!navigation_unanswered(&None, false));
+}
+
+#[test]
+fn navigation_actions_are_the_only_ones_that_can_be_abandoned() {
+    let target = eoka::LocatorSpec::css("#field");
+    for action in [
+        Action::Navigate {
+            url: "https://example.test/".into(),
+            referrer: None,
+        },
+        Action::NavigateWithHeaders {
+            url: "https://example.test/".into(),
+            headers: Default::default(),
+        },
+        Action::Reload,
+        Action::Back,
+        Action::Forward,
+        Action::History { delta: -2 },
+    ] {
+        assert!(navigates(&action), "{}", action.kind());
+    }
+    for action in [
+        Action::Click {
+            target: target.clone(),
+            human: false,
+            double: false,
+        },
+        Action::Fill {
+            target,
+            value: "value".into(),
+            input_mode: Default::default(),
+        },
+        Action::PressKey {
+            key: "Enter".into(),
+        },
+    ] {
+        assert!(!navigates(&action), "{}", action.kind());
+    }
+}

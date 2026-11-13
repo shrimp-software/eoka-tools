@@ -1920,3 +1920,96 @@ fn a_page_stuck_in_a_script_does_not_delay_other_pages_or_new_pages() {
     assert!(started.elapsed() < Duration::from_secs(10));
     server.exit();
 }
+
+#[test]
+#[ignore = "requires Chrome"]
+fn an_unanswered_navigation_is_isolated_then_abandoned_so_the_page_answers_again() {
+    let (root, state, scratch) = directories();
+    let origin = format!("http://{}", stalling_server());
+    let mut server = Sidecar::start(&state, &scratch);
+    let (stuck, other) = two_fixture_pages(&mut server, &root.path().join("profile"), &origin);
+    let mut inbox = Inbox::default();
+    let navigate = eoka_server::eoka::Action::Navigate {
+        url: format!("{origin}/hang"),
+        referrer: None,
+    };
+    let timed_out = uuid::Uuid::new_v4().to_string();
+    let record = server.request(
+        10,
+        "actions.perform",
+        json!({"pageId":stuck,"operation_id":timed_out,"action":navigate,"options":{"timeout_ms":4000}}),
+    );
+    assert_eq!(record["result"]["id"], timed_out, "{record}");
+    std::thread::sleep(Duration::from_millis(500));
+    let (title, elapsed) = inbox.timed(&mut server, 11, "page.title", json!({"pageId":other}));
+    assert_eq!(title["result"]["title"], "fixture", "{title}");
+    assert!(elapsed < Duration::from_millis(1000), "{elapsed:?}");
+    let (created, elapsed) = inbox.timed(&mut server, 12, "browser.new_page", json!({}));
+    assert!(created["result"]["pageId"].is_string(), "{created}");
+    assert!(elapsed < Duration::from_millis(3000), "{elapsed:?}");
+    let asked = Instant::now();
+    server.send(json!({"id":13,"method":"page.title","params":{"pageId":stuck}}));
+    let (title, elapsed) = inbox.timed(&mut server, 14, "page.title", json!({"pageId":other}));
+    assert_eq!(title["result"]["title"], "fixture", "{title}");
+    assert!(elapsed < Duration::from_millis(1000), "{elapsed:?}");
+    let finished = server_wait(&mut inbox, &mut server, 15, &timed_out);
+    assert_eq!(finished["result"]["state"], "finished", "{finished}");
+    assert_eq!(
+        finished["result"]["outcome"], "outcome_unknown",
+        "{finished}"
+    );
+    assert_eq!(
+        finished["result"]["error_code"], "action_timeout",
+        "{finished}"
+    );
+    let title = inbox
+        .take(&server, 13, Duration::from_secs(5))
+        .expect("the read must answer once the unanswered navigation is abandoned");
+    assert_eq!(title["result"]["title"], "fixture", "{title}");
+    assert!(asked.elapsed() < Duration::from_secs(35));
+    let (url, elapsed) = inbox.timed(&mut server, 16, "page.url", json!({"pageId":stuck}));
+    assert_eq!(url["result"]["url"], format!("{origin}/"), "{url}");
+    assert!(elapsed < Duration::from_millis(1000), "{elapsed:?}");
+
+    let cancelled = uuid::Uuid::new_v4().to_string();
+    let record = server.request(
+        20,
+        "actions.perform",
+        json!({"pageId":stuck,"operation_id":cancelled,"action":navigate,"options":{"timeout_ms":120_000}}),
+    );
+    assert_eq!(record["result"]["id"], cancelled, "{record}");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut id = 21;
+    loop {
+        let record = server.request(id, "operations.get", json!({"id":cancelled}));
+        id += 1;
+        if record["result"]["dispatch_intent"] == true {
+            break;
+        }
+        assert!(Instant::now() < deadline, "navigation never dispatched");
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    std::thread::sleep(Duration::from_millis(300));
+    let record = server.request(100, "operations.cancel", json!({"id":cancelled}));
+    assert_eq!(record["result"]["id"], cancelled, "{record}");
+    let finished = server_wait(&mut inbox, &mut server, 101, &cancelled);
+    assert_eq!(
+        finished["result"]["error_code"], "operation_canceled",
+        "{finished}"
+    );
+    let (title, elapsed) = inbox.timed(&mut server, 102, "page.title", json!({"pageId":stuck}));
+    assert_eq!(title["result"]["title"], "fixture", "{title}");
+    assert!(elapsed < Duration::from_millis(1000), "{elapsed:?}");
+    server.shutdown(103);
+}
+
+fn server_wait(inbox: &mut Inbox, server: &mut Sidecar, id: u64, operation: &str) -> Value {
+    inbox
+        .timed(
+            server,
+            id,
+            "operations.wait",
+            json!({"id":operation,"timeout_ms":30_000}),
+        )
+        .0
+}

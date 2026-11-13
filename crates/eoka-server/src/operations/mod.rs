@@ -3,14 +3,20 @@ pub mod sidecar;
 pub(crate) mod store;
 
 use anyhow::{anyhow, Context, Result};
-use eoka::{Action, ActionOptions, ActionOutcome, DispatchObserver, Error, Page};
+use eoka::{
+    Action, ActionOptions, ActionOutcome, ActionReceipt, DispatchObserver, DispatchState, Error,
+    Page,
+};
 use eoka_protocol::{OperationListArgs, OperationRecord, OperationState};
 use std::{
     collections::HashMap,
     future::Future,
     path::PathBuf,
     pin::Pin,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     time::Duration,
 };
 use store::{timestamp, Store};
@@ -73,6 +79,25 @@ impl DispatchObserver for Intent {
                         std::io::Error::other(error),
                     )
                 })
+        })
+    }
+}
+
+struct TrackedIntent {
+    intent: Intent,
+    dispatched: Arc<AtomicBool>,
+}
+impl DispatchObserver for TrackedIntent {
+    fn before_dispatch(
+        &self,
+        preparation: bool,
+    ) -> Pin<Box<dyn Future<Output = eoka::Result<()>> + Send + '_>> {
+        Box::pin(async move {
+            self.intent.before_dispatch(preparation).await?;
+            if !preparation {
+                self.dispatched.store(true, Ordering::Release);
+            }
+            Ok(())
         })
     }
 }
@@ -174,13 +199,18 @@ impl OperationManager {
             .lock()
             .map_err(|_| commands::uncertain(anyhow!("Operation registry unavailable")))?
             .insert(id.clone(), cancel);
-        options.observer = Some(Arc::new(Intent {
-            store: store.clone(),
-            id: id.clone(),
+        let dispatched = Arc::new(AtomicBool::new(false));
+        options.observer = Some(Arc::new(TrackedIntent {
+            intent: Intent {
+                store: store.clone(),
+                id: id.clone(),
+            },
+            dispatched: dispatched.clone(),
         }));
         let manager = self.clone();
         tokio::spawn(async move {
             let sensitive = action_values(&action);
+            let navigation = navigates(&action);
             let result = tokio::select! {
                 biased;
                 _ = canceled.changed() => None,
@@ -189,6 +219,9 @@ impl OperationManager {
                     else { page.act(action, options).await }
                 } => Some(result),
             };
+            if navigation && navigation_unanswered(&result, dispatched.load(Ordering::Acquire)) {
+                abandon_navigation(&page).await;
+            }
             let diagnostic = result
                 .as_ref()
                 .and_then(|result| result.as_ref().err())
@@ -415,4 +448,49 @@ pub(crate) fn redact(message: &str, sensitive: &[String]) -> String {
         .fold(message.to_owned(), |message, form| {
             redact_standalone(&message, &form)
         })
+}
+
+fn navigates(action: &Action) -> bool {
+    matches!(
+        action,
+        Action::Navigate { .. }
+            | Action::NavigateWithHeaders { .. }
+            | Action::Reload
+            | Action::Back
+            | Action::Forward
+            | Action::History { .. }
+    )
+}
+
+fn navigation_unanswered(result: &Option<eoka::Result<ActionReceipt>>, dispatched: bool) -> bool {
+    match result {
+        None => dispatched,
+        Some(Err(Error::Action { receipt, .. })) => {
+            receipt.dispatch == DispatchState::MayHaveBeenSent
+        }
+        Some(_) => false,
+    }
+}
+
+const NAVIGATION_ABANDON_DEADLINE: Duration = Duration::from_secs(2);
+
+pub(crate) async fn abandon_navigation(page: &Page) {
+    let stopped = tokio::time::timeout(
+        NAVIGATION_ABANDON_DEADLINE,
+        page.session()
+            .send::<_, serde_json::Value>("Page.stopLoading", &serde_json::json!({})),
+    )
+    .await;
+    match stopped {
+        Ok(Ok(_)) => {}
+        Ok(Err(error)) => {
+            tracing::warn!(target_id = page.target_id(), %error, "Could not stop an unanswered navigation");
+        }
+        Err(_) => {
+            tracing::warn!(
+                target_id = page.target_id(),
+                "Stopping an unanswered navigation exceeded its deadline"
+            );
+        }
+    }
 }

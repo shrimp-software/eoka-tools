@@ -182,7 +182,10 @@ async fn navigate_opened_page(page: &eoka::Page, url: &str) -> Result<(), Server
             tokio::time::sleep(OPENED_PAGE_SETTLE).await;
             Ok(())
         }
-        Err(error) => Err(error.into()),
+        Err(error) => {
+            crate::operations::abandon_navigation(page).await;
+            Err(error.into())
+        }
     }
 }
 

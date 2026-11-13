@@ -460,6 +460,19 @@ No uncertain action is automatically replayed. Local waiter cancellation,
 transport loss and shutdown remain separate from the site's business outcome.
 See [OPERATIONS.md](OPERATIONS.md) for deduplication and durable recovery.
 
+Chrome answers no page-level request (`page.title`, `page.url`, evaluation,
+element reads) for a page whose main-frame navigation is still waiting for the
+site's response; such a request waits until the navigation commits, fails or is
+stopped, or until its own command deadline (30 seconds, 90 behind a proxy). To keep that from
+outliving the operation, a navigation operation that ends while its navigation
+command is still unanswered (its deadline passes, or it is cancelled after
+dispatch) stops the pending load. The page stays on its current document, the
+record keeps `outcome_unknown`, and requests queued for the page then answer.
+A navigation that committed before its deadline is left to finish loading.
+`browser.new_page` with a `url` creates the page, then navigates it; when that
+navigation command gets no answer the load is stopped the same way and the
+error is returned.
+
 ### Agent operations
 
 `agent.observe` and `agent.step` use canonical agent schemas plus `pageId`.
