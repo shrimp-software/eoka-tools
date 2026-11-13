@@ -29,8 +29,10 @@ pub async fn dispatch(
             .map_err(|error| ServerError::invalid_params(error.to_string()))?;
         let browser = state.browser()?.clone();
         let page = state.page(&args.page_id)?.clone();
-        let result = state
-            .agent
+        let agent = state.agent.clone();
+        let result = agent
+            .lock()
+            .await
             .observe(&browser, &page, args.args)
             .await
             .map_err(agent_error)?;
@@ -42,8 +44,10 @@ pub async fn dispatch(
             .map_err(|error| ServerError::invalid_params(error.to_string()))?;
         let browser = state.browser()?.clone();
         let page = state.page(&args.page_id)?.clone();
-        let mut result = state
-            .agent
+        let agent = state.agent.clone();
+        let mut result = agent
+            .lock()
+            .await
             .step(&browser, &page, &state.operations, args.args)
             .await
             .map_err(agent_error)?;
@@ -69,27 +73,7 @@ pub async fn dispatch(
     }
     if let Some(operation) = catalog_operation(method) {
         let (page_id, request) = catalog_request(operation, &params)?;
-        let page = state.page(&page_id)?.clone();
-        let response = state
-            .engine()?
-            .handle_on(&page_id, &page, operation.cmd, &request.args_json())
-            .await;
-        if response.ok {
-            return Ok(response.data.unwrap_or(Value::Null));
-        }
-        return Err(match response.error_detail {
-            // Core errors keep the kind a registered method would report.
-            Some(detail) => match eoka_protocol::sidecar::core_error_code(&detail.code) {
-                Some(code) => ServerError::new(code, detail.message),
-                None => ServerError::from_detail(detail),
-            },
-            None => ServerError::new(
-                ErrorCode::Operation,
-                response
-                    .error
-                    .unwrap_or_else(|| "Operation failed".to_owned()),
-            ),
-        });
+        return state.catalog(&page_id, operation, &request).await;
     }
     if matches!(method, "browser.tabs" | "browser.close") {
         validate_params(method, &params)?;

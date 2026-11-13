@@ -754,7 +754,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-runner"
-version = "0.7.2"
+version = "0.7.3"
 dependencies = [
  "chrono",
  "clap",
@@ -823,7 +823,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-tack"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "async-trait",
  "eoka-protocol",

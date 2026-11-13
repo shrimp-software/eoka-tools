@@ -119,7 +119,7 @@ pub async fn run(session_name: &str, spec: LaunchSpec) -> anyhow::Result<()> {
                 handler.service_idle_fetch();
                 let activity = *activity_rx.borrow();
                 last_activity = last_activity.max(activity.last_request);
-                if activity.waiting || !waiters.is_empty() || handler.download_manager().is_active() || handler.operation_manager().is_active() { last_activity = Instant::now(); }
+                if activity.waiting || !waiters.is_empty() || handler.download_manager().is_active() || handler.operation_manager().is_active() || handler.is_recording() { last_activity = Instant::now(); }
                 if last_activity.elapsed() > timeout && !handler.is_network_recording().await {
                     eprintln!("[eoka] idle timeout ({}s), shutting down", timeout.as_secs());
                     let _ = handler.handle("close", &serde_json::Value::Null).await;

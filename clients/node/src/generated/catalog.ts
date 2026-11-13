@@ -4,8 +4,10 @@ import type { MethodParams, MethodResults } from "./protocol.js";
 
 export const catalogMethods = ["back","captcha.datadome","captcha.detect","captcha.inject","captcha.turnstile","clear_cookies","click","click_shadow","clone_from","console","content","cookies","delete_cookie","dialog.accept","dialog.dismiss","double_click","download.cancel","download.get","download.list","download.start","download.wait","dump_storage","emulate","errors","eval","exec","exists","fake_camera","fetch","fill","find","forward","frame_eval","frames","get_attribute","get_text","headers","hover","info","intercept.add","intercept.list","intercept.log","intercept.remove","js.allow","js.block","js.list","js.mode","js.remove","key","key.down","key.up","load_state","mouse.down","mouse.move","mouse.up","network.clear","network.export","network.log","network.record.start","network.record.status","network.record.stop","network.show","network.wait","observe","open","release_all_inputs","reload","save_state","screenshot","scroll","select","set_cookie","set_storage","snapshot","spa.info","spa.navigate","storage","text","wait","wasm.find","wasm.info","wasm.read","wasm.write"] as const;
 export type CatalogMethod = (typeof catalogMethods)[number];
+/** The declared fields of a generated params type, without its index signature. */
+type Declared<T> = { [K in keyof T as string extends K ? never : number extends K ? never : K]: T[K] };
 /** An operation's input without the page ID, which the page supplies. */
-export type CatalogInput<M extends CatalogMethod> = Omit<MethodParams[M], "pageId">;
+export type CatalogInput<M extends CatalogMethod> = Omit<Declared<MethodParams[M]>, "pageId">;
 
 export interface CatalogPage {
   readonly id: string;

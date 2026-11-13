@@ -130,8 +130,16 @@ named by its catalog path (`console`, `cookies`, `network.record.start`,
 daemon. The schema bundle lists them under `catalogMethods`.
 
 - Params are the operation's catalog input plus a required string `pageId`.
+  Catalog fields are snake_case. An unknown field is `InvalidParams`, not ignored.
 - The result is the operation's `data` value; results are not yet typed.
 - Failures return an `Operation` error carrying the catalog `ErrorDetail`.
+- Actions (`click`, `double_click`, `fill`, `select`, `hover`, `key`, `scroll`,
+  `back`, `forward`, `reload`) are durable operations. `operation_id` is
+  optional and generated when omitted. An admitted action returns its operation
+  record as the result even when the outcome is unverified or failed, like
+  `actions.perform`; read `outcome` and `error` on the record.
+- Target references from `agent.observe` resolve in catalog actions.
+- `open` navigates the addressed page, on launched and connected browsers.
 - Session lifecycle and tab management are not projected: use `server.shutdown`,
   `browser.close`, `browser.new_page`, `browser.tabs` and `browser.close_tab`.
 - A catalog path that already names a registered method keeps that method's
@@ -139,6 +147,20 @@ daemon. The schema bundle lists them under `catalogMethods`.
 - Errors raised by the core library keep their kind: a catalog operation that
   times out returns `Timeout`, a missing element returns `ElementNotFound`, the
   same codes a registered method returns.
+
+Some catalog state belongs to the browser session rather than one page: the
+network recorder and its log, the download slot, and the JavaScript policy
+(`js.*`, which applies to navigations made through catalog `open`). Interception
+rules are re-applied to whichever page a catalog call addresses. Actions that
+check actionability wait on animation frames, which a background tab does not
+run; act on the foreground page.
+
+The catalog includes operations that read or write local files chosen by the
+caller (`save_state`, `load_state`, `network.export`, `intercept.add` with
+`capture` or `respond`, `fake_camera`, `download.start`, `screenshot`,
+`recording.start`) and `clone_from`, which copies state from another local
+Chrome. A sidecar client has the same local reach as the `eoka` CLI. Do not pass
+untrusted input through as method names or file paths.
 
 Every registered method declares a role in `eoka-protocol::sidecar::method_role`:
 lifecycle, shared with a catalog operation of the same name, a typed convenience

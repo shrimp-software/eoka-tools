@@ -57,7 +57,9 @@ dispatch, including in a focused frame.
 
 `eoka action` (`actions.perform`) accepts every kind below. `step` accepts the
 subset marked *step*. Kinds marked *expect* are rejected without an expectation,
-because dispatch alone proves nothing about their result.
+because dispatch alone proves nothing about their result. The fields are those of
+`action`; `step` names two of them differently: `fill` takes `text` and `select`
+takes a single `value`.
 
 | Kind | Fields | Notes |
 | --- | --- | --- |

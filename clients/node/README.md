@@ -45,7 +45,7 @@ String targets are CSS selectors. An action resolves only after its result is ve
 - **Waits:** `waitFor`, `waitForVisible`, `waitForText`
 - **Actions:** `goto`, `fill`, `select`, `hover`, `click`, `type`, `pressKey`, `submit`, `drag`
 
-Everything the `eoka` CLI can do is available under `page.ops`, generated from the same operation catalog: console and error logs, cookies and storage, network recording and interception, downloads, JavaScript policy and more. Each takes the operation's input; results are untyped for now.
+Every page-scoped operation in the `eoka` CLI's catalog is available under `page.ops`, generated from that catalog: console and error logs, cookies and storage, network recording and interception, downloads, JavaScript policy, dialogs and more. Inputs are typed; results are untyped for now. Tabs, recording and the browser lifecycle keep their own methods on `Browser` and `Page`. Catalog actions such as `page.ops.reload()` return their operation record, including when the outcome is unverified, so check `outcome` on it. These operations include ones that read and write local files; see the protocol reference before passing untrusted input.
 
 ```js
 await page.ops.networkRecordStart();

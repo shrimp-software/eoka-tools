@@ -899,6 +899,106 @@ fn catalog_operations_run_on_the_addressed_page_and_report_structured_errors() {
     }
     assert_eq!(title["result"]["title"], "shadow-clicked", "{title}");
 
+    // Actions need no caller-supplied operation ID and return their record,
+    // including when the outcome is not verified.
+    let reloaded = server.request(100, "reload", json!({"pageId":first}));
+    assert_eq!(
+        reloaded["result"]["outcome"], "verified_complete",
+        "{reloaded}"
+    );
+    let generated = reloaded["result"]["id"].as_str().unwrap().to_owned();
+    let fetched = server.request(101, "operations.get", json!({"id":generated}));
+    assert_eq!(
+        fetched["result"]["id"], reloaded["result"]["id"],
+        "{fetched}"
+    );
+    let unverified = server.request(
+        102,
+        "click",
+        json!({"pageId":first,"target":"css:body","timeout_ms":500}),
+    );
+    assert!(
+        unverified["result"]["id"].is_string(),
+        "an unverified action must still return its record: {unverified}"
+    );
+
+    // A reference from the sidecar's own observation resolves in a catalog action.
+    server.request(
+        103,
+        "exec",
+        json!({"pageId":shadow,"raw":true,"code":"document.body.innerHTML = '<button id=go>Go</button>'; void 0"}),
+    );
+    let observed = server.request(104, "agent.observe", json!({"pageId":shadow}));
+    let reference = observed["result"]["controls"][0]["target"]
+        .as_str()
+        .unwrap_or_else(|| panic!("no control in {observed}"))
+        .to_owned();
+    // The shadow page is the foreground tab; background tabs do not run the
+    // animation frames that actionability checks wait for.
+    let scrolled = server.request(105, "scroll", json!({"pageId":shadow,"target":reference}));
+    assert!(scrolled.get("result").is_some(), "{scrolled}");
+    let stale = server.request(106, "scroll", json!({"pageId":shadow,"target":"@e999"}));
+    assert!(stale.get("error").is_some(), "{stale}");
+
+    // An interception rule must not stall requests made outside the engine:
+    // nothing polls an adopted engine, so it has to keep draining by itself.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    std::thread::spawn(move || {
+        for stream in listener.incoming().take(32) {
+            let Ok(mut stream) = stream else { continue };
+            let mut request = [0u8; 2048];
+            let _ = std::io::Read::read(&mut stream, &mut request);
+            let _ = stream.write_all(
+                b"HTTP/1.1 200 OK\r\naccess-control-allow-origin: *\r\ncontent-type: text/html\r\ncontent-length: 2\r\nconnection: close\r\n\r\nok",
+            );
+        }
+    });
+    // Same origin as the fixture, so the credentialed fetch below is allowed.
+    let opened = server.request(
+        108,
+        "open",
+        json!({"pageId":first,"url":format!("http://{address}/page")}),
+    );
+    assert!(opened.get("result").is_some(), "{opened}");
+    let baseline = server.request(
+        109,
+        "page.fetch",
+        json!({"pageId":first,"url":format!("http://{address}/data")}),
+    );
+    assert_eq!(baseline["result"]["status"], 200, "{baseline}");
+    let rule = server.request(
+        110,
+        "intercept.add",
+        json!({"pageId":first,"url_pattern":"*never-matches*","capture":scratch.join("capture")}),
+    );
+    assert!(rule.get("result").is_some(), "{rule}");
+    let started = Instant::now();
+    let direct = server.request(
+        111,
+        "page.fetch",
+        json!({"pageId":first,"url":format!("http://{address}/data")}),
+    );
+    assert_eq!(direct["result"]["status"], 200, "{direct}");
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "request stalled behind interception for {:?}",
+        started.elapsed()
+    );
+    let rules = server.request(112, "intercept.list", json!({"pageId":first}));
+    assert!(
+        rules["result"].to_string().contains("never-matches"),
+        "{rules}"
+    );
+
+    // Unknown and camelCase fields are named instead of ignored.
+    let misspelt = server.request(
+        113,
+        "click_shadow",
+        json!({"pageId":first,"selector":"b","timeoutMs":5}),
+    );
+    assert_eq!(misspelt["error"]["code"], "InvalidParams", "{misspelt}");
+
     for (id, method, params, code) in [
         (30, "info", json!({}), "InvalidParams"),
         (31, "info", json!({"pageId":"missing"}), "InvalidPage"),

@@ -190,6 +190,7 @@ pub(crate) async fn close_tab_impl(
     state.page(page_id)?;
     let recording_error = state.recordings.cancel_page(page_id).await.err();
     let release_result = state.page(page_id)?.release_all_inputs().await;
+    state.release_engine_tab(page_id).await;
     let browser = state.browser()?;
     browser.close_tab(page_id).await?;
     state.remove_page(page_id);

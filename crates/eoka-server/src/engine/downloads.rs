@@ -41,7 +41,9 @@ impl Engine {
                 Ok(tab) => tab,
                 Err(error) => return rejected(failure("session_unavailable", error)),
             };
-            match crate::downloads::resolve_click(&self.agent, &tab.page, target).await {
+            match crate::downloads::resolve_click(&*self.agent.lock().await, &tab.page, target)
+                .await
+            {
                 Ok(selector) => Some(selector),
                 Err(error) => return rejected(error),
             }

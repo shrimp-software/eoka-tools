@@ -52,13 +52,31 @@ fn recording_response(
     match result {
         Ok(record) => Ok(Response::ok(record)),
         Err(error) => {
-            let mut response = Response::err(error.message.clone());
+            // Keep the recording error kind (for example recording_not_found)
+            // instead of the generic classification of its message.
+            let code = serde_json::to_value(error.code)
+                .ok()
+                .and_then(|code| code.as_str().map(snake_case))
+                .unwrap_or_else(|| "recording_failed".to_owned());
+            let mut response =
+                Response::err_detail(eoka_protocol::ErrorDetail::new(code, error.message.clone()));
             response.data = serde_json::to_value(&error.data)
                 .ok()
                 .filter(|v| !v.is_null());
             Ok(response)
         }
     }
+}
+
+fn snake_case(pascal: &str) -> String {
+    let mut snake = String::with_capacity(pascal.len() + 4);
+    for (index, character) in pascal.chars().enumerate() {
+        if character.is_ascii_uppercase() && index > 0 {
+            snake.push('_');
+        }
+        snake.push(character.to_ascii_lowercase());
+    }
+    snake
 }
 
 /// A failed catalog command. Errors from the core library keep their kind so
@@ -72,13 +90,15 @@ pub struct EngineError {
 
 impl EngineError {
     fn into_response(self) -> Response {
-        let mut response = Response::err(self.message);
-        if let (Some(kind), Some(detail)) = (self.kind, response.error_detail.as_mut()) {
-            if let Some(code) = eoka_protocol::sidecar::core_error_detail_code(kind) {
-                detail.code = code.to_owned();
-            }
+        // A known core error kind replaces the message-based classification
+        // entirely, including its retry flag and hint.
+        match self
+            .kind
+            .and_then(eoka_protocol::sidecar::core_error_detail_code)
+        {
+            Some(code) => Response::err_detail(eoka_protocol::ErrorDetail::new(code, self.message)),
+            None => Response::err(self.message),
         }
-        response
     }
 }
 
@@ -105,7 +125,8 @@ impl From<anyhow::Error> for EngineError {
     fn from(error: anyhow::Error) -> Self {
         match error.downcast::<eoka::Error>() {
             Ok(error) => error.into(),
-            Err(error) => format!("{error:#}").into(),
+            // The outermost message only, as these errors were reported before.
+            Err(error) => error.to_string().into(),
         }
     }
 }
@@ -144,7 +165,7 @@ pub(crate) fn host_version() -> &'static str {
 }
 
 pub struct Engine {
-    agent: crate::agent::AgentSession,
+    agent: crate::agent::SharedAgentSession,
     operations: crate::operations::OperationManager,
     downloads: crate::downloads::DownloadManager,
     state: Option<BrowserState>,
@@ -209,10 +230,12 @@ impl Engine {
         browser: std::sync::Arc<eoka::Browser>,
         operations: crate::operations::OperationManager,
         recordings: crate::recordings::RecordingManager,
+        agent: crate::agent::SharedAgentSession,
     ) -> Self {
         let mut engine = Self::new(session_name, LaunchSpec::Reuse);
         engine.operations = operations;
         engine.recordings = recordings;
+        engine.agent = agent;
         engine.state = Some(BrowserState::adopted(browser));
         engine
     }
@@ -225,17 +248,50 @@ impl Engine {
         cmd: &str,
         args: &Value,
     ) -> Response {
+        let mut switched = false;
         if let Some(state) = self.state.as_mut() {
-            state
+            let tab = state
                 .tabs
                 .entry(tab_id.to_owned())
                 .or_insert_with(|| TabState::new(page.clone()));
+            // The owner navigates and acts on this page outside the engine,
+            // so nothing cached about its document can be trusted.
+            tab.invalidate();
+            switched = state.current_tab_id.as_deref() != Some(tab_id);
             state.current_tab_id = Some(tab_id.to_owned());
         }
-        self.handle(cmd, args).await
+        if switched {
+            // Interception rules, script policy and recording follow the
+            // addressed page rather than the last one used.
+            if let Err(error) = self.sync_current_target_features().await {
+                return Response::err(error);
+            }
+        }
+        let response = self.handle(cmd, args).await;
+        // Nothing polls an adopted engine between calls, so leave a drain
+        // running for requests that interception pauses in the meantime.
+        self.service_idle_fetch();
+        response
     }
 
-    /// Stop tracking a tab the caller closed.
+    /// Stop tracking a tab the owner is closing and release what the engine
+    /// attached to it.
+    pub async fn release_tab(&mut self, tab_id: &str) {
+        let session = self
+            .state
+            .as_ref()
+            .and_then(|state| state.tabs.get(tab_id))
+            .map(|tab| tab.page.session().clone());
+        if let Some(session) = session {
+            if self.fetch_sessions.contains_key(session.session_id()) {
+                self.disable_fetch_session(&session).await;
+            }
+        }
+        self.forget_tab(tab_id);
+        self.service_idle_fetch();
+    }
+
+    /// Stop tracking a tab that is already gone.
     pub fn forget_tab(&mut self, tab_id: &str) {
         if let Some(state) = self.state.as_mut() {
             state.tabs.remove(tab_id);
@@ -243,6 +299,27 @@ impl Engine {
                 state.current_tab_id = None;
             }
         }
+    }
+
+    /// Stop everything the engine runs against a browser it adopted, before
+    /// the owner closes that browser.
+    pub async fn release(&mut self) {
+        self.downloads.stop().await;
+        if let Some(recorder) = self.network.take() {
+            let session = self
+                .state
+                .as_ref()
+                .and_then(|state| state.current_tab())
+                .map(|tab| tab.page.session().clone());
+            let _ = recorder.stop(session).await;
+        }
+        self.disable_all_fetch_sessions().await;
+        self.state = None;
+    }
+
+    /// Whether a recording started through this engine is still running.
+    pub fn is_recording(&self) -> bool {
+        self.recordings.is_active()
     }
 
     async fn ensure_browser(&mut self) -> Result<(), String> {
@@ -1170,7 +1247,12 @@ impl Engine {
                     .await
             }
             _ => {
-                let target = self.agent.resolve_target(&tab.page, target_str).await?;
+                let target = self
+                    .agent
+                    .lock()
+                    .await
+                    .resolve_target(&tab.page, target_str)
+                    .await?;
                 let id = uuid::Uuid::new_v4().to_string();
                 self.operations
                     .submit(
@@ -1575,6 +1657,11 @@ impl Engine {
             .as_ref()
             .and_then(|s| s.tabs.get(&tab_id))
             .map(|t| t.page.session().clone());
+        // A recording cannot outlive its tab; cancel it rather than leave it
+        // running against a closed target.
+        if let Err(error) = self.recordings.cancel_page(&tab_id).await {
+            eprintln!("[eoka] recording cleanup failed: {}", error.message);
+        }
         let state = self.require_state_mut()?;
         state.close_tab(&tab_id).await?;
         if let Some(session) = closing_session {

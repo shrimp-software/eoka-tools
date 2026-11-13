@@ -85,7 +85,7 @@ fn add_catalog_tools(router: &mut ToolRouter<EokaServer>, include_opt_in: bool) 
         .chain(MCP_OWN_TOOL_COMMANDS)
         .map(|(_, command)| *command)
         .collect();
-    for operation in eoka_protocol::sidecar::catalog_operations() {
+    for operation in eoka_protocol::sidecar::page_operations() {
         let name = operation.name.replace('.', "_");
         let hidden =
             operation.exposure == eoka_protocol::OperationExposure::OptIn && !include_opt_in;
@@ -180,10 +180,12 @@ impl EokaServer {
             .current_tab_id
             .clone()
             .ok_or_else(|| ErrorData::from(AgentError::NoTab))?;
-        let mut params = arguments.unwrap_or_default();
-        params.insert("pageId".into(), Value::String(page_id));
-        let result =
-            eoka_server::dispatch::dispatch(&mut state.server, operation.path, params.into()).await;
+        let request = eoka_protocol::request_from_cmd(
+            operation.cmd,
+            Value::Object(arguments.unwrap_or_default()),
+        )
+        .map_err(invalid)?;
+        let result = state.server.catalog(&page_id, operation, &request).await;
         if !operation.read_only {
             if let Some(tab) = state.current_tab_mut() {
                 tab.invalidate();
@@ -209,7 +211,9 @@ impl EokaServer {
             }
         }
         if guard.is_none() {
-            let state = BrowserState::new(self.headless).await.map_err(internal)?;
+            let state = BrowserState::new(self.headless, self.agent.clone())
+                .await
+                .map_err(internal)?;
             *guard = Some(state);
         }
         Ok(())
@@ -1963,7 +1967,9 @@ mod tests {
             .chain(MCP_OWN_TOOL_COMMANDS)
             .map(|(_, command)| *command)
             .collect();
-        for operation in eoka_protocol::sidecar::catalog_operations() {
+        // Every operation that acts on a page, including those the sidecar
+        // serves under a method of its own such as recording.
+        for operation in eoka_protocol::sidecar::page_operations() {
             let name = operation.name.replace('.', "_");
             assert!(
                 covered.contains(operation.cmd) || router.map.contains_key(name.as_str()),
@@ -1976,8 +1982,15 @@ mod tests {
         add_catalog_tools(&mut default_router, false);
         assert!(default_router.map.contains_key("content"));
         assert!(default_router.map.contains_key("reload"));
-        assert!(!default_router.map.contains_key("click_shadow"));
-        assert!(router.map.contains_key("click_shadow"));
+        for opt_in in [
+            "click_shadow",
+            "recording_start",
+            "clone_from",
+            "fake_camera",
+        ] {
+            assert!(!default_router.map.contains_key(opt_in), "{opt_in}");
+            assert!(router.map.contains_key(opt_in), "{opt_in}");
+        }
     }
 
     #[tokio::test]
@@ -2015,11 +2028,36 @@ mod tests {
             .await
             .unwrap();
         assert!(text(&attribute).contains("/next"), "{}", text(&attribute));
+        // Missing required input is rejected before the engine runs.
         let invalid = server
             .catalog_tool(operation_by_cmd("get_text").unwrap(), None)
+            .await;
+        assert!(invalid.is_err(), "missing selector must be invalid params");
+        // A missing element is a tool error the model can read, not a crash.
+        let mut arguments = JsonObject::new();
+        arguments.insert("selector".into(), json!("#absent"));
+        let absent = server
+            .catalog_tool(operation_by_cmd("get_text").unwrap(), Some(arguments))
             .await
             .unwrap();
-        assert_eq!(invalid.is_error, Some(true), "{}", text(&invalid));
+        assert_eq!(absent.is_error, Some(true), "{}", text(&absent));
+        assert!(
+            text(&absent).contains("ElementNotFound"),
+            "{}",
+            text(&absent)
+        );
+        // An action tool needs no caller-supplied operation ID and returns
+        // the record of what it did.
+        let reload = server
+            .catalog_tool(operation_by_cmd("reload").unwrap(), None)
+            .await
+            .unwrap();
+        assert_ne!(reload.is_error, Some(true), "{}", text(&reload));
+        assert!(
+            text(&reload).contains("verified_complete"),
+            "{}",
+            text(&reload)
+        );
         // The hand-written tools still see the same page afterwards.
         let info = server.page_info().await.unwrap();
         assert!(text(&info).contains("one"), "{}", text(&info));

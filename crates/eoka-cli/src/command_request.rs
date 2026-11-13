@@ -132,7 +132,7 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
                 _ => eoka_protocol::sidecar::ScreenshotFormat::Png,
             }),
             quality: *quality,
-            clip: clip.as_deref().map(parse_clip),
+            clip: clip.clone(),
             full_page: *full_page,
         }),
         Command::Recording { action } => {
@@ -528,25 +528,6 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
     }
 }
 
-/// Parse `X,Y,WIDTH,HEIGHT`; a malformed value becomes an empty region, which
-/// the engine rejects with the usual validation error.
-fn parse_clip(value: &str) -> eoka_protocol::sidecar::ScreenshotClip {
-    let numbers: Vec<f64> = value
-        .split(',')
-        .map(|part| part.trim().parse().unwrap_or(f64::NAN))
-        .collect();
-    let at = |index: usize| match numbers.len() {
-        4 => numbers[index],
-        _ => f64::NAN,
-    };
-    eoka_protocol::sidecar::ScreenshotClip {
-        x: at(0),
-        y: at(1),
-        width: at(2),
-        height: at(3),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -566,6 +547,90 @@ mod tests {
             request.cmd()
         );
         request.cmd()
+    }
+
+    #[test]
+    fn new_command_flags_reach_their_requests() {
+        let args = |argv: &[&str]| {
+            let (_cli, command) = parsed_command(argv);
+            let request = command_to_request(&command, false);
+            (request.cmd(), request.args_json())
+        };
+        let (cmd, shot) = args(&[
+            "eoka",
+            "screenshot",
+            "--format",
+            "webp",
+            "--quality",
+            "80",
+            "--clip",
+            "1,2,30,40",
+        ]);
+        assert_eq!(cmd, "screenshot");
+        assert_eq!(shot["format"], "webp");
+        assert_eq!(shot["quality"], 80);
+        assert_eq!(
+            shot["clip"],
+            serde_json::json!({"x":1.0,"y":2.0,"width":30.0,"height":40.0})
+        );
+        assert_eq!(
+            args(&["eoka", "screenshot", "--full-page"]).1["full_page"],
+            true
+        );
+
+        let (cmd, wait) = args(&[
+            "eoka",
+            "wait",
+            "--selector",
+            "#x",
+            "--state",
+            "hidden",
+            "-t",
+            "9",
+        ]);
+        assert_eq!(cmd, "wait");
+        assert_eq!(wait["selector"], "#x");
+        assert_eq!(wait["state"], "hidden");
+        assert_eq!(wait["timeout"], 9);
+
+        let (cmd, start) = args(&[
+            "eoka",
+            "recording",
+            "start",
+            "/tmp/a.mp4",
+            "--fps",
+            "24",
+            "--max-width",
+            "640",
+        ]);
+        assert_eq!(cmd, "recording_start");
+        assert_eq!(start["path"], "/tmp/a.mp4");
+        assert_eq!(start["fps"], 24);
+        assert_eq!(start["max_width"], 640);
+
+        let (cmd, shadow) = args(&[
+            "eoka",
+            "click-shadow",
+            "b",
+            "--frame",
+            "F",
+            "--timeout-ms",
+            "5",
+        ]);
+        assert_eq!(cmd, "click_shadow");
+        assert_eq!(shadow["frame_id"], "F");
+        assert_eq!(shadow["timeout_ms"], 5);
+        assert_eq!(
+            args(&["eoka", "dialog", "accept", "--prompt-text", "hi"]).1["prompt_text"],
+            "hi"
+        );
+
+        for malformed in ["1,2,3", "a,b,c,d", "0,0,0,10", "-1,0,5,5", "0,0,inf,5"] {
+            assert!(
+                Cli::try_parse_from(["eoka", "screenshot", "--clip", malformed]).is_err(),
+                "{malformed}"
+            );
+        }
     }
 
     #[test]

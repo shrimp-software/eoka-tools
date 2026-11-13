@@ -15,11 +15,15 @@ impl Engine {
             match cmd {
                 "agent_observe" => Ok(Response::ok(serde_json::to_value(
                     self.agent
+                        .lock()
+                        .await
                         .observe(&state.browser, &page, serde_json::from_value(args.clone())?)
                         .await?,
                 )?)),
                 "agent_step" => Ok(Response::agent_result(
                     self.agent
+                        .lock()
+                        .await
                         .step_selected(
                             &state.browser,
                             &page,

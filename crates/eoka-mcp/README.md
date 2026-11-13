@@ -24,7 +24,12 @@ selector and expectation waits), `emulate`, `frames`, the `network_*`,
 appears here without a server change.
 
 Operations marked opt-in in the catalog are listed only when
-`EOKA_MCP_ALL_TOOLS=1` is set. Catalog tools need an open page; `navigate` first.
+`EOKA_MCP_ALL_TOOLS=1` is set. That set includes recording, shadow-root clicks,
+and the operations that reach outside the page: `clone_from` (copies cookies and
+storage from another local Chrome), `fake_camera`, and interception rules that
+capture to or respond from local files. Catalog tools need an open page;
+`navigate` first. Action tools generate an operation ID when none is given and
+return the operation record.
 
 ## Action defaults
 

@@ -139,9 +139,16 @@ fn every_action_kind_is_documented() {
 
     let reference = Path::new(env!("CARGO_MANIFEST_DIR")).join("references/actions.md");
     let text = std::fs::read_to_string(&reference).unwrap();
+    // A kind counts only when it names a row of the kinds table, so prose that
+    // happens to mention `click` or `back` does not satisfy this.
+    let rows: Vec<&str> = text
+        .lines()
+        .filter_map(|line| line.strip_prefix("| `"))
+        .filter_map(|row| row.split('|').next())
+        .collect();
     let undocumented: Vec<&String> = found
         .iter()
-        .filter(|kind| !text.contains(&format!("`{kind}`")))
+        .filter(|kind| !rows.iter().any(|cell| cell.contains(&format!("{kind}`"))))
         .collect();
     assert!(
         undocumented.is_empty(),

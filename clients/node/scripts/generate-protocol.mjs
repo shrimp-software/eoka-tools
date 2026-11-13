@@ -44,8 +44,10 @@ import type { MethodParams, MethodResults } from "./protocol.js";
 
 export const catalogMethods = ${JSON.stringify(catalog)} as const;
 export type CatalogMethod = (typeof catalogMethods)[number];
+/** The declared fields of a generated params type, without its index signature. */
+type Declared<T> = { [K in keyof T as string extends K ? never : number extends K ? never : K]: T[K] };
 /** An operation's input without the page ID, which the page supplies. */
-export type CatalogInput<M extends CatalogMethod> = Omit<MethodParams[M], "pageId">;
+export type CatalogInput<M extends CatalogMethod> = Omit<Declared<MethodParams[M]>, "pageId">;
 
 export interface CatalogPage {
   readonly id: string;

@@ -271,9 +271,10 @@ pub enum Command {
         #[arg(
             long,
             value_name = "X,Y,WIDTH,HEIGHT",
+            value_parser = parse_clip,
             help = "Capture a document-relative region in CSS pixels"
         )]
-        clip: Option<String>,
+        clip: Option<eoka_protocol::sidecar::ScreenshotClip>,
     },
     #[command(about = "Record the current tab to an MP4 file")]
     Recording {
@@ -1074,6 +1075,33 @@ pub enum OperationCommand {
         #[arg(help = OPERATION_ID)]
         id: String,
     },
+}
+
+/// Parse `X,Y,WIDTH,HEIGHT` for `screenshot --clip`.
+fn parse_clip(value: &str) -> Result<eoka_protocol::sidecar::ScreenshotClip, String> {
+    let numbers: Vec<f64> = value
+        .split(',')
+        .map(|part| part.trim().parse::<f64>())
+        .collect::<Result<_, _>>()
+        .map_err(|_| "expected four numbers: X,Y,WIDTH,HEIGHT".to_owned())?;
+    match numbers[..] {
+        [x, y, width, height]
+            if numbers.iter().all(|n| n.is_finite())
+                && x >= 0.0
+                && y >= 0.0
+                && width > 0.0
+                && height > 0.0 =>
+        {
+            Ok(eoka_protocol::sidecar::ScreenshotClip {
+                x,
+                y,
+                width,
+                height,
+            })
+        }
+        [_, _, _, _] => Err("X and Y must be at least 0, WIDTH and HEIGHT greater than 0".into()),
+        _ => Err("expected four numbers: X,Y,WIDTH,HEIGHT".into()),
+    }
 }
 
 #[derive(Subcommand)]

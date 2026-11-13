@@ -176,7 +176,9 @@ impl BrowserState {
 
     /// Track a browser owned by the caller. The engine never closes it.
     pub fn adopted(browser: Arc<Browser>) -> Self {
-        let is_live = !browser.owns_process();
+        // The owner addresses pages by ID, including on a browser it only
+        // attached to, so `open` navigates the addressed page.
+        let is_live = false;
         Self {
             browser,
             tabs: HashMap::new(),

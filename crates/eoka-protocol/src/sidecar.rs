@@ -1382,14 +1382,19 @@ pub fn method_role(method: &str) -> Option<MethodRole> {
         "page.get_attribute" => ReplacedBy("get_attribute"),
         "page.exists" => ReplacedBy("exists"),
         "page.wait_for" | "page.wait_for_visible" | "page.wait_for_text" => ReplacedBy("wait"),
-        "page.evaluate" | "page.evaluate_raw" => ReplacedBy("eval"),
-        "page.execute" | "page.execute_raw" => ReplacedBy("exec"),
+        "page.evaluate" | "page.evaluate_raw" | "page.execute" | "page.execute_raw" => {
+            Distinct("bounded function evaluation with typed results; eval and exec take a script")
+        }
         "page.frames" => ReplacedBy("frames"),
         "page.evaluate_in_frame" => ReplacedBy("frame_eval"),
         "page.click_shadow" => ReplacedBy("click_shadow"),
         "page.solve_turnstile" => ReplacedBy("captcha.turnstile"),
-        "page.fetch" | "page.fetch_bounded" => ReplacedBy("fetch"),
-        "page.set_viewport" | "page.reset_viewport" => ReplacedBy("emulate"),
+        "page.fetch" | "page.fetch_bounded" => {
+            Distinct("typed response and streaming byte bound; catalog fetch truncates text")
+        }
+        "page.set_viewport" | "page.reset_viewport" => {
+            Distinct("plain viewport metrics; emulate also turns on mobile and touch emulation")
+        }
         "page.mouse_down" => ReplacedBy("mouse.down"),
         "page.mouse_move" => ReplacedBy("mouse.move"),
         "page.mouse_up" => ReplacedBy("mouse.up"),
@@ -1414,11 +1419,17 @@ pub fn method_role(method: &str) -> Option<MethodRole> {
 /// `server.*` and `browser.*` methods, and a path that already names a sidecar
 /// method keeps that method's contract.
 pub fn catalog_operations() -> impl Iterator<Item = &'static crate::OperationSpec> {
+    page_operations()
+        .filter(|operation| !METHODS.iter().any(|method| method.name == operation.path))
+}
+
+/// Catalog operations that act on one page of an existing session: everything
+/// except session lifecycle and tab management, which each adapter owns.
+pub fn page_operations() -> impl Iterator<Item = &'static crate::OperationSpec> {
     crate::all_operations().iter().filter(|operation| {
         operation.exposure != crate::OperationExposure::Lifecycle
             && !operation.path.starts_with("tab.")
             && !matches!(operation.path, "close" | "shutdown")
-            && !METHODS.iter().any(|method| method.name == operation.path)
     })
 }
 
@@ -1438,6 +1449,17 @@ pub fn catalog_request(
         .and_then(|object| object.remove("pageId"))
         .and_then(|value| value.as_str().map(str::to_owned))
         .ok_or_else(|| ServerError::invalid_params("missing string field `pageId`"))?;
+    // Catalog inputs tolerate unknown fields for CLI compatibility. Over the
+    // wire a misspelt or camelCase field would be silently ignored, so name it.
+    let schema = crate::input_schema_for_operation(operation);
+    if let (Some(known), Some(given)) = (schema["properties"].as_object(), input.as_object()) {
+        if let Some(unknown) = given.keys().find(|key| !known.contains_key(*key)) {
+            return Err(ServerError::invalid_params(format!(
+                "unknown field `{unknown}` for {}",
+                operation.path
+            )));
+        }
+    }
     let request =
         crate::request_from_cmd(operation.cmd, input).map_err(ServerError::invalid_params)?;
     Ok((page_id, request))
@@ -1686,6 +1708,17 @@ mod tests {
         assert!(validate_params("cookies", &json!({"pageId":"p"})).is_ok());
         assert!(validate_params("cookies", &json!({"pageId":7})).is_err());
         assert!(validate_params("find", &json!({"pageId":"p"})).is_err());
+        let unknown = validate_params(
+            "click_shadow",
+            &json!({"pageId":"p","selector":"b","timeoutMs":500}),
+        )
+        .unwrap_err();
+        assert!(unknown.message.contains("timeoutMs"), "{}", unknown.message);
+        assert!(validate_params(
+            "click_shadow",
+            &json!({"pageId":"p","selector":"b","timeout_ms":500})
+        )
+        .is_ok());
         for absent in [
             "close",
             "shutdown",
