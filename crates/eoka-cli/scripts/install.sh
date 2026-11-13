@@ -15,8 +15,11 @@ if [ -z "$version" ]; then
     # The repository's "latest" release may be an eoka-server tag, so pick the
     # highest eoka-cli-v* tag among published releases.
     # GITHUB_TOKEN is optional; it only raises the API rate limit.
+    # The API answers with either indented or single-line JSON, so put every
+    # field on its own line before reading them.
     version="$(fetch ${GITHUB_TOKEN:+--header "Authorization: Bearer $GITHUB_TOKEN"} \
         "https://api.github.com/repos/$repo/releases?per_page=100" |
+        tr ',' '\n' |
         awk '
             /"tag_name":/   { tag = $0; sub(/.*"tag_name": *"/, "", tag); sub(/".*/, "", tag) }
             /"draft":/      { draft = ($0 ~ /true/) }
