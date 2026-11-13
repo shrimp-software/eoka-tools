@@ -7,6 +7,7 @@ pub mod captcha;
 pub mod cloudflare;
 pub mod dispatch;
 pub mod downloads;
+pub mod engine;
 mod file_publication;
 mod methods;
 pub mod observe;

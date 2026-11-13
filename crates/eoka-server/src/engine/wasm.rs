@@ -2,13 +2,13 @@
 
 use serde_json::Value;
 
-use super::Handler;
-use crate::protocol::Response;
+use super::Engine;
+use eoka_protocol::Response;
 
-impl Handler {
+impl Engine {
     pub(super) async fn cmd_wasm_info(&mut self) -> Result<Response, String> {
         let tab = self.require_tab()?;
-        let js = include_str!("../js/wasm_info.js");
+        let js = include_str!("js/wasm_info.js");
         let result: String = tab
             .page
             .evaluate_sync(js)

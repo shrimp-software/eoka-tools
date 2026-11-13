@@ -4,33 +4,33 @@ mod downloads;
 mod eval;
 #[cfg(test)]
 mod fetch_tests;
-pub mod intercept;
+mod intercept;
 mod intercept_files;
-pub mod network;
+mod network;
 mod operations;
 mod persist;
 pub mod profile;
 mod proxy_forward;
-pub mod script_policy;
-pub mod state;
+mod script_policy;
+mod state;
 mod target;
 mod wasm;
 
 use std::collections::HashMap;
 use std::fmt::Write as FmtWrite;
 
+use crate::{annotate, observe, snapshot};
 use ::captcha::{build_captcha_inject_js, parse_captcha_inject_kind};
-use base64::Engine;
+use base64::Engine as _;
 use eoka::cdp::{
     transport::{CommandDispatch, RequestPause},
     Session as CdpSession,
 };
 use eoka::MouseButton;
-use eoka_server::{annotate, observe, snapshot};
 use serde_json::{json, Value};
 
-use crate::launch_spec::LaunchSpec;
-use crate::protocol::Response;
+use eoka_protocol::launch_spec::LaunchSpec;
+use eoka_protocol::Response;
 use intercept::{InterceptLog, InterceptLogEntry, InterceptRule, InterceptState};
 use network::{NetworkConfig, NetworkRecorder};
 use persist::{capture_state, ensure_console_capture, restore_cookies, restore_state, SavedState};
@@ -38,10 +38,31 @@ use script_policy::{ScriptPolicyMode, ScriptPolicyState};
 use state::{BrowserState, TabState};
 use target::{click_once, json_str, title_nonblocking, wait_for_stable};
 
-pub struct Handler {
-    agent: eoka_server::agent::AgentSession,
-    operations: eoka_server::operations::OperationManager,
-    downloads: eoka_server::downloads::DownloadManager,
+/// Hooks for the daemon's own regression tests.
+#[doc(hidden)]
+pub mod test_support {
+    pub use super::intercept_files::FILE_SLOT;
+}
+
+static HOST_VERSION: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+
+/// Record the version of the binary hosting the engine. It is reported by
+/// `session_hello` and in exported HAR files; defaults to this crate's version.
+pub fn set_host_version(version: &'static str) {
+    let _ = HOST_VERSION.set(version);
+}
+
+pub(crate) fn host_version() -> &'static str {
+    HOST_VERSION
+        .get()
+        .copied()
+        .unwrap_or(env!("CARGO_PKG_VERSION"))
+}
+
+pub struct Engine {
+    agent: crate::agent::AgentSession,
+    operations: crate::operations::OperationManager,
+    downloads: crate::downloads::DownloadManager,
     state: Option<BrowserState>,
     spec: LaunchSpec,
     session_name: String,
@@ -53,10 +74,10 @@ pub struct Handler {
     fetch_sender: Option<tokio::sync::mpsc::Sender<RequestPause>>,
     fetch_dropped: std::sync::Arc<std::sync::atomic::AtomicU64>,
     fetch_sessions: HashMap<String, CdpSession>,
-    cloudflare: Option<eoka_server::cloudflare::CloudflareWatcher>,
+    cloudflare: Option<crate::cloudflare::CloudflareWatcher>,
 }
 
-impl Handler {
+impl Engine {
     pub fn new(session_name: impl Into<String>, spec: LaunchSpec) -> Self {
         let script_policy = match &spec {
             LaunchSpec::Launch {
@@ -117,7 +138,7 @@ impl Handler {
                 ..
             } => {
                 let persist_dir = if *persist {
-                    Some(crate::session::profile_dir(&self.session_name))
+                    Some(eoka_protocol::launch_spec::profile_dir(&self.session_name))
                 } else {
                     None
                 };
@@ -168,9 +189,9 @@ impl Handler {
             }
         ) && self.cloudflare.is_none()
         {
-            self.cloudflare = Some(eoka_server::cloudflare::CloudflareWatcher::start(
-                eoka_server::cloudflare::DEFAULT_WATCH_INTERVAL,
-                eoka_server::cloudflare::DEFAULT_SOLVE_TIMEOUT,
+            self.cloudflare = Some(crate::cloudflare::CloudflareWatcher::start(
+                crate::cloudflare::DEFAULT_WATCH_INTERVAL,
+                crate::cloudflare::DEFAULT_SOLVE_TIMEOUT,
             ));
         }
         Ok(())
@@ -222,10 +243,10 @@ impl Handler {
                 LaunchSpec::Reuse => "reuse",
             };
             return Response::ok(
-                json!({"protocol_major": eoka_protocol::sidecar::PROTOCOL_VERSION.major, "daemon_version":env!("CARGO_PKG_VERSION"), "session":self.session_name, "mode":mode, "configuration_fingerprint":self.spec.configuration_fingerprint()}),
+                json!({"protocol_major": eoka_protocol::sidecar::PROTOCOL_VERSION.major, "daemon_version":host_version(), "session":self.session_name, "mode":mode, "configuration_fingerprint":self.spec.configuration_fingerprint()}),
             );
         }
-        if let Err(error) = eoka_server::url_policy::ensure_args_allowed(args) {
+        if let Err(error) = crate::url_policy::ensure_args_allowed(args) {
             return Response::err(error);
         }
         if matches!(cmd, "agent_observe" | "agent_step") {
@@ -233,8 +254,7 @@ impl Handler {
         }
         if cmd == "action_command" {
             let command = args["command"].as_str().unwrap_or_default();
-            if (!eoka_server::operations::commands::is_action(command)
-                && command != "download_start")
+            if (!crate::operations::commands::is_action(command) && command != "download_start")
                 || command == "action_perform"
             {
                 return Response::err("Invalid convenience action");
@@ -252,7 +272,7 @@ impl Handler {
         if let Some(response) = self.operations.query(cmd, args).await {
             return response;
         }
-        if eoka_server::operations::commands::is_action(cmd) {
+        if crate::operations::commands::is_action(cmd) {
             return self.handle_action(cmd, args).await;
         }
         if matches!(cmd, "close" | "tab_close") {
@@ -288,12 +308,10 @@ impl Handler {
             "download_get" | "download_cancel" => {
                 let id = self.arg_str(args, "id")?;
                 if cmd == "download_cancel" {
-                    return Ok(eoka_server::downloads::start_response(
-                        self.downloads.cancel(id),
-                    ));
+                    return Ok(crate::downloads::start_response(self.downloads.cancel(id)));
                 }
                 Ok(match self.downloads.get(id) {
-                    Ok(job) => eoka_server::downloads::record_response(job.snapshot()),
+                    Ok(job) => crate::downloads::record_response(job.snapshot()),
                     Err(error) => Response::err_detail(error),
                 })
             }
@@ -419,14 +437,14 @@ impl Handler {
     }
 
     fn mouse_button_args(&self, args: &Value) -> Result<(f64, f64, MouseButton), String> {
-        let button = serde_json::from_value::<crate::protocol::MouseButton>(args["button"].clone())
+        let button = serde_json::from_value::<eoka_protocol::MouseButton>(args["button"].clone())
             .map_err(|error| error.to_string())?;
         let button = match button {
-            crate::protocol::MouseButton::Left => MouseButton::Left,
-            crate::protocol::MouseButton::Middle => MouseButton::Middle,
-            crate::protocol::MouseButton::Right => MouseButton::Right,
-            crate::protocol::MouseButton::Back => MouseButton::Back,
-            crate::protocol::MouseButton::Forward => MouseButton::Forward,
+            eoka_protocol::MouseButton::Left => MouseButton::Left,
+            eoka_protocol::MouseButton::Middle => MouseButton::Middle,
+            eoka_protocol::MouseButton::Right => MouseButton::Right,
+            eoka_protocol::MouseButton::Back => MouseButton::Back,
+            eoka_protocol::MouseButton::Forward => MouseButton::Forward,
         };
         Ok((self.arg_f64(args, "x")?, self.arg_f64(args, "y")?, button))
     }
@@ -479,8 +497,7 @@ impl Handler {
             .as_str()
             .map(str::to_owned)
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-        let options =
-            eoka_server::operations::commands::options(args).map_err(|e| e.to_string())?;
+        let options = crate::operations::commands::options(args).map_err(|e| e.to_string())?;
         let budget = options.timeout_ms;
         let drain = self.start_fetch_drain();
         let active_recorder = self.network.clone();
@@ -968,7 +985,7 @@ impl Handler {
 
     async fn cmd_fetch(&mut self, args: &Value) -> Result<Response, String> {
         let args = serde_json::from_value(args.clone()).map_err(|error| error.to_string())?;
-        Ok(eoka_server::browser_fetch::fetch(&self.require_tab()?.page, args).await)
+        Ok(crate::browser_fetch::fetch(&self.require_tab()?.page, args).await)
     }
 
     async fn cmd_cookies(&mut self) -> Result<Response, String> {
@@ -1105,7 +1122,7 @@ impl Handler {
         let tab = self.require_tab()?;
         let state = capture_state(&tab.page).await?;
         let json = serde_json::to_string_pretty(&state).map_err(|e| e.to_string())?;
-        eoka_server::saved_state::write_state_file(std::path::Path::new(path), json.as_bytes())
+        crate::saved_state::write_state_file(std::path::Path::new(path), json.as_bytes())
             .map_err(|e| e.to_string())?;
         Ok(Response::ok_text(format!(
             "Saved state to {} ({} cookies, {} localStorage, {} sessionStorage)",
@@ -1305,7 +1322,7 @@ impl Handler {
 
         if let Some(path) = to {
             let json = serde_json::to_string_pretty(&saved).map_err(|e| e.to_string())?;
-            eoka_server::saved_state::write_state_file(&path, json.as_bytes())
+            crate::saved_state::write_state_file(&path, json.as_bytes())
                 .map_err(|e| e.to_string())?;
             return Ok(Response::ok_text(format!(
                 "Saved state from {} to {} ({} cookies, {} localStorage, {} sessionStorage)",
@@ -1401,7 +1418,7 @@ impl Handler {
 
     async fn cmd_spa_info(&mut self) -> Result<Response, String> {
         let tab = self.require_tab()?;
-        let info = eoka_server::spa::detect_router(&tab.page)
+        let info = crate::spa::detect_router(&tab.page)
             .await
             .map_err(|e: eoka::Error| e.to_string())?;
         Ok(Response::ok(json!({
@@ -1416,10 +1433,10 @@ impl Handler {
         let drain = self.start_fetch_drain();
         let result = async {
             let tab = self.require_tab_mut()?;
-            let info = eoka_server::spa::detect_router(&tab.page)
+            let info = crate::spa::detect_router(&tab.page)
                 .await
                 .map_err(|e: eoka::Error| e.to_string())?;
-            eoka_server::spa::spa_navigate(&tab.page, &info.router_type, path)
+            crate::spa::spa_navigate(&tab.page, &info.router_type, path)
                 .await
                 .map_err(|e: eoka::Error| e.to_string())?;
             let _ = wait_for_stable(&tab.page).await;
@@ -1447,7 +1464,7 @@ impl Handler {
 
         let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
 
-        let template = include_str!("../js/fake_camera.js");
+        let template = include_str!("js/fake_camera.js");
         let js = template
             .replace("/*VIDEO_DATA*/", &b64)
             .replace("/*MIME_TYPE*/", mime)
@@ -1937,7 +1954,7 @@ impl Handler {
         Ok(Response::ok(result))
     }
 
-    pub(crate) fn service_idle_fetch(&mut self) {
+    pub fn service_idle_fetch(&mut self) {
         if self.idle_fetch_drain.is_none() {
             self.idle_fetch_drain = self.start_fetch_drain();
         }
@@ -2268,7 +2285,7 @@ async fn restore_state_and_maybe_reload(
     tab: &mut TabState,
     saved: &SavedState,
     reload_after_restore: bool,
-) -> Result<eoka_server::saved_state::StorageRestoreReport, String> {
+) -> Result<crate::saved_state::StorageRestoreReport, String> {
     let restored = restore_state(&tab.page, saved).await?;
     tab.invalidate();
 
@@ -2320,7 +2337,7 @@ fn same_web_origin(left: &str, right: &str) -> bool {
 fn read_saved_state_file(path: &str) -> Result<SavedState, String> {
     let json = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
     let saved: SavedState = serde_json::from_str(&json).map_err(|e| format!("{path}: {e}"))?;
-    eoka_server::url_policy::ensure_url_allowed(&saved.url).map_err(|e| format!("{path}: {e}"))?;
+    crate::url_policy::ensure_url_allowed(&saved.url).map_err(|e| format!("{path}: {e}"))?;
     Ok(saved)
 }
 

@@ -1,6 +1,6 @@
 use super::*;
 
-impl Handler {
+impl Engine {
     pub(super) async fn handle_agent(&mut self, cmd: &str, args: &Value) -> Response {
         let mut result: anyhow::Result<Response> = async {
             let state = self

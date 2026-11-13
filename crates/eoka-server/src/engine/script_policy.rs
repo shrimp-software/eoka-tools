@@ -4,8 +4,8 @@
 
 use serde_json::{json, Value};
 
-use super::Handler;
-use crate::protocol::Response;
+use super::Engine;
+use eoka_protocol::Response;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ScriptPolicyMode {
@@ -127,7 +127,7 @@ pub fn parse_mode(raw: &str) -> Result<ScriptPolicyMode, String> {
     }
 }
 
-impl Handler {
+impl Engine {
     pub(super) async fn cmd_js_mode(&mut self, args: &Value) -> Result<Response, String> {
         let mode = parse_mode(self.arg_str(args, "mode")?)?;
         self.script_policy.set_mode(mode);

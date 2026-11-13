@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
+use crate::{InteractiveElement, ObserveConfig};
 use eoka::{Browser, Page, StealthConfig};
-use eoka_server::{InteractiveElement, ObserveConfig};
 
 use super::profile::{clone_profile_dir, ClonedProfile};
 use super::proxy_forward::ProxyForwarder;

@@ -6,8 +6,7 @@ pub async fn click_once(
     target: &str,
     _viewport_only: bool,
 ) -> Result<String, String> {
-    let target =
-        eoka_server::operations::commands::live_locator(target).map_err(|e| e.to_string())?;
+    let target = crate::operations::commands::live_locator(target).map_err(|e| e.to_string())?;
     tab.page
         .act(
             eoka::Action::Click {

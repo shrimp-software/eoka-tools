@@ -655,23 +655,18 @@ dependencies = [
 
 [[package]]
 name = "eoka-cli"
-version = "0.11.0"
+version = "0.11.1"
 dependencies = [
  "anyhow",
- "async-trait",
- "base64 0.23.1",
- "chrono",
  "clap",
  "eoka",
  "eoka-captcha",
  "eoka-datadome",
  "eoka-protocol",
- "eoka-proxy",
  "eoka-sdk",
  "eoka-server",
  "eoka-tack",
  "flate2",
- "futures-util",
  "libc",
  "reqwest",
  "serde",
@@ -683,8 +678,6 @@ dependencies = [
  "tar",
  "tempfile",
  "tokio",
- "tokio-tungstenite",
- "url",
  "uuid",
 ]
 
@@ -741,12 +734,13 @@ dependencies = [
 
 [[package]]
 name = "eoka-protocol"
-version = "0.9.2"
+version = "0.9.3"
 dependencies = [
  "eoka",
  "schemars",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
 ]
 
@@ -782,7 +776,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-sdk"
-version = "0.10.2"
+version = "0.10.3"
 dependencies = [
  "anyhow",
  "eoka",
@@ -790,23 +784,25 @@ dependencies = [
  "libc",
  "serde",
  "serde_json",
- "sha2",
  "tokio",
  "uuid",
 ]
 
 [[package]]
 name = "eoka-server"
-version = "0.9.2"
+version = "0.9.3"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
+ "chrono",
  "dirs",
  "eoka",
  "eoka-captcha",
+ "eoka-datadome",
  "eoka-protocol",
  "eoka-proxy",
  "fs2",
+ "futures-util",
  "hmac",
  "libc",
  "parking_lot 0.13.0",
@@ -817,6 +813,7 @@ dependencies = [
  "sha2",
  "tempfile",
  "tokio",
+ "tokio-tungstenite",
  "toml",
  "tracing",
  "tracing-subscriber",

@@ -1,7 +1,7 @@
 use super::*;
-use eoka_server::operations::{commands, OperationManager};
+use crate::operations::{commands, OperationManager};
 
-impl Handler {
+impl Engine {
     pub fn operation_manager(&self) -> OperationManager {
         self.operations.clone()
     }

@@ -2,10 +2,10 @@ use eoka::cdp::Session as CdpSession;
 use serde_json::{json, Value};
 
 use super::target::json_str;
-use super::Handler;
-use crate::protocol::Response;
+use super::Engine;
+use eoka_protocol::Response;
 
-impl Handler {
+impl Engine {
     pub(super) async fn cmd_eval(&mut self, args: &Value) -> Result<Response, String> {
         let code = resolve_js(args)?;
         let max_size = args["max_size"].as_u64().map(|v| v as usize);

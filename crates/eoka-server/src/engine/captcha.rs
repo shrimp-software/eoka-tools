@@ -7,7 +7,7 @@ use eoka_protocol::{
 };
 use serde_json::Value;
 
-use super::Handler;
+use super::Engine;
 
 fn failure(code: &str, message: &str) -> Response {
     Response::err_detail(ErrorDetail::new(code, message).retryable(false))
@@ -55,13 +55,13 @@ fn outcome_response(outcome: SolveOutcome, tab_id: String, elapsed_ms: u64) -> R
     response
 }
 
-impl Handler {
+impl Engine {
     pub(super) async fn cmd_captcha_turnstile(&mut self, args: &Value) -> Result<Response, String> {
         let args: CaptchaTurnstileArgs =
             serde_json::from_value(args.clone()).map_err(|error| error.to_string())?;
         let page = self.require_tab()?.page.clone();
         let receipt =
-            eoka_server::cloudflare::solve_turnstile(&page, Duration::from_millis(args.timeout_ms))
+            crate::cloudflare::solve_turnstile(&page, Duration::from_millis(args.timeout_ms))
                 .await
                 .map_err(|error| error.to_string())?;
         let result = CaptchaTurnstileResult {
@@ -172,9 +172,9 @@ mod tests {
 
     #[tokio::test]
     async fn invalid_arguments_and_absent_browser_never_launch() {
-        let mut handler = Handler::new(
+        let mut handler = Engine::new(
             "datadome-no-browser",
-            crate::launch_spec::LaunchSpec::Connect {
+            eoka_protocol::launch_spec::LaunchSpec::Connect {
                 ws_url: "ws://127.0.0.1:1".into(),
             },
         );

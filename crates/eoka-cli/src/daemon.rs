@@ -1,14 +1,16 @@
 mod frontdoor;
+#[cfg(test)]
+mod idle_file_tests;
 
 use std::time::{Duration, Instant};
 use tokio::io::AsyncReadExt;
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 
-use crate::handler::Handler;
 use crate::launch_spec::LaunchSpec;
 use crate::protocol::{write_msg, Request, Response};
 use crate::session;
+use eoka_server::engine::Engine;
 
 fn idle_timeout() -> Duration {
     let ms = std::env::var("EOKA_IDLE_TIMEOUT")
@@ -39,7 +41,8 @@ pub async fn run(session_name: &str, spec: LaunchSpec) -> anyhow::Result<()> {
     );
     eprintln!("[eoka] socket: {}", sock_path.display());
 
-    let mut handler = Handler::new(session_name, spec);
+    eoka_server::engine::set_host_version(env!("CARGO_PKG_VERSION"));
+    let mut handler = Engine::new(session_name, spec);
     let mut last_activity = Instant::now();
     let mut waiters = tokio::task::JoinSet::new();
     let timeout = idle_timeout();
