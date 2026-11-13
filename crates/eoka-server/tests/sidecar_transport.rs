@@ -872,7 +872,10 @@ fn catalog_operations_run_on_the_addressed_page_and_report_structured_errors() {
         "wait",
         json!({"pageId":first,"selector":"#absent","state":"attached","timeout":300}),
     );
-    assert_eq!(missing["error"]["code"], "Operation", "{missing}");
+    // Core errors keep their kind through the catalog path.
+    assert_eq!(missing["error"]["code"], "Timeout", "{missing}");
+    let absent = server.request(49, "get_text", json!({"pageId":first,"selector":"#absent"}));
+    assert_eq!(absent["error"]["code"], "ElementNotFound", "{absent}");
     // The shadow search needs a real document rather than about:blank.
     let shadow_url = "data:text/html,<!doctype html><title>start</title><div id=host></div><script>\
         const root = document.getElementById('host').attachShadow({mode:'closed'});\

@@ -264,6 +264,32 @@ impl std::fmt::Display for ServerError {
 }
 impl std::error::Error for ServerError {}
 
+/// Catalog `ErrorDetail` codes for errors raised by the core library. Catalog
+/// operations report these so a sidecar client sees the same error kind it
+/// would from a registered method.
+const CORE_ERROR_DETAIL_CODES: &[(ErrorCode, &str)] = &[
+    (ErrorCode::ElementNotFound, "element_not_found"),
+    (ErrorCode::ElementNotVisible, "element_not_visible"),
+    (ErrorCode::Timeout, "timeout"),
+    (ErrorCode::RetryExhausted, "retry_exhausted"),
+    (ErrorCode::Cdp, "cdp_error"),
+    (ErrorCode::MessageTooLarge, "message_too_large"),
+];
+
+pub fn core_error_detail_code(code: ErrorCode) -> Option<&'static str> {
+    CORE_ERROR_DETAIL_CODES
+        .iter()
+        .find(|(candidate, _)| *candidate == code)
+        .map(|(_, detail)| *detail)
+}
+
+pub fn core_error_code(detail_code: &str) -> Option<ErrorCode> {
+    CORE_ERROR_DETAIL_CODES
+        .iter()
+        .find(|(_, candidate)| *candidate == detail_code)
+        .map(|(code, _)| *code)
+}
+
 impl From<eoka::Error> for ServerError {
     fn from(error: eoka::Error) -> Self {
         let message = error.to_string();

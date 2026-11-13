@@ -8,6 +8,7 @@ use eoka_protocol::{
 use serde_json::Value;
 
 use super::Engine;
+use super::EngineError;
 
 fn failure(code: &str, message: &str) -> Response {
     Response::err_detail(ErrorDetail::new(code, message).retryable(false))
@@ -56,7 +57,10 @@ fn outcome_response(outcome: SolveOutcome, tab_id: String, elapsed_ms: u64) -> R
 }
 
 impl Engine {
-    pub(super) async fn cmd_captcha_turnstile(&mut self, args: &Value) -> Result<Response, String> {
+    pub(super) async fn cmd_captcha_turnstile(
+        &mut self,
+        args: &Value,
+    ) -> Result<Response, EngineError> {
         let args: CaptchaTurnstileArgs =
             serde_json::from_value(args.clone()).map_err(|error| error.to_string())?;
         let page = self.require_tab()?.page.clone();
