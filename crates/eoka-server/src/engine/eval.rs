@@ -2,11 +2,12 @@ use eoka::cdp::Session as CdpSession;
 use serde_json::{json, Value};
 
 use super::target::json_str;
-use super::Handler;
-use crate::protocol::Response;
+use super::Engine;
+use super::EngineError;
+use eoka_protocol::Response;
 
-impl Handler {
-    pub(super) async fn cmd_eval(&mut self, args: &Value) -> Result<Response, String> {
+impl Engine {
+    pub(super) async fn cmd_eval(&mut self, args: &Value) -> Result<Response, EngineError> {
         let code = resolve_js(args)?;
         let max_size = args["max_size"].as_u64().map(|v| v as usize);
         if !args["raw"].as_bool().unwrap_or(false) {
@@ -61,7 +62,7 @@ impl Handler {
         ))
     }
 
-    pub(super) async fn cmd_exec(&mut self, args: &Value) -> Result<Response, String> {
+    pub(super) async fn cmd_exec(&mut self, args: &Value) -> Result<Response, EngineError> {
         let code = resolve_js(args)?;
         let tab = self.require_tab()?;
         if args["no_await"].as_bool().unwrap_or(false) {
@@ -89,7 +90,7 @@ impl Handler {
         Ok(Response::ok_text("Executed successfully"))
     }
 
-    pub(super) async fn cmd_frames(&mut self) -> Result<Response, String> {
+    pub(super) async fn cmd_frames(&mut self) -> Result<Response, EngineError> {
         let page = self.require_tab()?.page.clone();
         let frames = page.frames().await.map_err(|error| error.to_string())?;
         Ok(Response::ok(json!(frames
@@ -98,7 +99,7 @@ impl Handler {
             .collect::<Vec<_>>())))
     }
 
-    pub(super) async fn cmd_frame_eval(&mut self, args: &Value) -> Result<Response, String> {
+    pub(super) async fn cmd_frame_eval(&mut self, args: &Value) -> Result<Response, EngineError> {
         let code = resolve_js(args)?;
         let frame = args["frame"]
             .as_str()
@@ -120,9 +121,7 @@ impl Handler {
             page.evaluate_in_frame(frame, &code).await
         }
         .map_err(|e| e.to_string())?;
-        serde_json::to_string(&value)
-            .map(Response::ok_text)
-            .map_err(|e| e.to_string())
+        Ok(serde_json::to_string(&value).map(Response::ok_text)?)
     }
 }
 

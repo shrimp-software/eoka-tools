@@ -258,6 +258,28 @@ pub enum Command {
         output: Option<PathBuf>,
         #[arg(long, help = "Overlay numbered labels on interactive elements")]
         annotate: bool,
+        #[arg(long, value_parser = ["png", "jpeg", "webp"], help = "Image format [default: png]")]
+        format: Option<String>,
+        #[arg(long, help = "JPEG or WebP quality, 0 to 100")]
+        quality: Option<u8>,
+        #[arg(
+            long,
+            conflicts_with = "clip",
+            help = "Capture the whole scrollable page"
+        )]
+        full_page: bool,
+        #[arg(
+            long,
+            value_name = "X,Y,WIDTH,HEIGHT",
+            value_parser = parse_clip,
+            help = "Capture a document-relative region in CSS pixels"
+        )]
+        clip: Option<eoka_protocol::sidecar::ScreenshotClip>,
+    },
+    #[command(about = "Record the current tab to an MP4 file")]
+    Recording {
+        #[command(subcommand)]
+        action: RecordingAction,
     },
     #[command(about = "Handle CAPTCHAs locally or solve/inject provider tokens")]
     Captcha {
@@ -285,6 +307,42 @@ pub enum Command {
     Find {
         #[arg(help = "Text to search for")]
         text: String,
+    },
+    #[command(about = "Get the page HTML")]
+    Content,
+    #[command(about = "Accept or dismiss an open alert, confirm or prompt dialog")]
+    Dialog {
+        #[command(subcommand)]
+        action: DialogAction,
+    },
+    #[command(about = "Get the text of the first element matching a CSS selector")]
+    GetText {
+        #[arg(help = "CSS selector")]
+        selector: String,
+    },
+    #[command(about = "Get an attribute of the first element matching a CSS selector")]
+    GetAttribute {
+        #[arg(help = "CSS selector")]
+        selector: String,
+        #[arg(help = "Attribute name, for example href")]
+        name: String,
+    },
+    #[command(about = "Check whether a CSS selector matches an element")]
+    Exists {
+        #[arg(help = "CSS selector")]
+        selector: String,
+    },
+    #[command(
+        about = "Click an element inside open or closed shadow roots",
+        long_about = "Click an element inside open or closed shadow roots with human-like movement.\n\nThe result proves the click was dispatched, not what it did; check the page afterwards."
+    )]
+    ClickShadow {
+        #[arg(help = "CSS selector, matched through shadow roots")]
+        selector: String,
+        #[arg(long, help = "Frame ID from `eoka frames`; the top frame when omitted")]
+        frame: Option<String>,
+        #[arg(long, default_value = "10000", help = "Deadline in milliseconds")]
+        timeout_ms: u64,
     },
     #[command(
         about = "Click element",
@@ -580,7 +638,7 @@ pub enum Command {
         #[command(subcommand)]
         action: TabAction,
     },
-    #[command(about = "Wait for time, text, URL, or load state")]
+    #[command(about = "Wait for time, text, URL, selector, or load state")]
     Wait {
         #[arg(help = "Fixed delay in milliseconds")]
         ms: Option<u64>,
@@ -590,6 +648,15 @@ pub enum Command {
         url: Option<String>,
         #[arg(long, help = "Wait for network idle")]
         load: Option<String>,
+        #[arg(long, help = "Wait until this CSS selector reaches --state")]
+        selector: Option<String>,
+        #[arg(
+            long,
+            requires = "selector",
+            value_parser = ["attached", "visible", "hidden"],
+            help = "Selector condition [default: visible]"
+        )]
+        state: Option<String>,
         #[arg(short, long, help = "Timeout in milliseconds")]
         timeout: Option<u64>,
     },
@@ -634,6 +701,12 @@ pub enum Command {
     Doctor,
     #[command(about = "Force-kill daemon")]
     Kill,
+    #[command(
+        visible_alias = "upgrade",
+        about = "Update this eoka binary from the latest GitHub release",
+        long_about = "Update this eoka binary from the latest GitHub release.\n\nDownloads the release archive for this platform, verifies it against the release SHA256SUMS and replaces the running executable. Session daemons keep running their old version until restarted; they are listed, and stopped only with --kill-daemons."
+    )]
+    Update(UpdateArgs),
     #[command(about = "Close browser and daemon")]
     Close,
     #[command(
@@ -766,6 +839,8 @@ pub enum NetworkRecordAction {
 #[derive(Subcommand)]
 #[allow(clippy::large_enum_variant)]
 pub enum CaptchaAction {
+    #[command(about = "Detect an hCaptcha or reCAPTCHA widget and report its type and site key")]
+    Detect,
     #[command(
         about = "Attempt local DataDome clearance on the current tab; keep the session open",
         long_about = "Attempt local DataDome clearance on the current tab. No API key needed.\n\nRequires an existing session; foregrounds the tab and leaves it open. challenge_cleared is not proof of login; not_present is a no-op; every other outcome exits nonzero. An old daemon is not restarted automatically."
@@ -1000,4 +1075,91 @@ pub enum OperationCommand {
         #[arg(help = OPERATION_ID)]
         id: String,
     },
+}
+
+/// Parse `X,Y,WIDTH,HEIGHT` for `screenshot --clip`.
+fn parse_clip(value: &str) -> Result<eoka_protocol::sidecar::ScreenshotClip, String> {
+    let numbers: Vec<f64> = value
+        .split(',')
+        .map(|part| part.trim().parse::<f64>())
+        .collect::<Result<_, _>>()
+        .map_err(|_| "expected four numbers: X,Y,WIDTH,HEIGHT".to_owned())?;
+    match numbers[..] {
+        [x, y, width, height]
+            if numbers.iter().all(|n| n.is_finite())
+                && x >= 0.0
+                && y >= 0.0
+                && width > 0.0
+                && height > 0.0 =>
+        {
+            Ok(eoka_protocol::sidecar::ScreenshotClip {
+                x,
+                y,
+                width,
+                height,
+            })
+        }
+        [_, _, _, _] => Err("X and Y must be at least 0, WIDTH and HEIGHT greater than 0".into()),
+        _ => Err("expected four numbers: X,Y,WIDTH,HEIGHT".into()),
+    }
+}
+
+#[derive(Subcommand)]
+pub enum DialogAction {
+    #[command(about = "Accept the open dialog")]
+    Accept {
+        #[arg(long, help = "Text to enter for a prompt() dialog")]
+        prompt_text: Option<String>,
+    },
+    #[command(about = "Dismiss the open dialog")]
+    Dismiss,
+}
+
+#[derive(Subcommand)]
+pub enum RecordingAction {
+    #[command(about = "Start recording the current tab; prints the recording ID")]
+    Start {
+        #[arg(help = "MP4 file to write")]
+        path: PathBuf,
+        #[arg(long, help = "UUID naming this recording [default: generated]")]
+        id: Option<String>,
+        #[arg(long, help = "Frames per second, 1 to 120")]
+        fps: Option<u32>,
+        #[arg(long, help = "Scale frames down to at most this width")]
+        max_width: Option<u32>,
+        #[arg(long, help = "Scale frames down to at most this height")]
+        max_height: Option<u32>,
+    },
+    #[command(about = "Show a recording's state")]
+    Status {
+        #[arg(help = "Recording ID from start")]
+        id: String,
+    },
+    #[command(about = "Stop a recording and finalize its file")]
+    Stop {
+        #[arg(help = "Recording ID from start")]
+        id: String,
+    },
+    #[command(about = "Cancel a recording and discard its file")]
+    Cancel {
+        #[arg(help = "Recording ID from start")]
+        id: String,
+    },
+}
+
+#[derive(Args)]
+pub struct UpdateArgs {
+    #[arg(
+        long,
+        conflicts_with_all = ["force", "kill_daemons"],
+        help = "Report the installed and latest versions without installing"
+    )]
+    pub check: bool,
+    #[arg(long, help = "Reinstall even when already on the latest release")]
+    pub force: bool,
+    #[arg(
+        long,
+        help = "Stop session daemons still running another version (closes their browsers)"
+    )]
+    pub kill_daemons: bool,
 }

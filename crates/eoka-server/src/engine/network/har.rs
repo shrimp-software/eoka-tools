@@ -16,7 +16,7 @@ pub(super) fn build_har(entries: &[NetworkEntry]) -> Value {
             "version": "1.2",
             "creator": {
                 "name": "eoka",
-                "version": env!("CARGO_PKG_VERSION"),
+                "version": crate::engine::host_version(),
             },
             "entries": har_entries,
         }
@@ -28,7 +28,7 @@ pub(super) fn build_json_export(entries: &[NetworkEntry]) -> Value {
         "version": 1,
         "creator": {
             "name": "eoka",
-            "version": env!("CARGO_PKG_VERSION"),
+            "version": crate::engine::host_version(),
         },
         "entries": entries.iter().map(NetworkEntry::full_json).collect::<Vec<_>>(),
     })
@@ -251,7 +251,7 @@ pub(super) fn atomic_write_json(path: &Path, value: &Value) -> Result<(), String
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     let json = serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?;
-    eoka_server::saved_state::write_private_atomic(path, &json).map_err(|e| e.to_string())
+    crate::saved_state::write_private_atomic(path, &json).map_err(|e| e.to_string())
 }
 
 fn header_value<'a>(headers: &'a Map<String, Value>, lowercase_name: &str) -> Option<&'a str> {

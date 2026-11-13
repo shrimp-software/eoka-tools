@@ -72,7 +72,7 @@ fn read_proxy_from_stdin() -> Result<String, String> {
 
 fn resolve_profile_spec(spec: &str) -> Result<std::path::PathBuf, String> {
     if spec == "auto" {
-        return crate::handler::profile::default_profile_dir()
+        return eoka_server::engine::profile::default_profile_dir()
             .ok_or_else(|| "Could not autodetect Chrome profile dir".to_string());
     }
     let p = std::path::PathBuf::from(spec);

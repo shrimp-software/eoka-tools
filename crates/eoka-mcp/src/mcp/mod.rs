@@ -61,6 +61,62 @@ const MCP_PROTOCOL_TOOL_ROUTES: &[(&str, &str)] = &[
     ("captcha_turnstile", "captcha_turnstile"),
 ];
 
+/// Hand-written tools that cover a catalog command under a different name.
+const MCP_OWN_TOOL_COMMANDS: &[(&str, &str)] = &[
+    ("navigate", "open"),
+    ("page_info", "info"),
+    ("page_text", "text"),
+    ("extract", "eval"),
+    ("list_tabs", "tab_list"),
+    ("local_storage_get", "storage"),
+    ("local_storage_set", "set_storage"),
+    ("accept_dialog", "dialog_accept"),
+    ("dismiss_dialog", "dialog_dismiss"),
+    ("detect_captcha", "captcha_detect"),
+    ("inject_captcha_token", "captcha_inject"),
+];
+
+/// Register a tool for every catalog operation that has no hand-written tool,
+/// so an operation added to the catalog reaches MCP without code here. Opt-in
+/// operations are listed only when `include_opt_in` is set.
+fn add_catalog_tools(router: &mut ToolRouter<EokaServer>, include_opt_in: bool) {
+    let covered: std::collections::HashSet<&str> = MCP_PROTOCOL_TOOL_ROUTES
+        .iter()
+        .chain(MCP_OWN_TOOL_COMMANDS)
+        .map(|(_, command)| *command)
+        .collect();
+    for operation in eoka_protocol::sidecar::page_operations() {
+        let name = operation.name.replace('.', "_");
+        let hidden =
+            operation.exposure == eoka_protocol::OperationExposure::OptIn && !include_opt_in;
+        if hidden || covered.contains(operation.cmd) || router.map.contains_key(name.as_str()) {
+            continue;
+        }
+        let mut tool = Tool::new(
+            name,
+            operation.description,
+            rmcp::model::object(input_schema_for_cmd(operation.cmd)),
+        );
+        tool.annotations = Some(
+            ToolAnnotations::new()
+                .read_only(operation.read_only)
+                .destructive(operation.destructive),
+        );
+        router.add_route(rmcp::handler::server::router::tool::ToolRoute::new_dyn(
+            tool,
+            move |context: rmcp::handler::server::tool::ToolCallContext<'_, EokaServer>| {
+                Box::pin(async move {
+                    context
+                        .service
+                        .catalog_tool(operation, context.arguments)
+                        .await
+                        .map(Into::into)
+                })
+            },
+        ));
+    }
+}
+
 fn apply_protocol_tool_metadata(router: &mut ToolRouter<EokaServer>) {
     for (route_name, command) in MCP_PROTOCOL_TOOL_ROUTES {
         let operation = operation_by_cmd(command).expect("MCP route must use a cataloged command");
@@ -110,6 +166,40 @@ impl EokaServer {
         Ok(guard)
     }
 
+    /// Run a catalog operation on the current tab through the shared engine.
+    async fn catalog_tool(
+        &self,
+        operation: &'static eoka_protocol::OperationSpec,
+        arguments: Option<JsonObject>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let mut guard = self.lock_browser().await?;
+        let state = guard
+            .as_mut()
+            .ok_or_else(|| ErrorData::from(AgentError::NoBrowser))?;
+        let page_id = state
+            .current_tab_id
+            .clone()
+            .ok_or_else(|| ErrorData::from(AgentError::NoTab))?;
+        let request = eoka_protocol::request_from_cmd(
+            operation.cmd,
+            Value::Object(arguments.unwrap_or_default()),
+        )
+        .map_err(invalid)?;
+        let result = state.server.catalog(&page_id, operation, &request).await;
+        if !operation.read_only {
+            if let Some(tab) = state.current_tab_mut() {
+                tab.invalidate();
+            }
+        }
+        match result {
+            Ok(Value::String(text)) => text_ok(text),
+            Ok(data) => text_ok(serde_json::to_string(&data).map_err(internal)?),
+            Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(
+                serde_json::to_string(&error).map_err(internal)?,
+            )])),
+        }
+    }
+
     async fn ensure_browser(&self) -> Result<(), ErrorData> {
         let mut guard = self.state.lock().await;
         if guard.as_ref().map(|s| s.unhealthy).unwrap_or(false) {
@@ -121,7 +211,9 @@ impl EokaServer {
             }
         }
         if guard.is_none() {
-            let state = BrowserState::new(self.headless).await.map_err(internal)?;
+            let state = BrowserState::new(self.headless, self.agent.clone())
+                .await
+                .map_err(internal)?;
             *guard = Some(state);
         }
         Ok(())
@@ -152,8 +244,12 @@ impl EokaServer {
             .map(|v| v != "false" && v != "0")
             .unwrap_or(true);
 
+        let include_opt_in = std::env::var("EOKA_MCP_ALL_TOOLS")
+            .map(|v| v != "false" && v != "0")
+            .unwrap_or(false);
         let mut tool_router = Self::tool_router();
         apply_protocol_tool_metadata(&mut tool_router);
+        add_catalog_tools(&mut tool_router, include_opt_in);
         Self {
             agent: Default::default(),
             state: Arc::new(Mutex::new(None)),
@@ -1850,6 +1946,123 @@ fn protocol_tool_response(response: eoka_protocol::Response) -> Result<CallToolR
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn every_catalog_operation_is_an_mcp_tool() {
+        let router = {
+            let mut router = EokaServer::tool_router();
+            apply_protocol_tool_metadata(&mut router);
+            add_catalog_tools(&mut router, true);
+            router
+        };
+        for (tool, command) in MCP_OWN_TOOL_COMMANDS.iter().chain(MCP_PROTOCOL_TOOL_ROUTES) {
+            assert!(router.map.contains_key(*tool), "{tool} is not registered");
+            assert!(
+                operation_by_cmd(command).is_some(),
+                "{command} is not cataloged"
+            );
+        }
+        let covered: std::collections::HashSet<&str> = MCP_PROTOCOL_TOOL_ROUTES
+            .iter()
+            .chain(MCP_OWN_TOOL_COMMANDS)
+            .map(|(_, command)| *command)
+            .collect();
+        // Every operation that acts on a page, including those the sidecar
+        // serves under a method of its own such as recording.
+        for operation in eoka_protocol::sidecar::page_operations() {
+            let name = operation.name.replace('.', "_");
+            assert!(
+                covered.contains(operation.cmd) || router.map.contains_key(name.as_str()),
+                "catalog operation {} has no MCP tool",
+                operation.cmd
+            );
+        }
+        // Opt-in operations stay out of the default tool list.
+        let mut default_router = EokaServer::tool_router();
+        add_catalog_tools(&mut default_router, false);
+        assert!(default_router.map.contains_key("content"));
+        assert!(default_router.map.contains_key("reload"));
+        for opt_in in [
+            "click_shadow",
+            "recording_start",
+            "clone_from",
+            "fake_camera",
+        ] {
+            assert!(!default_router.map.contains_key(opt_in), "{opt_in}");
+            assert!(router.map.contains_key(opt_in), "{opt_in}");
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "requires Chrome; catalog tools run on the MCP session's current tab"]
+    async fn catalog_tools_share_the_mcp_browser_and_current_tab() {
+        fn text(result: &CallToolResult) -> String {
+            serde_json::to_string(result).unwrap()
+        }
+        let server = EokaServer::new();
+        let missing = server
+            .catalog_tool(operation_by_cmd("content").unwrap(), None)
+            .await;
+        assert!(missing.is_err(), "catalog tools must not launch a browser");
+        server
+            .navigate(Parameters(NavigateRequest {
+                operation: Default::default(),
+                url: "data:text/html,<title>one</title><h1 id='h'>Heading</h1><a href='/next'>next</a>"
+                    .into(),
+                headers: None,
+                user_agent: None,
+                bypass_csp: None,
+            }))
+            .await
+            .unwrap();
+        let content = server
+            .catalog_tool(operation_by_cmd("content").unwrap(), None)
+            .await
+            .unwrap();
+        assert!(text(&content).contains("Heading"), "{}", text(&content));
+        let mut arguments = JsonObject::new();
+        arguments.insert("selector".into(), json!("a"));
+        arguments.insert("name".into(), json!("href"));
+        let attribute = server
+            .catalog_tool(operation_by_cmd("get_attribute").unwrap(), Some(arguments))
+            .await
+            .unwrap();
+        assert!(text(&attribute).contains("/next"), "{}", text(&attribute));
+        // Missing required input is rejected before the engine runs.
+        let invalid = server
+            .catalog_tool(operation_by_cmd("get_text").unwrap(), None)
+            .await;
+        assert!(invalid.is_err(), "missing selector must be invalid params");
+        // A missing element is a tool error the model can read, not a crash.
+        let mut arguments = JsonObject::new();
+        arguments.insert("selector".into(), json!("#absent"));
+        let absent = server
+            .catalog_tool(operation_by_cmd("get_text").unwrap(), Some(arguments))
+            .await
+            .unwrap();
+        assert_eq!(absent.is_error, Some(true), "{}", text(&absent));
+        assert!(
+            text(&absent).contains("ElementNotFound"),
+            "{}",
+            text(&absent)
+        );
+        // An action tool needs no caller-supplied operation ID and returns
+        // the record of what it did.
+        let reload = server
+            .catalog_tool(operation_by_cmd("reload").unwrap(), None)
+            .await
+            .unwrap();
+        assert_ne!(reload.is_error, Some(true), "{}", text(&reload));
+        assert!(
+            text(&reload).contains("verified_complete"),
+            "{}",
+            text(&reload)
+        );
+        // The hand-written tools still see the same page afterwards.
+        let info = server.page_info().await.unwrap();
+        assert!(text(&info).contains("one"), "{}", text(&info));
+        server.close().await.unwrap();
+    }
 
     #[tokio::test]
     #[ignore = "requires Chrome; durable navigation diagnostic"]

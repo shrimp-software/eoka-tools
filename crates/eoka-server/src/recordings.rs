@@ -365,6 +365,15 @@ impl RecordingManager {
         Ok(entry.wait(false).await)
     }
 
+    /// Whether any recording has not reached a terminal state.
+    pub fn is_active(&self) -> bool {
+        self.history
+            .lock()
+            .entries
+            .values()
+            .any(|entry| !entry.is_terminal())
+    }
+
     pub async fn cancel_page(&self, page_id: &str) -> Result<(), ServerError> {
         let entries: Vec<_> = self
             .history

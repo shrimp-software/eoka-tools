@@ -6,7 +6,6 @@ mod code;
 mod command_request;
 mod daemon;
 mod download_cmd;
-mod handler;
 #[cfg(test)]
 mod help_coverage;
 mod launch;
@@ -17,6 +16,7 @@ mod session;
 mod sessions;
 #[cfg(test)]
 mod skill_examples;
+mod update;
 
 use clap::Parser;
 use cli::{CaptchaAction, Cli, Command, ToolsAction};
@@ -113,6 +113,16 @@ async fn main() {
         Command::Doctor => {
             let response = doctor_response(&effective_session, &spec).await;
             output::print_response(&response, json_mode);
+            return;
+        }
+        Command::Update(args) => {
+            let response = update::run(args)
+                .await
+                .with_meta(response_meta(&effective_session, "update"));
+            output::print_response(&response, json_mode);
+            if !response.ok {
+                std::process::exit(1);
+            }
             return;
         }
         Command::Kill => {

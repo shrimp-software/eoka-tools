@@ -70,3 +70,17 @@ jobs:
           sha256sum *.tar.gz > SHA256SUMS
           gh release view "$RELEASE_TAG" || gh release create "$RELEASE_TAG" --verify-tag --title "$RELEASE_TAG" --notes 'CLI binaries with SHA-256 checksums.'
           gh release upload "$RELEASE_TAG" ./*.tar.gz SHA256SUMS
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+      # Keeps the installer honest: with no version given it must find and
+      # install the release that was just published.
+      - name: Installer resolves this release
+        if: github.event_name == 'push'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          EOKA_INSTALL_DIR: ${{ runner.temp }}/eoka-install
+        run: |
+          sh crates/eoka-cli/scripts/install.sh
+          test "eoka-cli-v$("$EOKA_INSTALL_DIR/eoka" --version | cut -d' ' -f2)" = "$RELEASE_TAG"

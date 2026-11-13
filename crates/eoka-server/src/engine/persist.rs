@@ -2,8 +2,8 @@
 
 use std::collections::HashMap;
 
+use crate::saved_state::StorageRestoreReport;
 use eoka::Page;
-use eoka_server::saved_state::StorageRestoreReport;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -132,7 +132,7 @@ pub async fn restore_state(
     state: &SavedState,
 ) -> Result<StorageRestoreReport, String> {
     restore_cookies(page, state).await?;
-    eoka_server::saved_state::restore_storage(
+    crate::saved_state::restore_storage(
         page,
         &state.url,
         &state.local_storage,
@@ -145,7 +145,7 @@ pub async fn restore_state(
 /// Replace the cookies of the sites this state covers, including their parent domains
 /// and subdomains, leaving unrelated sites' alone.
 pub async fn restore_cookies(page: &Page, state: &SavedState) -> Result<(), String> {
-    eoka_server::saved_state::clear_covered_cookies(
+    crate::saved_state::clear_covered_cookies(
         page,
         &state.url,
         state.cookies.iter().map(|c| c.domain.as_str()),
@@ -169,7 +169,7 @@ pub async fn restore_cookies(page: &Page, state: &SavedState) -> Result<(), Stri
 /// front-tab state via CDP, and disconnect. The `Browser::disconnect()` call
 /// leaves the user's Chrome running.
 pub async fn clone_state_from_source(source: &str) -> Result<SavedState, String> {
-    use crate::launch_spec::resolve_cdp_spec;
+    use eoka_protocol::launch_spec::resolve_cdp_spec;
 
     let ws_url = resolve_cdp_spec(source)?;
     let browser = eoka::Browser::connect(&ws_url)
@@ -202,7 +202,7 @@ pub async fn clone_state_from_source(source: &str) -> Result<SavedState, String>
 // Console capture
 // ---------------------------------------------------------------------------
 
-const CONSOLE_CAPTURE_JS: &str = include_str!("../js/console_capture.js");
+const CONSOLE_CAPTURE_JS: &str = include_str!("js/console_capture.js");
 
 /// Inject console capture into the current page and register for future navigations.
 pub async fn ensure_console_capture(tab: &mut TabState) -> Result<(), String> {

@@ -114,12 +114,59 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
             max: *max,
             structured: *structured || agent_mode,
         }),
-        Command::Screenshot { output, annotate } => Request::Screenshot(ScreenshotArgs {
+        Command::Screenshot {
+            output,
+            annotate,
+            format,
+            quality,
+            full_page,
+            clip,
+        } => Request::Screenshot(ScreenshotArgs {
             output: output
                 .as_ref()
                 .map(|path| path.to_string_lossy().to_string()),
             annotate: *annotate,
+            format: format.as_deref().map(|format| match format {
+                "jpeg" => eoka_protocol::sidecar::ScreenshotFormat::Jpeg,
+                "webp" => eoka_protocol::sidecar::ScreenshotFormat::Webp,
+                _ => eoka_protocol::sidecar::ScreenshotFormat::Png,
+            }),
+            quality: *quality,
+            clip: clip.clone(),
+            full_page: *full_page,
         }),
+        Command::Recording { action } => {
+            let id = |id: &String| eoka_protocol::RecordingIdArgs {
+                recording_id: id.clone(),
+            };
+            match action {
+                crate::cli::RecordingAction::Start {
+                    path,
+                    id,
+                    fps,
+                    max_width,
+                    max_height,
+                } => Request::RecordingStart(eoka_protocol::RecordingStartArgs {
+                    path: std::path::absolute(path)
+                        .unwrap_or_else(|_| path.clone())
+                        .to_string_lossy()
+                        .to_string(),
+                    recording_id: id.clone(),
+                    max_width: *max_width,
+                    max_height: *max_height,
+                    fps: *fps,
+                }),
+                crate::cli::RecordingAction::Status { id: value } => {
+                    Request::RecordingGet(id(value))
+                }
+                crate::cli::RecordingAction::Stop { id: value } => {
+                    Request::RecordingStop(id(value))
+                }
+                crate::cli::RecordingAction::Cancel { id: value } => {
+                    Request::RecordingCancel(id(value))
+                }
+            }
+        }
         Command::Emulate {
             width,
             height,
@@ -136,6 +183,39 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
         Command::Info => Request::Info,
         Command::Text => Request::Text,
         Command::Find { text } => Request::Find(TextArgs { text: text.clone() }),
+        Command::Content => Request::Content,
+        Command::Dialog { action } => match action {
+            crate::cli::DialogAction::Accept { prompt_text } => {
+                Request::DialogAccept(eoka_protocol::DialogAcceptArgs {
+                    prompt_text: prompt_text.clone(),
+                })
+            }
+            crate::cli::DialogAction::Dismiss => Request::DialogDismiss,
+        },
+        Command::Captcha {
+            action: CaptchaAction::Detect,
+        } => Request::CaptchaDetect,
+        Command::GetText { selector } => Request::GetText(eoka_protocol::SelectorArgs {
+            selector: selector.clone(),
+        }),
+        Command::GetAttribute { selector, name } => {
+            Request::GetAttribute(eoka_protocol::AttributeArgs {
+                selector: selector.clone(),
+                name: name.clone(),
+            })
+        }
+        Command::Exists { selector } => Request::Exists(eoka_protocol::SelectorArgs {
+            selector: selector.clone(),
+        }),
+        Command::ClickShadow {
+            selector,
+            frame,
+            timeout_ms,
+        } => Request::ClickShadow(eoka_protocol::ClickShadowArgs {
+            selector: selector.clone(),
+            frame_id: frame.clone(),
+            timeout_ms: *timeout_ms,
+        }),
         Command::Click { target } => Request::Click(TargetArgs {
             operation: Default::default(),
             target: target.clone(),
@@ -331,6 +411,8 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
             text,
             url,
             load,
+            selector,
+            state,
             timeout,
         } => Request::Wait(WaitArgs {
             expect: None,
@@ -338,6 +420,12 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
             text: text.clone(),
             url: url.clone(),
             load: load.clone(),
+            selector: selector.clone(),
+            state: state.as_deref().map(|state| match state {
+                "attached" => eoka_protocol::WaitSelectorState::Attached,
+                "hidden" => eoka_protocol::WaitSelectorState::Hidden,
+                _ => eoka_protocol::WaitSelectorState::Visible,
+            }),
             timeout: *timeout,
         }),
         Command::SpaInfo => Request::SpaInfo,
@@ -430,6 +518,7 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
         | Command::Status
         | Command::Doctor
         | Command::Kill
+        | Command::Update(_)
         | Command::CdpUrl { .. }
         | Command::Batch { .. } => {
             unreachable!(
@@ -448,7 +537,7 @@ mod tests {
     use eoka_protocol::operation_by_cmd;
     use serde_json::json;
 
-    fn assert_command_maps_to_cataloged_operation(args: &[&str]) {
+    fn assert_command_maps_to_cataloged_operation(args: &[&str]) -> &'static str {
         let (_cli, command) = parsed_command(args);
         let request = command_to_request(&command, false);
         assert!(
@@ -457,6 +546,91 @@ mod tests {
             args,
             request.cmd()
         );
+        request.cmd()
+    }
+
+    #[test]
+    fn new_command_flags_reach_their_requests() {
+        let args = |argv: &[&str]| {
+            let (_cli, command) = parsed_command(argv);
+            let request = command_to_request(&command, false);
+            (request.cmd(), request.args_json())
+        };
+        let (cmd, shot) = args(&[
+            "eoka",
+            "screenshot",
+            "--format",
+            "webp",
+            "--quality",
+            "80",
+            "--clip",
+            "1,2,30,40",
+        ]);
+        assert_eq!(cmd, "screenshot");
+        assert_eq!(shot["format"], "webp");
+        assert_eq!(shot["quality"], 80);
+        assert_eq!(
+            shot["clip"],
+            serde_json::json!({"x":1.0,"y":2.0,"width":30.0,"height":40.0})
+        );
+        assert_eq!(
+            args(&["eoka", "screenshot", "--full-page"]).1["full_page"],
+            true
+        );
+
+        let (cmd, wait) = args(&[
+            "eoka",
+            "wait",
+            "--selector",
+            "#x",
+            "--state",
+            "hidden",
+            "-t",
+            "9",
+        ]);
+        assert_eq!(cmd, "wait");
+        assert_eq!(wait["selector"], "#x");
+        assert_eq!(wait["state"], "hidden");
+        assert_eq!(wait["timeout"], 9);
+
+        let (cmd, start) = args(&[
+            "eoka",
+            "recording",
+            "start",
+            "/tmp/a.mp4",
+            "--fps",
+            "24",
+            "--max-width",
+            "640",
+        ]);
+        assert_eq!(cmd, "recording_start");
+        assert_eq!(start["path"], "/tmp/a.mp4");
+        assert_eq!(start["fps"], 24);
+        assert_eq!(start["max_width"], 640);
+
+        let (cmd, shadow) = args(&[
+            "eoka",
+            "click-shadow",
+            "b",
+            "--frame",
+            "F",
+            "--timeout-ms",
+            "5",
+        ]);
+        assert_eq!(cmd, "click_shadow");
+        assert_eq!(shadow["frame_id"], "F");
+        assert_eq!(shadow["timeout_ms"], 5);
+        assert_eq!(
+            args(&["eoka", "dialog", "accept", "--prompt-text", "hi"]).1["prompt_text"],
+            "hi"
+        );
+
+        for malformed in ["1,2,3", "a,b,c,d", "0,0,0,10", "-1,0,5,5", "0,0,inf,5"] {
+            assert!(
+                Cli::try_parse_from(["eoka", "screenshot", "--clip", malformed]).is_err(),
+                "{malformed}"
+            );
+        }
     }
 
     #[test]
@@ -677,6 +851,44 @@ mod tests {
             &["eoka", "frame-eval", "id:fixture-frame", "1+1"],
             &["eoka", "text"],
             &["eoka", "find", "Submit"],
+            &["eoka", "content"],
+            &["eoka", "dialog", "accept", "--prompt-text", "yes"],
+            &["eoka", "dialog", "dismiss"],
+            &["eoka", "captcha", "detect"],
+            &[
+                "eoka",
+                "screenshot",
+                "--format",
+                "jpeg",
+                "--quality",
+                "80",
+                "--clip",
+                "0,0,10,20",
+            ],
+            &["eoka", "recording", "start", "out.mp4", "--fps", "30"],
+            &[
+                "eoka",
+                "recording",
+                "status",
+                "b9b87b7a-cc6d-4a25-b098-73271cc9c4cb",
+            ],
+            &[
+                "eoka",
+                "recording",
+                "stop",
+                "b9b87b7a-cc6d-4a25-b098-73271cc9c4cb",
+            ],
+            &[
+                "eoka",
+                "recording",
+                "cancel",
+                "b9b87b7a-cc6d-4a25-b098-73271cc9c4cb",
+            ],
+            &["eoka", "get-text", "h1"],
+            &["eoka", "get-attribute", "a", "href"],
+            &["eoka", "exists", "#save"],
+            &["eoka", "click-shadow", "button", "--frame", "F1"],
+            &["eoka", "wait", "--selector", "#ready", "--state", "hidden"],
             &["eoka", "click", "Submit"],
             &["eoka", "dblclick", "Submit"],
             &["eoka", "fill", "Email", "ada@example.com"],
@@ -740,10 +952,57 @@ mod tests {
             &["eoka", "network", "intercept", "log"],
             &["eoka", "clone-from", "9222"],
             &["eoka", "close"],
+            &["eoka", "view"],
+            &[
+                "eoka",
+                "step",
+                r#"{"action":{"kind":"press_key","key":"Tab"}}"#,
+            ],
+            &[
+                "eoka",
+                "action",
+                r#"{"operation_id":"a116d158-2cc5-4473-b73c-616b4b73cb0e","action":{"kind":"reload"}}"#,
+            ],
+            &["eoka", "operations", "get", "operation"],
+            &["eoka", "operations", "list"],
+            &["eoka", "operations", "wait", "operation"],
+            &["eoka", "operations", "cancel", "operation"],
+            &[
+                "eoka",
+                "download",
+                "--url",
+                "https://example.com/file",
+                "--out",
+                "/tmp/file",
+            ],
+            &["eoka", "download", "list"],
+            &["eoka", "download", "status", "job"],
+            &["eoka", "download", "wait", "job"],
+            &["eoka", "download", "cancel", "job"],
+            &["eoka", "captcha", "datadome"],
         ];
 
-        for args in commands {
-            assert_command_maps_to_cataloged_operation(args);
-        }
+        let reached: std::collections::BTreeSet<&str> = commands
+            .iter()
+            .map(|args| assert_command_maps_to_cataloged_operation(args))
+            .collect();
+
+        // The catalog is the single list of operations: anything added to it
+        // must be reachable from the CLI. These are the only exceptions, each
+        // reached another way.
+        let not_cli_commands = [
+            "session_hello",  // sent by every client connection, not a command
+            "action_command", // envelope `main` wraps around back/forward/reload
+            "shutdown",       // `eoka kill` signals the daemon instead
+        ];
+        let unreachable: Vec<&str> = eoka_protocol::all_operations()
+            .iter()
+            .map(|operation| operation.cmd)
+            .filter(|cmd| !reached.contains(cmd) && !not_cli_commands.contains(cmd))
+            .collect();
+        assert!(
+            unreachable.is_empty(),
+            "catalog operations with no CLI command (add one in cli.rs and list it here): {unreachable:?}"
+        );
     }
 }

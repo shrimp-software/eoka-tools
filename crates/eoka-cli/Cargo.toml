@@ -1,6 +1,6 @@
 [package]
 name = "eoka-cli"
-version = "0.10.3"
+version = "0.12.0"
 edition = "2021"
 license = "MIT"
 description = "Browser automation CLI for AI agents and pentesting"
@@ -14,12 +14,10 @@ path = "src/main.rs"
 [dependencies]
 uuid = { version = "1", features = ["v4"] }
 eoka-protocol = { workspace = true }
-eoka-proxy = { workspace = true }
 eoka-server = { workspace = true }
 eoka-sdk = { workspace = true }
 eoka-tack = { workspace = true }
 captcha = { workspace = true }
-eoka-datadome = { workspace = true }
 eoka = { workspace = true }
 tack-core = { workspace = true }
 tack-runtime-quickjs = { workspace = true }
@@ -27,16 +25,14 @@ clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
-base64 = "0.23"
 libc = "0.2"
 anyhow = { workspace = true }
-url = "2"
-chrono = "0.4"
-async-trait = { workspace = true }
+reqwest = "0.13"
+sha2 = "0.11"
+flate2 = "1"
+tar = "0.4"
 
 [dev-dependencies]
-futures-util = { version = "0.3", features = ["sink"] }
-tokio-tungstenite = "0.30"
 tempfile = "3"
 shlex = "2.0"
 eoka-datadome = { workspace = true, features = ["test-fixtures"] }
