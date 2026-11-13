@@ -456,6 +456,29 @@ fn store_lock_does_not_block_independent_hello() {
     server.shutdown(3);
 }
 
+#[test]
+fn a_client_that_refills_each_answered_slot_is_never_refused() {
+    let (_root, state, scratch) = directories();
+    let mut server = Sidecar::start(&state, &scratch);
+    let total = 6_000_u64;
+    let hello =
+        |id: u64| json!({"id":id,"method":"server.hello","params":{"protocol":PROTOCOL_VERSION}});
+    let mut next = 1;
+    while next <= MAX_IN_FLIGHT as u64 {
+        server.send(hello(next));
+        next += 1;
+    }
+    for _ in 0..total {
+        let reply = server.reply();
+        assert!(reply.get("result").is_some(), "{reply}");
+        if next <= total {
+            server.send(hello(next));
+            next += 1;
+        }
+    }
+    server.shutdown(total + 1);
+}
+
 fn launch(server: &mut Sidecar, profile: &Path) -> String {
     let mut params = json!({"headless":true,"userDataDir":profile});
     if let Ok(executable) = std::env::var("EOKA_TEST_CHROME_PATH") {

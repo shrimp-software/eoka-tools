@@ -18,7 +18,9 @@ consume those contracts. The Go client implements the same wire protocol.
 - A serialized message is limited to 33,554,432 bytes (32 MiB), excluding its
   line terminator. Input is bounded while reading. Oversized output becomes a
   structured error rather than an unlimited JSON message.
-- At most 128 requests may remain in flight. Respect advertised limits and
+- At most 128 requests may remain in flight. A request stops counting before its
+  response is written, so a client that keeps at most `maxInFlight` unanswered
+  requests is never refused with `ServerBusy`. Respect advertised limits and
   stdout backpressure; an unread pipe is not permission to buffer indefinitely.
 - Request IDs are positive integers through 9,007,199,254,740,991, unique among
   in-flight requests. Responses echo the ID. A malformed message without a

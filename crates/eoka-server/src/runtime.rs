@@ -62,7 +62,7 @@ struct Outgoing {
     id: Value,
     operation_id: Option<String>,
     response: Response,
-    _permit: Option<OwnedSemaphorePermit>,
+    permit: Option<OwnedSemaphorePermit>,
 }
 
 fn operation_id(request: &Request) -> Option<String> {
@@ -115,7 +115,7 @@ impl Outgoing {
             id,
             operation_id,
             response,
-            _permit: permit,
+            permit,
         }
     }
 }
@@ -259,12 +259,15 @@ async fn writer<W: AsyncWrite + Unpin>(
     mut output: W,
     mut responses: mpsc::Receiver<Outgoing>,
 ) -> anyhow::Result<()> {
-    while let Some(response) = responses.recv().await {
-        let bytes = transport::encode(
-            &response.response,
-            &response.id,
-            response.operation_id.as_deref(),
-        )?;
+    while let Some(outgoing) = responses.recv().await {
+        let Outgoing {
+            id,
+            operation_id,
+            response,
+            permit,
+        } = outgoing;
+        drop(permit);
+        let bytes = transport::encode(&response, &id, operation_id.as_deref())?;
         tokio::time::timeout(Duration::from_secs(2), async {
             output.write_all(&bytes).await?;
             output.flush().await
@@ -802,6 +805,62 @@ mod tests {
         assert_eq!(replies[1]["result"]["label"], "typed admission");
         let fake = harness.finish().await;
         assert_eq!(fake.shutdowns.load(Ordering::Acquire), 1);
+    }
+
+    struct SlotProbe {
+        permits: Arc<Semaphore>,
+        free_when_written: Arc<parking_lot::Mutex<Vec<usize>>>,
+    }
+
+    impl AsyncWrite for SlotProbe {
+        fn poll_write(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+            bytes: &[u8],
+        ) -> std::task::Poll<std::io::Result<usize>> {
+            self.free_when_written
+                .lock()
+                .push(self.permits.available_permits());
+            std::task::Poll::Ready(Ok(bytes.len()))
+        }
+
+        fn poll_flush(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+
+        fn poll_shutdown(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+    }
+
+    #[tokio::test]
+    async fn an_in_flight_slot_is_free_before_its_response_reaches_the_client() {
+        let permits = Arc::new(Semaphore::new(2));
+        let free_when_written = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let (responses, receiver) = mpsc::channel(4);
+        for id in [1, 2] {
+            let permit = permits.clone().try_acquire_owned().unwrap();
+            let queued = Outgoing::new(json!(id), Ok(json!({})), None, Some(permit));
+            assert!(responses.try_send(queued).is_ok());
+        }
+        assert_eq!(permits.available_permits(), 0);
+        drop(responses);
+        writer(
+            SlotProbe {
+                permits: permits.clone(),
+                free_when_written: free_when_written.clone(),
+            },
+            receiver,
+        )
+        .await
+        .unwrap();
+        assert_eq!(*free_when_written.lock(), [1, 2]);
     }
 
     #[test]
