@@ -254,8 +254,10 @@ compiled ESM/declarations for Node 24 LTS (`^24.21.0`), one private sidecar per 
 owned launch or borrowed attachment, verified actions, durable operation recovery,
 page reads, bounded text fetch, PNG/JPEG/WebP screenshots and native MP4 recording.
 
-The current release, `0.1.0-beta.3`, bundles server `0.6.1` built against eoka
-`0.7.2`. Merging a version bump to `main` starts the npm release automatically.
+Each release bundles the server version recorded in
+`clients/node/release-manifest.json`, built against the eoka version in the
+workspace `Cargo.toml`. Merging a version bump to `main` starts the npm release
+automatically.
 
 `Browser.launch()` resolves an exact optional server package and installs pinned
 full Chrome for Testing (the build pinned in
@@ -307,10 +309,9 @@ These apply to the CLI and MCP server:
 
 ## Development
 
-Builds use published eoka `0.7.2` from crates.io. The workspace lockfile pins its
-registry source and checksum
-`bb088753bbef0585bcbaa1e868e4e59b5ee99db40844ba9cb3ec4822ca95e019`;
-no sibling core checkout or Cargo patch is required.
+Builds use the published eoka crate from crates.io at the version in the workspace
+`Cargo.toml`. `Cargo.lock` pins its registry source and checksum; no sibling core
+checkout or Cargo patch is required.
 
 ```sh
 mise run drift

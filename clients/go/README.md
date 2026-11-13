@@ -1,6 +1,6 @@
 # eoka Go client
 
-A Go client for [`eoka`](https://github.com/cbxss/eoka), a Rust stealth
+A Go client for [`eoka`](https://github.com/shrimp-software/eoka), a Rust stealth
 Chrome-automation library, via its `eoka-server` sidecar process. This
 package spawns `eoka-server` as a child process and drives it over
 newline-delimited JSON on stdin/stdout, per the contract in
@@ -46,7 +46,7 @@ the resulting server.
 ## Action migration
 
 `Launch` and `Connect` send `server.hello` with protocol 2.0 before creating
-a browser session. The client requires major 1 and minor >= 1; server/core
+a browser session. The client requires major 2 and accepts any 2.x minor; server/core
 package versions are diagnostic information, not substitutes for protocol
 compatibility. `Browser.ServerInfo()` returns the negotiated versions, supported
 methods, capabilities and server limits. Missing required launch or connect support,
