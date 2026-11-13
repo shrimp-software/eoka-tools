@@ -225,6 +225,8 @@ impl OperationSpec {
             }
             "open" => serde_json::json!({"url":"about:blank"}),
             "find" => serde_json::json!({"text":"needle"}),
+            "get_text" | "exists" | "click_shadow" => serde_json::json!({"selector":"h1"}),
+            "get_attribute" => serde_json::json!({"selector":"a","name":"href"}),
             "click" | "dblclick" | "hover" | "scroll" => {
                 serde_json::json!({"target":"body"})
             }

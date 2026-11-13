@@ -11,6 +11,11 @@
     "info",
     "text",
     "find",
+    "content",
+    "get_text",
+    "get_attribute",
+    "exists",
+    "click_shadow",
     "click",
     "double_click",
     "fill",
@@ -3869,6 +3874,42 @@
       },
       "result": {}
     },
+    "click_shadow": {
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "frame_id": {
+            "default": null,
+            "description": "Frame ID from `frames`; the top frame when omitted.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pageId": {
+            "type": "string"
+          },
+          "selector": {
+            "description": "CSS selector, matched through open and closed shadow roots.",
+            "type": "string"
+          },
+          "timeout_ms": {
+            "default": 10000,
+            "format": "uint64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "selector",
+          "pageId"
+        ],
+        "title": "ClickShadowArgs",
+        "type": "object"
+      },
+      "result": {}
+    },
     "clone_from": {
       "params": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -3917,6 +3958,21 @@
           "pageId"
         ],
         "title": "ConsoleArgs",
+        "type": "object"
+      },
+      "result": {}
+    },
+    "content": {
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "pageId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "pageId"
+        ],
         "type": "object"
       },
       "result": {}
@@ -4736,6 +4792,27 @@
       },
       "result": {}
     },
+    "exists": {
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "pageId": {
+            "type": "string"
+          },
+          "selector": {
+            "description": "CSS selector of the element.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "selector",
+          "pageId"
+        ],
+        "title": "SelectorArgs",
+        "type": "object"
+      },
+      "result": {}
+    },
     "fake_camera": {
       "params": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -5375,6 +5452,53 @@
         "required": [
           "pageId"
         ],
+        "type": "object"
+      },
+      "result": {}
+    },
+    "get_attribute": {
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "name": {
+            "description": "Attribute name, for example href.",
+            "type": "string"
+          },
+          "pageId": {
+            "type": "string"
+          },
+          "selector": {
+            "description": "CSS selector of the element.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "selector",
+          "name",
+          "pageId"
+        ],
+        "title": "AttributeArgs",
+        "type": "object"
+      },
+      "result": {}
+    },
+    "get_text": {
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "pageId": {
+            "type": "string"
+          },
+          "selector": {
+            "description": "CSS selector of the element.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "selector",
+          "pageId"
+        ],
+        "title": "SelectorArgs",
         "type": "object"
       },
       "result": {}
@@ -24377,6 +24501,26 @@
               "query"
             ],
             "type": "object"
+          },
+          "WaitSelectorState": {
+            "description": "The condition a `wait` selector must reach.",
+            "oneOf": [
+              {
+                "const": "attached",
+                "description": "Present in the DOM, rendered or not.",
+                "type": "string"
+              },
+              {
+                "const": "visible",
+                "description": "Rendered with visible CSS and a nonzero box.",
+                "type": "string"
+              },
+              {
+                "const": "hidden",
+                "description": "Absent or no longer rendered.",
+                "type": "string"
+              }
+            ]
           }
         },
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -24409,6 +24553,26 @@
           },
           "pageId": {
             "type": "string"
+          },
+          "selector": {
+            "default": null,
+            "description": "CSS selector to wait for; see `state`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/WaitSelectorState"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "What the selector must become. Defaults to visible."
           },
           "text": {
             "type": [

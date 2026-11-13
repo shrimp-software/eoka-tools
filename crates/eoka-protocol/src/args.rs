@@ -271,7 +271,57 @@ pub struct WaitArgs {
     pub text: Option<String>,
     pub url: Option<String>,
     pub load: Option<String>,
+    #[serde(default)]
+    #[schemars(description = "CSS selector to wait for; see `state`.")]
+    pub selector: Option<String>,
+    #[serde(default)]
+    #[schemars(description = "What the selector must become. Defaults to visible.")]
+    pub state: Option<WaitSelectorState>,
     pub timeout: Option<u64>,
+}
+
+/// The condition a `wait` selector must reach.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum WaitSelectorState {
+    /// Present in the DOM, rendered or not.
+    Attached,
+    /// Rendered with visible CSS and a nonzero box.
+    #[default]
+    Visible,
+    /// Absent or no longer rendered.
+    Hidden,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+pub struct SelectorArgs {
+    #[schemars(description = "CSS selector of the element.")]
+    pub selector: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+pub struct AttributeArgs {
+    #[schemars(description = "CSS selector of the element.")]
+    pub selector: String,
+    #[schemars(description = "Attribute name, for example href.")]
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ClickShadowArgs {
+    #[schemars(description = "CSS selector, matched through open and closed shadow roots.")]
+    pub selector: String,
+    #[serde(default)]
+    #[schemars(description = "Frame ID from `frames`; the top frame when omitted.")]
+    pub frame_id: Option<String>,
+    #[serde(default = "default_click_shadow_timeout_ms")]
+    pub timeout_ms: u64,
+}
+
+fn default_click_shadow_timeout_ms() -> u64 {
+    10_000
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]

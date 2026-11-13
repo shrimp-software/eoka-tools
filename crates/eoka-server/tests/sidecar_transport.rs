@@ -829,6 +829,73 @@ fn catalog_operations_run_on_the_addressed_page_and_report_structured_errors() {
         "{other}"
     );
 
+    // Reads, waits and shadow clicks folded in from the sidecar-only methods.
+    let markup = "document.body.innerHTML = '<h1>Heading</h1><a id=link href=\"/next\">Next</a>'; \
+        setTimeout(() => { const late = document.createElement('p'); late.id = 'late'; late.textContent = 'Late'; document.body.append(late); }, 200); void 0";
+    server.request(50, "exec", json!({"pageId":first,"raw":true,"code":markup}));
+    let content = server.request(51, "content", json!({"pageId":first}));
+    assert!(
+        content["result"]
+            .as_str()
+            .unwrap()
+            .contains("<h1>Heading</h1>"),
+        "{content}"
+    );
+    let text = server.request(52, "get_text", json!({"pageId":first,"selector":"h1"}));
+    assert_eq!(text["result"], "Heading", "{text}");
+    for (id, name, value) in [(53, "href", json!("/next")), (54, "missing", Value::Null)] {
+        let attribute = server.request(
+            id,
+            "get_attribute",
+            json!({"pageId":first,"selector":"#link","name":name}),
+        );
+        assert_eq!(attribute["result"]["value"], value, "{attribute}");
+    }
+    for (id, selector, exists) in [(55, "#link", true), (56, "#absent", false)] {
+        let response = server.request(id, "exists", json!({"pageId":first,"selector":selector}));
+        assert_eq!(response["result"]["exists"], exists, "{response}");
+    }
+    let waited = server.request(
+        57,
+        "wait",
+        json!({"pageId":first,"selector":"#late","timeout":5000}),
+    );
+    assert!(waited.get("result").is_some(), "{waited}");
+    let hidden = server.request(
+        58,
+        "wait",
+        json!({"pageId":first,"selector":"#absent","state":"hidden","timeout":2000}),
+    );
+    assert!(hidden.get("result").is_some(), "{hidden}");
+    let missing = server.request(
+        59,
+        "wait",
+        json!({"pageId":first,"selector":"#absent","state":"attached","timeout":300}),
+    );
+    assert_eq!(missing["error"]["code"], "Operation", "{missing}");
+    // The shadow search needs a real document rather than about:blank.
+    let shadow_url = "data:text/html,<!doctype html><title>start</title><div id=host></div><script>\
+        const root = document.getElementById('host').attachShadow({mode:'closed'});\
+        root.innerHTML = '<button id=inner style=\"width:120px;height:40px\">go</button>';\
+        root.getElementById('inner').onclick = () => { document.title = 'shadow-clicked'; };</script>";
+    let shadow = server.request(60, "browser.new_page", json!({"url":shadow_url}));
+    let shadow = shadow["result"]["pageId"].as_str().unwrap().to_owned();
+    let clicked = server.request(
+        61,
+        "click_shadow",
+        json!({"pageId":shadow,"selector":"button#inner"}),
+    );
+    assert_eq!(clicked["result"]["selector"], "button#inner", "{clicked}");
+    let mut title = Value::Null;
+    for attempt in 0..20 {
+        title = server.request(62 + attempt, "page.title", json!({"pageId":shadow}));
+        if title["result"]["title"] == "shadow-clicked" {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert_eq!(title["result"]["title"], "shadow-clicked", "{title}");
+
     for (id, method, params, code) in [
         (30, "info", json!({}), "InvalidParams"),
         (31, "info", json!({"pageId":"missing"}), "InvalidPage"),

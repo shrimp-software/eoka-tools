@@ -286,6 +286,37 @@ pub enum Command {
         #[arg(help = "Text to search for")]
         text: String,
     },
+    #[command(about = "Get the page HTML")]
+    Content,
+    #[command(about = "Get the text of the first element matching a CSS selector")]
+    GetText {
+        #[arg(help = "CSS selector")]
+        selector: String,
+    },
+    #[command(about = "Get an attribute of the first element matching a CSS selector")]
+    GetAttribute {
+        #[arg(help = "CSS selector")]
+        selector: String,
+        #[arg(help = "Attribute name, for example href")]
+        name: String,
+    },
+    #[command(about = "Check whether a CSS selector matches an element")]
+    Exists {
+        #[arg(help = "CSS selector")]
+        selector: String,
+    },
+    #[command(
+        about = "Click an element inside open or closed shadow roots",
+        long_about = "Click an element inside open or closed shadow roots with human-like movement.\n\nThe result proves the click was dispatched, not what it did; check the page afterwards."
+    )]
+    ClickShadow {
+        #[arg(help = "CSS selector, matched through shadow roots")]
+        selector: String,
+        #[arg(long, help = "Frame ID from `eoka frames`; the top frame when omitted")]
+        frame: Option<String>,
+        #[arg(long, default_value = "10000", help = "Deadline in milliseconds")]
+        timeout_ms: u64,
+    },
     #[command(
         about = "Click element",
         long_about = "Click element. Requires --expect with the result that proves the click worked; without it the command fails before any input."
@@ -580,7 +611,7 @@ pub enum Command {
         #[command(subcommand)]
         action: TabAction,
     },
-    #[command(about = "Wait for time, text, URL, or load state")]
+    #[command(about = "Wait for time, text, URL, selector, or load state")]
     Wait {
         #[arg(help = "Fixed delay in milliseconds")]
         ms: Option<u64>,
@@ -590,6 +621,15 @@ pub enum Command {
         url: Option<String>,
         #[arg(long, help = "Wait for network idle")]
         load: Option<String>,
+        #[arg(long, help = "Wait until this CSS selector reaches --state")]
+        selector: Option<String>,
+        #[arg(
+            long,
+            requires = "selector",
+            value_parser = ["attached", "visible", "hidden"],
+            help = "Selector condition [default: visible]"
+        )]
+        state: Option<String>,
         #[arg(short, long, help = "Timeout in milliseconds")]
         timeout: Option<u64>,
     },

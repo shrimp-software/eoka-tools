@@ -382,6 +382,11 @@ impl Engine {
             "frames" => self.cmd_frames().await,
             "text" => self.cmd_text().await,
             "find" => self.cmd_find(args).await,
+            "content" => self.cmd_content().await,
+            "get_text" => self.cmd_get_text(args).await,
+            "get_attribute" => self.cmd_get_attribute(args).await,
+            "exists" => self.cmd_exists(args).await,
+            "click_shadow" => self.cmd_click_shadow(args).await,
             "click" => Ok(self.handle_action("click", args).await),
             "dblclick" => Ok(self.handle_action("dblclick", args).await),
             "fill" => Ok(self.handle_action("fill", args).await),
@@ -849,6 +854,59 @@ impl Engine {
         let tab = self.require_tab()?;
         let text = tab.page.text().await.map_err(|e| e.to_string())?;
         Ok(Response::ok_text(text))
+    }
+
+    async fn cmd_content(&mut self) -> Result<Response, String> {
+        let html = self.require_tab()?.page.content().await;
+        Ok(Response::ok_text(html.map_err(|e| e.to_string())?))
+    }
+
+    async fn cmd_get_text(&mut self, args: &Value) -> Result<Response, String> {
+        let selector = self.arg_str(args, "selector")?;
+        let element = self.require_tab()?.page.find(selector).await;
+        let text = element.map_err(|e| e.to_string())?.text().await;
+        Ok(Response::ok_text(text.map_err(|e| e.to_string())?))
+    }
+
+    async fn cmd_get_attribute(&mut self, args: &Value) -> Result<Response, String> {
+        let selector = self.arg_str(args, "selector")?;
+        let name = self.arg_str(args, "name")?;
+        let element = self.require_tab()?.page.find(selector).await;
+        let value = element
+            .map_err(|e| e.to_string())?
+            .get_attribute(name)
+            .await;
+        Ok(Response::ok(
+            json!({"value": value.map_err(|e| e.to_string())?}),
+        ))
+    }
+
+    async fn cmd_exists(&mut self, args: &Value) -> Result<Response, String> {
+        let selector = self.arg_str(args, "selector")?;
+        let exists = self.require_tab()?.page.exists(selector).await;
+        Ok(Response::ok(json!({"exists": exists})))
+    }
+
+    async fn cmd_click_shadow(&mut self, args: &Value) -> Result<Response, String> {
+        let args: eoka_protocol::ClickShadowArgs =
+            serde_json::from_value(args.clone()).map_err(|e| e.to_string())?;
+        let receipt = self
+            .require_tab()?
+            .page
+            .click_shadow_with_timeout(
+                args.frame_id.as_deref(),
+                &args.selector,
+                std::time::Duration::from_millis(args.timeout_ms),
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        self.require_tab_mut()?.invalidate();
+        Ok(Response::ok(json!({
+            "frame_id": receipt.frame_id,
+            "selector": receipt.selector,
+            "x": receipt.x,
+            "y": receipt.y,
+        })))
     }
 
     async fn cmd_find(&mut self, args: &Value) -> Result<Response, String> {
@@ -1446,13 +1504,36 @@ impl Engine {
                     .map_err(|e| e.to_string())?;
                 return Ok(Response::ok_text(format!("URL matched \"{}\"", url_pat)));
             }
+            if let Some(selector) = args["selector"].as_str() {
+                let state: eoka_protocol::WaitSelectorState = match args.get("state") {
+                    Some(state) if !state.is_null() => {
+                        serde_json::from_value(state.clone()).map_err(|e| e.to_string())?
+                    }
+                    _ => Default::default(),
+                };
+                let (wait, outcome) = match state {
+                    eoka_protocol::WaitSelectorState::Attached => (
+                        page.wait_for(selector, timeout).await.map(|_| ()),
+                        "attached",
+                    ),
+                    eoka_protocol::WaitSelectorState::Visible => (
+                        page.wait_for_visible(selector, timeout).await.map(|_| ()),
+                        "visible",
+                    ),
+                    eoka_protocol::WaitSelectorState::Hidden => {
+                        (page.wait_for_hidden(selector, timeout).await, "hidden")
+                    }
+                };
+                wait.map_err(|e| e.to_string())?;
+                return Ok(Response::ok_text(format!("\"{selector}\" is {outcome}")));
+            }
             if args["load"].as_str().is_some() {
                 page.wait_for_network_idle(500, timeout)
                     .await
                     .map_err(|e| e.to_string())?;
                 return Ok(Response::ok_text("Network idle"));
             }
-            Err("Provide ms, --text, --url, or --load".into())
+            Err("Provide ms, --text, --url, --selector, or --load".into())
         }
         .await;
         self.stop_fetch_drain(drain).await;

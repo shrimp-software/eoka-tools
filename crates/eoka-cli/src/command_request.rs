@@ -136,6 +136,28 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
         Command::Info => Request::Info,
         Command::Text => Request::Text,
         Command::Find { text } => Request::Find(TextArgs { text: text.clone() }),
+        Command::Content => Request::Content,
+        Command::GetText { selector } => Request::GetText(eoka_protocol::SelectorArgs {
+            selector: selector.clone(),
+        }),
+        Command::GetAttribute { selector, name } => {
+            Request::GetAttribute(eoka_protocol::AttributeArgs {
+                selector: selector.clone(),
+                name: name.clone(),
+            })
+        }
+        Command::Exists { selector } => Request::Exists(eoka_protocol::SelectorArgs {
+            selector: selector.clone(),
+        }),
+        Command::ClickShadow {
+            selector,
+            frame,
+            timeout_ms,
+        } => Request::ClickShadow(eoka_protocol::ClickShadowArgs {
+            selector: selector.clone(),
+            frame_id: frame.clone(),
+            timeout_ms: *timeout_ms,
+        }),
         Command::Click { target } => Request::Click(TargetArgs {
             operation: Default::default(),
             target: target.clone(),
@@ -331,6 +353,8 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
             text,
             url,
             load,
+            selector,
+            state,
             timeout,
         } => Request::Wait(WaitArgs {
             expect: None,
@@ -338,6 +362,12 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
             text: text.clone(),
             url: url.clone(),
             load: load.clone(),
+            selector: selector.clone(),
+            state: state.as_deref().map(|state| match state {
+                "attached" => eoka_protocol::WaitSelectorState::Attached,
+                "hidden" => eoka_protocol::WaitSelectorState::Hidden,
+                _ => eoka_protocol::WaitSelectorState::Visible,
+            }),
             timeout: *timeout,
         }),
         Command::SpaInfo => Request::SpaInfo,
@@ -678,6 +708,12 @@ mod tests {
             &["eoka", "frame-eval", "id:fixture-frame", "1+1"],
             &["eoka", "text"],
             &["eoka", "find", "Submit"],
+            &["eoka", "content"],
+            &["eoka", "get-text", "h1"],
+            &["eoka", "get-attribute", "a", "href"],
+            &["eoka", "exists", "#save"],
+            &["eoka", "click-shadow", "button", "--frame", "F1"],
+            &["eoka", "wait", "--selector", "#ready", "--state", "hidden"],
             &["eoka", "click", "Submit"],
             &["eoka", "dblclick", "Submit"],
             &["eoka", "fill", "Email", "ada@example.com"],

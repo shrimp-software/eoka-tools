@@ -293,6 +293,10 @@ export type MethodClickParams__LocatorSpec = { "frame_id"?: (string | null); "in
 
 export type MethodClickResult = unknown;
 
+export type MethodClickShadowParams = { "frame_id"?: (string | null); "pageId": string; "selector": string; "timeout_ms"?: number; [key: string]: unknown; };
+
+export type MethodClickShadowResult = unknown;
+
 export type MethodCloneFromParams = { "pageId": string; "source": string; "to"?: (string | null); [key: string]: unknown; };
 
 export type MethodCloneFromResult = unknown;
@@ -300,6 +304,10 @@ export type MethodCloneFromResult = unknown;
 export type MethodConsoleParams = { "clear"?: boolean; "level"?: (string | null); "pageId": string; [key: string]: unknown; };
 
 export type MethodConsoleResult = unknown;
+
+export type MethodContentParams = { "pageId": string; };
+
+export type MethodContentResult = unknown;
 
 export type MethodCookiesParams = { "pageId": string; };
 
@@ -356,6 +364,10 @@ export type MethodExecParams = { "arguments"?: Array<unknown>; "code"?: (string 
 
 export type MethodExecResult = unknown;
 
+export type MethodExistsParams = { "pageId": string; "selector": string; [key: string]: unknown; };
+
+export type MethodExistsResult = unknown;
+
 export type MethodFakeCameraParams = { "file": string; "loop_video"?: boolean; "pageId": string; [key: string]: unknown; };
 
 export type MethodFakeCameraResult = unknown;
@@ -387,6 +399,14 @@ export type MethodFrameEvalResult = unknown;
 export type MethodFramesParams = { "pageId": string; };
 
 export type MethodFramesResult = unknown;
+
+export type MethodGetAttributeParams = { "name": string; "pageId": string; "selector": string; [key: string]: unknown; };
+
+export type MethodGetAttributeResult = unknown;
+
+export type MethodGetTextParams = { "pageId": string; "selector": string; [key: string]: unknown; };
+
+export type MethodGetTextResult = unknown;
 
 export type MethodHeadersParams = { "headers_json": string; "pageId": string; [key: string]: unknown; };
 
@@ -1025,10 +1045,11 @@ export type MethodTextParams = { "pageId": string; };
 
 export type MethodTextResult = unknown;
 
-export type MethodWaitParams = { "expect"?: (MethodWaitParams__Expectation | null); "load"?: (string | null); "ms"?: (number | null); "pageId": string; "text"?: (string | null); "timeout"?: (number | null); "url"?: (string | null); [key: string]: unknown; };
+export type MethodWaitParams = { "expect"?: (MethodWaitParams__Expectation | null); "load"?: (string | null); "ms"?: (number | null); "pageId": string; "selector"?: (string | null); "state"?: (MethodWaitParams__WaitSelectorState | null); "text"?: (string | null); "timeout"?: (number | null); "url"?: (string | null); [key: string]: unknown; };
 export type MethodWaitParams__Expectation = ({ "kind": ("document_ready" & string); [key: string]: unknown; } | { "conditions": Array<MethodWaitParams__Expectation>; "kind": ("all" & string); [key: string]: unknown; } | { "enabled": boolean; "kind": ("enabled" & string); "target": MethodWaitParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("download_started" & string); [key: string]: unknown; } | { "kind": ("focused" & string); "target": MethodWaitParams__LocatorSpec; [key: string]: unknown; } | { "contains"?: boolean; "kind": ("url" & string); "value": string; [key: string]: unknown; } | { "kind": ("visible" & string); "target": MethodWaitParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("hidden" & string); "target": MethodWaitParams__LocatorSpec; [key: string]: unknown; } | { "contains"?: boolean; "kind": ("text" & string); "target": MethodWaitParams__LocatorSpec; "value": string; [key: string]: unknown; } | { "kind": ("value" & string); "target": MethodWaitParams__LocatorSpec; "value": string; [key: string]: unknown; } | { "checked": boolean; "kind": ("checked" & string); "target": MethodWaitParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("selected" & string); "target": MethodWaitParams__LocatorSpec; "values": Array<string>; [key: string]: unknown; });
 export type MethodWaitParams__LocatorQuery = ({ "id": number; "kind": ("node" & string); [key: string]: unknown; } | { "kind": ("css" & string); "selector": string; [key: string]: unknown; } | { "exact"?: boolean; "kind": ("text" & string); "text": string; [key: string]: unknown; } | { "kind": ("placeholder" & string); "text": string; [key: string]: unknown; } | { "kind": ("role" & string); "role": string; [key: string]: unknown; } | { "id": number; "kind": ("backend_node" & string); [key: string]: unknown; });
 export type MethodWaitParams__LocatorSpec = { "frame_id"?: (string | null); "index"?: (number | null); "query": MethodWaitParams__LocatorQuery; [key: string]: unknown; };
+export type MethodWaitParams__WaitSelectorState = (("attached" & string) | ("visible" & string) | ("hidden" & string));
 
 export type MethodWaitResult = unknown;
 
@@ -1064,8 +1085,10 @@ export type MethodParams = {
   "captcha.turnstile": MethodCaptchaTurnstileParams;
   "clear_cookies": MethodClearCookiesParams;
   "click": MethodClickParams;
+  "click_shadow": MethodClickShadowParams;
   "clone_from": MethodCloneFromParams;
   "console": MethodConsoleParams;
+  "content": MethodContentParams;
   "cookies": MethodCookiesParams;
   "delete_cookie": MethodDeleteCookieParams;
   "double_click": MethodDoubleClickParams;
@@ -1079,6 +1102,7 @@ export type MethodParams = {
   "errors": MethodErrorsParams;
   "eval": MethodEvalParams;
   "exec": MethodExecParams;
+  "exists": MethodExistsParams;
   "fake_camera": MethodFakeCameraParams;
   "fetch": MethodFetchParams;
   "fill": MethodFillParams;
@@ -1086,6 +1110,8 @@ export type MethodParams = {
   "forward": MethodForwardParams;
   "frame_eval": MethodFrameEvalParams;
   "frames": MethodFramesParams;
+  "get_attribute": MethodGetAttributeParams;
+  "get_text": MethodGetTextParams;
   "headers": MethodHeadersParams;
   "hover": MethodHoverParams;
   "info": MethodInfoParams;
@@ -1206,8 +1232,10 @@ export type MethodResults = {
   "captcha.turnstile": MethodCaptchaTurnstileResult;
   "clear_cookies": MethodClearCookiesResult;
   "click": MethodClickResult;
+  "click_shadow": MethodClickShadowResult;
   "clone_from": MethodCloneFromResult;
   "console": MethodConsoleResult;
+  "content": MethodContentResult;
   "cookies": MethodCookiesResult;
   "delete_cookie": MethodDeleteCookieResult;
   "double_click": MethodDoubleClickResult;
@@ -1221,6 +1249,7 @@ export type MethodResults = {
   "errors": MethodErrorsResult;
   "eval": MethodEvalResult;
   "exec": MethodExecResult;
+  "exists": MethodExistsResult;
   "fake_camera": MethodFakeCameraResult;
   "fetch": MethodFetchResult;
   "fill": MethodFillResult;
@@ -1228,6 +1257,8 @@ export type MethodResults = {
   "forward": MethodForwardResult;
   "frame_eval": MethodFrameEvalResult;
   "frames": MethodFramesResult;
+  "get_attribute": MethodGetAttributeResult;
+  "get_text": MethodGetTextResult;
   "headers": MethodHeadersResult;
   "hover": MethodHoverResult;
   "info": MethodInfoResult;
@@ -1347,4 +1378,4 @@ export type ProtocolErrorResponse = { id: number | null; error: ServerError; res
 export type ProtocolResponse<M extends MethodName = MethodName> = ProtocolSuccessResponse<M> | ProtocolErrorResponse;
 
 export const protocolVersion = {"major":2,"minor":1} as const;
-export const methodNames = ["actions.perform","agent.observe","agent.step","back","browser.close","browser.close_tab","browser.connect","browser.launch","browser.new_page","browser.tabs","captcha.datadome","captcha.inject","captcha.turnstile","clear_cookies","click","clone_from","console","cookies","delete_cookie","double_click","download.cancel","download.get","download.list","download.start","download.wait","dump_storage","emulate","errors","eval","exec","fake_camera","fetch","fill","find","forward","frame_eval","frames","headers","hover","info","intercept.add","intercept.list","intercept.log","intercept.remove","js.allow","js.block","js.list","js.mode","js.remove","key","key.down","key.up","load_state","mouse.down","mouse.move","mouse.up","network.clear","network.export","network.log","network.record.start","network.record.status","network.record.stop","network.show","network.wait","observe","open","operations.cancel","operations.get","operations.list","operations.wait","page.capture_state","page.click","page.click_shadow","page.click_text","page.close","page.content","page.evaluate","page.evaluate_in_frame","page.evaluate_raw","page.execute","page.execute_raw","page.exists","page.fetch","page.fetch_bounded","page.fill","page.frames","page.get_attribute","page.get_text","page.goto","page.hover","page.human_click","page.human_click_text","page.human_fill","page.key_down","page.key_up","page.mouse_down","page.mouse_move","page.mouse_up","page.press_key","page.release_all_inputs","page.reset_viewport","page.restore_state","page.screenshot","page.screenshot_to_file","page.select","page.set_viewport","page.solve_captcha","page.solve_turnstile","page.text","page.title","page.type_into","page.url","page.wait_for","page.wait_for_text","page.wait_for_visible","recording.cancel","recording.get","recording.start","recording.stop","release_all_inputs","reload","save_state","screenshot","scroll","select","server.hello","server.shutdown","set_cookie","set_storage","snapshot","spa.info","spa.navigate","storage","text","wait","wasm.find","wasm.info","wasm.read","wasm.write"] as const;
+export const methodNames = ["actions.perform","agent.observe","agent.step","back","browser.close","browser.close_tab","browser.connect","browser.launch","browser.new_page","browser.tabs","captcha.datadome","captcha.inject","captcha.turnstile","clear_cookies","click","click_shadow","clone_from","console","content","cookies","delete_cookie","double_click","download.cancel","download.get","download.list","download.start","download.wait","dump_storage","emulate","errors","eval","exec","exists","fake_camera","fetch","fill","find","forward","frame_eval","frames","get_attribute","get_text","headers","hover","info","intercept.add","intercept.list","intercept.log","intercept.remove","js.allow","js.block","js.list","js.mode","js.remove","key","key.down","key.up","load_state","mouse.down","mouse.move","mouse.up","network.clear","network.export","network.log","network.record.start","network.record.status","network.record.stop","network.show","network.wait","observe","open","operations.cancel","operations.get","operations.list","operations.wait","page.capture_state","page.click","page.click_shadow","page.click_text","page.close","page.content","page.evaluate","page.evaluate_in_frame","page.evaluate_raw","page.execute","page.execute_raw","page.exists","page.fetch","page.fetch_bounded","page.fill","page.frames","page.get_attribute","page.get_text","page.goto","page.hover","page.human_click","page.human_click_text","page.human_fill","page.key_down","page.key_up","page.mouse_down","page.mouse_move","page.mouse_up","page.press_key","page.release_all_inputs","page.reset_viewport","page.restore_state","page.screenshot","page.screenshot_to_file","page.select","page.set_viewport","page.solve_captcha","page.solve_turnstile","page.text","page.title","page.type_into","page.url","page.wait_for","page.wait_for_text","page.wait_for_visible","recording.cancel","recording.get","recording.start","recording.stop","release_all_inputs","reload","save_state","screenshot","scroll","select","server.hello","server.shutdown","set_cookie","set_storage","snapshot","spa.info","spa.navigate","storage","text","wait","wasm.find","wasm.info","wasm.read","wasm.write"] as const;
