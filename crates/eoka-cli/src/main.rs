@@ -6,7 +6,6 @@ mod code;
 mod command_request;
 mod daemon;
 mod download_cmd;
-mod handler;
 #[cfg(test)]
 mod help_coverage;
 mod launch;

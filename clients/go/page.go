@@ -60,6 +60,14 @@ type FetchResponse struct {
 
 func (p *Page) ID() string { return p.id }
 
+// Invoke calls any page-scoped server method by name, adding this page's ID
+// to params. It reaches every catalog operation the server lists in its
+// hello methods (for example "console", "cookies" or "network.record.start")
+// without a dedicated wrapper. result may be nil.
+func (p *Page) Invoke(ctx context.Context, method string, params map[string]any, result any) error {
+	return p.call(ctx, method, params, result)
+}
+
 func (p *Page) call(ctx context.Context, method string, params map[string]any, result any) error {
 	if params == nil {
 		params = map[string]any{}

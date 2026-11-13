@@ -1,6 +1,6 @@
 [package]
 name = "eoka-sdk"
-version = "0.10.2"
+version = "0.10.3"
 edition = "2021"
 license = "MIT"
 description = "Rust SDK for controlling eoka browser automation sessions"
@@ -20,5 +20,4 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { version = "1", features = ["v4"] }
 
-sha2 = "0.11"
 libc = "0.2"

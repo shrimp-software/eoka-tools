@@ -1,7 +1,8 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
+use crate::{InteractiveElement, ObserveConfig};
 use eoka::{Browser, Page, StealthConfig};
-use eoka_server::{InteractiveElement, ObserveConfig};
 
 use super::profile::{clone_profile_dir, ClonedProfile};
 use super::proxy_forward::ProxyForwarder;
@@ -48,11 +49,12 @@ impl TabState {
 }
 
 pub struct BrowserState {
-    pub browser: Browser,
+    pub browser: Arc<Browser>,
     pub tabs: HashMap<String, TabState>,
     pub current_tab_id: Option<String>,
     pub config: ObserveConfig,
     pub is_live: bool,
+    adopted: bool,
     _proxy_forwarder: Option<ProxyForwarder>,
     _cloned_profile: Option<ClonedProfile>,
 }
@@ -146,11 +148,12 @@ impl BrowserState {
         };
         let browser = Browser::launch_with_config(config).await?;
         Ok(Self {
-            browser,
+            browser: Arc::new(browser),
             tabs: HashMap::new(),
             current_tab_id: None,
             config: ObserveConfig::default(),
             is_live: false,
+            adopted: false,
             _proxy_forwarder: proxy_forwarder,
             _cloned_profile: cloned_profile,
         })
@@ -160,14 +163,32 @@ impl BrowserState {
         eprintln!("[eoka] connecting to {}", ws_url);
         let browser = Browser::connect(ws_url).await?;
         Ok(Self {
-            browser,
+            browser: Arc::new(browser),
             tabs: HashMap::new(),
             current_tab_id: None,
             config: ObserveConfig::default(),
             is_live: true,
+            adopted: false,
             _proxy_forwarder: None,
             _cloned_profile: None,
         })
+    }
+
+    /// Track a browser owned by the caller. The engine never closes it.
+    pub fn adopted(browser: Arc<Browser>) -> Self {
+        // The owner addresses pages by ID, including on a browser it only
+        // attached to, so `open` navigates the addressed page.
+        let is_live = false;
+        Self {
+            browser,
+            tabs: HashMap::new(),
+            current_tab_id: None,
+            config: ObserveConfig::default(),
+            is_live,
+            adopted: true,
+            _proxy_forwarder: None,
+            _cloned_profile: None,
+        }
     }
 
     pub async fn ensure_tab(&mut self, url: &str) -> eoka::Result<&mut TabState> {
@@ -257,14 +278,25 @@ impl BrowserState {
     }
 
     pub async fn close(self) -> eoka::Result<()> {
-        let BrowserState { browser, tabs, .. } = self;
+        let BrowserState {
+            browser,
+            tabs,
+            adopted,
+            ..
+        } = self;
         let mut release_error = None;
         for tab in tabs.values() {
             if let Err(error) = tab.page.release_all_inputs().await {
                 release_error.get_or_insert(error);
             }
         }
-        browser.close().await?;
+        // A browser adopted from another owner is released, not closed.
+        if !adopted {
+            Arc::try_unwrap(browser)
+                .map_err(|_| eoka::Error::cdp_msg("Browser is still in use"))?
+                .close()
+                .await?;
+        }
         match release_error {
             Some(error) => Err(error),
             None => Ok(()),

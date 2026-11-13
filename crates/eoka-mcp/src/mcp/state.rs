@@ -51,7 +51,10 @@ pub(crate) struct BrowserState {
 }
 
 impl BrowserState {
-    pub async fn new(headless: bool) -> eoka_server::eoka::Result<Self> {
+    pub async fn new(
+        headless: bool,
+        agent: eoka_server::agent::SharedAgentSession,
+    ) -> eoka_server::eoka::Result<Self> {
         let proxy = parse_proxy_env()?
             .map(|value| {
                 eoka_proxy::parse(&value)
@@ -78,6 +81,9 @@ impl BrowserState {
             proxy.is_some()
         );
         let mut server = AppState::new();
+        // Catalog tools resolve targets through the same session as the
+        // hand-written agent tools.
+        server.agent = agent;
         let mut params = json!({
             "headless": headless,
             "proxy": proxy.map(|server| json!({

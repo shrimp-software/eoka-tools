@@ -35,22 +35,7 @@ pub fn trusted_socket_path(session: &str) -> io::Result<PathBuf> {
     Ok(socket_path(session))
 }
 
-pub fn profile_dir(session: &str) -> PathBuf {
-    if let Ok(base) = std::env::var("EOKA_PROFILE_DIR") {
-        return PathBuf::from(base).join(session);
-    }
-    let base = std::env::var("XDG_STATE_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            let home = std::env::var("HOME").unwrap_or_default();
-            if home.is_empty() {
-                std::env::temp_dir()
-            } else {
-                PathBuf::from(home).join(".local/state")
-            }
-        });
-    base.join("eoka/profiles").join(session)
-}
+pub use eoka_protocol::launch_spec::profile_dir;
 
 pub fn ensure_runtime_dir() -> io::Result<()> {
     secure_private_dir(&runtime_dir())

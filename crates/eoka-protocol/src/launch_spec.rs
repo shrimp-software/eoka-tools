@@ -122,3 +122,21 @@ pub fn auto_connect() -> Result<(u16, String), String> {
     eoka::cdp::discover::auto_connect(9222, 9229)
         .ok_or_else(|| "No running Chrome found on ports 9222-9229".to_string())
 }
+
+/// Durable Chrome profile directory for a persisted session.
+pub fn profile_dir(session: &str) -> PathBuf {
+    if let Ok(base) = std::env::var("EOKA_PROFILE_DIR") {
+        return PathBuf::from(base).join(session);
+    }
+    let base = std::env::var("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            let home = std::env::var("HOME").unwrap_or_default();
+            if home.is_empty() {
+                std::env::temp_dir()
+            } else {
+                PathBuf::from(home).join(".local/state")
+            }
+        });
+    base.join("eoka/profiles").join(session)
+}

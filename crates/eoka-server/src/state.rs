@@ -9,10 +9,11 @@ use eoka_protocol::sidecar::ServerError;
 
 #[derive(Default)]
 pub struct AppState {
-    pub agent: crate::agent::AgentSession,
+    pub agent: crate::agent::SharedAgentSession,
     pub operations: crate::operations::OperationManager,
     pub recordings: crate::recordings::RecordingManager,
     browser: Option<Arc<Browser>>,
+    engine: Option<crate::engine::Engine>,
     pages: HashMap<String, Page>,
     cloudflare: Option<crate::cloudflare::CloudflareWatcher>,
     shutdown: bool,
@@ -28,7 +29,20 @@ impl AppState {
     }
 
     pub fn take_browser(&mut self) -> Option<Arc<Browser>> {
+        // The engine shares the browser; release its handle with ours.
+        self.engine = None;
         self.browser.take()
+    }
+
+    /// The catalog operation engine for this browser, created on first use.
+    pub fn engine(&mut self) -> Result<&mut crate::engine::Engine, ServerError> {
+        let browser = self.browser()?.clone();
+        let operations = self.operations.clone();
+        let recordings = self.recordings.clone();
+        let agent = self.agent.clone();
+        Ok(self.engine.get_or_insert_with(|| {
+            crate::engine::Engine::adopt("sidecar", browser, operations, recordings, agent)
+        }))
     }
 
     pub fn is_launched(&self) -> bool {
@@ -48,7 +62,66 @@ impl AppState {
         self.publish_pages();
     }
 
+    /// Run one catalog operation on a page through the engine.
+    ///
+    /// An action that was admitted returns its operation record even when the
+    /// outcome is unverified or failed, like `actions.perform`: the record is
+    /// the evidence, and the caller must not have to guess the operation ID.
+    pub async fn catalog(
+        &mut self,
+        page_id: &str,
+        operation: &eoka_protocol::OperationSpec,
+        request: &eoka_protocol::Request,
+    ) -> Result<serde_json::Value, ServerError> {
+        use eoka_protocol::sidecar::ErrorCode;
+        let page = self.page(page_id)?.clone();
+        let response = self
+            .engine()?
+            .handle_on(page_id, &page, operation.cmd, &request.args_json())
+            .await;
+        if response.ok {
+            return Ok(response.data.unwrap_or(serde_json::Value::Null));
+        }
+        if let Some(record) = response.data.as_ref().filter(|data| {
+            data.get("id").is_some_and(|id| id.is_string()) && data.get("state").is_some()
+        }) {
+            return Ok(record.clone());
+        }
+        let mut error = match response.error_detail {
+            // Core errors keep the kind a registered method would report.
+            Some(detail) => match eoka_protocol::sidecar::core_error_code(&detail.code) {
+                Some(code) => ServerError::new(code, detail.message),
+                None => ServerError::from_detail(detail),
+            },
+            None => ServerError::new(
+                ErrorCode::Operation,
+                response
+                    .error
+                    .unwrap_or_else(|| "Operation failed".to_owned()),
+            ),
+        };
+        let operation_id = response.data.as_ref().and_then(|data| {
+            data["operation_id"]
+                .as_str()
+                .or_else(|| data["id"].as_str())
+        });
+        if let Some(id) = operation_id {
+            error.data.get_or_insert_with(Default::default).operation_id = Some(id.to_owned());
+        }
+        Err(error)
+    }
+
+    /// Release what the engine attached to a page that is about to close.
+    pub async fn release_engine_tab(&mut self, id: &str) {
+        if let Some(engine) = &mut self.engine {
+            engine.release_tab(id).await;
+        }
+    }
+
     pub fn remove_page(&mut self, id: &str) -> Option<Page> {
+        if let Some(engine) = &mut self.engine {
+            engine.forget_tab(id);
+        }
         let page = self.pages.remove(id);
         self.publish_pages();
         page
@@ -122,6 +195,9 @@ impl AppState {
     pub async fn cleanup_browser(&mut self) -> Result<(), ServerError> {
         if let Some(watcher) = self.cloudflare.take() {
             watcher.stop().await;
+        }
+        if let Some(engine) = &mut self.engine {
+            engine.release().await;
         }
         let mut cleanup_error = self.recordings.shutdown().await.err();
         for page in self.pages() {
