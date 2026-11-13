@@ -1,0 +1,96 @@
+name: Node published smoke
+
+# Installs the package from the npm registry the way a user does and launches
+# a browser with it. Never triggered by pull requests; GitHub-hosted only.
+on:
+  schedule:
+    - cron: "23 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: node-published-smoke
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  versions:
+    name: Supported Node versions
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.engines.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Read engines.node from the SDK manifest
+        id: engines
+        run: |
+          set -euo pipefail
+          range=$(jq -er '.engines.node' clients/node/package.json)
+          if [[ ! "$range" =~ ^\^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "::error file=clients/node/package.json::engines.node is '$range'; this workflow needs a caret range with an exact minimum such as ^24.21.0"
+            exit 1
+          fi
+          matrix=$(jq -cn --arg minimum "${range#^}" --arg major "${BASH_REMATCH[1]}" \
+            '[{label: "minimum", request: $minimum}, {label: "newest", request: $major}]')
+          echo "matrix=$matrix" | tee -a "$GITHUB_OUTPUT"
+
+  smoke:
+    name: Published package on Node ${{ matrix.node.request }} (${{ matrix.node.label }})
+    needs: versions
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ${{ fromJSON(needs.versions.outputs.matrix) }}
+    env:
+      NODE_REQUEST: ${{ matrix.node.request }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b
+      - name: Resolve the exact Node release
+        run: |
+          set -euo pipefail
+          if [[ "$NODE_REQUEST" == *.*.* ]]; then exact="$NODE_REQUEST"; else exact=$(mise latest "node@$NODE_REQUEST"); fi
+          [[ "$exact" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Could not resolve node@$NODE_REQUEST to a release (got '$exact')"; exit 1; }
+          mise install "node@$exact"
+          echo "NODE_EXACT=$exact" | tee -a "$GITHUB_ENV"
+      - name: Install Chrome runtime dependencies
+        run: |
+          set -euo pipefail
+          apt=(sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30)
+          "${apt[@]}" update
+          "${apt[@]}" install -y --no-install-recommends libasound2 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libgbm1 libgtk-3-0 libnss3 libx11-xcb1 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 fonts-liberation
+      # Ubuntu AppArmor blocks unprivileged user namespaces; Chrome's sandbox needs them.
+      - name: Permit Chrome sandbox namespaces
+        run: |
+          set -euo pipefail
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+      - name: Install the published package into an empty directory
+        run: |
+          set -euo pipefail
+          consumer="$RUNNER_TEMP/consumer"
+          mkdir "$consumer"
+          cd "$consumer"
+          mise exec "node@$NODE_EXACT" -- node --version
+          mise exec "node@$NODE_EXACT" -- npm install @cbxss/eoka@latest
+          mise exec "node@$NODE_EXACT" -- npm ls @cbxss/eoka @cbxss/eoka-server-linux-x64-gnu
+          echo "CONSUMER=$consumer" >> "$GITHUB_ENV"
+      - name: Launch, open a local page, read its title and close
+        run: |
+          set -euo pipefail
+          cp .github/scripts/published-smoke.mjs "$CONSUMER/published-smoke.mjs"
+          cd "$CONSUMER"
+          EXPECTED_NODE_VERSION="$NODE_EXACT" mise exec "node@$NODE_EXACT" -- node published-smoke.mjs | tee -a "$GITHUB_STEP_SUMMARY"
