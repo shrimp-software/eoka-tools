@@ -6,7 +6,7 @@ description: "Control a real Chrome browser with the Eoka CLI. Use for browser n
 # eoka
 
 Use `eoka` when the task needs a real Chrome browser. This guide targets CLI
-**0.10 / protocol 2**. Check the binary first:
+**0.11 / protocol 2**. Check the binary first:
 
 ```bash
 command -v eoka
@@ -14,7 +14,17 @@ eoka --version
 ```
 
 An older binary earlier in `PATH` can shadow a newer one (`type -a eoka`).
-Upgrading the binary or this skill does not update the other, or a running daemon.
+Update the binary in place from the latest GitHub release:
+
+```bash
+eoka update --check
+eoka update
+```
+
+`update` verifies the download against the release checksums and lists sessions
+whose daemon still runs the old version. Restarting one closes its browser, so
+that happens only with `eoka update --kill-daemons` or `eoka --session NAME kill`.
+Updating the binary does not update this skill.
 
 ## Where the details live
 

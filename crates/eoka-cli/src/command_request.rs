@@ -430,6 +430,7 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
         | Command::Status
         | Command::Doctor
         | Command::Kill
+        | Command::Update(_)
         | Command::CdpUrl { .. }
         | Command::Batch { .. } => {
             unreachable!(
