@@ -2,13 +2,14 @@
 
 use serde_json::Value;
 
-use super::Handler;
-use crate::protocol::Response;
+use super::Engine;
+use super::EngineError;
+use eoka_protocol::Response;
 
-impl Handler {
-    pub(super) async fn cmd_wasm_info(&mut self) -> Result<Response, String> {
+impl Engine {
+    pub(super) async fn cmd_wasm_info(&mut self) -> Result<Response, EngineError> {
         let tab = self.require_tab()?;
-        let js = include_str!("../js/wasm_info.js");
+        let js = include_str!("js/wasm_info.js");
         let result: String = tab
             .page
             .evaluate_sync(js)
@@ -18,7 +19,7 @@ impl Handler {
         Ok(Response::ok(parsed))
     }
 
-    pub(super) async fn cmd_wasm_read(&mut self, args: &Value) -> Result<Response, String> {
+    pub(super) async fn cmd_wasm_read(&mut self, args: &Value) -> Result<Response, EngineError> {
         let addr = parse_addr(self.arg_str(args, "addr")?)?;
         let len = args["len"].as_u64().ok_or("Missing 'len'")? as usize;
         let memory = args["memory"].as_str();
@@ -53,7 +54,8 @@ impl Handler {
                 return Err(format!(
                     "WASM memory not found or address out of bounds (tried {})",
                     mem_expr
-                ));
+                )
+                .into());
             }
             hex_output.push_str(&chunk);
             offset += chunk_len;
@@ -81,7 +83,7 @@ impl Handler {
         Ok(Response::ok_text(formatted))
     }
 
-    pub(super) async fn cmd_wasm_write(&mut self, args: &Value) -> Result<Response, String> {
+    pub(super) async fn cmd_wasm_write(&mut self, args: &Value) -> Result<Response, EngineError> {
         let addr = parse_addr(self.arg_str(args, "addr")?)?;
         let hex = self.arg_str(args, "hex")?;
         let memory = args["memory"].as_str();
@@ -112,7 +114,7 @@ impl Handler {
             .await
             .map_err(|e| e.to_string())?;
         if result.starts_with("error:") {
-            return Err(result);
+            return Err(result.into());
         }
 
         Ok(Response::ok_text(format!(
@@ -122,7 +124,7 @@ impl Handler {
         )))
     }
 
-    pub(super) async fn cmd_wasm_find(&mut self, args: &Value) -> Result<Response, String> {
+    pub(super) async fn cmd_wasm_find(&mut self, args: &Value) -> Result<Response, EngineError> {
         let pattern = self.arg_str(args, "pattern")?;
         let memory = args["memory"].as_str();
         let max = args["max"].as_u64().unwrap_or(20) as usize;
@@ -180,7 +182,7 @@ impl Handler {
         let parsed: Value = serde_json::from_str(&result).unwrap_or(Value::Null);
 
         if let Some(err) = parsed.get("error").and_then(|v| v.as_str()) {
-            return Err(err.to_string());
+            return Err(err.into());
         }
 
         let matches = parsed.get("matches").and_then(|v| v.as_array());

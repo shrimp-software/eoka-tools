@@ -1,6 +1,6 @@
 [package]
 name = "eoka-server"
-version = "0.9.2"
+version = "0.9.5"
 edition = "2021"
 license = "MIT"
 description = "Shared browser runtime and sidecar process for eoka browser automation"
@@ -21,7 +21,7 @@ eoka-proxy = { workspace = true }
 url = "2"
 libc = "0.2"
 parking_lot = "0.13"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "io-util", "fs", "time", "sync"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "io-util", "fs", "time", "sync", "net"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.23"
@@ -29,6 +29,8 @@ anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 captcha = { workspace = true }
+eoka-datadome = { workspace = true }
+chrono = "0.4"
 
 rusqlite = { version = "0.41", features = ["bundled", "fallible_uint"] }
 uuid = { version = "1", features = ["v4"] }
@@ -43,3 +45,6 @@ toml = "1.1"
 tempfile = "3"
 dirs = "7"
 reqwest = { version = "0.13", features = ["json"] }
+futures-util = { version = "0.3", features = ["sink"] }
+tokio-tungstenite = "0.30"
+eoka-datadome = { workspace = true, features = ["test-fixtures"] }

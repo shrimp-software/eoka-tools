@@ -1,3 +1,4 @@
+import { catalogOperations, type CatalogOperations } from './generated/catalog.js';
 import { Buffer } from 'node:buffer';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
@@ -55,9 +56,17 @@ export class Page implements InvokeClient {
   readonly id: string;
   private readonly client: InvokeClient;
 
+  /**
+   * Every operation the eoka CLI offers, bound to this page and generated from
+   * the operation catalog: `page.ops.console()`, `page.ops.cookies()`,
+   * `page.ops.networkRecordStart()`. Results are not yet typed.
+   */
+  readonly ops: CatalogOperations;
+
   constructor(client: InvokeClient, id: string) {
     this.client = client;
     this.id = id;
+    this.ops = catalogOperations(this);
   }
 
   supports(method: string): boolean { return this.client.supports?.(method) === true; }

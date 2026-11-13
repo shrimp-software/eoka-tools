@@ -4,33 +4,33 @@ mod downloads;
 mod eval;
 #[cfg(test)]
 mod fetch_tests;
-pub mod intercept;
+mod intercept;
 mod intercept_files;
-pub mod network;
+mod network;
 mod operations;
 mod persist;
 pub mod profile;
 mod proxy_forward;
-pub mod script_policy;
-pub mod state;
+mod script_policy;
+mod state;
 mod target;
 mod wasm;
 
 use std::collections::HashMap;
 use std::fmt::Write as FmtWrite;
 
+use crate::{annotate, observe, snapshot};
 use ::captcha::{build_captcha_inject_js, parse_captcha_inject_kind};
-use base64::Engine;
+use base64::Engine as _;
 use eoka::cdp::{
     transport::{CommandDispatch, RequestPause},
     Session as CdpSession,
 };
 use eoka::MouseButton;
-use eoka_server::{annotate, observe, snapshot};
 use serde_json::{json, Value};
 
-use crate::launch_spec::LaunchSpec;
-use crate::protocol::Response;
+use eoka_protocol::launch_spec::LaunchSpec;
+use eoka_protocol::Response;
 use intercept::{InterceptLog, InterceptLogEntry, InterceptRule, InterceptState};
 use network::{NetworkConfig, NetworkRecorder};
 use persist::{capture_state, ensure_console_capture, restore_cookies, restore_state, SavedState};
@@ -38,10 +38,136 @@ use script_policy::{ScriptPolicyMode, ScriptPolicyState};
 use state::{BrowserState, TabState};
 use target::{click_once, json_str, title_nonblocking, wait_for_stable};
 
-pub struct Handler {
-    agent: eoka_server::agent::AgentSession,
-    operations: eoka_server::operations::OperationManager,
-    downloads: eoka_server::downloads::DownloadManager,
+/// Hooks for the daemon's own regression tests.
+#[doc(hidden)]
+pub mod test_support {
+    pub use super::intercept_files::FILE_SLOT;
+}
+
+/// Map a recording result onto a catalog response, keeping the record that a
+/// failure carries so the caller can still read its state and partial path.
+fn recording_response(
+    result: Result<Value, eoka_protocol::sidecar::ServerError>,
+) -> Result<Response, EngineError> {
+    match result {
+        Ok(record) => Ok(Response::ok(record)),
+        Err(error) => {
+            // Keep the recording error kind (for example recording_not_found)
+            // instead of the generic classification of its message.
+            let code = serde_json::to_value(error.code)
+                .ok()
+                .and_then(|code| code.as_str().map(snake_case))
+                .unwrap_or_else(|| "recording_failed".to_owned());
+            let mut response =
+                Response::err_detail(eoka_protocol::ErrorDetail::new(code, error.message.clone()));
+            response.data = serde_json::to_value(&error.data)
+                .ok()
+                .filter(|v| !v.is_null());
+            Ok(response)
+        }
+    }
+}
+
+fn snake_case(pascal: &str) -> String {
+    let mut snake = String::with_capacity(pascal.len() + 4);
+    for (index, character) in pascal.chars().enumerate() {
+        if character.is_ascii_uppercase() && index > 0 {
+            snake.push('_');
+        }
+        snake.push(character.to_ascii_lowercase());
+    }
+    snake
+}
+
+/// A failed catalog command. Errors from the core library keep their kind so
+/// every adapter can report a timeout or a missing element as such; anything
+/// else is a message.
+#[derive(Debug)]
+pub struct EngineError {
+    message: String,
+    kind: Option<eoka_protocol::sidecar::ErrorCode>,
+}
+
+impl EngineError {
+    fn into_response(self) -> Response {
+        // A known core error kind replaces the message-based classification
+        // entirely, including its retry flag and hint.
+        match self
+            .kind
+            .and_then(eoka_protocol::sidecar::core_error_detail_code)
+        {
+            Some(code) => Response::err_detail(eoka_protocol::ErrorDetail::new(code, self.message)),
+            None => Response::err(self.message),
+        }
+    }
+}
+
+impl From<eoka::Error> for EngineError {
+    fn from(error: eoka::Error) -> Self {
+        let error = eoka_protocol::sidecar::ServerError::from(error);
+        Self {
+            message: error.message,
+            kind: Some(error.code),
+        }
+    }
+}
+
+impl From<String> for EngineError {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            kind: None,
+        }
+    }
+}
+
+impl From<anyhow::Error> for EngineError {
+    fn from(error: anyhow::Error) -> Self {
+        match error.downcast::<eoka::Error>() {
+            Ok(error) => error.into(),
+            // The outermost message only, as these errors were reported before.
+            Err(error) => error.to_string().into(),
+        }
+    }
+}
+
+impl From<serde_json::Error> for EngineError {
+    fn from(error: serde_json::Error) -> Self {
+        error.to_string().into()
+    }
+}
+
+impl From<std::io::Error> for EngineError {
+    fn from(error: std::io::Error) -> Self {
+        error.to_string().into()
+    }
+}
+
+impl From<&str> for EngineError {
+    fn from(message: &str) -> Self {
+        message.to_owned().into()
+    }
+}
+
+static HOST_VERSION: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+
+/// Record the version of the binary hosting the engine. It is reported by
+/// `session_hello` and in exported HAR files; defaults to this crate's version.
+pub fn set_host_version(version: &'static str) {
+    let _ = HOST_VERSION.set(version);
+}
+
+pub(crate) fn host_version() -> &'static str {
+    HOST_VERSION
+        .get()
+        .copied()
+        .unwrap_or(env!("CARGO_PKG_VERSION"))
+}
+
+pub struct Engine {
+    agent: crate::agent::SharedAgentSession,
+    operations: crate::operations::OperationManager,
+    downloads: crate::downloads::DownloadManager,
     state: Option<BrowserState>,
     spec: LaunchSpec,
     session_name: String,
@@ -53,10 +179,11 @@ pub struct Handler {
     fetch_sender: Option<tokio::sync::mpsc::Sender<RequestPause>>,
     fetch_dropped: std::sync::Arc<std::sync::atomic::AtomicU64>,
     fetch_sessions: HashMap<String, CdpSession>,
-    cloudflare: Option<eoka_server::cloudflare::CloudflareWatcher>,
+    cloudflare: Option<crate::cloudflare::CloudflareWatcher>,
+    recordings: crate::recordings::RecordingManager,
 }
 
-impl Handler {
+impl Engine {
     pub fn new(session_name: impl Into<String>, spec: LaunchSpec) -> Self {
         let script_policy = match &spec {
             LaunchSpec::Launch {
@@ -91,7 +218,108 @@ impl Handler {
             fetch_dropped: Default::default(),
             fetch_sessions: HashMap::new(),
             cloudflare: None,
+            recordings: Default::default(),
         }
+    }
+
+    /// An engine over a browser the caller owns and keeps managing, sharing
+    /// the caller's durable operation records and recordings. Tabs are supplied per call
+    /// through [`Engine::handle_on`]; the engine never closes the browser.
+    pub fn adopt(
+        session_name: impl Into<String>,
+        browser: std::sync::Arc<eoka::Browser>,
+        operations: crate::operations::OperationManager,
+        recordings: crate::recordings::RecordingManager,
+        agent: crate::agent::SharedAgentSession,
+    ) -> Self {
+        let mut engine = Self::new(session_name, LaunchSpec::Reuse);
+        engine.operations = operations;
+        engine.recordings = recordings;
+        engine.agent = agent;
+        engine.state = Some(BrowserState::adopted(browser));
+        engine
+    }
+
+    /// Run one catalog command against a specific tab instead of the current one.
+    pub async fn handle_on(
+        &mut self,
+        tab_id: &str,
+        page: &eoka::Page,
+        cmd: &str,
+        args: &Value,
+    ) -> Response {
+        let mut switched = false;
+        if let Some(state) = self.state.as_mut() {
+            let tab = state
+                .tabs
+                .entry(tab_id.to_owned())
+                .or_insert_with(|| TabState::new(page.clone()));
+            // The owner navigates and acts on this page outside the engine,
+            // so nothing cached about its document can be trusted.
+            tab.invalidate();
+            switched = state.current_tab_id.as_deref() != Some(tab_id);
+            state.current_tab_id = Some(tab_id.to_owned());
+        }
+        if switched {
+            // Interception rules, script policy and recording follow the
+            // addressed page rather than the last one used.
+            if let Err(error) = self.sync_current_target_features().await {
+                return Response::err(error);
+            }
+        }
+        let response = self.handle(cmd, args).await;
+        // Nothing polls an adopted engine between calls, so leave a drain
+        // running for requests that interception pauses in the meantime.
+        self.service_idle_fetch();
+        response
+    }
+
+    /// Stop tracking a tab the owner is closing and release what the engine
+    /// attached to it.
+    pub async fn release_tab(&mut self, tab_id: &str) {
+        let session = self
+            .state
+            .as_ref()
+            .and_then(|state| state.tabs.get(tab_id))
+            .map(|tab| tab.page.session().clone());
+        if let Some(session) = session {
+            if self.fetch_sessions.contains_key(session.session_id()) {
+                self.disable_fetch_session(&session).await;
+            }
+        }
+        self.forget_tab(tab_id);
+        self.service_idle_fetch();
+    }
+
+    /// Stop tracking a tab that is already gone.
+    pub fn forget_tab(&mut self, tab_id: &str) {
+        if let Some(state) = self.state.as_mut() {
+            state.tabs.remove(tab_id);
+            if state.current_tab_id.as_deref() == Some(tab_id) {
+                state.current_tab_id = None;
+            }
+        }
+    }
+
+    /// Stop everything the engine runs against a browser it adopted, before
+    /// the owner closes that browser.
+    pub async fn release(&mut self) {
+        self.downloads.stop().await;
+        if let Some(recorder) = self.network.take() {
+            let session = self
+                .state
+                .as_ref()
+                .and_then(|state| state.current_tab())
+                .map(|tab| tab.page.session().clone());
+            let _ = recorder.stop(session).await;
+        }
+        self.disable_all_fetch_sessions().await;
+        self.state = None;
+    }
+
+    /// Whether a recording started through this engine is still running.
+    pub fn is_recording(&self) -> bool {
+        self.recordings.is_active()
     }
 
     async fn ensure_browser(&mut self) -> Result<(), String> {
@@ -117,7 +345,7 @@ impl Handler {
                 ..
             } => {
                 let persist_dir = if *persist {
-                    Some(crate::session::profile_dir(&self.session_name))
+                    Some(eoka_protocol::launch_spec::profile_dir(&self.session_name))
                 } else {
                     None
                 };
@@ -168,9 +396,9 @@ impl Handler {
             }
         ) && self.cloudflare.is_none()
         {
-            self.cloudflare = Some(eoka_server::cloudflare::CloudflareWatcher::start(
-                eoka_server::cloudflare::DEFAULT_WATCH_INTERVAL,
-                eoka_server::cloudflare::DEFAULT_SOLVE_TIMEOUT,
+            self.cloudflare = Some(crate::cloudflare::CloudflareWatcher::start(
+                crate::cloudflare::DEFAULT_WATCH_INTERVAL,
+                crate::cloudflare::DEFAULT_SOLVE_TIMEOUT,
             ));
         }
         Ok(())
@@ -222,10 +450,10 @@ impl Handler {
                 LaunchSpec::Reuse => "reuse",
             };
             return Response::ok(
-                json!({"protocol_major": eoka_protocol::sidecar::PROTOCOL_VERSION.major, "daemon_version":env!("CARGO_PKG_VERSION"), "session":self.session_name, "mode":mode, "configuration_fingerprint":self.spec.configuration_fingerprint()}),
+                json!({"protocol_major": eoka_protocol::sidecar::PROTOCOL_VERSION.major, "daemon_version":host_version(), "session":self.session_name, "mode":mode, "configuration_fingerprint":self.spec.configuration_fingerprint()}),
             );
         }
-        if let Err(error) = eoka_server::url_policy::ensure_args_allowed(args) {
+        if let Err(error) = crate::url_policy::ensure_args_allowed(args) {
             return Response::err(error);
         }
         if matches!(cmd, "agent_observe" | "agent_step") {
@@ -233,8 +461,7 @@ impl Handler {
         }
         if cmd == "action_command" {
             let command = args["command"].as_str().unwrap_or_default();
-            if (!eoka_server::operations::commands::is_action(command)
-                && command != "download_start")
+            if (!crate::operations::commands::is_action(command) && command != "download_start")
                 || command == "action_perform"
             {
                 return Response::err("Invalid convenience action");
@@ -252,7 +479,7 @@ impl Handler {
         if let Some(response) = self.operations.query(cmd, args).await {
             return response;
         }
-        if eoka_server::operations::commands::is_action(cmd) {
+        if crate::operations::commands::is_action(cmd) {
             return self.handle_action(cmd, args).await;
         }
         if matches!(cmd, "close" | "tab_close") {
@@ -274,26 +501,22 @@ impl Handler {
         self.drain_fetch_events().await;
         let response = match self.dispatch(cmd, args).await {
             Ok(resp) => resp,
-            Err(e) => Response::err(e),
+            Err(e) => e.into_response(),
         };
         self.drain_fetch_events().await;
         response
     }
 
-    async fn dispatch(&mut self, cmd: &str, args: &Value) -> Result<Response, String> {
+    async fn dispatch(&mut self, cmd: &str, args: &Value) -> Result<Response, EngineError> {
         match cmd {
-            "download_list" => Ok(Response::ok(
-                serde_json::to_value(self.downloads.list()).map_err(|e| e.to_string())?,
-            )),
+            "download_list" => Ok(Response::ok(serde_json::to_value(self.downloads.list())?)),
             "download_get" | "download_cancel" => {
                 let id = self.arg_str(args, "id")?;
                 if cmd == "download_cancel" {
-                    return Ok(eoka_server::downloads::start_response(
-                        self.downloads.cancel(id),
-                    ));
+                    return Ok(crate::downloads::start_response(self.downloads.cancel(id)));
                 }
                 Ok(match self.downloads.get(id) {
-                    Ok(job) => eoka_server::downloads::record_response(job.snapshot()),
+                    Ok(job) => crate::downloads::record_response(job.snapshot()),
                     Err(error) => Response::err_detail(error),
                 })
             }
@@ -322,6 +545,15 @@ impl Handler {
             "frames" => self.cmd_frames().await,
             "text" => self.cmd_text().await,
             "find" => self.cmd_find(args).await,
+            "content" => self.cmd_content().await,
+            "recording_start" => self.cmd_recording_start(args).await,
+            "recording_get" | "recording_stop" | "recording_cancel" => {
+                self.cmd_recording_control(cmd, args).await
+            }
+            "get_text" => self.cmd_get_text(args).await,
+            "get_attribute" => self.cmd_get_attribute(args).await,
+            "exists" => self.cmd_exists(args).await,
+            "click_shadow" => self.cmd_click_shadow(args).await,
             "click" => Ok(self.handle_action("click", args).await),
             "dblclick" => Ok(self.handle_action("dblclick", args).await),
             "fill" => Ok(self.handle_action("fill", args).await),
@@ -349,6 +581,9 @@ impl Handler {
             }
             "captcha_datadome" => Ok(self.cmd_captcha_datadome(args).await),
             "captcha_inject" => self.cmd_captcha_inject(args).await,
+            "captcha_detect" => self.cmd_captcha_detect().await,
+            "dialog_accept" => self.cmd_dialog(Some(args["prompt_text"].as_str())).await,
+            "dialog_dismiss" => self.cmd_dialog(None).await,
             "captcha_turnstile" => {
                 let drain = self.start_fetch_drain();
                 let result = self.cmd_captcha_turnstile(args).await;
@@ -402,7 +637,7 @@ impl Handler {
             "network_wait" => self.cmd_network_wait(args).await,
             "network_clear" => self.cmd_network_clear().await,
             "close" => self.cmd_close().await,
-            other => Err(format!("Unknown command: {}", other)),
+            other => Err(format!("Unknown command: {}", other).into()),
         }
     }
 
@@ -419,14 +654,14 @@ impl Handler {
     }
 
     fn mouse_button_args(&self, args: &Value) -> Result<(f64, f64, MouseButton), String> {
-        let button = serde_json::from_value::<crate::protocol::MouseButton>(args["button"].clone())
+        let button = serde_json::from_value::<eoka_protocol::MouseButton>(args["button"].clone())
             .map_err(|error| error.to_string())?;
         let button = match button {
-            crate::protocol::MouseButton::Left => MouseButton::Left,
-            crate::protocol::MouseButton::Middle => MouseButton::Middle,
-            crate::protocol::MouseButton::Right => MouseButton::Right,
-            crate::protocol::MouseButton::Back => MouseButton::Back,
-            crate::protocol::MouseButton::Forward => MouseButton::Forward,
+            eoka_protocol::MouseButton::Left => MouseButton::Left,
+            eoka_protocol::MouseButton::Middle => MouseButton::Middle,
+            eoka_protocol::MouseButton::Right => MouseButton::Right,
+            eoka_protocol::MouseButton::Back => MouseButton::Back,
+            eoka_protocol::MouseButton::Forward => MouseButton::Forward,
         };
         Ok((self.arg_f64(args, "x")?, self.arg_f64(args, "y")?, button))
     }
@@ -440,7 +675,7 @@ impl Handler {
         Ok((tab, vp))
     }
 
-    async fn cmd_open(&mut self, args: &Value) -> Result<Response, String> {
+    async fn cmd_open(&mut self, args: &Value) -> Result<Response, EngineError> {
         let requested_url = self.arg_str(args, "url")?.to_string();
         let open_state = args["load_state"]
             .as_str()
@@ -479,8 +714,7 @@ impl Handler {
             .as_str()
             .map(str::to_owned)
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-        let options =
-            eoka_server::operations::commands::options(args).map_err(|e| e.to_string())?;
+        let options = crate::operations::commands::options(args)?;
         let budget = options.timeout_ms;
         let drain = self.start_fetch_drain();
         let active_recorder = self.network.clone();
@@ -607,12 +841,13 @@ impl Handler {
         Ok(Response::action_result(record))
     }
 
-    async fn cmd_nav<F>(&mut self, f: F, label: &str) -> Result<Response, String>
+    async fn cmd_nav<F>(&mut self, f: F, label: &str) -> Result<Response, EngineError>
     where
         F: FnOnce(
             &eoka::Page,
-        )
-            -> std::pin::Pin<Box<dyn std::future::Future<Output = eoka::Result<()>> + '_>>,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = eoka::Result<()>> + Send + '_>,
+        >,
     {
         let page = self.require_tab()?.page.clone();
         let drain = self.start_fetch_drain();
@@ -627,10 +862,10 @@ impl Handler {
         Ok(Response::ok_text(format!("{} to: {}", label, url)))
     }
 
-    async fn cmd_reload(&mut self) -> Result<Response, String> {
+    async fn cmd_reload(&mut self) -> Result<Response, EngineError> {
         let page = self.require_tab()?.page.clone();
         let script_enabled = if self.script_policy.is_active() {
-            let current_url = page.url().await.map_err(|e| e.to_string())?;
+            let current_url = page.url().await?;
             let host = url::Url::parse(&current_url)
                 .ok()
                 .and_then(|parsed| parsed.host_str().map(str::to_owned));
@@ -661,19 +896,17 @@ impl Handler {
         Ok(Response::ok_text(format!("Reloaded: {}", url)))
     }
 
-    async fn cmd_snapshot(&mut self, args: &Value) -> Result<Response, String> {
+    async fn cmd_snapshot(&mut self, args: &Value) -> Result<Response, EngineError> {
         self.ensure_browser().await?;
         let include_all = args["all"].as_bool().unwrap_or(false);
         let tab = self.require_tab_mut()?;
 
-        let result = snapshot::snapshot(&tab.page, include_all)
-            .await
-            .map_err(|e| e.to_string())?;
+        let result = snapshot::snapshot(&tab.page, include_all).await?;
 
         Ok(Response::ok_text(result.tree_text))
     }
 
-    async fn cmd_observe(&mut self, args: &Value) -> Result<Response, String> {
+    async fn cmd_observe(&mut self, args: &Value) -> Result<Response, EngineError> {
         let args: eoka_protocol::ObserveArgs =
             serde_json::from_value(args.clone()).map_err(|error| error.to_string())?;
         let (tab, viewport_only) = self.tab_with_config()?;
@@ -682,23 +915,45 @@ impl Handler {
         Ok(Response::ok(data))
     }
 
-    async fn cmd_screenshot(&mut self, args: &Value) -> Result<Response, String> {
+    async fn cmd_screenshot(&mut self, args: &Value) -> Result<Response, EngineError> {
         let annotate_flag = args["annotate"].as_bool().unwrap_or(false);
         let output = args["output"].as_str();
 
         let (tab, viewport_only) = self.tab_with_config()?;
 
+        let capture: eoka_protocol::ScreenshotArgs = serde_json::from_value(args.clone())?;
+        let params = eoka_protocol::sidecar::ScreenshotParams {
+            page_id: String::new(),
+            format: capture.format,
+            quality: capture.quality,
+            clip: capture.clip,
+            full_page: capture.full_page.then_some(true),
+        };
+        params.validate().map_err(|error| error.message)?;
+        let plain = params.format.is_none()
+            && params.quality.is_none()
+            && params.clip.is_none()
+            && params.full_page.is_none();
+        if annotate_flag && !plain {
+            return Err(
+                "--annotate cannot be combined with format, quality, clip or full page".into(),
+            );
+        }
+        let extension = match params.format {
+            Some(eoka_protocol::sidecar::ScreenshotFormat::Jpeg) => "jpg",
+            Some(eoka_protocol::sidecar::ScreenshotFormat::Webp) => "webp",
+            _ => "png",
+        };
+
         let png = if annotate_flag {
             if tab.elements.is_empty() {
-                tab.elements = observe::observe(&tab.page, viewport_only)
-                    .await
-                    .map_err(|e| e.to_string())?;
+                tab.elements = observe::observe(&tab.page, viewport_only).await?;
             }
-            annotate::annotated_screenshot(&tab.page, &tab.elements)
-                .await
-                .map_err(|e| e.to_string())?
+            annotate::annotated_screenshot(&tab.page, &tab.elements).await?
+        } else if plain {
+            tab.page.screenshot().await?
         } else {
-            tab.page.screenshot().await.map_err(|e| e.to_string())?
+            tab.page.screenshot_with_options(&params.options()).await?
         };
 
         let path = match output {
@@ -708,11 +963,11 @@ impl Handler {
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_millis();
-                std::env::temp_dir().join(format!("eoka-screenshot-{}.png", ts))
+                std::env::temp_dir().join(format!("eoka-screenshot-{ts}.{extension}"))
             }
         };
 
-        std::fs::write(&path, &png).map_err(|e| e.to_string())?;
+        std::fs::write(&path, &png)?;
 
         let mut result = json!({ "path": path.to_string_lossy(), "size": png.len() });
         if annotate_flag {
@@ -725,7 +980,7 @@ impl Handler {
         Ok(Response::ok(result))
     }
 
-    async fn cmd_emulate(&mut self, args: &Value) -> Result<Response, String> {
+    async fn cmd_emulate(&mut self, args: &Value) -> Result<Response, EngineError> {
         self.ensure_browser().await?;
         let reset = args["reset"].as_bool().unwrap_or(false);
         let tab = self.require_tab_mut()?;
@@ -734,8 +989,7 @@ impl Handler {
         if reset {
             session
                 .send::<_, Value>("Emulation.clearDeviceMetricsOverride", &json!({}))
-                .await
-                .map_err(|e| e.to_string())?;
+                .await?;
             let _ = session
                 .send::<_, Value>(
                     "Emulation.setTouchEmulationEnabled",
@@ -760,8 +1014,7 @@ impl Handler {
                     "mobile": mobile,
                 }),
             )
-            .await
-            .map_err(|e| e.to_string())?;
+            .await?;
 
         let _ = session
             .send::<_, Value>(
@@ -778,27 +1031,139 @@ impl Handler {
         })))
     }
 
-    async fn cmd_info(&mut self) -> Result<Response, String> {
+    async fn cmd_info(&mut self) -> Result<Response, EngineError> {
         let tab = self.require_tab()?;
-        let url = tab.page.url().await.map_err(|e| e.to_string())?;
+        let url = tab.page.url().await?;
         let title = title_nonblocking(&tab.page).await;
         Ok(Response::ok(json!({ "url": url, "title": title })))
     }
 
-    async fn cmd_text(&mut self) -> Result<Response, String> {
+    async fn cmd_text(&mut self) -> Result<Response, EngineError> {
         let tab = self.require_tab()?;
-        let text = tab.page.text().await.map_err(|e| e.to_string())?;
+        let text = tab.page.text().await?;
         Ok(Response::ok_text(text))
     }
 
-    async fn cmd_find(&mut self, args: &Value) -> Result<Response, String> {
+    async fn cmd_recording_start(&mut self, args: &Value) -> Result<Response, EngineError> {
+        let args: eoka_protocol::RecordingStartArgs = serde_json::from_value(args.clone())?;
+        let state = self
+            .state
+            .as_ref()
+            .ok_or("No browser open. Use 'open' first.")?;
+        let page_id = state.current_tab_id.clone().ok_or("Open a tab first")?;
+        let page = self.require_tab()?.page.clone();
+        let params = eoka_protocol::sidecar::RecordingStartParams {
+            page_id,
+            recording_id: args
+                .recording_id
+                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+            path: args.path,
+            max_width: args.max_width,
+            max_height: args.max_height,
+            fps: args.fps,
+        };
+        let record = self.recordings.start(params, Ok(page)).await;
+        recording_response(record.and_then(|record| {
+            serde_json::to_value(record)
+                .map_err(|e| eoka_protocol::sidecar::ServerError::internal(e.to_string()))
+        }))
+    }
+
+    async fn cmd_recording_control(
+        &mut self,
+        cmd: &str,
+        args: &Value,
+    ) -> Result<Response, EngineError> {
+        let method = match cmd {
+            "recording_get" => "recording.get",
+            "recording_stop" => "recording.stop",
+            _ => "recording.cancel",
+        };
+        let params = json!({"recordingId": args["recording_id"]});
+        recording_response(crate::recordings::control(&self.recordings, method, params).await)
+    }
+
+    /// Accept (`Some(prompt_text)`) or dismiss (`None`) the open JavaScript dialog.
+    async fn cmd_dialog(&mut self, accept: Option<Option<&str>>) -> Result<Response, EngineError> {
+        let tab = self.require_tab_mut()?;
+        tab.invalidate();
+        match accept {
+            Some(prompt_text) => {
+                let result = tab.page.accept_dialog(prompt_text).await;
+                result?;
+                Ok(Response::ok_text("Dialog accepted"))
+            }
+            None => {
+                tab.page.dismiss_dialog().await?;
+                Ok(Response::ok_text("Dialog dismissed"))
+            }
+        }
+    }
+
+    async fn cmd_captcha_detect(&mut self) -> Result<Response, EngineError> {
+        let page = &self.require_tab()?.page;
+        Ok(Response::ok(
+            match crate::captcha::detect_captcha_on_page(page).await {
+                Some(info) => {
+                    json!({"detected": true, "type": info.captcha_type, "sitekey": info.sitekey})
+                }
+                None => json!({"detected": false}),
+            },
+        ))
+    }
+
+    async fn cmd_content(&mut self) -> Result<Response, EngineError> {
+        let html = self.require_tab()?.page.content().await;
+        Ok(Response::ok_text(html?))
+    }
+
+    async fn cmd_get_text(&mut self, args: &Value) -> Result<Response, EngineError> {
+        let selector = self.arg_str(args, "selector")?;
+        let element = self.require_tab()?.page.find(selector).await;
+        let text = element?.text().await;
+        Ok(Response::ok_text(text?))
+    }
+
+    async fn cmd_get_attribute(&mut self, args: &Value) -> Result<Response, EngineError> {
+        let selector = self.arg_str(args, "selector")?;
+        let name = self.arg_str(args, "name")?;
+        let element = self.require_tab()?.page.find(selector).await;
+        let value = element?.get_attribute(name).await;
+        Ok(Response::ok(json!({"value": value?})))
+    }
+
+    async fn cmd_exists(&mut self, args: &Value) -> Result<Response, EngineError> {
+        let selector = self.arg_str(args, "selector")?;
+        let exists = self.require_tab()?.page.exists(selector).await;
+        Ok(Response::ok(json!({"exists": exists})))
+    }
+
+    async fn cmd_click_shadow(&mut self, args: &Value) -> Result<Response, EngineError> {
+        let args: eoka_protocol::ClickShadowArgs = serde_json::from_value(args.clone())?;
+        let receipt = self
+            .require_tab()?
+            .page
+            .click_shadow_with_timeout(
+                args.frame_id.as_deref(),
+                &args.selector,
+                std::time::Duration::from_millis(args.timeout_ms),
+            )
+            .await?;
+        self.require_tab_mut()?.invalidate();
+        Ok(Response::ok(json!({
+            "frame_id": receipt.frame_id,
+            "selector": receipt.selector,
+            "x": receipt.x,
+            "y": receipt.y,
+        })))
+    }
+
+    async fn cmd_find(&mut self, args: &Value) -> Result<Response, EngineError> {
         let text = self.arg_str(args, "text")?;
         let (tab, viewport_only) = self.tab_with_config()?;
 
         if tab.elements.is_empty() {
-            tab.elements = observe::observe(&tab.page, viewport_only)
-                .await
-                .map_err(|e| e.to_string())?;
+            tab.elements = observe::observe(&tab.page, viewport_only).await?;
         }
 
         let needle = text.to_lowercase();
@@ -824,67 +1189,43 @@ impl Handler {
         }
     }
 
-    async fn cmd_mouse_down(&mut self, args: &Value) -> Result<Response, String> {
+    async fn cmd_mouse_down(&mut self, args: &Value) -> Result<Response, EngineError> {
         let (x, y, button) = self.mouse_button_args(args)?;
-        self.require_tab()?
-            .page
-            .mouse_down(x, y, button)
-            .await
-            .map_err(|e| e.to_string())?;
+        self.require_tab()?.page.mouse_down(x, y, button).await?;
         Ok(Response::ok_text("Mouse button held"))
     }
 
-    async fn cmd_mouse_move(&mut self, args: &Value) -> Result<Response, String> {
+    async fn cmd_mouse_move(&mut self, args: &Value) -> Result<Response, EngineError> {
         let x = self.arg_f64(args, "x")?;
         let y = self.arg_f64(args, "y")?;
-        self.require_tab()?
-            .page
-            .mouse_move(x, y)
-            .await
-            .map_err(|e| e.to_string())?;
+        self.require_tab()?.page.mouse_move(x, y).await?;
         Ok(Response::ok_text("Mouse moved"))
     }
 
-    async fn cmd_mouse_up(&mut self, args: &Value) -> Result<Response, String> {
+    async fn cmd_mouse_up(&mut self, args: &Value) -> Result<Response, EngineError> {
         let (x, y, button) = self.mouse_button_args(args)?;
-        self.require_tab()?
-            .page
-            .mouse_up(x, y, button)
-            .await
-            .map_err(|e| e.to_string())?;
+        self.require_tab()?.page.mouse_up(x, y, button).await?;
         Ok(Response::ok_text("Mouse button released"))
     }
 
-    async fn cmd_key_down(&mut self, args: &Value) -> Result<Response, String> {
+    async fn cmd_key_down(&mut self, args: &Value) -> Result<Response, EngineError> {
         let key = self.arg_str(args, "key")?;
-        self.require_tab()?
-            .page
-            .key_down(key)
-            .await
-            .map_err(|e| e.to_string())?;
+        self.require_tab()?.page.key_down(key).await?;
         Ok(Response::ok_text(format!("Held {key}")))
     }
 
-    async fn cmd_key_up(&mut self, args: &Value) -> Result<Response, String> {
+    async fn cmd_key_up(&mut self, args: &Value) -> Result<Response, EngineError> {
         let key = self.arg_str(args, "key")?;
-        self.require_tab()?
-            .page
-            .key_up(key)
-            .await
-            .map_err(|e| e.to_string())?;
+        self.require_tab()?.page.key_up(key).await?;
         Ok(Response::ok_text(format!("Released {key}")))
     }
 
-    async fn cmd_release_all_inputs(&mut self) -> Result<Response, String> {
-        self.require_tab()?
-            .page
-            .release_all_inputs()
-            .await
-            .map_err(|e| e.to_string())?;
+    async fn cmd_release_all_inputs(&mut self) -> Result<Response, EngineError> {
+        self.require_tab()?.page.release_all_inputs().await?;
         Ok(Response::ok_text("Released all held inputs"))
     }
 
-    async fn cmd_scroll(&mut self, args: &Value) -> Result<Response, String> {
+    async fn cmd_scroll(&mut self, args: &Value) -> Result<Response, EngineError> {
         let target_str = self.arg_str(args, "target")?;
         let tab = self.require_tab()?;
 
@@ -908,9 +1249,10 @@ impl Handler {
             _ => {
                 let target = self
                     .agent
-                    .resolve_target(&tab.page, target_str)
+                    .lock()
                     .await
-                    .map_err(|e| e.to_string())?;
+                    .resolve_target(&tab.page, target_str)
+                    .await?;
                 let id = uuid::Uuid::new_v4().to_string();
                 self.operations
                     .submit(
@@ -919,21 +1261,16 @@ impl Handler {
                         eoka::Action::ScrollIntoView { target },
                         Default::default(),
                     )
-                    .await
-                    .map_err(|e| e.to_string())?;
+                    .await?;
                 return Ok(Response::action_result(
-                    self.operations
-                        .wait(&id, 30_000)
-                        .await
-                        .map_err(|e| e.to_string())?,
+                    self.operations.wait(&id, 30_000).await?,
                 ));
             }
-        }
-        .map_err(|e| e.to_string())?;
+        }?;
         Ok(Response::ok_text(format!("Scrolled {}", target_str)))
     }
 
-    async fn cmd_captcha_inject(&mut self, args: &Value) -> Result<Response, String> {
+    async fn cmd_captcha_inject(&mut self, args: &Value) -> Result<Response, EngineError> {
         self.ensure_browser().await?;
         let token = self.arg_str(args, "token")?;
         let captcha_type = args["captcha_type"].as_str().unwrap_or("auto");
@@ -943,9 +1280,9 @@ impl Handler {
         let js = build_captcha_inject_js(token, kind, callback);
         let result: String = {
             let tab = self.require_tab()?;
-            tab.page.evaluate(&js).await.map_err(|e| e.to_string())?
+            tab.page.evaluate(&js).await?
         };
-        let mut parsed: Value = serde_json::from_str(&result).map_err(|e| e.to_string())?;
+        let mut parsed: Value = serde_json::from_str(&result)?;
         if let Some(target) = click_after {
             let (tab, viewport_only) = self.tab_with_config()?;
             let desc = click_once(tab, &target, viewport_only).await?;
@@ -966,14 +1303,20 @@ impl Handler {
         Ok(Response::ok(parsed))
     }
 
-    async fn cmd_fetch(&mut self, args: &Value) -> Result<Response, String> {
+    async fn cmd_fetch(&mut self, args: &Value) -> Result<Response, EngineError> {
         let args = serde_json::from_value(args.clone()).map_err(|error| error.to_string())?;
-        Ok(eoka_server::browser_fetch::fetch(&self.require_tab()?.page, args).await)
+        let page = self.require_tab()?.page.clone();
+        // The request this makes is paused like any other when interception
+        // is on, so it needs a drain running while it is awaited.
+        let drain = self.start_fetch_drain();
+        let response = crate::browser_fetch::fetch(&page, args).await;
+        self.stop_fetch_drain(drain).await;
+        Ok(response)
     }
 
-    async fn cmd_cookies(&mut self) -> Result<Response, String> {
+    async fn cmd_cookies(&mut self) -> Result<Response, EngineError> {
         let tab = self.require_tab()?;
-        let cookies = tab.page.cookies().await.map_err(|e| e.to_string())?;
+        let cookies = tab.page.cookies().await?;
         let json: Vec<Value> = cookies
             .into_iter()
             .map(|c| {
@@ -987,7 +1330,7 @@ impl Handler {
         Ok(Response::ok(Value::Array(json)))
     }
 
-    async fn cmd_set_cookie(&mut self, args: &Value) -> Result<Response, String> {
+    async fn cmd_set_cookie(&mut self, args: &Value) -> Result<Response, EngineError> {
         let name = self.arg_str(args, "name")?;
         let value = self.arg_str(args, "value")?;
         let path = args["path"].as_str().unwrap_or("/");
@@ -995,11 +1338,7 @@ impl Handler {
         let tab = self.require_tab()?;
         let domain = match args["domain"].as_str() {
             Some(d) => d.to_string(),
-            None => tab
-                .page
-                .evaluate_sync("location.hostname")
-                .await
-                .map_err(|e| e.to_string())?,
+            None => tab.page.evaluate_sync("location.hostname").await?,
         };
 
         let cookie = eoka::SessionCookie {
@@ -1012,23 +1351,20 @@ impl Handler {
             same_site: None,
             expires: None,
         };
-        tab.page
-            .set_cookies_bulk(vec![cookie])
-            .await
-            .map_err(|e| e.to_string())?;
+        tab.page.set_cookies_bulk(vec![cookie]).await?;
         Ok(Response::ok_text(format!("Set cookie: {}={}", name, value)))
     }
 
-    async fn cmd_delete_cookie(&mut self, args: &Value) -> Result<Response, String> {
+    async fn cmd_delete_cookie(&mut self, args: &Value) -> Result<Response, EngineError> {
         let name = self.arg_str(args, "name")?;
         let tab = self.require_tab()?;
         let domain = match args["domain"].as_str() {
             Some(d) => d.to_string(),
-            None => tab
-                .page
-                .evaluate_sync::<String>("location.hostname")
-                .await
-                .map_err(|e| e.to_string())?,
+            None => {
+                tab.page
+                    .evaluate_sync::<String>("location.hostname")
+                    .await?
+            }
         };
         tab.page
             .session()
@@ -1036,21 +1372,17 @@ impl Handler {
                 "Network.deleteCookies",
                 &json!({ "name": name, "domain": domain }),
             )
-            .await
-            .map_err(|e| e.to_string())?;
+            .await?;
         Ok(Response::ok_text(format!("Deleted cookie: {}", name)))
     }
 
-    async fn cmd_clear_cookies(&mut self) -> Result<Response, String> {
+    async fn cmd_clear_cookies(&mut self) -> Result<Response, EngineError> {
         let tab = self.require_tab()?;
-        tab.page
-            .clear_all_cookies()
-            .await
-            .map_err(|e| e.to_string())?;
+        tab.page.clear_all_cookies().await?;
         Ok(Response::ok_text("Cleared all cookies"))
     }
 
-    async fn cmd_storage(&mut self, args: &Value) -> Result<Response, String> {
+    async fn cmd_storage(&mut self, args: &Value) -> Result<Response, EngineError> {
         let key = args["key"].as_str();
         let session = args["session_storage"].as_bool().unwrap_or(false);
         let s = if session {
@@ -1062,7 +1394,7 @@ impl Handler {
 
         if let Some(k) = key {
             let js = format!("{}.getItem({})", s, json_str(k));
-            let val: Value = tab.page.evaluate(&js).await.map_err(|e| e.to_string())?;
+            let val: Value = tab.page.evaluate(&js).await?;
             Ok(Response::ok(val))
         } else {
             let js = format!("JSON.stringify(Object.fromEntries(Object.entries({})))", s);
@@ -1070,7 +1402,7 @@ impl Handler {
         }
     }
 
-    async fn cmd_set_storage(&mut self, args: &Value) -> Result<Response, String> {
+    async fn cmd_set_storage(&mut self, args: &Value) -> Result<Response, EngineError> {
         let key = self.arg_str(args, "key")?;
         let value = self.arg_str(args, "value")?;
         let session = args["session_storage"].as_bool().unwrap_or(false);
@@ -1081,17 +1413,14 @@ impl Handler {
         };
         let tab = self.require_tab()?;
         let js = format!("{}.setItem({}, {})", s, json_str(key), json_str(value));
-        tab.page
-            .execute_sync(&js)
-            .await
-            .map_err(|e| e.to_string())?;
+        tab.page.execute_sync(&js).await?;
         Ok(Response::ok_text(format!(
             "Set {}.{} = \"{}\"",
             s, key, value
         )))
     }
 
-    async fn cmd_dump_storage(&mut self) -> Result<Response, String> {
+    async fn cmd_dump_storage(&mut self) -> Result<Response, EngineError> {
         let tab = self.require_tab()?;
         let js = "JSON.stringify({\
                     localStorage: Object.fromEntries(Object.entries(localStorage)),\
@@ -1100,13 +1429,12 @@ impl Handler {
         Ok(Response::ok(eval_json_or_string(&tab.page, js).await?))
     }
 
-    async fn cmd_save_state(&mut self, args: &Value) -> Result<Response, String> {
+    async fn cmd_save_state(&mut self, args: &Value) -> Result<Response, EngineError> {
         let path = self.arg_str(args, "path")?;
         let tab = self.require_tab()?;
         let state = capture_state(&tab.page).await?;
-        let json = serde_json::to_string_pretty(&state).map_err(|e| e.to_string())?;
-        eoka_server::saved_state::write_state_file(std::path::Path::new(path), json.as_bytes())
-            .map_err(|e| e.to_string())?;
+        let json = serde_json::to_string_pretty(&state)?;
+        crate::saved_state::write_state_file(std::path::Path::new(path), json.as_bytes())?;
         Ok(Response::ok_text(format!(
             "Saved state to {} ({} cookies, {} localStorage, {} sessionStorage)",
             path,
@@ -1116,7 +1444,7 @@ impl Handler {
         )))
     }
 
-    async fn cmd_load_state(&mut self, args: &Value) -> Result<Response, String> {
+    async fn cmd_load_state(&mut self, args: &Value) -> Result<Response, EngineError> {
         let path = self.arg_str(args, "path")?;
         let no_navigate = args["no_navigate"].as_bool().unwrap_or(false);
 
@@ -1126,10 +1454,7 @@ impl Handler {
         let state = self.require_state_mut()?;
 
         if !no_navigate && !saved.url.is_empty() {
-            let tab = state
-                .ensure_tab(&saved.url)
-                .await
-                .map_err(|e| e.to_string())?;
+            let tab = state.ensure_tab(&saved.url).await?;
             let _ = wait_for_stable(&tab.page).await;
         }
 
@@ -1151,7 +1476,7 @@ impl Handler {
         )))
     }
 
-    async fn cmd_headers(&mut self, args: &Value) -> Result<Response, String> {
+    async fn cmd_headers(&mut self, args: &Value) -> Result<Response, EngineError> {
         let raw = &args["headers_json"];
         let headers: HashMap<String, String> = if let Some(s) = raw.as_str() {
             serde_json::from_str(s).map_err(|_| "Invalid headers JSON")?
@@ -1160,17 +1485,14 @@ impl Handler {
         };
 
         let tab = self.require_tab()?;
-        tab.page
-            .set_extra_headers(headers.clone())
-            .await
-            .map_err(|e| e.to_string())?;
+        tab.page.set_extra_headers(headers.clone()).await?;
         Ok(Response::ok_text(format!(
             "Set {} extra headers",
             headers.len()
         )))
     }
 
-    async fn cmd_console(&mut self, args: &Value) -> Result<Response, String> {
+    async fn cmd_console(&mut self, args: &Value) -> Result<Response, EngineError> {
         let clear = args["clear"].as_bool().unwrap_or(false);
         let level = args["level"].as_str();
 
@@ -1195,7 +1517,7 @@ impl Handler {
         Ok(Response::ok(parsed))
     }
 
-    async fn cmd_errors(&mut self, args: &Value) -> Result<Response, String> {
+    async fn cmd_errors(&mut self, args: &Value) -> Result<Response, EngineError> {
         let clear = args["clear"].as_bool().unwrap_or(false);
         let tab = self.require_tab_mut()?;
         ensure_console_capture(tab).await?;
@@ -1211,9 +1533,9 @@ impl Handler {
         Ok(Response::ok(parsed))
     }
 
-    async fn cmd_tab_list(&mut self) -> Result<Response, String> {
+    async fn cmd_tab_list(&mut self) -> Result<Response, EngineError> {
         let state = self.state.as_ref().ok_or("No browser open.")?;
-        let tabs = state.browser.tabs().await.map_err(|e| e.to_string())?;
+        let tabs = state.browser.tabs().await?;
         let current_id = state.current_tab_id.as_deref();
 
         let mut out = String::new();
@@ -1232,7 +1554,7 @@ impl Handler {
         }))
     }
 
-    async fn cmd_tab_new(&mut self, args: &Value) -> Result<Response, String> {
+    async fn cmd_tab_new(&mut self, args: &Value) -> Result<Response, EngineError> {
         self.ensure_browser().await?;
         let url = args["url"].as_str();
         let active_recorder = self.network.clone();
@@ -1243,15 +1565,15 @@ impl Handler {
                 None => false,
             };
             let (tab_id, tab) = if let (Some(url), true) = (url, record_first_navigation) {
-                let (tab_id, tab) = state.new_tab(None).await.map_err(|e| e.to_string())?;
+                let (tab_id, tab) = state.new_tab(None).await?;
                 let session = tab.page.session().clone();
                 if let Some(recorder) = active_recorder.as_ref() {
                     recorder.update_session(&session).await?;
                 }
-                tab.page.goto(url).await.map_err(|e| e.to_string())?;
+                tab.page.goto(url).await?;
                 (tab_id, tab)
             } else {
-                state.new_tab(url).await.map_err(|e| e.to_string())?
+                state.new_tab(url).await?
             };
             let (url, title) = tab_summary(tab).await?;
             (tab_id, url, title)
@@ -1263,10 +1585,10 @@ impl Handler {
         )))
     }
 
-    async fn cmd_tab_switch(&mut self, args: &Value) -> Result<Response, String> {
+    async fn cmd_tab_switch(&mut self, args: &Value) -> Result<Response, EngineError> {
         let tab_id = self.arg_str(args, "tab_id")?;
         let state = self.require_state_mut()?;
-        state.switch_tab(tab_id).await.map_err(|e| e.to_string())?;
+        state.switch_tab(tab_id).await?;
         let (url, title) = {
             let tab = state.current_tab().ok_or("Tab switch failed")?;
             tab_summary(tab).await?
@@ -1278,14 +1600,11 @@ impl Handler {
         )))
     }
 
-    async fn cmd_tab_attach(&mut self, args: &Value) -> Result<Response, String> {
+    async fn cmd_tab_attach(&mut self, args: &Value) -> Result<Response, EngineError> {
         let tab_id = self.arg_str(args, "tab_id")?.to_string();
         self.ensure_browser().await?;
         let state = self.require_state_mut()?;
-        state
-            .attach_existing_tab(&tab_id)
-            .await
-            .map_err(|e| e.to_string())?;
+        state.attach_existing_tab(&tab_id).await?;
         let (url, title) = {
             let tab = state.current_tab().ok_or("Attach failed")?;
             tab_summary(tab).await?
@@ -1297,16 +1616,15 @@ impl Handler {
         )))
     }
 
-    async fn cmd_clone_from(&mut self, args: &Value) -> Result<Response, String> {
+    async fn cmd_clone_from(&mut self, args: &Value) -> Result<Response, EngineError> {
         let source = self.arg_str(args, "source")?.to_string();
         let to = args["to"].as_str().map(std::path::PathBuf::from);
 
         let saved = persist::clone_state_from_source(&source).await?;
 
         if let Some(path) = to {
-            let json = serde_json::to_string_pretty(&saved).map_err(|e| e.to_string())?;
-            eoka_server::saved_state::write_state_file(&path, json.as_bytes())
-                .map_err(|e| e.to_string())?;
+            let json = serde_json::to_string_pretty(&saved)?;
+            crate::saved_state::write_state_file(&path, json.as_bytes())?;
             return Ok(Response::ok_text(format!(
                 "Saved state from {} to {} ({} cookies, {} localStorage, {} sessionStorage)",
                 source,
@@ -1321,9 +1639,9 @@ impl Handler {
         let state = self.require_state_mut()?;
         let url = saved.url.clone();
         let tab = if !url.is_empty() {
-            state.ensure_tab(&url).await.map_err(|e| e.to_string())?
+            state.ensure_tab(&url).await?
         } else {
-            state.ensure_blank_tab().await.map_err(|e| e.to_string())?
+            state.ensure_blank_tab().await?
         };
         let _ = wait_for_stable(&tab.page).await;
         let restored =
@@ -1338,15 +1656,20 @@ impl Handler {
         )))
     }
 
-    async fn cmd_tab_close(&mut self, args: &Value) -> Result<Response, String> {
+    async fn cmd_tab_close(&mut self, args: &Value) -> Result<Response, EngineError> {
         let tab_id = self.arg_str(args, "tab_id")?.to_string();
         let closing_session = self
             .state
             .as_ref()
             .and_then(|s| s.tabs.get(&tab_id))
             .map(|t| t.page.session().clone());
+        // A recording cannot outlive its tab; cancel it rather than leave it
+        // running against a closed target.
+        if let Err(error) = self.recordings.cancel_page(&tab_id).await {
+            eprintln!("[eoka] recording cleanup failed: {}", error.message);
+        }
         let state = self.require_state_mut()?;
-        state.close_tab(&tab_id).await.map_err(|e| e.to_string())?;
+        state.close_tab(&tab_id).await?;
         if let Some(session) = closing_session {
             self.disable_fetch_session(&session).await;
         }
@@ -1354,7 +1677,7 @@ impl Handler {
         Ok(Response::ok_text(format!("Closed tab [{}]", tab_id)))
     }
 
-    async fn cmd_wait(&mut self, args: &Value) -> Result<Response, String> {
+    async fn cmd_wait(&mut self, args: &Value) -> Result<Response, EngineError> {
         if let Some(ms) = args["ms"].as_u64() {
             let ms = ms.min(30_000);
             tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
@@ -1366,42 +1689,53 @@ impl Handler {
 
         let result = async {
             if let Some(expect) = args.get("expect").filter(|v| !v.is_null()) {
-                page.wait_for_expectation(
-                    &serde_json::from_value(expect.clone()).map_err(|e| e.to_string())?,
-                    timeout,
-                )
-                .await
-                .map_err(|e| e.to_string())?;
+                page.wait_for_expectation(&serde_json::from_value(expect.clone())?, timeout)
+                    .await?;
                 return Ok(Response::ok_text("Readiness condition satisfied"));
             }
             if let Some(text) = args["text"].as_str() {
-                page.wait_for_text(text, timeout)
-                    .await
-                    .map_err(|e| e.to_string())?;
+                page.wait_for_text(text, timeout).await?;
                 return Ok(Response::ok_text(format!("Text \"{}\" appeared", text)));
             }
             if let Some(url_pat) = args["url"].as_str() {
-                page.wait_for_url_contains(url_pat, timeout)
-                    .await
-                    .map_err(|e| e.to_string())?;
+                page.wait_for_url_contains(url_pat, timeout).await?;
                 return Ok(Response::ok_text(format!("URL matched \"{}\"", url_pat)));
             }
+            if let Some(selector) = args["selector"].as_str() {
+                let state: eoka_protocol::WaitSelectorState = match args.get("state") {
+                    Some(state) if !state.is_null() => serde_json::from_value(state.clone())?,
+                    _ => Default::default(),
+                };
+                let (wait, outcome) = match state {
+                    eoka_protocol::WaitSelectorState::Attached => (
+                        page.wait_for(selector, timeout).await.map(|_| ()),
+                        "attached",
+                    ),
+                    eoka_protocol::WaitSelectorState::Visible => (
+                        page.wait_for_visible(selector, timeout).await.map(|_| ()),
+                        "visible",
+                    ),
+                    eoka_protocol::WaitSelectorState::Hidden => {
+                        (page.wait_for_hidden(selector, timeout).await, "hidden")
+                    }
+                };
+                wait?;
+                return Ok(Response::ok_text(format!("\"{selector}\" is {outcome}")));
+            }
             if args["load"].as_str().is_some() {
-                page.wait_for_network_idle(500, timeout)
-                    .await
-                    .map_err(|e| e.to_string())?;
+                page.wait_for_network_idle(500, timeout).await?;
                 return Ok(Response::ok_text("Network idle"));
             }
-            Err("Provide ms, --text, --url, or --load".into())
+            Err("Provide ms, --text, --url, --selector, or --load".into())
         }
         .await;
         self.stop_fetch_drain(drain).await;
         result
     }
 
-    async fn cmd_spa_info(&mut self) -> Result<Response, String> {
+    async fn cmd_spa_info(&mut self) -> Result<Response, EngineError> {
         let tab = self.require_tab()?;
-        let info = eoka_server::spa::detect_router(&tab.page)
+        let info = crate::spa::detect_router(&tab.page)
             .await
             .map_err(|e: eoka::Error| e.to_string())?;
         Ok(Response::ok(json!({
@@ -1411,15 +1745,15 @@ impl Handler {
         })))
     }
 
-    async fn cmd_spa_navigate(&mut self, args: &Value) -> Result<Response, String> {
+    async fn cmd_spa_navigate(&mut self, args: &Value) -> Result<Response, EngineError> {
         let path = self.arg_str(args, "path")?;
         let drain = self.start_fetch_drain();
         let result = async {
             let tab = self.require_tab_mut()?;
-            let info = eoka_server::spa::detect_router(&tab.page)
+            let info = crate::spa::detect_router(&tab.page)
                 .await
                 .map_err(|e: eoka::Error| e.to_string())?;
-            eoka_server::spa::spa_navigate(&tab.page, &info.router_type, path)
+            crate::spa::spa_navigate(&tab.page, &info.router_type, path)
                 .await
                 .map_err(|e: eoka::Error| e.to_string())?;
             let _ = wait_for_stable(&tab.page).await;
@@ -1432,7 +1766,7 @@ impl Handler {
         Ok(Response::ok_text(format!("SPA navigated to: {}", url)))
     }
 
-    async fn cmd_fake_camera(&mut self, args: &Value) -> Result<Response, String> {
+    async fn cmd_fake_camera(&mut self, args: &Value) -> Result<Response, EngineError> {
         let file_path = self.arg_str(args, "file")?;
         let loop_video = args["loop_video"].as_bool().unwrap_or(false);
 
@@ -1447,7 +1781,7 @@ impl Handler {
 
         let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
 
-        let template = include_str!("../js/fake_camera.js");
+        let template = include_str!("js/fake_camera.js");
         let js = template
             .replace("/*VIDEO_DATA*/", &b64)
             .replace("/*MIME_TYPE*/", mime)
@@ -1462,8 +1796,7 @@ impl Handler {
                 "Page.addScriptToEvaluateOnNewDocument",
                 &json!({ "source": js }),
             )
-            .await
-            .map_err(|e| e.to_string())?;
+            .await?;
         let _: String = tab.page.evaluate_sync(&js).await.unwrap_or_default();
 
         let _ = tab
@@ -1688,7 +2021,7 @@ impl Handler {
         }
     }
 
-    async fn cmd_network_record_start(&mut self, args: &Value) -> Result<Response, String> {
+    async fn cmd_network_record_start(&mut self, args: &Value) -> Result<Response, EngineError> {
         self.ensure_browser().await?;
         if self
             .state
@@ -1696,10 +2029,7 @@ impl Handler {
             .and_then(|state| state.current_tab())
             .is_none()
         {
-            self.require_state_mut()?
-                .ensure_blank_tab()
-                .await
-                .map_err(|e| e.to_string())?;
+            self.require_state_mut()?.ensure_blank_tab().await?;
         }
         let patterns = args
             .get("patterns")
@@ -1733,7 +2063,7 @@ impl Handler {
         Ok(Response::ok(status))
     }
 
-    async fn cmd_network_record_stop(&mut self) -> Result<Response, String> {
+    async fn cmd_network_record_stop(&mut self) -> Result<Response, EngineError> {
         let Some(recorder) = self.network.clone() else {
             return Ok(Response::ok(json!({ "active": false })));
         };
@@ -1745,7 +2075,7 @@ impl Handler {
         Ok(Response::ok(recorder.stop(session).await?))
     }
 
-    async fn cmd_network_record_status(&mut self) -> Result<Response, String> {
+    async fn cmd_network_record_status(&mut self) -> Result<Response, EngineError> {
         match self.network.as_ref() {
             Some(recorder) => Ok(Response::ok(recorder.status().await)),
             None => Ok(Response::ok(json!({
@@ -1759,7 +2089,7 @@ impl Handler {
         }
     }
 
-    async fn cmd_network_log(&mut self, args: &Value) -> Result<Response, String> {
+    async fn cmd_network_log(&mut self, args: &Value) -> Result<Response, EngineError> {
         let Some(recorder) = self.network.as_ref() else {
             return Ok(Response::ok(json!({
                 "meta": self.network_empty_meta(),
@@ -1787,14 +2117,14 @@ impl Handler {
         ))
     }
 
-    async fn cmd_network_show(&mut self, args: &Value) -> Result<Response, String> {
+    async fn cmd_network_show(&mut self, args: &Value) -> Result<Response, EngineError> {
         let id = args["id"].as_u64().ok_or("Missing 'id'")?;
         let body = args["body"].as_bool().unwrap_or(false);
         let max_body = args["max_body"]
             .as_u64()
             .and_then(|value| usize::try_from(value).ok());
         let Some(recorder) = self.network.as_ref() else {
-            return Err(format!("Network entry #{} not found", id));
+            return Err(format!("Network entry #{} not found", id).into());
         };
         if body {
             recorder.settle(5000).await;
@@ -1803,10 +2133,10 @@ impl Handler {
             .show(id, body, max_body)
             .await
             .map(Response::ok)
-            .ok_or_else(|| format!("Network entry #{} not found", id))
+            .ok_or_else(|| format!("Network entry #{} not found", id).into())
     }
 
-    async fn cmd_network_export(&mut self, args: &Value) -> Result<Response, String> {
+    async fn cmd_network_export(&mut self, args: &Value) -> Result<Response, EngineError> {
         let path = self.arg_str(args, "path")?;
         let format = args["format"].as_str().unwrap_or("har");
         let settle_ms = args["settle_ms"].as_u64();
@@ -1820,7 +2150,7 @@ impl Handler {
         ))
     }
 
-    async fn cmd_network_wait(&mut self, args: &Value) -> Result<Response, String> {
+    async fn cmd_network_wait(&mut self, args: &Value) -> Result<Response, EngineError> {
         let Some(recorder) = self.network.as_ref() else {
             return Err("No network recorder has been started".into());
         };
@@ -1836,10 +2166,12 @@ impl Handler {
             .wait(pattern, method, status, since, include_existing, timeout)
             .await
             .map(Response::ok)
-            .ok_or_else(|| format!("Timed out waiting {}ms for matching network entry", timeout))
+            .ok_or_else(|| {
+                format!("Timed out waiting {}ms for matching network entry", timeout).into()
+            })
     }
 
-    async fn cmd_network_clear(&mut self) -> Result<Response, String> {
+    async fn cmd_network_clear(&mut self) -> Result<Response, EngineError> {
         match self.network.as_ref() {
             Some(recorder) => Ok(Response::ok(recorder.clear().await?)),
             None => Ok(Response::ok(json!({
@@ -1867,7 +2199,7 @@ impl Handler {
         })
     }
 
-    async fn cmd_intercept_add(&mut self, args: &Value) -> Result<Response, String> {
+    async fn cmd_intercept_add(&mut self, args: &Value) -> Result<Response, EngineError> {
         let url_pattern = self.arg_str(args, "url_pattern")?.to_string();
         let capture = args["capture"].as_str().map(std::path::PathBuf::from);
         let respond = args["respond"].as_str().map(std::path::PathBuf::from);
@@ -1884,12 +2216,12 @@ impl Handler {
         )))
     }
 
-    async fn cmd_intercept_list(&mut self) -> Result<Response, String> {
+    async fn cmd_intercept_list(&mut self) -> Result<Response, EngineError> {
         self.drain_fetch_events().await;
         Ok(Response::ok(self.intercept.list_json()))
     }
 
-    async fn cmd_intercept_remove(&mut self, args: &Value) -> Result<Response, String> {
+    async fn cmd_intercept_remove(&mut self, args: &Value) -> Result<Response, EngineError> {
         let id = self.arg_str(args, "id")?;
         if id == "all" {
             self.intercept.remove_all();
@@ -1901,12 +2233,12 @@ impl Handler {
                 self.sync_fetch_interception().await?;
                 Ok(Response::ok_text(format!("Removed rule #{}", id_num)))
             } else {
-                Err(format!("Rule #{} not found", id_num))
+                Err(format!("Rule #{} not found", id_num).into())
             }
         }
     }
 
-    async fn cmd_intercept_log(&mut self, args: &Value) -> Result<Response, String> {
+    async fn cmd_intercept_log(&mut self, args: &Value) -> Result<Response, EngineError> {
         self.drain_fetch_events().await;
         if let Some(recorder) = self.network.clone() {
             self.intercept
@@ -1937,7 +2269,7 @@ impl Handler {
         Ok(Response::ok(result))
     }
 
-    pub(crate) fn service_idle_fetch(&mut self) {
+    pub fn service_idle_fetch(&mut self) {
         if self.idle_fetch_drain.is_none() {
             self.idle_fetch_drain = self.start_fetch_drain();
         }
@@ -1951,7 +2283,7 @@ impl Handler {
         self.stop_fetch_drain(drain).await;
     }
 
-    async fn cmd_close(&mut self) -> Result<Response, String> {
+    async fn cmd_close(&mut self) -> Result<Response, EngineError> {
         self.downloads.stop().await;
         if let Some(recorder) = self.network.clone() {
             let session = self
@@ -1962,8 +2294,11 @@ impl Handler {
             let _ = recorder.stop(session).await;
         }
         self.disable_all_fetch_sessions().await;
+        if let Err(error) = self.recordings.shutdown().await {
+            eprintln!("[eoka] recording cleanup failed: {}", error.message);
+        }
         if let Some(state) = self.state.take() {
-            state.close().await.map_err(|e| e.to_string())?;
+            state.close().await?;
         }
         Ok(Response::ok_text("Browser closed"))
     }
@@ -2268,7 +2603,7 @@ async fn restore_state_and_maybe_reload(
     tab: &mut TabState,
     saved: &SavedState,
     reload_after_restore: bool,
-) -> Result<eoka_server::saved_state::StorageRestoreReport, String> {
+) -> Result<crate::saved_state::StorageRestoreReport, String> {
     let restored = restore_state(&tab.page, saved).await?;
     tab.invalidate();
 
@@ -2320,7 +2655,7 @@ fn same_web_origin(left: &str, right: &str) -> bool {
 fn read_saved_state_file(path: &str) -> Result<SavedState, String> {
     let json = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
     let saved: SavedState = serde_json::from_str(&json).map_err(|e| format!("{path}: {e}"))?;
-    eoka_server::url_policy::ensure_url_allowed(&saved.url).map_err(|e| format!("{path}: {e}"))?;
+    crate::url_policy::ensure_url_allowed(&saved.url).map_err(|e| format!("{path}: {e}"))?;
     Ok(saved)
 }
 

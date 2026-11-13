@@ -1,1 +1,1 @@
-pub use eoka_sdk::launch_spec::*;
+pub use eoka_protocol::launch_spec::*;

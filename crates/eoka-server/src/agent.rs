@@ -15,6 +15,10 @@ use crate::{
     page_context, snapshot,
 };
 
+/// One agent session shared by every adapter over the same browser, so a
+/// target reference from one adapter's observation resolves in another's action.
+pub type SharedAgentSession = std::sync::Arc<tokio::sync::Mutex<AgentSession>>;
+
 #[derive(Default)]
 pub struct AgentSession {
     views: HashMap<String, View>,

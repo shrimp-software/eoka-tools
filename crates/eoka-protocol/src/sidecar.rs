@@ -8,7 +8,7 @@ pub use crate::{OperationIdArgs, OperationListArgs, OperationWaitArgs};
 pub const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 pub const MAX_MESSAGE_BYTES: usize = 32 * 1024 * 1024;
 pub const MAX_IN_FLIGHT: usize = 128;
-pub const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion { major: 2, minor: 0 };
+pub const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion { major: 2, minor: 1 };
 pub const MAX_BOUNDED_FETCH_BYTES: usize = 1024 * 1024;
 pub const MAX_SCREENSHOT_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_RECORDING_FPS: u32 = 120;
@@ -16,6 +16,9 @@ pub const CAPABILITY_SCREENSHOT_OPTIONS: &str = "screenshotOptions";
 pub const CAPABILITY_SCREENSHOT_FILE: &str = "screenshotFile";
 pub const CAPABILITY_NATIVE_RECORDING: &str = "nativeRecording";
 pub const CAPABILITY_CLOUDFLARE_AUTO_SOLVE: &str = "cloudflareAutoSolve";
+/// Catalog operations are callable as sidecar methods named by their catalog
+/// path, with a `pageId` added to the operation's input.
+pub const CAPABILITY_OPERATION_CATALOG: &str = "operationCatalog";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProtocolVersion {
@@ -260,6 +263,32 @@ impl std::fmt::Display for ServerError {
     }
 }
 impl std::error::Error for ServerError {}
+
+/// Catalog `ErrorDetail` codes for errors raised by the core library. Catalog
+/// operations report these so a sidecar client sees the same error kind it
+/// would from a registered method.
+const CORE_ERROR_DETAIL_CODES: &[(ErrorCode, &str)] = &[
+    (ErrorCode::ElementNotFound, "element_not_found"),
+    (ErrorCode::ElementNotVisible, "element_not_visible"),
+    (ErrorCode::Timeout, "timeout"),
+    (ErrorCode::RetryExhausted, "retry_exhausted"),
+    (ErrorCode::Cdp, "cdp_error"),
+    (ErrorCode::MessageTooLarge, "message_too_large"),
+];
+
+pub fn core_error_detail_code(code: ErrorCode) -> Option<&'static str> {
+    CORE_ERROR_DETAIL_CODES
+        .iter()
+        .find(|(candidate, _)| *candidate == code)
+        .map(|(_, detail)| *detail)
+}
+
+pub fn core_error_code(detail_code: &str) -> Option<ErrorCode> {
+    CORE_ERROR_DETAIL_CODES
+        .iter()
+        .find(|(_, candidate)| *candidate == detail_code)
+        .map(|(code, _)| *code)
+}
 
 impl From<eoka::Error> for ServerError {
     fn from(error: eoka::Error) -> Self {
@@ -1306,12 +1335,174 @@ dto!(GetAttributeParams {
     name: String
 });
 
+/// Why a hand-registered sidecar method exists next to the operation catalog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MethodRole {
+    /// Server, browser and tab lifecycle, which only the sidecar owns.
+    Lifecycle,
+    /// Registered under the same name as its catalog operation, with the
+    /// sidecar's typed contract.
+    Shared,
+    /// A typed convenience over `actions.perform`.
+    Action,
+    /// Duplicates the named catalog operation. Kept until catalog results are
+    /// typed, then removed in the next protocol major.
+    ReplacedBy(&'static str),
+    /// No catalog equivalent yet, for the stated reason.
+    Distinct(&'static str),
+}
+
+/// The role of every method in `METHODS`. A method added without an entry here
+/// fails `every_registered_method_declares_its_role`, so a sidecar-only
+/// capability cannot be introduced silently.
+pub fn method_role(method: &str) -> Option<MethodRole> {
+    use MethodRole::*;
+    Some(match method {
+        "server.hello" | "server.shutdown" | "browser.launch" | "browser.connect"
+        | "browser.new_page" | "browser.tabs" | "browser.close_tab" | "browser.close"
+        | "page.close" => Lifecycle,
+        "actions.perform" | "operations.get" | "operations.list" | "operations.wait"
+        | "operations.cancel" | "agent.observe" | "agent.step" | "recording.start"
+        | "recording.get" | "recording.stop" | "recording.cancel" => Shared,
+        "page.goto"
+        | "page.click"
+        | "page.click_text"
+        | "page.human_click"
+        | "page.human_click_text"
+        | "page.fill"
+        | "page.human_fill"
+        | "page.type_into"
+        | "page.select"
+        | "page.hover"
+        | "page.press_key" => Action,
+        "page.text" => ReplacedBy("text"),
+        "page.content" => ReplacedBy("content"),
+        "page.title" | "page.url" => ReplacedBy("info"),
+        "page.get_text" => ReplacedBy("get_text"),
+        "page.get_attribute" => ReplacedBy("get_attribute"),
+        "page.exists" => ReplacedBy("exists"),
+        "page.wait_for" | "page.wait_for_visible" | "page.wait_for_text" => ReplacedBy("wait"),
+        "page.evaluate" | "page.evaluate_raw" | "page.execute" | "page.execute_raw" => {
+            Distinct("bounded function evaluation with typed results; eval and exec take a script")
+        }
+        "page.frames" => ReplacedBy("frames"),
+        "page.evaluate_in_frame" => ReplacedBy("frame_eval"),
+        "page.click_shadow" => ReplacedBy("click_shadow"),
+        "page.solve_turnstile" => ReplacedBy("captcha.turnstile"),
+        "page.fetch" | "page.fetch_bounded" => {
+            Distinct("typed response and streaming byte bound; catalog fetch truncates text")
+        }
+        "page.set_viewport" | "page.reset_viewport" => {
+            Distinct("plain viewport metrics; emulate also turns on mobile and touch emulation")
+        }
+        "page.mouse_down" => ReplacedBy("mouse.down"),
+        "page.mouse_move" => ReplacedBy("mouse.move"),
+        "page.mouse_up" => ReplacedBy("mouse.up"),
+        "page.key_down" => ReplacedBy("key.down"),
+        "page.key_up" => ReplacedBy("key.up"),
+        "page.release_all_inputs" => ReplacedBy("release_all_inputs"),
+        "page.screenshot" => Distinct("returns image bytes; catalog screenshot writes a file"),
+        "page.screenshot_to_file" => {
+            Distinct("atomic publication with partial-file evidence on failure")
+        }
+        "page.capture_state" | "page.restore_state" => {
+            Distinct("in-memory state; catalog save_state and load_state use a file")
+        }
+        "page.solve_captcha" => Distinct("provider solving runs client-side in the CLI"),
+        _ => return None,
+    })
+}
+
+/// Catalog operations served through the sidecar under their catalog path.
+///
+/// Session lifecycle and tab management stay with the sidecar's own
+/// `server.*` and `browser.*` methods, and a path that already names a sidecar
+/// method keeps that method's contract.
+pub fn catalog_operations() -> impl Iterator<Item = &'static crate::OperationSpec> {
+    page_operations()
+        .filter(|operation| !METHODS.iter().any(|method| method.name == operation.path))
+}
+
+/// Catalog operations that act on one page of an existing session: everything
+/// except session lifecycle and tab management, which each adapter owns.
+pub fn page_operations() -> impl Iterator<Item = &'static crate::OperationSpec> {
+    crate::all_operations().iter().filter(|operation| {
+        operation.exposure != crate::OperationExposure::Lifecycle
+            && !operation.path.starts_with("tab.")
+            && !matches!(operation.path, "close" | "shutdown")
+    })
+}
+
+pub fn catalog_operation(method: &str) -> Option<&'static crate::OperationSpec> {
+    catalog_operations().find(|operation| operation.path == method)
+}
+
+/// Split catalog method params into the target `pageId` and the operation's
+/// own typed input.
+pub fn catalog_request(
+    operation: &crate::OperationSpec,
+    params: &Value,
+) -> Result<(String, crate::Request), ServerError> {
+    let mut input = params.clone();
+    let page_id = input
+        .as_object_mut()
+        .and_then(|object| object.remove("pageId"))
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .ok_or_else(|| ServerError::invalid_params("missing string field `pageId`"))?;
+    // Catalog inputs tolerate unknown fields for CLI compatibility. Over the
+    // wire a misspelt or camelCase field would be silently ignored, so name it.
+    let schema = crate::input_schema_for_operation(operation);
+    if let (Some(known), Some(given)) = (schema["properties"].as_object(), input.as_object()) {
+        if let Some(unknown) = given.keys().find(|key| !known.contains_key(*key)) {
+            return Err(ServerError::invalid_params(format!(
+                "unknown field `{unknown}` for {}",
+                operation.path
+            )));
+        }
+    }
+    let request =
+        crate::request_from_cmd(operation.cmd, input).map_err(ServerError::invalid_params)?;
+    Ok((page_id, request))
+}
+
+fn catalog_params_schema(operation: &crate::OperationSpec) -> Value {
+    let page_id = json!({
+        "type": "object",
+        "properties": {"pageId": {"type": "string"}},
+        "required": ["pageId"],
+    });
+    let mut input = crate::input_schema_for_operation(operation);
+    constrain_integers(&mut input);
+    let plain_object = input["type"] == "object"
+        && ["oneOf", "anyOf", "allOf", "$ref"]
+            .iter()
+            .all(|key| input.get(key).is_none());
+    if !plain_object {
+        return json!({"allOf": [input, page_id]});
+    }
+    let object = input.as_object_mut().expect("checked above");
+    let properties = object.entry("properties").or_insert_with(|| json!({}));
+    properties["pageId"] = page_id["properties"]["pageId"].clone();
+    match object.entry("required").or_insert_with(|| json!([])) {
+        Value::Array(required) => required.push(json!("pageId")),
+        _ => unreachable!("JSON schema `required` is an array"),
+    }
+    input
+}
+
 pub fn method_names() -> Vec<&'static str> {
-    METHODS.iter().map(|method| method.name).collect()
+    METHODS
+        .iter()
+        .map(|method| method.name)
+        .chain(catalog_operations().map(|operation| operation.path))
+        .collect()
 }
 
 pub fn validate_params(method: &str, params: &Value) -> Result<(), ServerError> {
     validate_safe_numbers(params)?;
+    if let Some(operation) = catalog_operation(method) {
+        return catalog_request(operation, params).map(|_| ());
+    }
     let spec = METHODS
         .iter()
         .find(|spec| spec.name == method)
@@ -1328,6 +1519,13 @@ pub fn schema_bundle() -> Value {
                 json!({"params": (method.params_schema)(), "result": (method.result_schema)()}),
             )
         })
+        // Catalog results are the operation's `data`, not yet typed.
+        .chain(catalog_operations().map(|operation| {
+            (
+                operation.path,
+                json!({"params": catalog_params_schema(operation), "result": {}}),
+            )
+        }))
         .collect();
     let mut bundle = json!({
         "protocolVersion": PROTOCOL_VERSION,
@@ -1355,6 +1553,18 @@ pub fn schema_bundle() -> Value {
             "RecordingFailure": schema::<RecordingFailure>(), "RecordingFailureStage": schema::<RecordingFailureStage>()
         }
     });
+    // Registered methods that duplicate a catalog operation, and its path.
+    bundle["replacedMethods"] = METHODS
+        .iter()
+        .filter_map(|method| match method_role(method.name)? {
+            MethodRole::ReplacedBy(path) => Some((method.name.to_owned(), json!(path))),
+            _ => None,
+        })
+        .collect::<serde_json::Map<_, _>>()
+        .into();
+    bundle["catalogMethods"] = catalog_operations()
+        .map(|operation| operation.path)
+        .collect();
     bundle["types"]["InputMode"] = schema::<crate::InputMode>();
     bundle["types"]["Destination"] = schema::<crate::Destination>();
     bundle["types"]["CloudflareAutoSolve"] = schema::<CloudflareAutoSolve>();
@@ -1413,6 +1623,110 @@ mod tests {
                 height: 1.0,
             };
             assert!(validate_screenshot(None, None, Some(&clip), None).is_err());
+        }
+    }
+
+    #[test]
+    fn every_registered_method_declares_its_role() {
+        for method in METHODS {
+            let role = method_role(method.name)
+                .unwrap_or_else(|| panic!("{} has no MethodRole", method.name));
+            match role {
+                MethodRole::Shared => assert!(
+                    crate::operation_by_path(method.name).is_some(),
+                    "{} is Shared but is not a catalog path",
+                    method.name
+                ),
+                MethodRole::ReplacedBy(path) => assert!(
+                    catalog_operation(path).is_some(),
+                    "{} names {path}, which is not a projected catalog operation",
+                    method.name
+                ),
+                MethodRole::Distinct(reason) => assert!(!reason.is_empty()),
+                MethodRole::Lifecycle | MethodRole::Action => {}
+            }
+        }
+        assert_eq!(method_role("page.not_a_method"), None);
+    }
+
+    #[test]
+    fn catalog_operations_are_sidecar_methods_addressed_by_page() {
+        let names = method_names();
+        let unique: std::collections::BTreeSet<_> = names.iter().collect();
+        assert_eq!(unique.len(), names.len(), "method names must be unique");
+
+        // Every catalog operation is either projected or deliberately served
+        // by a sidecar method of its own.
+        for operation in crate::all_operations() {
+            let projected = catalog_operation(operation.path).is_some();
+            let own_method = METHODS.iter().any(|method| method.name == operation.path);
+            let sidecar_lifecycle = operation.exposure == crate::OperationExposure::Lifecycle
+                || operation.path.starts_with("tab.")
+                || matches!(operation.path, "close" | "shutdown");
+            assert_eq!(
+                projected,
+                !own_method && !sidecar_lifecycle,
+                "{}",
+                operation.path
+            );
+            assert!(
+                names.contains(&operation.path) || sidecar_lifecycle,
+                "{} is not reachable through the sidecar",
+                operation.path
+            );
+        }
+
+        let bundle = schema_bundle();
+        for operation in catalog_operations() {
+            let params = &bundle["methods"][operation.path]["params"];
+            assert_eq!(params["properties"]["pageId"]["type"], "string");
+            assert!(params["required"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("pageId")));
+            assert_eq!(
+                validate_params(operation.path, &json!({}))
+                    .unwrap_err()
+                    .code,
+                ErrorCode::InvalidParams,
+                "{} must require pageId",
+                operation.path
+            );
+        }
+        assert_eq!(
+            bundle["catalogMethods"].as_array().unwrap().len(),
+            catalog_operations().count()
+        );
+
+        let console = catalog_operation("console").unwrap();
+        let (page, request) =
+            catalog_request(console, &json!({"pageId":"p","clear":true})).unwrap();
+        assert_eq!(page, "p");
+        assert_eq!(request.cmd(), "console");
+        assert_eq!(request.args_json()["clear"], true);
+        assert!(request.args_json().get("pageId").is_none());
+        assert!(validate_params("cookies", &json!({"pageId":"p"})).is_ok());
+        assert!(validate_params("cookies", &json!({"pageId":7})).is_err());
+        assert!(validate_params("find", &json!({"pageId":"p"})).is_err());
+        let unknown = validate_params(
+            "click_shadow",
+            &json!({"pageId":"p","selector":"b","timeoutMs":500}),
+        )
+        .unwrap_err();
+        assert!(unknown.message.contains("timeoutMs"), "{}", unknown.message);
+        assert!(validate_params(
+            "click_shadow",
+            &json!({"pageId":"p","selector":"b","timeout_ms":500})
+        )
+        .is_ok());
+        for absent in [
+            "close",
+            "shutdown",
+            "tab.list",
+            "session.hello",
+            "actions.command",
+        ] {
+            assert!(catalog_operation(absent).is_none(), "{absent}");
         }
     }
 

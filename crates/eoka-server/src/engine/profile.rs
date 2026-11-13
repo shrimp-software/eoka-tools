@@ -50,6 +50,8 @@ impl Drop for ClonedProfile {
 
 pub fn clone_profile_dir(src: &Path) -> io::Result<ClonedProfile> {
     let dst = std::env::temp_dir().join(format!("eoka-profile-clone-{}", uuid::Uuid::new_v4()));
+    // Only Unix sets a mode on the builder.
+    #[cfg_attr(not(unix), allow(unused_mut))]
     let mut builder = fs::DirBuilder::new();
     #[cfg(unix)]
     {

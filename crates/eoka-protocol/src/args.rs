@@ -38,6 +38,40 @@ pub struct ScreenshotArgs {
     pub output: Option<String>,
     #[serde(default)]
     pub annotate: bool,
+    #[serde(default)]
+    #[schemars(description = "Image format; PNG when omitted.")]
+    pub format: Option<crate::sidecar::ScreenshotFormat>,
+    #[serde(default)]
+    #[schemars(range(max = 100), description = "JPEG or WebP quality, 0 to 100.")]
+    pub quality: Option<u8>,
+    #[serde(default)]
+    #[schemars(description = "Document-relative CSS pixel region; conflicts with full_page.")]
+    pub clip: Option<crate::sidecar::ScreenshotClip>,
+    #[serde(default)]
+    #[schemars(description = "Capture the whole scrollable page instead of the viewport.")]
+    pub full_page: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+pub struct RecordingStartArgs {
+    #[schemars(description = "Absolute path of the MP4 file to write.")]
+    pub path: String,
+    #[serde(default)]
+    #[schemars(description = "UUID naming this recording; generated when omitted.")]
+    pub recording_id: Option<String>,
+    #[serde(default)]
+    pub max_width: Option<u32>,
+    #[serde(default)]
+    pub max_height: Option<u32>,
+    #[serde(default)]
+    #[schemars(range(min = 1, max = 120))]
+    pub fps: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+pub struct RecordingIdArgs {
+    #[schemars(description = "Recording UUID returned by recording_start.")]
+    pub recording_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -271,7 +305,66 @@ pub struct WaitArgs {
     pub text: Option<String>,
     pub url: Option<String>,
     pub load: Option<String>,
+    #[serde(default)]
+    #[schemars(description = "CSS selector to wait for; see `state`.")]
+    pub selector: Option<String>,
+    #[serde(default)]
+    #[schemars(description = "What the selector must become. Defaults to visible.")]
+    pub state: Option<WaitSelectorState>,
     pub timeout: Option<u64>,
+}
+
+/// The condition a `wait` selector must reach.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum WaitSelectorState {
+    /// Present in the DOM, rendered or not.
+    Attached,
+    /// Rendered with visible CSS and a nonzero box.
+    #[default]
+    Visible,
+    /// Absent or no longer rendered.
+    Hidden,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+pub struct DialogAcceptArgs {
+    #[serde(default)]
+    #[schemars(
+        description = "Text to enter for a prompt() dialog; ignored for alert and confirm."
+    )]
+    pub prompt_text: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+pub struct SelectorArgs {
+    #[schemars(description = "CSS selector of the element.")]
+    pub selector: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+pub struct AttributeArgs {
+    #[schemars(description = "CSS selector of the element.")]
+    pub selector: String,
+    #[schemars(description = "Attribute name, for example href.")]
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ClickShadowArgs {
+    #[schemars(description = "CSS selector, matched through open and closed shadow roots.")]
+    pub selector: String,
+    #[serde(default)]
+    #[schemars(description = "Frame ID from `frames`; the top frame when omitted.")]
+    pub frame_id: Option<String>,
+    #[serde(default = "default_click_shadow_timeout_ms")]
+    pub timeout_ms: u64,
+}
+
+fn default_click_shadow_timeout_ms() -> u64 {
+    10_000
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]

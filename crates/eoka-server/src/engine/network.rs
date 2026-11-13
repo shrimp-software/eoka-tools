@@ -421,7 +421,7 @@ mod tests {
     use serde_json::Map;
 
     use super::*;
-    use crate::handler::network::body::capture_text_body;
+    use crate::engine::network::body::capture_text_body;
 
     fn sample_entry() -> NetworkEntry {
         let mut request_headers = Map::new();

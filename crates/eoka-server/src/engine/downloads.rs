@@ -1,10 +1,10 @@
-use super::Handler;
+use super::Engine;
+use crate::downloads::{failure, rejected, start_response, DownloadManager};
 use eoka_protocol::{DownloadStartArgs, Response};
-use eoka_server::downloads::{failure, rejected, start_response, DownloadManager};
 use serde_json::Value;
 
-impl Handler {
-    pub(crate) fn download_manager(&self) -> DownloadManager {
+impl Engine {
+    pub fn download_manager(&self) -> DownloadManager {
         self.downloads.clone()
     }
 
@@ -41,7 +41,9 @@ impl Handler {
                 Ok(tab) => tab,
                 Err(error) => return rejected(failure("session_unavailable", error)),
             };
-            match eoka_server::downloads::resolve_click(&self.agent, &tab.page, target).await {
+            match crate::downloads::resolve_click(&*self.agent.lock().await, &tab.page, target)
+                .await
+            {
                 Ok(selector) => Some(selector),
                 Err(error) => return rejected(error),
             }

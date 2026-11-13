@@ -1,4 +1,5 @@
 use std::io::{Read, Write};
+#[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::sync::Arc;
@@ -6,19 +7,19 @@ use std::time::Duration;
 
 const MAX_BYTES: usize = 8 * 1024 * 1024;
 const FILE_TIMEOUT: Duration = Duration::from_millis(500);
-pub(super) static FILE_SLOT: std::sync::LazyLock<Arc<tokio::sync::Semaphore>> =
+pub static FILE_SLOT: std::sync::LazyLock<Arc<tokio::sync::Semaphore>> =
     std::sync::LazyLock::new(|| Arc::new(tokio::sync::Semaphore::new(1)));
 
 #[cfg(test)]
 pub(super) static FILE_READ_STARTED: tokio::sync::Notify = tokio::sync::Notify::const_new();
 
 fn open_regular(path: &Path, write: bool) -> std::io::Result<std::fs::File> {
-    let file = std::fs::OpenOptions::new()
-        .read(!write)
-        .write(write)
-        .create(write)
-        .custom_flags(libc::O_NONBLOCK | libc::O_NOCTTY)
-        .open(path)?;
+    let mut options = std::fs::OpenOptions::new();
+    options.read(!write).write(write).create(write);
+    // Never block on a FIFO or adopt a terminal named as an interception file.
+    #[cfg(unix)]
+    options.custom_flags(libc::O_NONBLOCK | libc::O_NOCTTY);
+    let file = options.open(path)?;
     let metadata = file.metadata()?;
     if !metadata.is_file() || metadata.len() > MAX_BYTES as u64 {
         return Err(std::io::Error::other("unsupported interception file"));
@@ -107,6 +108,7 @@ pub(super) async fn capture(path: &Path, body: serde_json::Value) -> std::io::Re
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn special_and_oversized_files_are_rejected_and_binary_files_work() {
         let dir = tempfile::tempdir().unwrap();

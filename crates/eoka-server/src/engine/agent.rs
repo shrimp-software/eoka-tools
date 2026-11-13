@@ -1,6 +1,6 @@
 use super::*;
 
-impl Handler {
+impl Engine {
     pub(super) async fn handle_agent(&mut self, cmd: &str, args: &Value) -> Response {
         let mut result: anyhow::Result<Response> = async {
             let state = self
@@ -15,11 +15,15 @@ impl Handler {
             match cmd {
                 "agent_observe" => Ok(Response::ok(serde_json::to_value(
                     self.agent
+                        .lock()
+                        .await
                         .observe(&state.browser, &page, serde_json::from_value(args.clone())?)
                         .await?,
                 )?)),
                 "agent_step" => Ok(Response::agent_result(
                     self.agent
+                        .lock()
+                        .await
                         .step_selected(
                             &state.browser,
                             &page,

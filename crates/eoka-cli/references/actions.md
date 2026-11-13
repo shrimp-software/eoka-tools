@@ -53,6 +53,43 @@ This is an alternative to `key Tab` above. Printable keys preserve case;
 current focus. Inspect focus and choose the expected application effect before
 dispatch, including in a focused frame.
 
+## Action kinds
+
+`eoka action` (`actions.perform`) accepts every kind below. `step` accepts the
+subset marked *step*. Kinds marked *expect* are rejected without an expectation,
+because dispatch alone proves nothing about their result. The fields are those of
+`action`; `step` names two of them differently: `fill` takes `text` and `select`
+takes a single `value`.
+
+| Kind | Fields | Notes |
+| --- | --- | --- |
+| `click` | `target`, `double`?, `human`? | *step*, *expect* |
+| `fill` | `target`, `value`, `input_mode`? | *step*; replaces the value and verifies it |
+| `type` | `target`, `text`, `input_mode`? | *step*, *expect*; inserts without clearing |
+| `insert_text` | `text` | *expect*; types into the focused control |
+| `press_key` | `key` | *step*, *expect* |
+| `submit` | `target` | *expect*; focuses the target and presses Enter |
+| `select` | `target`, `values` | *step*; verifies the selected values |
+| `select_option` | `target`, `value` | one option by value, falling back to its exact label |
+| `select_text` | `target`, `text` | one option by exact visible label |
+| `upload` | `target`, `files` | sets a file input from local paths and verifies names and sizes |
+| `drag` | `target`, `dx`, `dy` | *expect*; drags by a viewport offset |
+| `hover` | `target`, `human`? | *step* |
+| `focus` | `target` | *step* |
+| `scroll_into_view` | `target` | *step* |
+| `navigate` | `url`, `referrer`? | *step*; verifies a document commit |
+| `navigate_with_headers` | `url`, `headers` | temporary headers, cleared afterwards |
+| `reload` | none | verifies a document commit |
+| `back`, `forward` | none | *step*; one history entry |
+| `history` | `delta` | relative history offset; zero reloads |
+
+Upload a file and drag a slider with `action`; both take a typed locator target:
+
+```bash
+eoka --agent --session work action '{"operation_id":"5d0c7a1e-8f0b-4c0e-9a56-0c1f4a6b2d11","action":{"kind":"upload","target":{"query":{"kind":"css","selector":"input[type=file]"}},"files":["/home/me/report.pdf"]}}'
+eoka --agent --session work action '{"operation_id":"7b9e2f44-3a61-4d0d-b7c8-91a5e3f0c6aa","action":{"kind":"drag","target":{"query":{"kind":"css","selector":"#handle"}},"dx":120,"dy":0},"options":{"expect":{"kind":"text","target":{"query":{"kind":"css","selector":"#value"}},"value":"60"}}}'
+```
+
 ## Readiness and destinations
 
 `open` waits for an interactive document. Use `--expect` for application readiness,

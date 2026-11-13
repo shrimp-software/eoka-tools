@@ -225,6 +225,12 @@ impl OperationSpec {
             }
             "open" => serde_json::json!({"url":"about:blank"}),
             "find" => serde_json::json!({"text":"needle"}),
+            "recording_start" => serde_json::json!({"path":"/tmp/recording.mp4"}),
+            "recording_get" | "recording_stop" | "recording_cancel" => {
+                serde_json::json!({"recording_id":"b9b87b7a-cc6d-4a25-b098-73271cc9c4cb"})
+            }
+            "get_text" | "exists" | "click_shadow" => serde_json::json!({"selector":"h1"}),
+            "get_attribute" => serde_json::json!({"selector":"a","name":"href"}),
             "click" | "dblclick" | "hover" | "scroll" => {
                 serde_json::json!({"target":"body"})
             }

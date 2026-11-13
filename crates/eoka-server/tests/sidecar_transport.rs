@@ -777,6 +777,554 @@ fn oversized_evaluation_returns_structured_size_error_and_remains_usable() {
 
 #[test]
 #[ignore = "requires Chrome"]
+fn catalog_operations_run_on_the_addressed_page_and_report_structured_errors() {
+    let (root, state, scratch) = directories();
+    let mut server = Sidecar::start(&state, &scratch);
+    let hello = server.request(90, "server.hello", json!({"protocol":PROTOCOL_VERSION}));
+    assert!(hello["result"]["capabilities"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("operationCatalog")));
+    let first = launch(&mut server, &root.path().join("profile"));
+    let second = server.request(3, "browser.new_page", json!({}))["result"]["pageId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    // Each call targets the page named by pageId, in either order.
+    for (id, page, title) in [(4, &first, "first"), (5, &second, "second")] {
+        let response = server.request(
+            id,
+            "exec",
+            json!({"pageId":page,"raw":true,"code":format!("document.title = '{title}'; void 0")}),
+        );
+        assert!(response.get("result").is_some(), "{response}");
+    }
+    for (id, page, title) in [(6, &second, "second"), (7, &first, "first")] {
+        let response = server.request(id, "info", json!({"pageId":page}));
+        assert!(response["result"].to_string().contains(title), "{response}");
+        // The sidecar's own method sees the same page.
+        let legacy = server.request(id + 10, "page.title", json!({"pageId":page}));
+        assert_eq!(legacy["result"]["title"], title, "{legacy}");
+    }
+
+    // An operation with no sidecar equivalent: console capture.
+    assert!(server
+        .request(20, "console", json!({"pageId":first}))
+        .get("result")
+        .is_some());
+    server.request(
+        21,
+        "exec",
+        json!({"pageId":first,"raw":true,"code":"console.log('catalog-marker'); void 0"}),
+    );
+    let console = server.request(22, "console", json!({"pageId":first}));
+    assert!(
+        console["result"].to_string().contains("catalog-marker"),
+        "{console}"
+    );
+    let other = server.request(23, "console", json!({"pageId":second}));
+    assert!(
+        !other["result"].to_string().contains("catalog-marker"),
+        "{other}"
+    );
+
+    // Reads, waits and shadow clicks folded in from the sidecar-only methods.
+    let markup = "document.body.innerHTML = '<h1>Heading</h1><a id=link href=\"/next\">Next</a>'; \
+        setTimeout(() => { const late = document.createElement('p'); late.id = 'late'; late.textContent = 'Late'; document.body.append(late); }, 200); void 0";
+    server.request(50, "exec", json!({"pageId":first,"raw":true,"code":markup}));
+    let content = server.request(51, "content", json!({"pageId":first}));
+    assert!(
+        content["result"]
+            .as_str()
+            .unwrap()
+            .contains("<h1>Heading</h1>"),
+        "{content}"
+    );
+    let text = server.request(52, "get_text", json!({"pageId":first,"selector":"h1"}));
+    assert_eq!(text["result"], "Heading", "{text}");
+    for (id, name, value) in [(53, "href", json!("/next")), (54, "missing", Value::Null)] {
+        let attribute = server.request(
+            id,
+            "get_attribute",
+            json!({"pageId":first,"selector":"#link","name":name}),
+        );
+        assert_eq!(attribute["result"]["value"], value, "{attribute}");
+    }
+    for (id, selector, exists) in [(55, "#link", true), (56, "#absent", false)] {
+        let response = server.request(id, "exists", json!({"pageId":first,"selector":selector}));
+        assert_eq!(response["result"]["exists"], exists, "{response}");
+    }
+    let waited = server.request(
+        57,
+        "wait",
+        json!({"pageId":first,"selector":"#late","timeout":5000}),
+    );
+    assert!(waited.get("result").is_some(), "{waited}");
+    let hidden = server.request(
+        58,
+        "wait",
+        json!({"pageId":first,"selector":"#absent","state":"hidden","timeout":2000}),
+    );
+    assert!(hidden.get("result").is_some(), "{hidden}");
+    let missing = server.request(
+        59,
+        "wait",
+        json!({"pageId":first,"selector":"#absent","state":"attached","timeout":300}),
+    );
+    // Core errors keep their kind through the catalog path.
+    assert_eq!(missing["error"]["code"], "Timeout", "{missing}");
+    let absent = server.request(49, "get_text", json!({"pageId":first,"selector":"#absent"}));
+    assert_eq!(absent["error"]["code"], "ElementNotFound", "{absent}");
+    // The shadow search needs a real document rather than about:blank.
+    let shadow_url = "data:text/html,<!doctype html><title>start</title><div id=host></div><script>\
+        const root = document.getElementById('host').attachShadow({mode:'closed'});\
+        root.innerHTML = '<button id=inner style=\"width:120px;height:40px\">go</button>';\
+        root.getElementById('inner').onclick = () => { document.title = 'shadow-clicked'; };</script>";
+    let shadow = server.request(60, "browser.new_page", json!({"url":shadow_url}));
+    let shadow = shadow["result"]["pageId"].as_str().unwrap().to_owned();
+    let clicked = server.request(
+        61,
+        "click_shadow",
+        json!({"pageId":shadow,"selector":"button#inner"}),
+    );
+    assert_eq!(clicked["result"]["selector"], "button#inner", "{clicked}");
+    let mut title = Value::Null;
+    for attempt in 0..20 {
+        title = server.request(62 + attempt, "page.title", json!({"pageId":shadow}));
+        if title["result"]["title"] == "shadow-clicked" {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert_eq!(title["result"]["title"], "shadow-clicked", "{title}");
+
+    // Actions need no caller-supplied operation ID and return their record,
+    // including when the outcome is not verified.
+    let reloaded = server.request(100, "reload", json!({"pageId":first}));
+    assert_eq!(
+        reloaded["result"]["outcome"], "verified_complete",
+        "{reloaded}"
+    );
+    let generated = reloaded["result"]["id"].as_str().unwrap().to_owned();
+    let fetched = server.request(101, "operations.get", json!({"id":generated}));
+    assert_eq!(
+        fetched["result"]["id"], reloaded["result"]["id"],
+        "{fetched}"
+    );
+    let unverified = server.request(
+        102,
+        "click",
+        json!({"pageId":first,"target":"css:body","timeout_ms":500}),
+    );
+    assert!(
+        unverified["result"]["id"].is_string(),
+        "an unverified action must still return its record: {unverified}"
+    );
+
+    // A reference from the sidecar's own observation resolves in a catalog action.
+    server.request(
+        103,
+        "exec",
+        json!({"pageId":shadow,"raw":true,"code":"document.body.innerHTML = '<button id=go>Go</button>'; void 0"}),
+    );
+    let observed = server.request(104, "agent.observe", json!({"pageId":shadow}));
+    let reference = observed["result"]["controls"][0]["target"]
+        .as_str()
+        .unwrap_or_else(|| panic!("no control in {observed}"))
+        .to_owned();
+    // The shadow page is the foreground tab; background tabs do not run the
+    // animation frames that actionability checks wait for.
+    let scrolled = server.request(105, "scroll", json!({"pageId":shadow,"target":reference}));
+    assert!(scrolled.get("result").is_some(), "{scrolled}");
+    let stale = server.request(106, "scroll", json!({"pageId":shadow,"target":"@e999"}));
+    assert!(stale.get("error").is_some(), "{stale}");
+
+    // An interception rule must not stall requests made outside the engine:
+    // nothing polls an adopted engine, so it has to keep draining by itself.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    std::thread::spawn(move || {
+        for stream in listener.incoming().take(32) {
+            let Ok(mut stream) = stream else { continue };
+            let mut request = [0u8; 2048];
+            let _ = std::io::Read::read(&mut stream, &mut request);
+            let _ = stream.write_all(
+                b"HTTP/1.1 200 OK\r\naccess-control-allow-origin: *\r\ncontent-type: text/html\r\ncontent-length: 2\r\nconnection: close\r\n\r\nok",
+            );
+        }
+    });
+    // Same origin as the fixture, so the credentialed fetch below is allowed.
+    let opened = server.request(
+        108,
+        "open",
+        json!({"pageId":first,"url":format!("http://{address}/page")}),
+    );
+    assert!(opened.get("result").is_some(), "{opened}");
+    let baseline = server.request(
+        109,
+        "page.fetch",
+        json!({"pageId":first,"url":format!("http://{address}/data")}),
+    );
+    assert_eq!(baseline["result"]["status"], 200, "{baseline}");
+    let rule = server.request(
+        110,
+        "intercept.add",
+        json!({"pageId":first,"url_pattern":"*never-matches*","capture":scratch.join("capture")}),
+    );
+    assert!(rule.get("result").is_some(), "{rule}");
+    let started = Instant::now();
+    let direct = server.request(
+        111,
+        "page.fetch",
+        json!({"pageId":first,"url":format!("http://{address}/data")}),
+    );
+    assert_eq!(direct["result"]["status"], 200, "{direct}");
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "request stalled behind interception for {:?}",
+        started.elapsed()
+    );
+    let rules = server.request(112, "intercept.list", json!({"pageId":first}));
+    assert!(
+        rules["result"].to_string().contains("never-matches"),
+        "{rules}"
+    );
+
+    // Unknown and camelCase fields are named instead of ignored.
+    let misspelt = server.request(
+        113,
+        "click_shadow",
+        json!({"pageId":first,"selector":"b","timeoutMs":5}),
+    );
+    assert_eq!(misspelt["error"]["code"], "InvalidParams", "{misspelt}");
+
+    for (id, method, params, code) in [
+        (30, "info", json!({}), "InvalidParams"),
+        (31, "info", json!({"pageId":"missing"}), "InvalidPage"),
+        (
+            32,
+            "console",
+            json!({"pageId":first,"clear":"yes"}),
+            "InvalidParams",
+        ),
+        (33, "find", json!({"pageId":first}), "InvalidParams"),
+        (34, "tab.list", json!({"pageId":first}), "UnknownMethod"),
+        (35, "close", json!({"pageId":first}), "UnknownMethod"),
+    ] {
+        let response = server.request(id, method, params);
+        assert_eq!(response["error"]["code"], code, "{method}: {response}");
+    }
+
+    // The browser stays under sidecar ownership and closes with it.
+    assert!(server
+        .request(40, "browser.close_tab", json!({"pageId":second}))
+        .get("result")
+        .is_some());
+    let closed = server.request(41, "info", json!({"pageId":second}));
+    assert_eq!(closed["error"]["code"], "InvalidPage", "{closed}");
+    assert!(server
+        .request(42, "text", json!({"pageId":first}))
+        .get("result")
+        .is_some());
+    server.shutdown(43);
+}
+
+/// A same-origin fixture: a small form page at any path, plain text at `/data`.
+fn fixture_server() -> std::net::SocketAddr {
+    const PAGE: &str = "<!doctype html><title>fixture</title><h1>Heading</h1>\
+        <input id=name aria-label=Name><select id=pick><option value=a>A<option value=b>B</select>\
+        <button id=go onclick=\"document.getElementById('status').textContent='clicked'\">Go</button>\
+        <p id=status></p><a id=link href=/next>Next</a><iframe id=inner srcdoc='<p>inner</p>'></iframe>";
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            std::thread::spawn(move || {
+                let mut request = [0u8; 4096];
+                let read = std::io::Read::read(&mut stream, &mut request).unwrap_or(0);
+                let head = String::from_utf8_lossy(&request[..read]).to_string();
+                let (kind, body) = if head.starts_with("GET /data") {
+                    ("text/plain", "ok")
+                } else {
+                    ("text/html", PAGE)
+                };
+                let _ = stream.write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: {kind}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                        body.len()
+                    )
+                    .as_bytes(),
+                );
+            });
+        }
+    });
+    address
+}
+
+#[test]
+#[ignore = "requires Chrome; calls every projected catalog operation once"]
+fn every_catalog_operation_answers_through_the_sidecar() {
+    let (root, state, scratch) = directories();
+    let mut server = Sidecar::start(&state, &scratch);
+    let page = launch(&mut server, &root.path().join("profile"));
+    let origin = format!("http://{}", fixture_server());
+    let file = |name: &str| scratch.join(name).to_string_lossy().into_owned();
+    let status = json!({"kind":"text","target":{"query":{"kind":"css","selector":"#status"}},"value":"clicked"});
+
+    // `true` means the call must succeed. `false` means the operation has
+    // nothing to act on in this fixture (no CAPTCHA, no WASM, no dialog) and
+    // only has to answer with a structured operation error.
+    let calls: Vec<(&str, Value, bool)> = vec![
+        ("open", json!({"url":format!("{origin}/page")}), true),
+        ("info", json!({}), true),
+        ("text", json!({}), true),
+        ("content", json!({}), true),
+        ("find", json!({"text":"Go"}), true),
+        ("observe", json!({}), true),
+        ("snapshot", json!({}), true),
+        ("exists", json!({"selector":"#go"}), true),
+        ("get_text", json!({"selector":"h1"}), true),
+        (
+            "get_attribute",
+            json!({"selector":"#link","name":"href"}),
+            true,
+        ),
+        ("frames", json!({}), true),
+        ("frame_eval", json!({"frame":"#inner","code":"1+1"}), true),
+        ("eval", json!({"code":"() => 1 + 1"}), true),
+        (
+            "exec",
+            json!({"code":"() => { window.touched = true; }"}),
+            true,
+        ),
+        ("console", json!({}), true),
+        ("errors", json!({}), true),
+        ("set_cookie", json!({"name":"sid","value":"1"}), true),
+        ("cookies", json!({}), true),
+        ("delete_cookie", json!({"name":"sid"}), true),
+        ("clear_cookies", json!({}), true),
+        ("set_storage", json!({"key":"k","value":"v"}), true),
+        ("storage", json!({"key":"k"}), true),
+        ("dump_storage", json!({}), true),
+        ("save_state", json!({"path":file("state.json")}), true),
+        (
+            "load_state",
+            json!({"path":file("state.json"),"no_navigate":true}),
+            true,
+        ),
+        (
+            "headers",
+            json!({"headers_json":"{\"x-test\":\"1\"}"}),
+            true,
+        ),
+        (
+            "emulate",
+            json!({"width":800,"height":600,"desktop":true}),
+            true,
+        ),
+        ("emulate", json!({"reset":true}), true),
+        ("screenshot", json!({"output":file("shot.png")}), true),
+        ("wait", json!({"ms":10}), true),
+        ("wait", json!({"selector":"h1","timeout":3000}), true),
+        ("fetch", json!({"url":format!("{origin}/data")}), true),
+        ("scroll", json!({"target":"css:#go"}), true),
+        ("hover", json!({"target":"css:#go","timeout_ms":5000}), true),
+        (
+            "click",
+            json!({"target":"css:#go","expect":status,"timeout_ms":5000}),
+            true,
+        ),
+        (
+            "double_click",
+            json!({"target":"css:#go","timeout_ms":1000}),
+            true,
+        ),
+        (
+            "fill",
+            json!({"target":"css:#name","text":"ada","timeout_ms":5000}),
+            true,
+        ),
+        (
+            "select",
+            json!({"target":"css:#pick","value":"b","timeout_ms":5000}),
+            true,
+        ),
+        ("key", json!({"key":"Tab","timeout_ms":1000}), true),
+        ("key.down", json!({"key":"Shift"}), true),
+        ("key.up", json!({"key":"Shift"}), true),
+        ("mouse.move", json!({"x":10,"y":10}), true),
+        ("mouse.down", json!({"x":10,"y":10,"button":"left"}), true),
+        ("mouse.up", json!({"x":10,"y":10,"button":"left"}), true),
+        ("release_all_inputs", json!({}), true),
+        ("network.record.start", json!({}), true),
+        ("network.record.status", json!({}), true),
+        ("fetch", json!({"url":format!("{origin}/data")}), true),
+        ("network.log", json!({}), true),
+        ("network.show", json!({"id":1}), false),
+        (
+            "network.wait",
+            json!({"timeout":200,"pattern":"*never*"}),
+            false,
+        ),
+        ("network.export", json!({"path":file("capture.har")}), true),
+        ("network.clear", json!({}), true),
+        ("network.record.stop", json!({}), true),
+        (
+            "intercept.add",
+            json!({"url_pattern":"*never-matches*","capture":file("capture")}),
+            true,
+        ),
+        ("intercept.list", json!({}), true),
+        ("intercept.log", json!({}), true),
+        ("fetch", json!({"url":format!("{origin}/data")}), true),
+        ("intercept.remove", json!({"id":"1"}), false),
+        ("js.list", json!({}), true),
+        ("js.allow", json!({"domain":"example.com"}), true),
+        ("js.block", json!({"domain":"ads.example"}), true),
+        ("js.remove", json!({"domain":"example.com"}), true),
+        ("js.mode", json!({"mode":"allow-all"}), true),
+        ("spa.info", json!({}), true),
+        ("spa.navigate", json!({"path":"/next"}), false),
+        ("reload", json!({}), true),
+        ("back", json!({}), true),
+        ("forward", json!({}), true),
+        ("dialog.accept", json!({}), false),
+        ("dialog.dismiss", json!({}), false),
+        ("captcha.detect", json!({}), true),
+        ("captcha.inject", json!({"token":"token"}), false),
+        ("captcha.turnstile", json!({"timeout_ms":1000}), false),
+        (
+            "captcha.datadome",
+            json!({"max_attempts":1,"timeout_ms":5000}),
+            false,
+        ),
+        (
+            "click_shadow",
+            json!({"selector":"#absent","timeout_ms":300}),
+            false,
+        ),
+        ("wasm.info", json!({}), false),
+        ("wasm.read", json!({"addr":"0x0","len":4}), false),
+        ("wasm.write", json!({"addr":"0x0","hex":"00"}), false),
+        ("wasm.find", json!({"pattern":"00"}), false),
+        ("download.list", json!({}), true),
+        ("download.get", json!({"id":"missing"}), false),
+        (
+            "download.wait",
+            json!({"id":"missing","timeout_ms":100}),
+            false,
+        ),
+        ("download.cancel", json!({"id":"missing"}), false),
+        (
+            "download.start",
+            json!({"output":file("download.txt"),"url":format!("{origin}/data"),"start_timeout_ms":3000}),
+            false,
+        ),
+        (
+            "clone_from",
+            json!({"source":"ws://127.0.0.1:1/devtools/browser/none"}),
+            false,
+        ),
+        ("fake_camera", json!({"file":file("missing.mp4")}), false),
+    ];
+
+    let mut called = std::collections::BTreeSet::new();
+    let mut problems = Vec::new();
+    for (index, (method, params, must_succeed)) in calls.into_iter().enumerate() {
+        called.insert(method);
+        let mut params = params;
+        params["pageId"] = json!(page);
+        let started = Instant::now();
+        let response = server.request(1000 + index as u64, method, params);
+        let elapsed = started.elapsed();
+        let summary: String = response.to_string().chars().take(260).collect();
+        if elapsed > Duration::from_secs(20) {
+            problems.push(format!("#{index} {method} took {elapsed:?}: {summary}"));
+        }
+        match response["error"]["code"].as_str() {
+            None => {}
+            // A wrong name, a rejected input or a server fault is a defect in
+            // the projection whatever the fixture contains.
+            Some(code @ ("UnknownMethod" | "InvalidParams" | "Internal" | "InvalidPage")) => {
+                problems.push(format!("{method} failed with {code}: {summary}"))
+            }
+            Some(_) if must_succeed => problems.push(format!("{method} failed: {summary}")),
+            Some(_) => {}
+        }
+        // An action that was admitted answers with its record either way.
+        if must_succeed && response["result"]["outcome"].is_string() {
+            let outcome = response["result"]["outcome"].as_str().unwrap();
+            let unverified_by_design = matches!(method, "double_click" | "key");
+            if outcome != "verified_complete" && !unverified_by_design {
+                problems.push(format!("{method} ended {outcome}: {summary}"));
+            }
+        }
+    }
+    // The server is still healthy and the page is still the one addressed.
+    let title = server.request(5000, "page.title", json!({"pageId":page}));
+    if title["result"]["title"] != "fixture" {
+        problems.push(format!("page was lost: {title}"));
+    }
+    let missing: Vec<&str> = eoka_protocol::sidecar::catalog_operations()
+        .map(|operation| operation.path)
+        .filter(|path| !called.contains(path))
+        .collect();
+    assert!(missing.is_empty(), "sweep does not call {missing:?}");
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+    server.shutdown(5001);
+}
+
+#[test]
+#[ignore = "requires Chrome; catalog open on a browser the sidecar does not own"]
+fn catalog_open_navigates_the_addressed_page_on_a_borrowed_browser() {
+    let (root, state, scratch) = directories();
+    let profile = root.path().join("profile");
+    let mut owner = Sidecar::start(&state, &scratch);
+    launch(&mut owner, &profile);
+    let mut borrower = Sidecar::start(
+        &root.path().join("borrower-state"),
+        &root.path().join("borrower-tmp"),
+    );
+    let response = borrower.request(
+        1,
+        "browser.launch",
+        json!({"headless":true,"userDataDir":profile}),
+    );
+    assert_eq!(response["result"]["ownership"], "borrowed", "{response}");
+    let page = borrower.request(2, "browser.new_page", json!({}))["result"]["pageId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let before = borrower.request(3, "browser.tabs", json!({}))["result"]["tabs"]
+        .as_array()
+        .unwrap()
+        .len();
+    let origin = format!("http://{}", fixture_server());
+    let opened = borrower.request(
+        4,
+        "open",
+        json!({"pageId":page,"url":format!("{origin}/page")}),
+    );
+    assert!(opened.get("result").is_some(), "{opened}");
+    let url = borrower.request(5, "page.url", json!({"pageId":page}));
+    assert_eq!(url["result"]["url"], format!("{origin}/page"), "{url}");
+    let after = borrower.request(6, "browser.tabs", json!({}))["result"]["tabs"]
+        .as_array()
+        .unwrap()
+        .len();
+    assert_eq!(after, before, "open must not create a tab");
+    borrower.shutdown(7);
+    assert!(owner
+        .request(8, "browser.tabs", json!({}))
+        .get("result")
+        .is_some());
+    owner.shutdown(9);
+}
+
+#[test]
+#[ignore = "requires Chrome"]
 fn shutdown_during_launch_does_not_abandon_the_owned_browser() {
     let (root, state, scratch) = directories();
     let profile = root.path().join("profile");
