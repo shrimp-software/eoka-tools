@@ -27,7 +27,7 @@ sidecar protocol **2.0** or a newer compatible 2.x minor. The client locates the
 2. The `EOKA_SERVER_BIN` environment variable, if set.
 3. `eoka-server` on `PATH`.
 4. A prebuilt binary downloaded from this repo's GitHub Releases, pinned to
-   [`eoka-server-v0.9.5`](https://github.com/shrimp-software/eoka-tools/releases/tag/eoka-server-v0.9.5).
+   [`eoka-server-v0.10.0`](https://github.com/shrimp-software/eoka-tools/releases/tag/eoka-server-v0.10.0).
    Assets are available for linux/amd64, linux/arm64, darwin/amd64, darwin/arm64
    and windows/amd64. The binary is cached under `os.UserCacheDir()/eoka/` and
    verified against the release's published SHA-256 checksums before installation.
