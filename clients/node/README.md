@@ -203,4 +203,6 @@ npm run build
 npm test
 ```
 
+[EVALS.md](https://github.com/shrimp-software/eoka-tools/blob/main/clients/node/EVALS.md) describes the real-browser suites that check caller mistakes, misbehaving pages and the examples in this README, and how to run them.
+
 Releases are automatic: merge a version bump to `main` and approve the `npm-prerelease` deployment.
