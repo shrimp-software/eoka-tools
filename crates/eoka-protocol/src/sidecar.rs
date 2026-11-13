@@ -1335,6 +1335,79 @@ dto!(GetAttributeParams {
     name: String
 });
 
+/// Why a hand-registered sidecar method exists next to the operation catalog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MethodRole {
+    /// Server, browser and tab lifecycle, which only the sidecar owns.
+    Lifecycle,
+    /// Registered under the same name as its catalog operation, with the
+    /// sidecar's typed contract.
+    Shared,
+    /// A typed convenience over `actions.perform`.
+    Action,
+    /// Duplicates the named catalog operation. Kept until catalog results are
+    /// typed, then removed in the next protocol major.
+    ReplacedBy(&'static str),
+    /// No catalog equivalent yet, for the stated reason.
+    Distinct(&'static str),
+}
+
+/// The role of every method in `METHODS`. A method added without an entry here
+/// fails `every_registered_method_declares_its_role`, so a sidecar-only
+/// capability cannot be introduced silently.
+pub fn method_role(method: &str) -> Option<MethodRole> {
+    use MethodRole::*;
+    Some(match method {
+        "server.hello" | "server.shutdown" | "browser.launch" | "browser.connect"
+        | "browser.new_page" | "browser.tabs" | "browser.close_tab" | "browser.close"
+        | "page.close" => Lifecycle,
+        "actions.perform" | "operations.get" | "operations.list" | "operations.wait"
+        | "operations.cancel" | "agent.observe" | "agent.step" | "recording.start"
+        | "recording.get" | "recording.stop" | "recording.cancel" => Shared,
+        "page.goto"
+        | "page.click"
+        | "page.click_text"
+        | "page.human_click"
+        | "page.human_click_text"
+        | "page.fill"
+        | "page.human_fill"
+        | "page.type_into"
+        | "page.select"
+        | "page.hover"
+        | "page.press_key" => Action,
+        "page.text" => ReplacedBy("text"),
+        "page.content" => ReplacedBy("content"),
+        "page.title" | "page.url" => ReplacedBy("info"),
+        "page.get_text" => ReplacedBy("get_text"),
+        "page.get_attribute" => ReplacedBy("get_attribute"),
+        "page.exists" => ReplacedBy("exists"),
+        "page.wait_for" | "page.wait_for_visible" | "page.wait_for_text" => ReplacedBy("wait"),
+        "page.evaluate" | "page.evaluate_raw" => ReplacedBy("eval"),
+        "page.execute" | "page.execute_raw" => ReplacedBy("exec"),
+        "page.frames" => ReplacedBy("frames"),
+        "page.evaluate_in_frame" => ReplacedBy("frame_eval"),
+        "page.click_shadow" => ReplacedBy("click_shadow"),
+        "page.solve_turnstile" => ReplacedBy("captcha.turnstile"),
+        "page.fetch" | "page.fetch_bounded" => ReplacedBy("fetch"),
+        "page.set_viewport" | "page.reset_viewport" => ReplacedBy("emulate"),
+        "page.mouse_down" => ReplacedBy("mouse.down"),
+        "page.mouse_move" => ReplacedBy("mouse.move"),
+        "page.mouse_up" => ReplacedBy("mouse.up"),
+        "page.key_down" => ReplacedBy("key.down"),
+        "page.key_up" => ReplacedBy("key.up"),
+        "page.release_all_inputs" => ReplacedBy("release_all_inputs"),
+        "page.screenshot" => Distinct("returns image bytes; catalog screenshot writes a file"),
+        "page.screenshot_to_file" => {
+            Distinct("atomic publication with partial-file evidence on failure")
+        }
+        "page.capture_state" | "page.restore_state" => {
+            Distinct("in-memory state; catalog save_state and load_state use a file")
+        }
+        "page.solve_captcha" => Distinct("provider solving runs client-side in the CLI"),
+        _ => return None,
+    })
+}
+
 /// Catalog operations served through the sidecar under their catalog path.
 ///
 /// Session lifecycle and tab management stay with the sidecar's own
@@ -1458,6 +1531,15 @@ pub fn schema_bundle() -> Value {
             "RecordingFailure": schema::<RecordingFailure>(), "RecordingFailureStage": schema::<RecordingFailureStage>()
         }
     });
+    // Registered methods that duplicate a catalog operation, and its path.
+    bundle["replacedMethods"] = METHODS
+        .iter()
+        .filter_map(|method| match method_role(method.name)? {
+            MethodRole::ReplacedBy(path) => Some((method.name.to_owned(), json!(path))),
+            _ => None,
+        })
+        .collect::<serde_json::Map<_, _>>()
+        .into();
     bundle["catalogMethods"] = catalog_operations()
         .map(|operation| operation.path)
         .collect();
@@ -1520,6 +1602,29 @@ mod tests {
             };
             assert!(validate_screenshot(None, None, Some(&clip), None).is_err());
         }
+    }
+
+    #[test]
+    fn every_registered_method_declares_its_role() {
+        for method in METHODS {
+            let role = method_role(method.name)
+                .unwrap_or_else(|| panic!("{} has no MethodRole", method.name));
+            match role {
+                MethodRole::Shared => assert!(
+                    crate::operation_by_path(method.name).is_some(),
+                    "{} is Shared but is not a catalog path",
+                    method.name
+                ),
+                MethodRole::ReplacedBy(path) => assert!(
+                    catalog_operation(path).is_some(),
+                    "{} names {path}, which is not a projected catalog operation",
+                    method.name
+                ),
+                MethodRole::Distinct(reason) => assert!(!reason.is_empty()),
+                MethodRole::Lifecycle | MethodRole::Action => {}
+            }
+        }
+        assert_eq!(method_role("page.not_a_method"), None);
     }
 
     #[test]

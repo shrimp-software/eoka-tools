@@ -136,6 +136,16 @@ daemon. The schema bundle lists them under `catalogMethods`.
   `browser.close`, `browser.new_page`, `browser.tabs` and `browser.close_tab`.
 - A catalog path that already names a registered method keeps that method's
   contract.
+- Errors raised by the core library keep their kind: a catalog operation that
+  times out returns `Timeout`, a missing element returns `ElementNotFound`, the
+  same codes a registered method returns.
+
+Every registered method declares a role in `eoka-protocol::sidecar::method_role`:
+lifecycle, shared with a catalog operation of the same name, a typed convenience
+over `actions.perform`, a duplicate of a named catalog operation, or distinct for
+a stated reason. The schema bundle lists the duplicates and their catalog
+operation under `replacedMethods`. They stay available in protocol 2 and are
+removed in the next major, once catalog results are typed.
 
 ```json
 {"id":7,"method":"console","params":{"pageId":"<id>","clear":false}}
