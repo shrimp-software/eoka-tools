@@ -17,7 +17,7 @@ fn close_tab_response(cleanup_error: Option<ServerError>) -> Value {
     .expect("close tab response is serializable")
 }
 
-pub async fn launch(state: &mut AppState, params: Value) -> Result<Value, ServerError> {
+pub async fn launch(state: &AppState, params: Value) -> Result<Value, ServerError> {
     if state.is_launched() {
         return Err(ServerError::internal("browser already connected"));
     }
@@ -77,7 +77,7 @@ fn validate_endpoint(endpoint: &str) -> Result<(), ServerError> {
     Ok(())
 }
 
-pub async fn connect(state: &mut AppState, params: Value) -> Result<Value, ServerError> {
+pub async fn connect(state: &AppState, params: Value) -> Result<Value, ServerError> {
     if state.is_launched() {
         return Err(ServerError::internal("browser already connected"));
     }
@@ -89,7 +89,7 @@ pub async fn connect(state: &mut AppState, params: Value) -> Result<Value, Serve
 }
 
 async fn initialize_browser(
-    state: &mut AppState,
+    state: &AppState,
     browser: Browser,
     auto_solve: Option<CloudflareAutoSolve>,
 ) -> Result<Value, ServerError> {
@@ -127,8 +127,7 @@ async fn initialize_browser(
                 Ok(Ok(())) => None,
                 Ok(Err(error)) => Some(error),
                 Err(_) => {
-                    state.clear_pages();
-                    state.take_browser();
+                    state.abandon_cleanup();
                     Some(ServerError::internal(
                         "browser cleanup exceeded the 5 second deadline",
                     ))
@@ -156,20 +155,38 @@ fn resolve_proxy(params: Option<ProxyParams>) -> Result<Option<ProxyConfig>, Ser
         .transpose()
 }
 
-pub async fn new_page(state: &mut AppState, params: Value) -> Result<Value, ServerError> {
+pub async fn new_page(state: &AppState, params: Value) -> Result<Value, ServerError> {
     let params: NewPageParams = parse_params(params)?;
-    let browser = state.browser()?;
-    let page = match params.url {
-        Some(url) => browser.new_page(&url).await?,
-        None => browser.new_blank_page().await?,
-    };
-    let page_id = page.target_id().to_string();
-    state.insert_page(page_id.clone(), page);
-    serde_json::to_value(NewPageResult { page_id })
-        .map_err(|error| ServerError::internal(error.to_string()))
+    let page = state.open_page().await?;
+    if let Some(url) = params.url {
+        navigate_opened_page(&page, &url).await?;
+    }
+    serde_json::to_value(NewPageResult {
+        page_id: page.target_id().to_string(),
+    })
+    .map_err(|error| ServerError::internal(error.to_string()))
 }
 
-pub async fn tabs(state: &mut AppState, _params: Value) -> Result<Value, ServerError> {
+const OPENED_PAGE_SETTLE: std::time::Duration = std::time::Duration::from_millis(100);
+
+async fn navigate_opened_page(page: &eoka::Page, url: &str) -> Result<(), ServerError> {
+    let navigation = page
+        .session()
+        .send::<_, Value>("Page.navigate", &json!({ "url": url }))
+        .await;
+    match navigation {
+        Ok(result) => {
+            if let Some(error) = result["errorText"].as_str() {
+                return Err(eoka::Error::Navigation(error.to_owned()).into());
+            }
+            tokio::time::sleep(OPENED_PAGE_SETTLE).await;
+            Ok(())
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+pub async fn tabs(state: &AppState, _params: Value) -> Result<Value, ServerError> {
     let tabs = state.reconcile_pages().await?;
     let tabs = tabs
         .into_iter()
@@ -184,16 +201,14 @@ pub async fn tabs(state: &mut AppState, _params: Value) -> Result<Value, ServerE
 }
 
 pub(crate) async fn close_tab_impl(
-    state: &mut AppState,
+    state: &AppState,
     page_id: &str,
 ) -> Result<Option<ServerError>, ServerError> {
-    state.page(page_id)?;
+    let page = state.page(page_id)?;
     let recording_error = state.recordings.cancel_page(page_id).await.err();
-    let release_result = state.page(page_id)?.release_all_inputs().await;
+    let release_result = page.release_all_inputs().await;
     state.release_engine_tab(page_id).await;
-    let browser = state.browser()?;
-    browser.close_tab(page_id).await?;
-    state.remove_page(page_id);
+    state.close_page(page_id).await?;
     let release_error = release_result.err().map(ServerError::from);
     Ok(match (recording_error, release_error) {
         (Some(mut recording), Some(release)) => {
@@ -206,13 +221,13 @@ pub(crate) async fn close_tab_impl(
     })
 }
 
-pub async fn close_tab(state: &mut AppState, params: Value) -> Result<Value, ServerError> {
+pub async fn close_tab(state: &AppState, params: Value) -> Result<Value, ServerError> {
     let params: PageIdParams = parse_params(params)?;
     let cleanup_error = close_tab_impl(state, &params.page_id).await?;
     Ok(close_tab_response(cleanup_error))
 }
 
-pub async fn close(state: &mut AppState, _params: Value) -> Result<Value, ServerError> {
+pub async fn close(state: &AppState, _params: Value) -> Result<Value, ServerError> {
     if !state.is_launched() {
         return Err(ServerError::internal("browser not launched"));
     }

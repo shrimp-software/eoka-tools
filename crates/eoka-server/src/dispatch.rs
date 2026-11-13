@@ -15,6 +15,14 @@ pub async fn dispatch(
     method: &str,
     params: Value,
 ) -> Result<Value, ServerError> {
+    dispatch_shared(state, method, params).await
+}
+
+pub async fn dispatch_shared(
+    state: &AppState,
+    method: &str,
+    params: Value,
+) -> Result<Value, ServerError> {
     validate_safe_numbers(&params)?;
     if method == "server.hello" {
         return hello(params);
@@ -27,8 +35,8 @@ pub async fn dispatch(
     if method == "agent.observe" {
         let args: AgentObserveParams = serde_json::from_value(params)
             .map_err(|error| ServerError::invalid_params(error.to_string()))?;
-        let browser = state.browser()?.clone();
-        let page = state.page(&args.page_id)?.clone();
+        let browser = state.browser()?;
+        let page = state.page(&args.page_id)?;
         let agent = state.agent.clone();
         let result = agent
             .lock()
@@ -42,8 +50,8 @@ pub async fn dispatch(
     if method == "agent.step" {
         let args: AgentStepParams = serde_json::from_value(params)
             .map_err(|error| ServerError::invalid_params(error.to_string()))?;
-        let browser = state.browser()?.clone();
-        let page = state.page(&args.page_id)?.clone();
+        let browser = state.browser()?;
+        let page = state.page(&args.page_id)?;
         let agent = state.agent.clone();
         let mut result = agent
             .lock()
@@ -51,15 +59,11 @@ pub async fn dispatch(
             .step(&browser, &page, &state.operations, args.args)
             .await
             .map_err(agent_error)?;
+        drop(browser);
         if let Some(observation) = &result.observation {
-            if state.page(&observation.tab_id).is_err() {
-                match browser.attach_page(&observation.tab_id).await {
-                    Ok(page) => state.insert_page(observation.tab_id.clone(), page),
-                    Err(error) => {
-                        result.observation_error =
-                            Some(format!("Destination attachment failed: {error}"));
-                    }
-                }
+            if let Err(error) = state.attach_page(&observation.tab_id).await {
+                result.observation_error =
+                    Some(format!("Destination attachment failed: {}", error.message));
             }
         }
         return serde_json::to_value(result)
@@ -117,7 +121,7 @@ pub async fn dispatch(
             let params: eoka_protocol::sidecar::RecordingStartParams =
                 serde_json::from_value(params)
                     .map_err(|error| ServerError::invalid_params(error.to_string()))?;
-            let page = state.page(&params.page_id).cloned();
+            let page = state.page(&params.page_id);
             let record = state.recordings.start(params, page).await?;
             serde_json::to_value(record).map_err(|error| ServerError::internal(error.to_string()))
         }

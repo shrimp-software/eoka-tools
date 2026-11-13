@@ -23,13 +23,24 @@ consume those contracts. The Go client implements the same wire protocol.
 - Request IDs are positive integers through 9,007,199,254,740,991, unique among
   in-flight requests. Responses echo the ID. A malformed message without a
   recoverable valid ID may receive an error with `id: null`.
-- Ordinary page requests and action admission retain serialized dispatch.
-  Operation waiters and list snapshots run independently. Get/cancel for an
-  already-admitted operation also bypass a blocked ordinary request; unknown IDs
-  fall back behind earlier queued admissions. List returns the current admitted
-  snapshot, not a barrier for queued mutations. Controls still consume the
-  advertised in-flight budget; shutdown retains its separate admission.
-  Responses can arrive out of order. Always correlate by ID.
+- Requests are dispatched per page. Requests that name the same `pageId`,
+  including action admission, catalog operations and `browser.close_tab`, run
+  one at a time in the order received. Requests for different pages run
+  concurrently, so a page whose request is slow or never answers delays only
+  its own later requests. `browser.new_page` and `browser.tabs` belong to no
+  page and are never queued behind one. `browser.launch`, `browser.connect` and
+  `browser.close` are barriers: each waits for every request received before it
+  and holds back every request received after it until it finishes.
+- Catalog operations share one engine and run one at a time across pages; a slow
+  catalog operation delays catalog operations on other pages, not their
+  registered `page.*` methods. `agent.observe` and `agent.step` likewise share
+  one agent session.
+- Operation waiters and list snapshots run independently. Get/cancel for an
+  already-admitted operation also bypass a blocked page; an unknown ID waits
+  only for an earlier queued request carrying the same operation ID. List
+  returns the current admitted snapshot, not a barrier for queued mutations.
+  Controls still consume the advertised in-flight budget; shutdown retains its
+  separate admission. Responses can arrive out of order. Always correlate by ID.
 - Local request timeout or connection loss does not prove a browser action was
   cancelled. Durable operation IDs remain the recovery mechanism.
 
@@ -317,7 +328,7 @@ Element handles do not cross this wire.
 - Cloudflare: `page.solve_turnstile` (`{pageId, timeoutMs?}`, default 30000, at
   most 120000) clicks the Turnstile checkbox through its closed shadow root until
   the page leaves the challenge and returns `{clicks, elapsedMs}`; a normal page
-  returns zero clicks. It holds the request queue for up to `timeoutMs`.
+  returns zero clicks. It holds that page's request queue for up to `timeoutMs`.
 - Other implemented methods include `page.solve_captcha` and `page.close`.
 
 JSON results are dynamic data, not statically known application types. Type

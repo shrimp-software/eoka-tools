@@ -1745,3 +1745,178 @@ fn connected_external_browser_keeps_tabs_profile_and_releases_held_input() {
         b"keep"
     );
 }
+
+fn stalling_server() -> std::net::SocketAddr {
+    const PAGE: &str = "<!doctype html><title>fixture</title><input id=name>\
+        <button id=go>Go</button><p id=status></p>";
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            std::thread::spawn(move || {
+                let mut request = [0u8; 4096];
+                let read = std::io::Read::read(&mut stream, &mut request).unwrap_or(0);
+                if String::from_utf8_lossy(&request[..read]).starts_with("GET /hang") {
+                    std::thread::sleep(Duration::from_secs(600));
+                    return;
+                }
+                let _ = stream.write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: text/html\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{PAGE}",
+                        PAGE.len()
+                    )
+                    .as_bytes(),
+                );
+            });
+        }
+    });
+    address
+}
+
+#[derive(Default)]
+struct Inbox {
+    held: std::collections::HashMap<u64, Value>,
+}
+
+impl Inbox {
+    fn take(&mut self, server: &Sidecar, id: u64, within: Duration) -> Option<Value> {
+        let deadline = Instant::now() + within;
+        loop {
+            if let Some(reply) = self.held.remove(&id) {
+                return Some(reply);
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            let reply = server.replies.recv_timeout(remaining).ok()?;
+            self.held.insert(reply["id"].as_u64().unwrap(), reply);
+        }
+    }
+
+    fn timed(
+        &mut self,
+        server: &mut Sidecar,
+        id: u64,
+        method: &str,
+        params: Value,
+    ) -> (Value, Duration) {
+        let started = Instant::now();
+        server.send(json!({"id":id,"method":method,"params":params}));
+        let reply = self
+            .take(server, id, Duration::from_secs(45))
+            .unwrap_or_else(|| panic!("{method} did not answer"));
+        (reply, started.elapsed())
+    }
+}
+
+fn two_fixture_pages(server: &mut Sidecar, profile: &Path, origin: &str) -> (String, String) {
+    launch(server, profile);
+    let mut open = |id: u64| {
+        let response = server.request(id, "browser.new_page", json!({"url":format!("{origin}/")}));
+        response["result"]["pageId"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{response}"))
+            .to_owned()
+    };
+    (open(3), open(4))
+}
+
+#[test]
+#[ignore = "requires Chrome"]
+fn pages_run_requests_concurrently_and_each_page_keeps_its_order() {
+    let (root, state, scratch) = directories();
+    let origin = format!("http://{}", stalling_server());
+    let mut server = Sidecar::start(&state, &scratch);
+    let (first, second) = two_fixture_pages(&mut server, &root.path().join("profile"), &origin);
+    let mut inbox = Inbox::default();
+    let pause = "()=>new Promise(resolve=>setTimeout(()=>resolve(1),1000))";
+    let started = Instant::now();
+    server
+        .send(json!({"id":10,"method":"page.evaluate","params":{"pageId":first,"function":pause}}));
+    server.send(
+        json!({"id":11,"method":"page.evaluate","params":{"pageId":second,"function":pause}}),
+    );
+    for id in [10, 11] {
+        let reply = inbox.take(&server, id, Duration::from_secs(20)).unwrap();
+        assert_eq!(reply["result"]["result"], 1, "{reply}");
+    }
+    let elapsed = started.elapsed();
+    assert!(elapsed >= Duration::from_millis(1000), "{elapsed:?}");
+    assert!(elapsed < Duration::from_millis(1600), "{elapsed:?}");
+    server.send(json!({"id":12,"method":"page.evaluate","params":{"pageId":first,
+        "function":"()=>new Promise(resolve=>setTimeout(()=>{window.seen=['slow'];resolve(1)},300))"}}));
+    server.send(
+        json!({"id":13,"method":"page.evaluate","params":{"pageId":first,
+        "function":"()=>{(window.seen??=[]).push('fast');return window.seen}"}}),
+    );
+    server.send(json!({"id":14,"method":"page.title","params":{"pageId":first}}));
+    assert!(inbox.take(&server, 12, Duration::from_secs(20)).is_some());
+    let ordered = inbox.take(&server, 13, Duration::from_secs(20)).unwrap();
+    assert_eq!(
+        ordered["result"]["result"],
+        json!(["slow", "fast"]),
+        "{ordered}"
+    );
+    let title = inbox.take(&server, 14, Duration::from_secs(20)).unwrap();
+    assert_eq!(title["result"]["title"], "fixture");
+    server.shutdown(15);
+}
+
+#[test]
+#[ignore = "requires Chrome"]
+fn a_page_stuck_in_a_script_does_not_delay_other_pages_or_new_pages() {
+    let (root, state, scratch) = directories();
+    let origin = format!("http://{}", stalling_server());
+    let mut server = Sidecar::start(&state, &scratch);
+    let (stuck, other) = two_fixture_pages(&mut server, &root.path().join("profile"), &origin);
+    let mut inbox = Inbox::default();
+    server.send(json!({"id":10,"method":"page.evaluate","params":{"pageId":stuck,"function":"()=>new Promise(()=>{})"}}));
+    std::thread::sleep(Duration::from_millis(200));
+    let (title, elapsed) = inbox.timed(&mut server, 11, "page.title", json!({"pageId":other}));
+    assert_eq!(title["result"]["title"], "fixture", "{title}");
+    assert!(elapsed < Duration::from_millis(1000), "{elapsed:?}");
+    let (created, elapsed) = inbox.timed(&mut server, 12, "browser.new_page", json!({}));
+    assert!(created["result"]["pageId"].is_string(), "{created}");
+    assert!(elapsed < Duration::from_millis(3000), "{elapsed:?}");
+    let (tabs, elapsed) = inbox.timed(&mut server, 13, "browser.tabs", json!({}));
+    for page in [
+        json!(stuck),
+        json!(other),
+        created["result"]["pageId"].clone(),
+    ] {
+        assert!(
+            tabs["result"]["tabs"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|tab| tab["id"] == page),
+            "{tabs}"
+        );
+    }
+    assert!(elapsed < Duration::from_millis(3000), "{elapsed:?}");
+    let (closed, elapsed) = inbox.timed(
+        &mut server,
+        14,
+        "browser.close_tab",
+        json!({"pageId":created["result"]["pageId"]}),
+    );
+    assert!(closed.get("result").is_some(), "{closed}");
+    assert!(elapsed < Duration::from_millis(3000), "{elapsed:?}");
+    server.send(json!({"id":15,"method":"page.title","params":{"pageId":stuck}}));
+    assert!(
+        inbox
+            .take(&server, 15, Duration::from_millis(500))
+            .is_none(),
+        "a request behind the stuck script on the same page must keep its place"
+    );
+    assert!(inbox.take(&server, 10, Duration::from_millis(1)).is_none());
+    let started = Instant::now();
+    server.send(json!({"id":16,"method":"server.shutdown","params":{}}));
+    let interrupted = inbox.take(&server, 10, Duration::from_secs(20)).unwrap();
+    assert_eq!(interrupted["error"]["code"], "Cancelled", "{interrupted}");
+    let queued = inbox.take(&server, 15, Duration::from_secs(20)).unwrap();
+    assert_eq!(queued["error"]["code"], "ShuttingDown", "{queued}");
+    let shutdown = inbox.take(&server, 16, Duration::from_secs(20)).unwrap();
+    assert_eq!(shutdown["result"], json!({}), "{shutdown}");
+    assert!(started.elapsed() < Duration::from_secs(10));
+    server.exit();
+}

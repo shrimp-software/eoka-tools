@@ -1,22 +1,31 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 use eoka::{Browser, Page};
+use parking_lot::Mutex;
 
 use eoka_protocol::sidecar::ServerError;
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct AppState {
     pub agent: crate::agent::SharedAgentSession,
     pub operations: crate::operations::OperationManager,
     pub recordings: crate::recordings::RecordingManager,
-    browser: Option<Arc<Browser>>,
-    engine: Option<crate::engine::Engine>,
-    pages: HashMap<String, Page>,
-    cloudflare: Option<crate::cloudflare::CloudflareWatcher>,
-    shutdown: bool,
+    shared: Arc<Shared>,
+}
+
+#[derive(Default)]
+struct Shared {
+    browser: Mutex<Option<Arc<Browser>>>,
+    pages: Mutex<HashMap<String, Page>>,
+    engine: tokio::sync::Mutex<Option<crate::engine::Engine>>,
+    engine_pages: Mutex<HashSet<String>>,
+    cloudflare: Mutex<Option<crate::cloudflare::CloudflareWatcher>>,
+    topology: tokio::sync::Mutex<()>,
+    shutdown: AtomicBool,
 }
 
 impl AppState {
@@ -24,61 +33,85 @@ impl AppState {
         Self::default()
     }
 
-    pub fn set_browser(&mut self, browser: Browser) {
-        self.browser = Some(Arc::new(browser));
+    pub fn set_browser(&self, browser: Browser) {
+        *self.shared.browser.lock() = Some(Arc::new(browser));
     }
 
-    pub fn take_browser(&mut self) -> Option<Arc<Browser>> {
-        // The engine shares the browser; release its handle with ours.
-        self.engine = None;
-        self.browser.take()
+    pub async fn take_browser(&self) -> Option<Arc<Browser>> {
+        *self.shared.engine.lock().await = None;
+        self.shared.engine_pages.lock().clear();
+        self.shared.browser.lock().take()
     }
 
-    /// The catalog operation engine for this browser, created on first use.
-    pub fn engine(&mut self) -> Result<&mut crate::engine::Engine, ServerError> {
-        let browser = self.browser()?.clone();
-        let operations = self.operations.clone();
-        let recordings = self.recordings.clone();
-        let agent = self.agent.clone();
-        Ok(self.engine.get_or_insert_with(|| {
-            crate::engine::Engine::adopt("sidecar", browser, operations, recordings, agent)
-        }))
+    fn abandon_browser(&self) {
+        if let Ok(mut engine) = self.shared.engine.try_lock() {
+            *engine = None;
+        }
+        self.shared.engine_pages.lock().clear();
+        self.shared.browser.lock().take();
     }
 
     pub fn is_launched(&self) -> bool {
-        self.browser.is_some()
+        self.shared.browser.lock().is_some()
     }
 
-    pub fn browser(&self) -> Result<&Arc<Browser>, ServerError> {
-        self.browser.as_ref().ok_or_else(|| {
+    pub fn browser(&self) -> Result<Arc<Browser>, ServerError> {
+        self.shared.browser.lock().clone().ok_or_else(|| {
             ServerError::internal(
                 "browser not connected; call browser.launch or browser.connect first",
             )
         })
     }
 
-    pub fn insert_page(&mut self, id: String, page: Page) {
-        self.pages.insert(id, page);
+    pub fn insert_page(&self, id: String, page: Page) {
+        self.shared.pages.lock().insert(id, page);
         self.publish_pages();
     }
 
-    /// Run one catalog operation on a page through the engine.
-    ///
-    /// An action that was admitted returns its operation record even when the
-    /// outcome is unverified or failed, like `actions.perform`: the record is
-    /// the evidence, and the caller must not have to guess the operation ID.
+    pub async fn open_page(&self) -> Result<Page, ServerError> {
+        let browser = self.browser()?;
+        let _topology = self.shared.topology.lock().await;
+        let page = browser.new_blank_page().await?;
+        self.insert_page(page.target_id().to_owned(), page.clone());
+        Ok(page)
+    }
+
+    pub async fn attach_page(&self, id: &str) -> Result<Page, ServerError> {
+        let browser = self.browser()?;
+        let _topology = self.shared.topology.lock().await;
+        if let Ok(page) = self.page(id) {
+            return Ok(page);
+        }
+        let page = browser.attach_page(id).await?;
+        self.insert_page(id.to_owned(), page.clone());
+        Ok(page)
+    }
+
     pub async fn catalog(
-        &mut self,
+        &self,
         page_id: &str,
         operation: &eoka_protocol::OperationSpec,
         request: &eoka_protocol::Request,
     ) -> Result<serde_json::Value, ServerError> {
         use eoka_protocol::sidecar::ErrorCode;
-        let page = self.page(page_id)?.clone();
-        let response = self
-            .engine()?
-            .handle_on(page_id, &page, operation.cmd, &request.args_json())
-            .await;
+        let page = self.page(page_id)?;
+        let browser = self.browser()?;
+        let response = {
+            let mut engine = self.shared.engine.lock().await;
+            self.shared.engine_pages.lock().insert(page_id.to_owned());
+            engine
+                .get_or_insert_with(|| {
+                    crate::engine::Engine::adopt(
+                        "sidecar",
+                        browser,
+                        self.operations.clone(),
+                        self.recordings.clone(),
+                        self.agent.clone(),
+                    )
+                })
+                .handle_on(page_id, &page, operation.cmd, &request.args_json())
+                .await
+        };
         if response.ok {
             return Ok(response.data.unwrap_or(serde_json::Value::Null));
         }
@@ -88,7 +121,6 @@ impl AppState {
             return Ok(record.clone());
         }
         let mut error = match response.error_detail {
-            // Core errors keep the kind a registered method would report.
             Some(detail) => match eoka_protocol::sidecar::core_error_code(&detail.code) {
                 Some(code) => ServerError::new(code, detail.message),
                 None => ServerError::from_detail(detail),
@@ -111,48 +143,63 @@ impl AppState {
         Err(error)
     }
 
-    /// Release what the engine attached to a page that is about to close.
-    pub async fn release_engine_tab(&mut self, id: &str) {
-        if let Some(engine) = &mut self.engine {
+    pub async fn release_engine_tab(&self, id: &str) {
+        if !self.shared.engine_pages.lock().remove(id) {
+            return;
+        }
+        if let Some(engine) = self.shared.engine.lock().await.as_mut() {
             engine.release_tab(id).await;
         }
     }
 
-    pub fn remove_page(&mut self, id: &str) -> Option<Page> {
-        if let Some(engine) = &mut self.engine {
-            engine.forget_tab(id);
-        }
-        let page = self.pages.remove(id);
+    pub fn remove_page(&self, id: &str) -> Option<Page> {
+        let page = self.shared.pages.lock().remove(id);
         self.publish_pages();
         page
     }
 
-    /// Solve full-page Cloudflare challenges in every tab until the browser
-    /// is cleaned up.
-    pub fn start_cloudflare_watcher(&mut self, interval: Duration, timeout: Duration) {
-        self.cloudflare = Some(crate::cloudflare::CloudflareWatcher::start(
+    pub async fn close_page(&self, id: &str) -> Result<(), ServerError> {
+        let browser = self.browser()?;
+        let _topology = self.shared.topology.lock().await;
+        browser.close_tab(id).await?;
+        self.remove_page(id);
+        Ok(())
+    }
+
+    pub fn start_cloudflare_watcher(&self, interval: Duration, timeout: Duration) {
+        *self.shared.cloudflare.lock() = Some(crate::cloudflare::CloudflareWatcher::start(
             interval, timeout,
         ));
         self.publish_pages();
     }
 
     fn publish_pages(&self) {
-        if let Some(watcher) = &self.cloudflare {
-            watcher.set_pages(&self.pages);
+        let pages = self.shared.pages.lock();
+        if let Some(watcher) = self.shared.cloudflare.lock().as_ref() {
+            watcher.set_pages(pages.iter());
         }
     }
 
-    pub fn page(&self, id: &str) -> Result<&Page, ServerError> {
-        self.pages
+    pub fn page(&self, id: &str) -> Result<Page, ServerError> {
+        self.shared
+            .pages
+            .lock()
             .get(id)
+            .cloned()
             .ok_or_else(|| ServerError::invalid_page(id))
     }
-    pub async fn reconcile_pages(&mut self) -> Result<Vec<eoka::TabInfo>, ServerError> {
+
+    fn has_page(&self, id: &str) -> bool {
+        self.shared.pages.lock().contains_key(id)
+    }
+
+    pub async fn reconcile_pages(&self) -> Result<Vec<eoka::TabInfo>, ServerError> {
         let browser = self.browser()?;
+        let _topology = self.shared.topology.lock().await;
         let mut tabs = browser.tabs().await?;
         let mut attached = Vec::new();
         for tab in &tabs {
-            if !self.pages.contains_key(&tab.id) {
+            if !self.has_page(&tab.id) {
                 match browser.attach_page(&tab.id).await {
                     Ok(page) => attached.push((tab.id.clone(), page)),
                     Err(error) => {
@@ -170,33 +217,45 @@ impl AppState {
         }
         tabs = browser.tabs().await?;
         let live_tabs: HashSet<&str> = tabs.iter().map(|tab| tab.id.as_str()).collect();
+        let closed: Vec<(String, Page)> = self
+            .shared
+            .pages
+            .lock()
+            .iter()
+            .filter(|(id, _)| !live_tabs.contains(id.as_str()))
+            .map(|(id, page)| (id.clone(), page.clone()))
+            .collect();
         let mut release_error = None;
-        for (id, page) in &self.pages {
-            if !live_tabs.contains(id.as_str()) {
-                if let Err(error) = page.release_all_inputs().await {
-                    release_error.get_or_insert(error);
+        for (_, page) in &closed {
+            if let Err(error) = page.release_all_inputs().await {
+                release_error.get_or_insert(error);
+            }
+        }
+        {
+            let mut pages = self.shared.pages.lock();
+            for (id, _) in &closed {
+                pages.remove(id);
+            }
+            for (id, page) in attached {
+                if live_tabs.contains(id.as_str()) {
+                    pages.entry(id).or_insert(page);
                 }
             }
         }
-        self.pages.retain(|id, _| live_tabs.contains(id.as_str()));
         self.publish_pages();
-        for (id, page) in attached {
-            if live_tabs.contains(id.as_str()) {
-                self.insert_page(id, page);
-            }
-        }
-        tabs.retain(|tab| self.pages.contains_key(&tab.id));
+        tabs.retain(|tab| self.has_page(&tab.id));
         match release_error {
             Some(error) => Err(error.into()),
             None => Ok(tabs),
         }
     }
 
-    pub async fn cleanup_browser(&mut self) -> Result<(), ServerError> {
-        if let Some(watcher) = self.cloudflare.take() {
+    pub async fn cleanup_browser(&self) -> Result<(), ServerError> {
+        let watcher = self.shared.cloudflare.lock().take();
+        if let Some(watcher) = watcher {
             watcher.stop().await;
         }
-        if let Some(engine) = &mut self.engine {
+        if let Some(engine) = self.shared.engine.lock().await.as_mut() {
             engine.release().await;
         }
         let mut cleanup_error = self.recordings.shutdown().await.err();
@@ -212,7 +271,7 @@ impl AppState {
             }
         }
         self.clear_pages();
-        if let Some(browser) = self.take_browser() {
+        if let Some(browser) = self.take_browser().await {
             let browser = Arc::try_unwrap(browser).map_err(|_| {
                 let mut error = cleanup_error.take().unwrap_or_else(|| {
                     ServerError::internal("browser is still in use during shutdown")
@@ -243,36 +302,40 @@ impl AppState {
         }
     }
 
-    pub fn pages(&self) -> impl Iterator<Item = &Page> {
-        self.pages.values()
+    pub fn pages(&self) -> Vec<Page> {
+        self.shared.pages.lock().values().cloned().collect()
     }
 
-    pub fn clear_pages(&mut self) {
-        self.pages.clear();
+    pub fn clear_pages(&self) {
+        self.shared.pages.lock().clear();
         self.publish_pages();
     }
 
-    pub fn mark_shutdown(&mut self) {
-        self.shutdown = true;
+    pub fn abandon_cleanup(&self) {
+        self.shared.cloudflare.lock().take();
+        self.clear_pages();
+        self.abandon_browser();
+    }
+
+    pub fn mark_shutdown(&self) {
+        self.shared.shutdown.store(true, Ordering::Release);
     }
 
     pub fn should_shutdown(&self) -> bool {
-        self.shutdown
+        self.shared.shutdown.load(Ordering::Acquire)
     }
 
-    pub async fn shutdown(&mut self) -> Result<(), ServerError> {
+    pub async fn shutdown(&self) -> Result<(), ServerError> {
         self.mark_shutdown();
         self.recordings.request_shutdown();
         let cleanup = async {
             self.operations.stop().await;
             self.cleanup_browser().await
         };
-        match tokio::time::timeout(std::time::Duration::from_secs(5), cleanup).await {
+        match tokio::time::timeout(Duration::from_secs(5), cleanup).await {
             Ok(result) => result,
             Err(_) => {
-                self.cloudflare = None;
-                self.clear_pages();
-                self.take_browser();
+                self.abandon_cleanup();
                 let mut error = self.recordings.shutdown_timeout_error().unwrap_or_else(|| {
                     ServerError::internal("browser cleanup exceeded the 5 second deadline")
                 });
