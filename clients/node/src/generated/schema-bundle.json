@@ -24868,6 +24868,36 @@
     "major": 2,
     "minor": 1
   },
+  "replacedMethods": {
+    "page.click_shadow": "click_shadow",
+    "page.content": "content",
+    "page.evaluate": "eval",
+    "page.evaluate_in_frame": "frame_eval",
+    "page.evaluate_raw": "eval",
+    "page.execute": "exec",
+    "page.execute_raw": "exec",
+    "page.exists": "exists",
+    "page.fetch": "fetch",
+    "page.fetch_bounded": "fetch",
+    "page.frames": "frames",
+    "page.get_attribute": "get_attribute",
+    "page.get_text": "get_text",
+    "page.key_down": "key.down",
+    "page.key_up": "key.up",
+    "page.mouse_down": "mouse.down",
+    "page.mouse_move": "mouse.move",
+    "page.mouse_up": "mouse.up",
+    "page.release_all_inputs": "release_all_inputs",
+    "page.reset_viewport": "emulate",
+    "page.set_viewport": "emulate",
+    "page.solve_turnstile": "captcha.turnstile",
+    "page.text": "text",
+    "page.title": "info",
+    "page.url": "info",
+    "page.wait_for": "wait",
+    "page.wait_for_text": "wait",
+    "page.wait_for_visible": "wait"
+  },
   "types": {
     "Action": {
       "$defs": {
