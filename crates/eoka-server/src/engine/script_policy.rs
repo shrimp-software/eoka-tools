@@ -5,6 +5,7 @@
 use serde_json::{json, Value};
 
 use super::Engine;
+use super::EngineError;
 use eoka_protocol::Response;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -128,34 +129,34 @@ pub fn parse_mode(raw: &str) -> Result<ScriptPolicyMode, String> {
 }
 
 impl Engine {
-    pub(super) async fn cmd_js_mode(&mut self, args: &Value) -> Result<Response, String> {
+    pub(super) async fn cmd_js_mode(&mut self, args: &Value) -> Result<Response, EngineError> {
         let mode = parse_mode(self.arg_str(args, "mode")?)?;
         self.script_policy.set_mode(mode);
         Ok(Response::ok(self.script_policy.status_json()))
     }
 
-    pub(super) async fn cmd_js_allow(&mut self, args: &Value) -> Result<Response, String> {
+    pub(super) async fn cmd_js_allow(&mut self, args: &Value) -> Result<Response, EngineError> {
         let domain = self.arg_str(args, "domain")?.to_string();
         self.script_policy.add_allow(domain);
         Ok(Response::ok(self.script_policy.status_json()))
     }
 
-    pub(super) async fn cmd_js_block(&mut self, args: &Value) -> Result<Response, String> {
+    pub(super) async fn cmd_js_block(&mut self, args: &Value) -> Result<Response, EngineError> {
         let domain = self.arg_str(args, "domain")?.to_string();
         self.script_policy.add_block(domain);
         Ok(Response::ok(self.script_policy.status_json()))
     }
 
-    pub(super) async fn cmd_js_remove(&mut self, args: &Value) -> Result<Response, String> {
+    pub(super) async fn cmd_js_remove(&mut self, args: &Value) -> Result<Response, EngineError> {
         let domain = self.arg_str(args, "domain")?;
         if self.script_policy.remove(domain) {
             Ok(Response::ok(self.script_policy.status_json()))
         } else {
-            Err(format!("'{}' not found in either list", domain))
+            Err(format!("'{}' not found in either list", domain).into())
         }
     }
 
-    pub(super) async fn cmd_js_list(&mut self) -> Result<Response, String> {
+    pub(super) async fn cmd_js_list(&mut self) -> Result<Response, EngineError> {
         Ok(Response::ok(self.script_policy.status_json()))
     }
 }

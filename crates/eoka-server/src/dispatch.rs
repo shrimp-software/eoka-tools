@@ -78,7 +78,11 @@ pub async fn dispatch(
             return Ok(response.data.unwrap_or(Value::Null));
         }
         return Err(match response.error_detail {
-            Some(detail) => ServerError::from_detail(detail),
+            // Core errors keep the kind a registered method would report.
+            Some(detail) => match eoka_protocol::sidecar::core_error_code(&detail.code) {
+                Some(code) => ServerError::new(code, detail.message),
+                None => ServerError::from_detail(detail),
+            },
             None => ServerError::new(
                 ErrorCode::Operation,
                 response
