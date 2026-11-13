@@ -90,23 +90,13 @@ async fn main() {
             return;
         }
         Command::Status => {
-            let running = client::is_daemon_running(&effective_session);
+            let status = sessions::status(&effective_session).await;
             if json_mode {
-                let response = protocol::Response::ok(json!({
-                    "running": running,
-                    "session": effective_session,
-                    "socket": session::socket_path(&effective_session).to_string_lossy(),
-                }))
-                .with_meta(response_meta(&effective_session, "status"));
+                let response = protocol::Response::ok(status)
+                    .with_meta(response_meta(&effective_session, "status"));
                 output::print_response(&response, true);
-            } else if running {
-                println!("Daemon running (session={})", effective_session);
-                println!(
-                    "Socket: {}",
-                    session::socket_path(&effective_session).display()
-                );
             } else {
-                println!("No daemon running (session={})", effective_session);
+                print!("{}", sessions::status_text(&status));
             }
             return;
         }

@@ -184,6 +184,7 @@ impl AgentSession {
             blocker = blockers::interrupted(page, true) => {
                 bail!("{}: {}; no fresh targets were issued", blocker.code(), blocker.describe())
             }
+            _ = blockers::abandoned() => bail!("caller_left: no fresh targets were issued"),
         }
     }
 
@@ -580,6 +581,7 @@ impl AgentSession {
             biased;
             waited = timeout_at(operation_deadline, execution) => Some(waited),
             _ = blockers::interrupted(page, false) => None,
+            _ = blockers::abandoned() => None,
         };
         let pending = || {
             ErrorDetail::new("operation_pending", "Response budget reached; inspect this operation ID. Admission or execution may still be running; do not repeat the action.").retryable(false)

@@ -41,6 +41,7 @@ pub enum Blocker {
 pub enum Policy {
     Free,
     Gate,
+    Observe,
     Capture,
     Read,
     Script,
@@ -58,7 +59,9 @@ pub enum Stage {
 impl Policy {
     pub fn interrupted(self) -> Stage {
         match self {
-            Policy::Read | Policy::Wait | Policy::Capture => Stage::ReadInterrupted,
+            Policy::Read | Policy::Wait | Policy::Capture | Policy::Observe => {
+                Stage::ReadInterrupted
+            }
             _ => Stage::ActionInterrupted,
         }
     }
@@ -428,6 +431,38 @@ pub async fn interrupted(page: &Page, navigation: bool) -> Blocker {
     }
 }
 
+tokio::task_local! {
+    static ABANDON: watch::Receiver<bool>;
+}
+
+pub async fn abandonable<F: Future>(caller_left: watch::Receiver<bool>, work: F) -> F::Output {
+    ABANDON.scope(caller_left, work).await
+}
+
+pub async fn abandoned() {
+    let Ok(mut caller_left) = ABANDON.try_with(Clone::clone) else {
+        return std::future::pending().await;
+    };
+    loop {
+        if *caller_left.borrow() {
+            return;
+        }
+        if caller_left.changed().await.is_err() {
+            return std::future::pending().await;
+        }
+    }
+}
+
+fn abandoned_response(command: &str) -> Response {
+    Response::err_detail(
+        ErrorDetail::new(
+            "caller_left",
+            format!("The caller disconnected before `{command}` answered, so the session stopped waiting for it."),
+        )
+        .retryable(false),
+    )
+}
+
 pub async fn stop_loading(page: &Page) -> bool {
     let stopped = tokio::time::timeout(
         CONTROL_LIMIT,
@@ -485,6 +520,7 @@ pub async fn wait_unless_dialog(
         biased;
         record = operations.wait(id, budget) => record,
         _ = interrupted(page, false) => operations.get(id).await,
+        _ = abandoned() => operations.get(id).await,
     }
 }
 
@@ -589,7 +625,7 @@ impl super::Engine {
         };
         let blocker = match confirmed(&page, grace).await? {
             Blocker::Navigation(_) if policy == Policy::Navigate => {
-                stop_loading(&page).await;
+                self.supersede_navigation(&page).await;
                 return None;
             }
             Blocker::Navigation(_) if matches!(policy, Policy::Wait | Policy::Capture) => {
@@ -603,7 +639,7 @@ impl super::Engine {
             &remedies.name(command, arguments),
             Stage::NotStarted,
         ));
-        if matches!(policy, Policy::Gate | Policy::Navigate) && command != "agent_observe" {
+        if matches!(policy, Policy::Gate | Policy::Navigate) {
             response.data = Some(json!({
                 "status": eoka_protocol::OperationStatus::NotDispatched,
                 "operation_id": arguments["operation_id"],
@@ -612,13 +648,49 @@ impl super::Engine {
         Some(response)
     }
 
+    async fn supersede_navigation(&self, page: &Page) {
+        let running = self
+            .operations
+            .list(eoka_protocol::OperationListArgs {
+                limit: Some(100),
+                before_ms: None,
+            })
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|record| {
+                matches!(record.state, eoka_protocol::OperationState::Running)
+                    && record.target_id == page.target_id()
+                    && matches!(
+                        record.action.as_str(),
+                        "navigate"
+                            | "navigate_with_headers"
+                            | "reload"
+                            | "back"
+                            | "forward"
+                            | "history"
+                    )
+            });
+        let mut canceled = Vec::new();
+        for record in running {
+            if self.operations.cancel(&record.id).await.is_ok() {
+                canceled.push(record.id);
+            }
+        }
+        stop_loading(page).await;
+        for id in canceled {
+            settle(&self.operations, &id).await;
+        }
+    }
+
     pub(super) async fn dispatch_guarded(
         &mut self,
         command: &str,
         arguments: &Value,
     ) -> Result<Response, super::EngineError> {
         let policy = policy(command, arguments);
-        if !matches!(policy, Policy::Read | Policy::Wait | Policy::Capture) {
+        let sleeps = command == "wait" && policy == Policy::Free;
+        if !sleeps && !matches!(policy, Policy::Read | Policy::Wait | Policy::Capture) {
             return self.dispatch(command, arguments).await;
         }
         let page = self.current_page();
@@ -919,11 +991,11 @@ pub fn policy(command: &str, arguments: &Value) -> Policy {
                 Policy::Capture
             }
         }
-        "agent_observe" | "agent_step" | "action_perform" | "click" | "dblclick" | "fill"
-        | "select" | "hover" | "key" | "click_shadow" | "mouse_down" | "mouse_move"
-        | "mouse_up" | "key_down" | "key_up" | "scroll" | "set_storage" | "save_state"
-        | "spa_navigate" | "wasm_write" | "captcha_detect" | "captcha_inject"
-        | "download_start" => Policy::Gate,
+        "agent_observe" => Policy::Observe,
+        "agent_step" | "action_perform" | "click" | "dblclick" | "fill" | "select" | "hover"
+        | "key" | "click_shadow" | "mouse_down" | "mouse_move" | "mouse_up" | "key_down"
+        | "key_up" | "scroll" | "set_storage" | "save_state" | "spa_navigate" | "wasm_write"
+        | "captcha_detect" | "captcha_inject" | "download_start" => Policy::Gate,
         _ => Policy::Free,
     }
 }
@@ -949,18 +1021,23 @@ pub async fn guard<E>(
     limit: Option<Duration>,
     work: impl Future<Output = Result<Response, E>>,
 ) -> Result<Response, E> {
-    let Some(page) = page else {
-        return work.await;
-    };
     let deadline = async {
         match limit {
             Some(limit) => tokio::time::sleep(limit).await,
             None => std::future::pending().await,
         }
     };
+    let Some(page) = page.filter(|_| policy != Policy::Free) else {
+        return tokio::select! {
+            biased;
+            result = work => result,
+            _ = abandoned() => Ok(abandoned_response(command)),
+        };
+    };
     tokio::select! {
         biased;
         result = work => result,
+        _ = abandoned() => Ok(abandoned_response(command)),
         blocker = interrupted(page, policy != Policy::Wait) => {
             Ok(Response::err_detail(blocker.detail(&remedies, command, policy.interrupted())))
         }
@@ -1167,6 +1244,9 @@ mod tests {
         assert_eq!(policy("eval", &none), Policy::Script);
         assert_eq!(policy("open", &none), Policy::Navigate);
         assert_eq!(policy("click", &none), Policy::Gate);
+        assert_eq!(policy("agent_observe", &none), Policy::Observe);
+        assert_eq!(Policy::Observe.interrupted(), Stage::ReadInterrupted);
+        assert_eq!(Policy::Script.interrupted(), Stage::ActionInterrupted);
         assert_eq!(policy("screenshot", &none), Policy::Capture);
         assert_eq!(
             policy("screenshot", &json!({"annotate":true})),

@@ -427,17 +427,15 @@ pub async fn send_command(
     mut request: Request,
     spec: LaunchSpec,
 ) -> anyhow::Result<Response> {
+    let mut reply_limit = None;
     if !matches!(request, Request::SessionHello) {
         if let Ok(stream) = connect_session(session_name).await {
-            let hello = tokio::time::timeout(
-                Duration::from_secs(5),
-                exchange_request(stream, &Request::SessionHello),
-            )
-            .await;
-            let hello = match hello {
-                Ok(Ok(response)) if response.ok => response.data.unwrap_or_default(),
-                _ => return Ok(non_retryable_error("protocol_mismatch", "Daemon compatibility could not be verified. Upgrade explicitly; no browser was restarted and no action was sent.")),
+            let hello = match exchange(stream, &hello_wire(), HELLO_LIMIT).await {
+                Ok(response) if response.ok => response.data.unwrap_or_default(),
+                Ok(_) => return Ok(non_retryable_error("protocol_mismatch", "Daemon compatibility could not be verified. Upgrade explicitly; no browser was restarted and no action was sent.")),
+                Err(_) => return Ok(silent_daemon(session_name)),
             };
+            reply_limit = hello["command_limit_ms"].as_u64();
             if hello["protocol_major"] != eoka_protocol::sidecar::PROTOCOL_VERSION.major {
                 return Ok(non_retryable_error("protocol_mismatch", "Client and daemon protocols differ. Upgrade explicitly; the existing browser was retained."));
             }
@@ -492,7 +490,7 @@ pub async fn send_command(
             | "operation_wait"
             | "operation_cancel"
     ) {
-        return send_operation(session_name, request, &spec).await;
+        return send_operation(session_name, request, &spec, reply_limit).await;
     }
     if matches!(
         request,
@@ -502,23 +500,248 @@ pub async fn send_command(
             | Request::DownloadWait(_)
             | Request::DownloadCancel(_)
     ) {
-        return Ok(send_download(session_name, &request, &spec).await);
+        return Ok(send_download(session_name, &request, &spec, reply_limit).await);
     }
     if let Request::CaptchaDatadome(args) = request {
-        return Ok(send_datadome(session_name, args).await);
+        return Ok(send_datadome(session_name, args, reply_limit).await);
     }
     if matches!(request, Request::Frames | Request::FrameEval(_)) {
         return Ok(send_existing_session(session_name, &request, "frame_transport_error",
-            "This daemon does not support frame operations. Upgrade the daemon explicitly; the existing browser was not restarted.").await);
+            "This daemon does not support frame operations. Upgrade the daemon explicitly; the existing browser was not restarted.", reply_limit).await);
     }
-    send_command_once(session_name, request, &spec).await
+    send_command_once(session_name, request, &spec, reply_limit).await
+}
+
+const HELLO_LIMIT: Duration = Duration::from_secs(5);
+const STATUS_LIMIT: Duration = Duration::from_millis(1500);
+const REPLY_MARGIN_MS: u64 = 15_000;
+const LAUNCH_MARGIN_MS: u64 = 30_000;
+const UNKNOWN_COMMAND_LIMIT_MS: u64 = 90_000;
+
+enum Lost {
+    Timeout(Duration),
+    Disconnected,
+}
+
+fn hello_wire() -> serde_json::Value {
+    serde_json::json!({"cmd":"session_hello"})
+}
+
+fn request_wire(request: &Request) -> anyhow::Result<serde_json::Value> {
+    let mut wire = serde_json::to_value(request)?;
+    wire["protocol_major"] = serde_json::json!(eoka_protocol::sidecar::PROTOCOL_VERSION.major);
+    Ok(wire)
+}
+
+async fn exchange(
+    stream: UnixStream,
+    wire: &serde_json::Value,
+    limit: Duration,
+) -> Result<Response, Lost> {
+    let (mut reader, mut writer) = stream.into_split();
+    let reply = async {
+        write_msg(&mut writer, wire).await?;
+        Ok::<Response, anyhow::Error>(read_msg(&mut reader).await?)
+    };
+    match tokio::time::timeout(limit, reply).await {
+        Ok(Ok(response)) => Ok(response),
+        Ok(Err(_)) => Err(Lost::Disconnected),
+        Err(_) => Err(Lost::Timeout(limit)),
+    }
+}
+
+fn configured_reply_ms() -> Option<u64> {
+    std::env::var("EOKA_REPLY_TIMEOUT_MS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .filter(|limit| *limit > 0)
+}
+
+fn reply_budget(request: &Request, command_limit_ms: Option<u64>) -> Duration {
+    let args = request.args_json();
+    let number = |value: &serde_json::Value| value.as_u64();
+    let own = match request {
+        Request::SessionHello => return HELLO_LIMIT,
+        Request::AgentStep(_) | Request::AgentObserve(_) => {
+            return Duration::from_millis(
+                number(&args["timeout_ms"]).unwrap_or(10_000).min(60_000) + 1_000,
+            )
+        }
+        Request::Wait(_) => number(&args["ms"])
+            .max(number(&args["timeout"]))
+            .or(Some(10_000)),
+        Request::NetworkWait(_) => number(&args["timeout"]).or(Some(10_000)),
+        Request::OperationWait(_) | Request::DownloadWait(_) => {
+            number(&args["timeout_ms"]).or(Some(30_000))
+        }
+        Request::CaptchaDatadome(_) => number(&args["timeout_ms"])
+            .map(|limit| limit.saturating_mul(number(&args["max_attempts"]).unwrap_or(1).max(1))),
+        Request::CaptchaTurnstile(_) => number(&args["timeout_ms"]),
+        Request::Open(_) => Some(
+            number(&args["timeout_ms"])
+                .unwrap_or(30_000)
+                .saturating_add(LAUNCH_MARGIN_MS),
+        ),
+        Request::TabAttach(_) | Request::TabNew(_) => Some(30_000 + LAUNCH_MARGIN_MS),
+        Request::ActionCommand(command) => Some(
+            number(&command.arguments["timeout_ms"])
+                .max(number(&command.arguments["start_timeout_ms"]))
+                .unwrap_or(30_000),
+        ),
+        Request::ActionPerform(_) => Some(number(&args["options"]["timeout_ms"]).unwrap_or(30_000)),
+        Request::Click(_)
+        | Request::DblClick(_)
+        | Request::Fill(_)
+        | Request::Select(_)
+        | Request::Hover(_)
+        | Request::Key(_)
+        | Request::Back
+        | Request::Forward
+        | Request::Reload => Some(number(&args["timeout_ms"]).unwrap_or(30_000)),
+        Request::DownloadStart(_) => number(&args["start_timeout_ms"]).or(Some(30_000)),
+        _ => None,
+    };
+    let limit = own
+        .or_else(configured_reply_ms)
+        .or(command_limit_ms)
+        .unwrap_or(UNKNOWN_COMMAND_LIMIT_MS);
+    Duration::from_millis(limit.saturating_add(REPLY_MARGIN_MS))
+}
+
+fn log_path(session_name: &str) -> String {
+    session::socket_path(session_name)
+        .with_extension("log")
+        .to_string_lossy()
+        .into_owned()
+}
+
+fn session_flag(session_name: &str) -> String {
+    if session_name == "default" {
+        String::new()
+    } else {
+        format!("--session {session_name} ")
+    }
+}
+
+fn silent_daemon(session_name: &str) -> Response {
+    let flag = session_flag(session_name);
+    Response::err_detail(
+        eoka_protocol::ErrorDetail::new(
+            "daemon_unresponsive",
+            format!(
+                "Session `{session_name}` accepted the connection but did not answer within {} s; its daemon is suspended, overloaded or shutting down. No command was sent.",
+                HELLO_LIMIT.as_secs()
+            ),
+        )
+        .retryable(true)
+        .hint(format!(
+            "Check it with `eoka {flag}status`; the daemon log is {}. If it stays silent, `eoka {flag}kill` force-stops the daemon and closes its browser, losing page state.",
+            log_path(session_name)
+        ))
+        .context(eoka_protocol::ErrorContext {
+            action_status: Some(eoka_protocol::ActionStatus::NotAttempted),
+            ..Default::default()
+        }),
+    )
+}
+
+pub async fn session_status(session_name: &str) -> Option<serde_json::Value> {
+    let stream = connect_session(session_name).await.ok()?;
+    exchange(stream, &hello_wire(), STATUS_LIMIT)
+        .await
+        .ok()
+        .filter(|response| response.ok)
+        .and_then(|response| response.data)
+}
+
+async fn daemon_activity(session_name: &str) -> (String, String) {
+    let flag = session_flag(session_name);
+    let status = format!("`eoka {flag}status` shows what the session is doing");
+    let last_resort = format!(
+        "As a last resort `eoka {flag}kill` force-stops the daemon and closes its browser, losing page state; the daemon log is {}.",
+        log_path(session_name)
+    );
+    let Some(hello) = session_status(session_name).await else {
+        return (
+            "The daemon does not answer status probes either, so its process is suspended or overloaded.".into(),
+            last_resort,
+        );
+    };
+    let activity = &hello["activity"];
+    let blocker = activity["blocker"]["hint"].as_str();
+    let state = match activity["busy"]["cmd"].as_str() {
+        Some(command) => format!(
+            "The daemon is still running `{command}` ({:.1} s so far).",
+            activity["busy"]["for_ms"].as_u64().unwrap_or_default() as f64 / 1000.0
+        ),
+        None => "The daemon is idle again, so the reply was lost after the command ended.".into(),
+    };
+    let hint = match blocker {
+        Some(blocker) => format!("{blocker} {status}."),
+        None => format!("{status}. {last_resort}"),
+    };
+    (state, hint)
+}
+
+async fn unanswered(session_name: &str, request: &Request, lost: Lost) -> Response {
+    let command = request.cmd();
+    let read_only = eoka_protocol::operation_by_cmd(command).is_some_and(|spec| spec.read_only);
+    let (state, hint) = daemon_activity(session_name).await;
+    let (code, cause) = match lost {
+        Lost::Timeout(limit) => (
+            "reply_timeout",
+            format!(
+                "No reply to `{command}` from session `{session_name}` within {} s.",
+                limit.as_secs()
+            ),
+        ),
+        Lost::Disconnected => (
+            "transport_error",
+            format!("Session `{session_name}` closed the connection before answering `{command}`."),
+        ),
+    };
+    let consequence = if read_only {
+        "Nothing was sent again."
+    } else {
+        "The command may have run; it was not sent again."
+    };
+    let detail = eoka_protocol::ErrorDetail::new(code, format!("{cause} {state} {consequence}"))
+        .retryable(read_only)
+        .hint(hint);
+    Response::err_detail(if read_only {
+        detail
+    } else {
+        detail.context(eoka_protocol::ErrorContext {
+            action_status: Some(eoka_protocol::ActionStatus::MayHaveExecuted),
+            ..Default::default()
+        })
+    })
+}
+
+fn no_session(session_name: &str) -> Response {
+    let flag = session_flag(session_name);
+    Response::err_detail(
+        eoka_protocol::ErrorDetail::new(
+            "session_unavailable",
+            format!("No session named `{session_name}` is running; nothing was sent."),
+        )
+        .retryable(false)
+        .hint(format!(
+            "Start it with `eoka {flag}open URL`. `eoka sessions` lists the sessions that are running."
+        )),
+    )
 }
 
 fn non_retryable_error(code: &str, message: &str) -> Response {
     Response::err_detail(eoka_protocol::ErrorDetail::new(code, message).retryable(false))
 }
 
-async fn send_download(session_name: &str, request: &Request, spec: &LaunchSpec) -> Response {
+async fn send_download(
+    session_name: &str,
+    request: &Request,
+    spec: &LaunchSpec,
+    reply_limit: Option<u64>,
+) -> Response {
     use eoka_protocol::{ActionStatus, ErrorContext};
     let id = match request {
         Request::DownloadStart(args) => args.operation_id.as_deref(),
@@ -571,16 +794,22 @@ async fn send_download(session_name: &str, request: &Request, spec: &LaunchSpec)
     } else {
         request.clone()
     };
-    let mut response = match exchange_request(stream, &wire).await {
-        Ok(response) if response.error.as_deref().is_some_and(|message| {
+    let exchanged = match request_wire(&wire) {
+        Ok(message) => exchange(stream, &message, reply_budget(request, reply_limit))
+            .await
+            .ok(),
+        Err(_) => None,
+    };
+    let mut response = match exchanged {
+        Some(response) if response.error.as_deref().is_some_and(|message| {
             message.contains("unknown variant") || message.contains("unknown eoka protocol command")
         }) => disconnected(
             "unsupported_operation",
             "This daemon does not support downloads. Restart it explicitly after upgrading; no action was replayed.",
             ActionStatus::NotAttempted,
         ),
-        Ok(response) => response,
-        Err(_) => disconnected(
+        Some(response) => response,
+        None => disconnected(
             "download_transport_error",
             "Session transport failed; the action may have executed. Inspect download list before retrying. No restart or replay was attempted.",
             ActionStatus::MayHaveExecuted,
@@ -596,12 +825,16 @@ async fn send_download(session_name: &str, request: &Request, spec: &LaunchSpec)
     response
 }
 
-async fn send_datadome(session_name: &str, args: CaptchaDatadomeArgs) -> Response {
+async fn send_datadome(
+    session_name: &str,
+    args: CaptchaDatadomeArgs,
+    reply_limit: Option<u64>,
+) -> Response {
     if let Err(message) = args.validate() {
         return non_retryable_error("invalid_input", message);
     }
     send_existing_session(session_name, &Request::CaptchaDatadome(args), "datadome_transport_error",
-        "This daemon does not support DataDome. Upgrade the daemon explicitly; the existing browser was not restarted.").await
+        "This daemon does not support DataDome. Upgrade the daemon explicitly; the existing browser was not restarted.", reply_limit).await
 }
 
 async fn send_existing_session(
@@ -609,6 +842,7 @@ async fn send_existing_session(
     request: &Request,
     transport_error: &str,
     unsupported_message: &str,
+    reply_limit: Option<u64>,
 ) -> Response {
     let Ok(stream) = connect_session(session_name).await else {
         return non_retryable_error(
@@ -616,11 +850,17 @@ async fn send_existing_session(
             "Existing session unavailable; open the intended page first. No browser was launched.",
         );
     };
-    match exchange_request(stream, request).await {
-        Ok(response) if response.error.as_deref().is_some_and(|error| error.contains(request.cmd()) && (error.contains("unknown variant") || error.contains("unknown eoka protocol command"))) =>
+    let exchanged = match request_wire(request) {
+        Ok(wire) => exchange(stream, &wire, reply_budget(request, reply_limit))
+            .await
+            .ok(),
+        Err(_) => None,
+    };
+    match exchanged {
+        Some(response) if response.error.as_deref().is_some_and(|error| error.contains(request.cmd()) && (error.contains("unknown variant") || error.contains("unknown eoka protocol command"))) =>
             non_retryable_error("unsupported_operation", unsupported_message),
-        Ok(response) => response,
-        Err(_) => non_retryable_error(transport_error, "Session transport failed; the request may have executed. Inspect the existing page before retrying. No replay was attempted."),
+        Some(response) => response,
+        None => non_retryable_error(transport_error, "Session transport failed; the request may have executed. Inspect the existing page before retrying. No replay was attempted."),
     }
 }
 
@@ -628,6 +868,7 @@ async fn send_command_once(
     session_name: &str,
     request: Request,
     spec: &LaunchSpec,
+    reply_limit: Option<u64>,
 ) -> anyhow::Result<Response> {
     let stream = match connect_session(session_name).await {
         Ok(s) => s,
@@ -646,27 +887,20 @@ async fn send_command_once(
             launch_daemon(session_name, spec)?;
             wait_for_socket(session_name).await?
         }
-        Err(_) => {
-            return Ok(non_retryable_error(
-                "session_unavailable",
-                "Existing session unavailable; open the intended session explicitly",
-            ))
-        }
+        Err(_) => return Ok(no_session(session_name)),
     };
 
-    exchange_request(stream, &request).await
+    let wire = request_wire(&request)?;
+    Ok(
+        match exchange(stream, &wire, reply_budget(&request, reply_limit)).await {
+            Ok(response) => response,
+            Err(lost) => unanswered(session_name, &request, lost).await,
+        },
+    )
 }
 
 async fn connect_session(session_name: &str) -> std::io::Result<UnixStream> {
     UnixStream::connect(session::trusted_socket_path(session_name)?).await
-}
-
-async fn exchange_request(stream: UnixStream, request: &Request) -> anyhow::Result<Response> {
-    let (mut reader, mut writer) = stream.into_split();
-    let mut wire = serde_json::to_value(request)?;
-    wire["protocol_major"] = serde_json::json!(eoka_protocol::sidecar::PROTOCOL_VERSION.major);
-    write_msg(&mut writer, &wire).await?;
-    Ok(read_msg(&mut reader).await?)
 }
 
 async fn wait_for_socket(session_name: &str) -> anyhow::Result<UnixStream> {
@@ -836,6 +1070,7 @@ async fn send_operation(
     session_name: &str,
     request: Request,
     spec: &LaunchSpec,
+    reply_limit: Option<u64>,
 ) -> anyhow::Result<Response> {
     let args = request.args_json();
     let id = args["operation_id"]
@@ -859,40 +1094,39 @@ async fn send_operation(
             launch_daemon(session_name, spec)?;
             wait_for_socket(session_name).await?
         }
+        Err(_) if matches!(request, Request::AgentObserve(_)) => {
+            return Ok(no_session(session_name))
+        }
         Err(_) => {
-            return Ok(non_retryable_error(
-                "session_unavailable",
-                &format!("Existing session unavailable; operation {id} was not sent"),
-            ))
+            let mut response = no_session(session_name);
+            response.data = Some(serde_json::json!({"operation_id":id,"status":"not_dispatched"}));
+            return Ok(response);
         }
     };
-    let (mut reader, mut writer) = stream.into_split();
-    let exchange = async {
-        write_msg(&mut writer, &wire).await?;
-        Ok::<Response, anyhow::Error>(read_msg(&mut reader).await?)
+    let lost = match exchange(stream, &wire, reply_budget(&request, reply_limit)).await {
+        Ok(response) => return Ok(response),
+        Err(lost) => lost,
     };
-    let result = if matches!(request, Request::AgentStep(_) | Request::AgentObserve(_)) {
-        tokio::time::timeout(
-            Duration::from_millis(args["timeout_ms"].as_u64().unwrap_or(10000).min(60000) + 1000),
-            exchange,
-        )
-        .await
-        .unwrap_or_else(|_| Err(anyhow::anyhow!("Agent response deadline exceeded")))
-    } else {
-        exchange.await
+    let (state, hint) = daemon_activity(session_name).await;
+    let cause = match lost {
+        Lost::Timeout(limit) => format!("No reply within {:.1} s", limit.as_secs_f64()),
+        Lost::Disconnected => "Connection lost".to_owned(),
     };
-    Ok(match result {
-        Ok(response) => response,
-        Err(_) if matches!(request, Request::AgentObserve(_)) => non_retryable_error(
-            "observation_transport_error",
-            "Observation response unavailable; no action was requested.",
-        ),
-        Err(_) => {
-            let mut response = Response::err_detail(eoka_protocol::ErrorDetail::new("operation_transport_error", format!("Connection lost; inspect operation {id}. Its outcome is unknown. No action was replayed.")).retryable(false).context(eoka_protocol::ErrorContext { operation_id: Some(id.clone()), phase: Some("transport".into()), action_status: Some(eoka_protocol::ActionStatus::MayHaveExecuted), ..Default::default() }));
-            response.data = Some(serde_json::json!({"operation_id":id,"status":"outcome_unknown"}));
-            response
-        }
-    })
+    if matches!(request, Request::AgentObserve(_)) {
+        return Ok(Response::err_detail(
+            eoka_protocol::ErrorDetail::new(
+                "observation_transport_error",
+                format!(
+                    "{cause}: the observation is unavailable. {state} No action was requested."
+                ),
+            )
+            .retryable(false)
+            .hint(hint),
+        ));
+    }
+    let mut response = Response::err_detail(eoka_protocol::ErrorDetail::new("operation_transport_error", format!("{cause}; inspect operation {id}. Its outcome is unknown. {state} No action was replayed.")).retryable(false).hint(hint).context(eoka_protocol::ErrorContext { operation_id: Some(id.clone()), phase: Some("transport".into()), action_status: Some(eoka_protocol::ActionStatus::MayHaveExecuted), ..Default::default() }));
+    response.data = Some(serde_json::json!({"operation_id":id,"status":"outcome_unknown"}));
+    Ok(response)
 }
 
 #[cfg(test)]
