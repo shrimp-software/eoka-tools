@@ -371,7 +371,7 @@ eoka tack 'return await tools.invoke({ path: "eoka.info", input: {} });'
 ## Documentation
 
 - [eoka-mcp](crates/eoka-mcp/README.md)
-- [eoka CLI skill](crates/eoka-cli/SKILL.md)
+- [eoka CLI skill](crates/eoka-cli/skill/SKILL.md)
 - [eoka-runner](crates/eoka-runner/README.md)
 - [Go client](clients/go/README.md)
 - [server protocol](PROTOCOL.md)
@@ -379,7 +379,7 @@ eoka tack 'return await tools.invoke({ path: "eoka.info", input: {} });'
 Install the Codex skill with the open skills CLI:
 
 ```sh
-npx skills add https://github.com/shrimp-software/eoka-tools/tree/main/crates/eoka-cli --skill eoka -a codex -y
+npx skills add https://github.com/shrimp-software/eoka-tools/tree/main/crates/eoka-cli/skill --skill eoka --global -a codex -y
 ```
 
 ## License
