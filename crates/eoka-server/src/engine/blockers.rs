@@ -743,11 +743,6 @@ impl super::Engine {
             .map(|tab| tab.page.clone())
     }
 
-    pub fn blocker_summary(&self) -> Option<Value> {
-        let page = self.current_page()?;
-        current(&page).map(|blocker| blocker.summary())
-    }
-
     pub(super) async fn refuse_blocked(
         &mut self,
         command: &str,

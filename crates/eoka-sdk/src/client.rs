@@ -1069,6 +1069,17 @@ pub fn kill_daemon(session_name: &str) -> anyhow::Result<bool> {
             }
             std::thread::sleep(Duration::from_millis(25));
         }
+        if let Some(pid) = original_pid.as_deref() {
+            let exited = std::time::Instant::now() + Duration::from_secs(5);
+            while std::time::Instant::now() < exited
+                && StdCommand::new("kill")
+                    .args(["-0", pid.trim()])
+                    .output()
+                    .is_ok_and(|probe| probe.status.success())
+            {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
     }
     if std::fs::read_to_string(&pid_path).ok() == original_pid {
         let _ = std::fs::remove_file(&sock);

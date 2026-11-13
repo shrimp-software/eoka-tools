@@ -154,9 +154,12 @@ pub async fn run(session_name: &str, spec: LaunchSpec) -> anyhow::Result<()> {
         }
     }
 
+    board.finished(None);
     frontdoor.abort();
     let _ = frontdoor.await;
     waiters.shutdown().await;
+    drop(board);
+    drop(handler);
     let _ = std::fs::remove_file(&sock_path);
     let _ = std::fs::remove_file(&pid_path);
     eprintln!("[eoka] daemon stopped");
