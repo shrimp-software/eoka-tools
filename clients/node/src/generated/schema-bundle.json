@@ -79,6 +79,9 @@
     "network.clear",
     "captcha.datadome",
     "captcha.turnstile",
+    "dialog.accept",
+    "dialog.dismiss",
+    "captcha.detect",
     "captcha.inject"
   ],
   "methods": {
@@ -3341,6 +3344,21 @@
       },
       "result": {}
     },
+    "captcha.detect": {
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "pageId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "pageId"
+        ],
+        "type": "object"
+      },
+      "result": {}
+    },
     "captcha.inject": {
       "params": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -4014,6 +4032,45 @@
           "pageId"
         ],
         "title": "DeleteCookieArgs",
+        "type": "object"
+      },
+      "result": {}
+    },
+    "dialog.accept": {
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "pageId": {
+            "type": "string"
+          },
+          "prompt_text": {
+            "default": null,
+            "description": "Text to enter for a prompt() dialog; ignored for alert and confirm.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "pageId"
+        ],
+        "title": "DialogAcceptArgs",
+        "type": "object"
+      },
+      "result": {}
+    },
+    "dialog.dismiss": {
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "pageId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "pageId"
+        ],
         "type": "object"
       },
       "result": {}

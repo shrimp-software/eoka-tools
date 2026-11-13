@@ -2,7 +2,7 @@
 import type { CallOptions } from "../client.js";
 import type { MethodParams, MethodResults } from "./protocol.js";
 
-export const catalogMethods = ["back","captcha.datadome","captcha.inject","captcha.turnstile","clear_cookies","click","click_shadow","clone_from","console","content","cookies","delete_cookie","double_click","download.cancel","download.get","download.list","download.start","download.wait","dump_storage","emulate","errors","eval","exec","exists","fake_camera","fetch","fill","find","forward","frame_eval","frames","get_attribute","get_text","headers","hover","info","intercept.add","intercept.list","intercept.log","intercept.remove","js.allow","js.block","js.list","js.mode","js.remove","key","key.down","key.up","load_state","mouse.down","mouse.move","mouse.up","network.clear","network.export","network.log","network.record.start","network.record.status","network.record.stop","network.show","network.wait","observe","open","release_all_inputs","reload","save_state","screenshot","scroll","select","set_cookie","set_storage","snapshot","spa.info","spa.navigate","storage","text","wait","wasm.find","wasm.info","wasm.read","wasm.write"] as const;
+export const catalogMethods = ["back","captcha.datadome","captcha.detect","captcha.inject","captcha.turnstile","clear_cookies","click","click_shadow","clone_from","console","content","cookies","delete_cookie","dialog.accept","dialog.dismiss","double_click","download.cancel","download.get","download.list","download.start","download.wait","dump_storage","emulate","errors","eval","exec","exists","fake_camera","fetch","fill","find","forward","frame_eval","frames","get_attribute","get_text","headers","hover","info","intercept.add","intercept.list","intercept.log","intercept.remove","js.allow","js.block","js.list","js.mode","js.remove","key","key.down","key.up","load_state","mouse.down","mouse.move","mouse.up","network.clear","network.export","network.log","network.record.start","network.record.status","network.record.stop","network.show","network.wait","observe","open","release_all_inputs","reload","save_state","screenshot","scroll","select","set_cookie","set_storage","snapshot","spa.info","spa.navigate","storage","text","wait","wasm.find","wasm.info","wasm.read","wasm.write"] as const;
 export type CatalogMethod = (typeof catalogMethods)[number];
 /** An operation's input without the page ID, which the page supplies. */
 export type CatalogInput<M extends CatalogMethod> = Omit<MethodParams[M], "pageId">;
@@ -19,6 +19,7 @@ export function catalogOperations(page: CatalogPage) {
   return {
     back: (input: CatalogInput<"back"> = {}, options?: CallOptions) => call("back", input, options),
     captchaDatadome: (input: CatalogInput<"captcha.datadome"> = {}, options?: CallOptions) => call("captcha.datadome", input, options),
+    captchaDetect: (input: CatalogInput<"captcha.detect"> = {}, options?: CallOptions) => call("captcha.detect", input, options),
     captchaInject: (input: CatalogInput<"captcha.inject">, options?: CallOptions) => call("captcha.inject", input, options),
     captchaTurnstile: (input: CatalogInput<"captcha.turnstile"> = {}, options?: CallOptions) => call("captcha.turnstile", input, options),
     clearCookies: (input: CatalogInput<"clear_cookies"> = {}, options?: CallOptions) => call("clear_cookies", input, options),
@@ -29,6 +30,8 @@ export function catalogOperations(page: CatalogPage) {
     content: (input: CatalogInput<"content"> = {}, options?: CallOptions) => call("content", input, options),
     cookies: (input: CatalogInput<"cookies"> = {}, options?: CallOptions) => call("cookies", input, options),
     deleteCookie: (input: CatalogInput<"delete_cookie">, options?: CallOptions) => call("delete_cookie", input, options),
+    dialogAccept: (input: CatalogInput<"dialog.accept"> = {}, options?: CallOptions) => call("dialog.accept", input, options),
+    dialogDismiss: (input: CatalogInput<"dialog.dismiss"> = {}, options?: CallOptions) => call("dialog.dismiss", input, options),
     doubleClick: (input: CatalogInput<"double_click">, options?: CallOptions) => call("double_click", input, options),
     downloadCancel: (input: CatalogInput<"download.cancel">, options?: CallOptions) => call("download.cancel", input, options),
     downloadGet: (input: CatalogInput<"download.get">, options?: CallOptions) => call("download.get", input, options),

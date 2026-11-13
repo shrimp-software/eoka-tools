@@ -330,6 +330,15 @@ pub enum WaitSelectorState {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+pub struct DialogAcceptArgs {
+    #[serde(default)]
+    #[schemars(
+        description = "Text to enter for a prompt() dialog; ignored for alert and confirm."
+    )]
+    pub prompt_text: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
 pub struct SelectorArgs {
     #[schemars(description = "CSS selector of the element.")]
     pub selector: String,

@@ -309,6 +309,11 @@ pub enum Command {
     },
     #[command(about = "Get the page HTML")]
     Content,
+    #[command(about = "Accept or dismiss an open alert, confirm or prompt dialog")]
+    Dialog {
+        #[command(subcommand)]
+        action: DialogAction,
+    },
     #[command(about = "Get the text of the first element matching a CSS selector")]
     GetText {
         #[arg(help = "CSS selector")]
@@ -833,6 +838,8 @@ pub enum NetworkRecordAction {
 #[derive(Subcommand)]
 #[allow(clippy::large_enum_variant)]
 pub enum CaptchaAction {
+    #[command(about = "Detect an hCaptcha or reCAPTCHA widget and report its type and site key")]
+    Detect,
     #[command(
         about = "Attempt local DataDome clearance on the current tab; keep the session open",
         long_about = "Attempt local DataDome clearance on the current tab. No API key needed.\n\nRequires an existing session; foregrounds the tab and leaves it open. challenge_cleared is not proof of login; not_present is a no-op; every other outcome exits nonzero. An old daemon is not restarted automatically."
@@ -1067,6 +1074,17 @@ pub enum OperationCommand {
         #[arg(help = OPERATION_ID)]
         id: String,
     },
+}
+
+#[derive(Subcommand)]
+pub enum DialogAction {
+    #[command(about = "Accept the open dialog")]
+    Accept {
+        #[arg(long, help = "Text to enter for a prompt() dialog")]
+        prompt_text: Option<String>,
+    },
+    #[command(about = "Dismiss the open dialog")]
+    Dismiss,
 }
 
 #[derive(Subcommand)]

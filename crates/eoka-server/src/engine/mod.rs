@@ -439,6 +439,9 @@ impl Engine {
             }
             "captcha_datadome" => Ok(self.cmd_captcha_datadome(args).await),
             "captcha_inject" => self.cmd_captcha_inject(args).await,
+            "captcha_detect" => self.cmd_captcha_detect().await,
+            "dialog_accept" => self.cmd_dialog(Some(args["prompt_text"].as_str())).await,
+            "dialog_dismiss" => self.cmd_dialog(None).await,
             "captcha_turnstile" => {
                 let drain = self.start_fetch_drain();
                 let result = self.cmd_captcha_turnstile(args).await;
@@ -945,6 +948,35 @@ impl Engine {
         };
         let params = json!({"recordingId": args["recording_id"]});
         recording_response(crate::recordings::control(&self.recordings, method, params).await)
+    }
+
+    /// Accept (`Some(prompt_text)`) or dismiss (`None`) the open JavaScript dialog.
+    async fn cmd_dialog(&mut self, accept: Option<Option<&str>>) -> Result<Response, String> {
+        let tab = self.require_tab_mut()?;
+        tab.invalidate();
+        match accept {
+            Some(prompt_text) => {
+                let result = tab.page.accept_dialog(prompt_text).await;
+                result.map_err(|e| e.to_string())?;
+                Ok(Response::ok_text("Dialog accepted"))
+            }
+            None => {
+                tab.page.dismiss_dialog().await.map_err(|e| e.to_string())?;
+                Ok(Response::ok_text("Dialog dismissed"))
+            }
+        }
+    }
+
+    async fn cmd_captcha_detect(&mut self) -> Result<Response, String> {
+        let page = &self.require_tab()?.page;
+        Ok(Response::ok(
+            match crate::captcha::detect_captcha_on_page(page).await {
+                Some(info) => {
+                    json!({"detected": true, "type": info.captcha_type, "sitekey": info.sitekey})
+                }
+                None => json!({"detected": false}),
+            },
+        ))
     }
 
     async fn cmd_content(&mut self) -> Result<Response, String> {

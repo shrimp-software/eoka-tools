@@ -274,6 +274,10 @@ export type MethodCaptchaDatadomeParams = { "max_attempts"?: number; "pageId": s
 
 export type MethodCaptchaDatadomeResult = unknown;
 
+export type MethodCaptchaDetectParams = { "pageId": string; };
+
+export type MethodCaptchaDetectResult = unknown;
+
 export type MethodCaptchaInjectParams = { "callback"?: (string | null); "captcha_type"?: string; "click_after"?: (string | null); "pageId": string; "token": string; [key: string]: unknown; };
 
 export type MethodCaptchaInjectResult = unknown;
@@ -316,6 +320,14 @@ export type MethodCookiesResult = unknown;
 export type MethodDeleteCookieParams = { "domain"?: (string | null); "name": string; "pageId": string; [key: string]: unknown; };
 
 export type MethodDeleteCookieResult = unknown;
+
+export type MethodDialogAcceptParams = { "pageId": string; "prompt_text"?: (string | null); [key: string]: unknown; };
+
+export type MethodDialogAcceptResult = unknown;
+
+export type MethodDialogDismissParams = { "pageId": string; };
+
+export type MethodDialogDismissResult = unknown;
 
 export type MethodDoubleClickParams = { "expect"?: (MethodDoubleClickParams__Expectation | null); "operation_id"?: (string | null); "pageId": string; "target": string; "timeout_ms"?: (number | null); [key: string]: unknown; };
 export type MethodDoubleClickParams__Expectation = ({ "kind": ("document_ready" & string); [key: string]: unknown; } | { "conditions": Array<MethodDoubleClickParams__Expectation>; "kind": ("all" & string); [key: string]: unknown; } | { "enabled": boolean; "kind": ("enabled" & string); "target": MethodDoubleClickParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("download_started" & string); [key: string]: unknown; } | { "kind": ("focused" & string); "target": MethodDoubleClickParams__LocatorSpec; [key: string]: unknown; } | { "contains"?: boolean; "kind": ("url" & string); "value": string; [key: string]: unknown; } | { "kind": ("visible" & string); "target": MethodDoubleClickParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("hidden" & string); "target": MethodDoubleClickParams__LocatorSpec; [key: string]: unknown; } | { "contains"?: boolean; "kind": ("text" & string); "target": MethodDoubleClickParams__LocatorSpec; "value": string; [key: string]: unknown; } | { "kind": ("value" & string); "target": MethodDoubleClickParams__LocatorSpec; "value": string; [key: string]: unknown; } | { "checked": boolean; "kind": ("checked" & string); "target": MethodDoubleClickParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("selected" & string); "target": MethodDoubleClickParams__LocatorSpec; "values": Array<string>; [key: string]: unknown; });
@@ -1083,6 +1095,7 @@ export type MethodParams = {
   "browser.new_page": MethodBrowserNewPageParams;
   "browser.tabs": MethodBrowserTabsParams;
   "captcha.datadome": MethodCaptchaDatadomeParams;
+  "captcha.detect": MethodCaptchaDetectParams;
   "captcha.inject": MethodCaptchaInjectParams;
   "captcha.turnstile": MethodCaptchaTurnstileParams;
   "clear_cookies": MethodClearCookiesParams;
@@ -1093,6 +1106,8 @@ export type MethodParams = {
   "content": MethodContentParams;
   "cookies": MethodCookiesParams;
   "delete_cookie": MethodDeleteCookieParams;
+  "dialog.accept": MethodDialogAcceptParams;
+  "dialog.dismiss": MethodDialogDismissParams;
   "double_click": MethodDoubleClickParams;
   "download.cancel": MethodDownloadCancelParams;
   "download.get": MethodDownloadGetParams;
@@ -1230,6 +1245,7 @@ export type MethodResults = {
   "browser.new_page": MethodBrowserNewPageResult;
   "browser.tabs": MethodBrowserTabsResult;
   "captcha.datadome": MethodCaptchaDatadomeResult;
+  "captcha.detect": MethodCaptchaDetectResult;
   "captcha.inject": MethodCaptchaInjectResult;
   "captcha.turnstile": MethodCaptchaTurnstileResult;
   "clear_cookies": MethodClearCookiesResult;
@@ -1240,6 +1256,8 @@ export type MethodResults = {
   "content": MethodContentResult;
   "cookies": MethodCookiesResult;
   "delete_cookie": MethodDeleteCookieResult;
+  "dialog.accept": MethodDialogAcceptResult;
+  "dialog.dismiss": MethodDialogDismissResult;
   "double_click": MethodDoubleClickResult;
   "download.cancel": MethodDownloadCancelResult;
   "download.get": MethodDownloadGetResult;
@@ -1380,4 +1398,4 @@ export type ProtocolErrorResponse = { id: number | null; error: ServerError; res
 export type ProtocolResponse<M extends MethodName = MethodName> = ProtocolSuccessResponse<M> | ProtocolErrorResponse;
 
 export const protocolVersion = {"major":2,"minor":1} as const;
-export const methodNames = ["actions.perform","agent.observe","agent.step","back","browser.close","browser.close_tab","browser.connect","browser.launch","browser.new_page","browser.tabs","captcha.datadome","captcha.inject","captcha.turnstile","clear_cookies","click","click_shadow","clone_from","console","content","cookies","delete_cookie","double_click","download.cancel","download.get","download.list","download.start","download.wait","dump_storage","emulate","errors","eval","exec","exists","fake_camera","fetch","fill","find","forward","frame_eval","frames","get_attribute","get_text","headers","hover","info","intercept.add","intercept.list","intercept.log","intercept.remove","js.allow","js.block","js.list","js.mode","js.remove","key","key.down","key.up","load_state","mouse.down","mouse.move","mouse.up","network.clear","network.export","network.log","network.record.start","network.record.status","network.record.stop","network.show","network.wait","observe","open","operations.cancel","operations.get","operations.list","operations.wait","page.capture_state","page.click","page.click_shadow","page.click_text","page.close","page.content","page.evaluate","page.evaluate_in_frame","page.evaluate_raw","page.execute","page.execute_raw","page.exists","page.fetch","page.fetch_bounded","page.fill","page.frames","page.get_attribute","page.get_text","page.goto","page.hover","page.human_click","page.human_click_text","page.human_fill","page.key_down","page.key_up","page.mouse_down","page.mouse_move","page.mouse_up","page.press_key","page.release_all_inputs","page.reset_viewport","page.restore_state","page.screenshot","page.screenshot_to_file","page.select","page.set_viewport","page.solve_captcha","page.solve_turnstile","page.text","page.title","page.type_into","page.url","page.wait_for","page.wait_for_text","page.wait_for_visible","recording.cancel","recording.get","recording.start","recording.stop","release_all_inputs","reload","save_state","screenshot","scroll","select","server.hello","server.shutdown","set_cookie","set_storage","snapshot","spa.info","spa.navigate","storage","text","wait","wasm.find","wasm.info","wasm.read","wasm.write"] as const;
+export const methodNames = ["actions.perform","agent.observe","agent.step","back","browser.close","browser.close_tab","browser.connect","browser.launch","browser.new_page","browser.tabs","captcha.datadome","captcha.detect","captcha.inject","captcha.turnstile","clear_cookies","click","click_shadow","clone_from","console","content","cookies","delete_cookie","dialog.accept","dialog.dismiss","double_click","download.cancel","download.get","download.list","download.start","download.wait","dump_storage","emulate","errors","eval","exec","exists","fake_camera","fetch","fill","find","forward","frame_eval","frames","get_attribute","get_text","headers","hover","info","intercept.add","intercept.list","intercept.log","intercept.remove","js.allow","js.block","js.list","js.mode","js.remove","key","key.down","key.up","load_state","mouse.down","mouse.move","mouse.up","network.clear","network.export","network.log","network.record.start","network.record.status","network.record.stop","network.show","network.wait","observe","open","operations.cancel","operations.get","operations.list","operations.wait","page.capture_state","page.click","page.click_shadow","page.click_text","page.close","page.content","page.evaluate","page.evaluate_in_frame","page.evaluate_raw","page.execute","page.execute_raw","page.exists","page.fetch","page.fetch_bounded","page.fill","page.frames","page.get_attribute","page.get_text","page.goto","page.hover","page.human_click","page.human_click_text","page.human_fill","page.key_down","page.key_up","page.mouse_down","page.mouse_move","page.mouse_up","page.press_key","page.release_all_inputs","page.reset_viewport","page.restore_state","page.screenshot","page.screenshot_to_file","page.select","page.set_viewport","page.solve_captcha","page.solve_turnstile","page.text","page.title","page.type_into","page.url","page.wait_for","page.wait_for_text","page.wait_for_visible","recording.cancel","recording.get","recording.start","recording.stop","release_all_inputs","reload","save_state","screenshot","scroll","select","server.hello","server.shutdown","set_cookie","set_storage","snapshot","spa.info","spa.navigate","storage","text","wait","wasm.find","wasm.info","wasm.read","wasm.write"] as const;
