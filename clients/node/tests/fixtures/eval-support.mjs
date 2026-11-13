@@ -29,7 +29,7 @@ const fixtureDocument = `<!doctype html><title>fixture</title>
 <p id="status"></p>
 <button id="real" onclick="fetch('/hit'+location.search,{method:'POST'});document.getElementById('status').textContent='Saved'">Go</button>`;
 
-export async function startFixture() {
+export async function startFixture(document = fixtureDocument) {
   const clicks = new Map();
   const documents = new Map();
   const server = createServer((request, response) => {
@@ -42,7 +42,7 @@ export async function startFixture() {
       return;
     }
     if (url.pathname === '/') documents.set(row, (documents.get(row) ?? 0) + 1);
-    response.writeHead(200, { 'content-type': 'text/html' }).end(fixtureDocument);
+    response.writeHead(200, { 'content-type': 'text/html' }).end(document);
   });
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
