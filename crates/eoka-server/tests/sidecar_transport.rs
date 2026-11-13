@@ -2053,3 +2053,58 @@ fn closing_one_tab_leaves_an_operation_on_another_tab_running() {
     );
     server.shutdown(15);
 }
+
+#[test]
+#[ignore = "requires Chrome"]
+fn diagnostics_keep_their_wording_and_file_output_names_the_occupied_path() {
+    let (root, state, scratch) = directories();
+    let origin = format!("http://{}", stalling_server());
+    let mut server = Sidecar::start(&state, &scratch);
+    let (page, _) = two_fixture_pages(&mut server, &root.path().join("profile"), &origin);
+    let operation = uuid::Uuid::new_v4().to_string();
+    let record = server.request(
+        10,
+        "page.fill",
+        json!({"pageId":page,"operation_id":operation,"selector":"#missing","value":"x","options":{"timeout_ms":500}}),
+    );
+    assert_eq!(record["result"]["id"], operation, "{record}");
+    let finished = server.request(
+        11,
+        "operations.wait",
+        json!({"id":operation,"timeout_ms":30_000}),
+    );
+    let message = finished["result"]["error"]["message"].as_str().unwrap();
+    assert!(message.contains("exceeded"), "{message}");
+    assert!(!message.contains("[redacted]"), "{message}");
+
+    let directory = std::fs::canonicalize(root.path()).unwrap();
+    let occupied = directory.join("occupied.png");
+    std::fs::write(&occupied, b"keep").unwrap();
+    let refused = server.request(
+        12,
+        "page.screenshot_to_file",
+        json!({"pageId":page,"path":occupied}),
+    );
+    assert_eq!(refused["error"]["code"], "FileOutput", "{refused}");
+    let message = refused["error"]["message"].as_str().unwrap();
+    assert!(message.contains(occupied.to_str().unwrap()), "{message}");
+    assert!(message.contains("never overwrites"), "{message}");
+    assert_eq!(std::fs::read(&occupied).unwrap(), b"keep");
+
+    let recording = uuid::Uuid::new_v4().to_string();
+    let refused = server.request(
+        13,
+        "recording.start",
+        json!({"recordingId":recording,"pageId":page,"path":occupied}),
+    );
+    let failure = if refused.get("error").is_some() {
+        refused["error"]["message"].clone()
+    } else {
+        refused["result"]["failure"]["message"].clone()
+    };
+    let message = failure.as_str().unwrap_or_else(|| panic!("{refused}"));
+    assert!(message.contains(occupied.to_str().unwrap()), "{message}");
+    assert!(message.contains("never overwrites"), "{message}");
+    assert_eq!(std::fs::read(&occupied).unwrap(), b"keep");
+    server.shutdown(14);
+}
