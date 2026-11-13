@@ -338,6 +338,15 @@ Install the local CLI from this checkout:
 mise run install-cli
 ```
 
+Install the latest released CLI binary without a Rust toolchain (Linux and
+macOS). The script verifies the download against the release `SHA256SUMS`;
+set `EOKA_VERSION` to pin a release and `EOKA_INSTALL_DIR` to change the
+destination (default `~/.local/bin`):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/shrimp-software/eoka-tools/main/crates/eoka-cli/scripts/install.sh | sh
+```
+
 Update an installed CLI to the latest GitHub release (Linux and macOS, x86_64
 and aarch64). The download is verified against the release `SHA256SUMS` before
 the running binary is replaced:
