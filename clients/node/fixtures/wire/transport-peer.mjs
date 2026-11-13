@@ -17,10 +17,14 @@ let terminalReaderClosed = false;
 let recording;
 let finalization;
 const ownsDescendant = mode === 'owned-descendant' || mode === 'owned-descendant-exiting';
+const leavesHelper = mode === 'lingering-helper' || mode === 'stuck-helper';
 let ownedDescendantPid;
 let ownedReady = Promise.resolve();
-if (ownsDescendant) {
-  const descendant = spawn(process.execPath, [fileURLToPath(new URL('./transport-descendant.mjs', import.meta.url))], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+if (ownsDescendant || leavesHelper) {
+  const descendant = spawn(process.execPath, [fileURLToPath(new URL('./transport-descendant.mjs', import.meta.url))], {
+    stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+    env: { ...process.env, ...(mode === 'lingering-helper' ? { EOKA_TRANSPORT_TEST_LINGER_MS: '200' } : {}) },
+  });
   ownedReady = new Promise((resolve, reject) => {
     descendant.once('message', message => {
       ownedDescendantPid = message.pid;

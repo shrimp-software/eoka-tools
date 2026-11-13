@@ -546,6 +546,43 @@ for (const mode of ['owned-descendant', 'owned-descendant-exiting']) {
   });
 }
 
+test('a helper that briefly outlives a cleanly closed sidecar is awaited, not escalated', { timeout: 8000, skip: process.platform === 'win32' }, async t => {
+  const transport = await start(t, 'lingering-helper', {}, { shutdownTimeoutMs: 4000 });
+  const helper = transport.hello.ownedDescendantPid;
+  assert.equal(await running(helper), true);
+  const started = performance.now();
+  await transport.close();
+  const elapsed = performance.now() - started;
+  assert.ok(elapsed >= 150 && elapsed < 3000, `close took ${elapsed} ms`);
+  assert.equal(transport.ownedProcessesTerminated, true);
+  assert.equal(transport.cleanupError, undefined);
+  assert.equal(transport.escalating, false);
+  assert.equal(await running(helper), false);
+  await transport.whenClosed();
+  clean(transport);
+});
+
+for (const [bound, shutdownTimeoutMs, earliest, latest] of [['the remaining shutdown budget', 300, 2200, 4500], ['the drain cap', 30_000, 6900, 9500]]) {
+  test(`a helper that never exits after a clean sidecar close is terminated and reported once ${bound} runs out`, { timeout: 15_000, skip: process.platform === 'win32' }, async t => {
+    const transport = await start(t, 'stuck-helper', {}, { shutdownTimeoutMs });
+    const helper = transport.hello.ownedDescendantPid;
+    assert.equal(await running(helper), true);
+    const started = performance.now();
+    await assert.rejects(transport.close(), error => {
+      assert.equal(error.code, 'ForcedKill');
+      assert.match(error.message, /cleanup is uncertain/);
+      assert.equal(error.cause.code, 'ShutdownTimeout');
+      return true;
+    });
+    const elapsed = performance.now() - started;
+    assert.ok(elapsed >= earliest && elapsed < latest, `close took ${elapsed} ms`);
+    assert.equal(transport.child.exitCode, 0);
+    assert.equal(transport.ownedProcessesTerminated, true);
+    assert.equal(await running(helper), false);
+    clean(transport);
+  });
+}
+
 for (const method of ['server.shutdown', 'browser.close']) {
   test(`${method} shares disposal without writing another shutdown to a closed reader`, { timeout: 5000 }, async t => {
     const transport = await start(t, 'terminal-reader-closed');

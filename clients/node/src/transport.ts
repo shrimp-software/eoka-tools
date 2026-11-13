@@ -57,6 +57,8 @@ const responseWriteReserve = 1;
 const resendFrameLimit = 1024 * 1024;
 const intakeBusyMessage = 'maxInFlight pending requests exceeded';
 const stderrLimit = 16 * 1024;
+const groupExitGraceMs = 5_000;
+const groupExitPollMs = 10;
 export const defaultCallTimeoutMs = 120_000;
 
 function collectWaitFields(root: Schema, schema: Schema, path: readonly string[], fields: WaitField[]): void {
@@ -173,6 +175,7 @@ export class SidecarTransport implements InvokeClient {
   private cleanupError: EokaError | undefined;
   private closeCompletion: PromiseWithResolvers<void> | undefined;
   private teardownTimer: NodeJS.Timeout | undefined;
+  private closeDeadline = Number.POSITIVE_INFINITY;
   private shutdownId: number | undefined;
   private readonly closed = Promise.withResolvers<void>();
   private terminationConfirmed = false;
@@ -596,9 +599,18 @@ export class SidecarTransport implements InvokeClient {
     if (!this.closing) this.fail(new TransportError('ProcessExit', 'Sidecar process closed before disposal', { stderr: this.stderr }));
     if (this.escalating) {
       if (process.platform !== 'win32' && !this.ownedGroupAlive()) this.finishClose();
-    } else if (process.platform !== 'win32' && this.ownedGroupAlive()) void this.terminate();
+    } else if (process.platform !== 'win32' && this.ownedGroupAlive()) this.awaitGroupExit(Math.min(this.closeDeadline, performance.now() + groupExitGraceMs));
     else this.finishClose();
   };
+
+  private awaitGroupExit(deadline: number): void {
+    if (this.finished || this.escalating) return;
+    clearTimeout(this.teardownTimer);
+    this.teardownTimer = undefined;
+    if (!this.ownedGroupAlive()) this.finishClose();
+    else if (performance.now() >= deadline) void this.terminate();
+    else this.teardownTimer = setTimeout(() => this.awaitGroupExit(deadline), groupExitPollMs);
+  }
 
   close(): Promise<void> {
     return this.beginClose();
@@ -638,6 +650,7 @@ export class SidecarTransport implements InvokeClient {
     } catch (cause) {
       this.cleanupError ??= new TransportError('ShutdownWrite', 'Could not send sidecar shutdown; cleanup may be incomplete', { cause, stderr: this.stderr });
     }
+    this.closeDeadline = performance.now() + this.shutdownTimeoutMs;
     this.teardownTimer = setTimeout(() => { void this.terminate(); }, this.shutdownTimeoutMs);
     return this.closeCompletion.promise;
   }
