@@ -66,9 +66,22 @@ The result contains:
 | `limits.maxMessageBytes` | Maximum serialized message size |
 | `limits.maxInFlight` | Maximum in-flight requests |
 
-Protocol major 2 through minor 1 is supported; minor 1 adds catalog operations. Version 1 clients must migrate. A
-different major or a requested minor newer than the server supports returns
-`ProtocolMismatch` without launching a browser. Existing low-level clients can
+Protocol major 2 through minor 2 is supported; minor 1 adds catalog operations
+and minor 2 adds the blocked-page error codes below. Version 1 clients must
+migrate. A different major or a requested minor newer than the server supports
+returns `ProtocolMismatch` without launching a browser.
+
+`protocol` is the oldest version the client can work with. A client that also
+understands a newer minor says so with the optional `understands` field:
+
+```json
+{"id":1,"method":"server.hello","params":{"protocol":{"major":2,"minor":0},"understands":{"major":2,"minor":2}}}
+```
+
+The server then speaks the older of its own version and the newest version the
+client named in either field, and never sends such a client an error code or
+field introduced after that version. A client that sends no `server.hello` is
+spoken to as protocol 2.0. Servers older than 2.2 ignore `understands`. Existing low-level clients can
 still call compatible methods directly; the Go client requires protocol 1.1
 before launch or attachment and fails explicitly against older servers.
 The Node SDK requires protocol 2.0, including bounded browser fetch and capture contracts.
@@ -114,6 +127,29 @@ Errors retain stable `code` and human-readable `message`. Optional `data`
 contains structured evidence such as an operation ID, action receipt, original
 protocol error or canonical error detail. Branch on codes and fields, not text.
 An absent receipt is not proof that nothing was dispatched.
+
+### Blocked pages (protocol 2.2)
+
+Chrome answers no page command while a JavaScript dialog is open on the page,
+while the page's main frame waits for a navigation response, or while the
+page's main thread is busy. The `pageBlockers` capability says the server
+detects these states and fails the request promptly instead of at the 30-second
+command deadline. A client spoken to as protocol 2.2 receives:
+
+| Code | State | `data.blocker` |
+| --- | --- | --- |
+| `DialogOpen` | An `alert`, `confirm`, `prompt` or `beforeunload` dialog is open | `{kind:"dialog", dialogType, message, url, elapsedMs}` |
+| `NavigationPending` | The main frame has waited for a navigation response | `{kind:"navigation", url?, elapsedMs}` |
+| `PageUnresponsive` | The page answers nothing and neither state above is known | absent |
+
+`data.detail` carries the catalog `ErrorDetail` with code `dialog_open`,
+`navigation_pending` or `page_unresponsive`, the same message, a `hint` naming
+the remedy and, for a request that was not started, `context.action_status`.
+`elapsedMs` is how long the dialog has been open or the navigation has waited.
+
+A client spoken to as protocol 2.0 or 2.1 receives the same failure as an
+`Operation` error: the same message and `data.detail`, without `data.blocker`.
+Its `data.detail.code` still names the state.
 
 Invalid request envelopes/parameters, unknown methods, incompatible protocols,
 message-size violations, overload and shutdown are explicit protocol errors.

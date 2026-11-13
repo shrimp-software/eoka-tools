@@ -22154,7 +22154,10 @@
               "RecordingConflict",
               "RecordingAlreadyActive",
               "RecordingInvalidState",
-              "RecordingFailed"
+              "RecordingFailed",
+              "DialogOpen",
+              "NavigationPending",
+              "PageUnresponsive"
             ],
             "type": "string"
           },
@@ -22339,7 +22342,10 @@
               "RecordingConflict",
               "RecordingAlreadyActive",
               "RecordingInvalidState",
-              "RecordingFailed"
+              "RecordingFailed",
+              "DialogOpen",
+              "NavigationPending",
+              "PageUnresponsive"
             ],
             "type": "string"
           },
@@ -22560,7 +22566,10 @@
               "RecordingConflict",
               "RecordingAlreadyActive",
               "RecordingInvalidState",
-              "RecordingFailed"
+              "RecordingFailed",
+              "DialogOpen",
+              "NavigationPending",
+              "PageUnresponsive"
             ],
             "type": "string"
           },
@@ -22745,7 +22754,10 @@
               "RecordingConflict",
               "RecordingAlreadyActive",
               "RecordingInvalidState",
-              "RecordingFailed"
+              "RecordingFailed",
+              "DialogOpen",
+              "NavigationPending",
+              "PageUnresponsive"
             ],
             "type": "string"
           },
@@ -23956,6 +23968,16 @@
         "properties": {
           "protocol": {
             "$ref": "#/$defs/ProtocolVersion"
+          },
+          "understands": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ProtocolVersion"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -24866,7 +24888,7 @@
   },
   "protocolVersion": {
     "major": 2,
-    "minor": 1
+    "minor": 2
   },
   "replacedMethods": {
     "page.click_shadow": "click_shadow",
@@ -27374,7 +27396,10 @@
         "RecordingConflict",
         "RecordingAlreadyActive",
         "RecordingInvalidState",
-        "RecordingFailed"
+        "RecordingFailed",
+        "DialogOpen",
+        "NavigationPending",
+        "PageUnresponsive"
       ],
       "title": "ErrorCode",
       "type": "string"
@@ -27606,7 +27631,10 @@
             "RecordingConflict",
             "RecordingAlreadyActive",
             "RecordingInvalidState",
-            "RecordingFailed"
+            "RecordingFailed",
+            "DialogOpen",
+            "NavigationPending",
+            "PageUnresponsive"
           ],
           "type": "string"
         },
@@ -27689,6 +27717,66 @@
             "message"
           ],
           "type": "object"
+        },
+        "PageBlocker": {
+          "oneOf": [
+            {
+              "properties": {
+                "dialogType": {
+                  "type": "string"
+                },
+                "elapsedMs": {
+                  "format": "uint64",
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "kind": {
+                  "const": "dialog",
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "dialogType",
+                "message",
+                "url",
+                "elapsedMs"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "elapsedMs": {
+                  "format": "uint64",
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "kind": {
+                  "const": "navigation",
+                  "type": "string"
+                },
+                "url": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "kind",
+                "elapsedMs"
+              ],
+              "type": "object"
+            }
+          ]
         },
         "PageContext": {
           "properties": {
@@ -27861,6 +27949,16 @@
       },
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
+        "blocker": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PageBlocker"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "cdp": {
           "anyOf": [
             {
@@ -28515,6 +28613,16 @@
       "properties": {
         "protocol": {
           "$ref": "#/$defs/ProtocolVersion"
+        },
+        "understands": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProtocolVersion"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -29276,6 +29384,68 @@
       "title": "OperationState",
       "type": "string"
     },
+    "PageBlocker": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "oneOf": [
+        {
+          "properties": {
+            "dialogType": {
+              "type": "string"
+            },
+            "elapsedMs": {
+              "format": "uint64",
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "dialog",
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "dialogType",
+            "message",
+            "url",
+            "elapsedMs"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "elapsedMs": {
+              "format": "uint64",
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "navigation",
+              "type": "string"
+            },
+            "url": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "elapsedMs"
+          ],
+          "type": "object"
+        }
+      ],
+      "title": "PageBlocker"
+    },
     "ProtocolVersion": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
@@ -29326,7 +29496,10 @@
             "RecordingConflict",
             "RecordingAlreadyActive",
             "RecordingInvalidState",
-            "RecordingFailed"
+            "RecordingFailed",
+            "DialogOpen",
+            "NavigationPending",
+            "PageUnresponsive"
           ],
           "type": "string"
         },
@@ -29472,7 +29645,10 @@
             "RecordingConflict",
             "RecordingAlreadyActive",
             "RecordingInvalidState",
-            "RecordingFailed"
+            "RecordingFailed",
+            "DialogOpen",
+            "NavigationPending",
+            "PageUnresponsive"
           ],
           "type": "string"
         },
@@ -29887,7 +30063,10 @@
             "RecordingConflict",
             "RecordingAlreadyActive",
             "RecordingInvalidState",
-            "RecordingFailed"
+            "RecordingFailed",
+            "DialogOpen",
+            "NavigationPending",
+            "PageUnresponsive"
           ],
           "type": "string"
         },
@@ -29936,6 +30115,16 @@
         },
         "ErrorData": {
           "properties": {
+            "blocker": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PageBlocker"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "cdp": {
               "anyOf": [
                 {
@@ -30049,6 +30238,66 @@
             "message"
           ],
           "type": "object"
+        },
+        "PageBlocker": {
+          "oneOf": [
+            {
+              "properties": {
+                "dialogType": {
+                  "type": "string"
+                },
+                "elapsedMs": {
+                  "format": "uint64",
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "kind": {
+                  "const": "dialog",
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "dialogType",
+                "message",
+                "url",
+                "elapsedMs"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "elapsedMs": {
+                  "format": "uint64",
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "kind": {
+                  "const": "navigation",
+                  "type": "string"
+                },
+                "url": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "kind",
+                "elapsedMs"
+              ],
+              "type": "object"
+            }
+          ]
         },
         "PageContext": {
           "properties": {
@@ -30718,7 +30967,10 @@
             "RecordingConflict",
             "RecordingAlreadyActive",
             "RecordingInvalidState",
-            "RecordingFailed"
+            "RecordingFailed",
+            "DialogOpen",
+            "NavigationPending",
+            "PageUnresponsive"
           ],
           "type": "string"
         },
@@ -30767,6 +31019,16 @@
         },
         "ErrorData": {
           "properties": {
+            "blocker": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PageBlocker"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "cdp": {
               "anyOf": [
                 {
@@ -30880,6 +31142,66 @@
             "message"
           ],
           "type": "object"
+        },
+        "PageBlocker": {
+          "oneOf": [
+            {
+              "properties": {
+                "dialogType": {
+                  "type": "string"
+                },
+                "elapsedMs": {
+                  "format": "uint64",
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "kind": {
+                  "const": "dialog",
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "dialogType",
+                "message",
+                "url",
+                "elapsedMs"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "elapsedMs": {
+                  "format": "uint64",
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "kind": {
+                  "const": "navigation",
+                  "type": "string"
+                },
+                "url": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "kind",
+                "elapsedMs"
+              ],
+              "type": "object"
+            }
+          ]
         },
         "PageContext": {
           "properties": {

@@ -239,6 +239,17 @@ if errors.As(err, &eErr) {
 }
 ```
 
+A page that cannot answer is reported promptly by servers advertising the
+`pageBlockers` capability, with its own code: `DialogOpen`
+(`ErrCodeDialogOpen`) while a JavaScript dialog is open, `NavigationPending`
+(`ErrCodeNavigationPending`) while the main frame waits for a navigation
+response, and `PageUnresponsive` (`ErrCodePageUnresponsive`) when the page
+answers nothing and neither is known. For the first two, `Data` carries
+`blocker`: `{"kind":"dialog","dialogType","message","url","elapsedMs"}` or
+`{"kind":"navigation","url","elapsedMs"}`, next to the `detail` that names the
+remedy. The client asks for these codes by sending `understands` 2.2 in
+`server.hello`; an older server ignores it and keeps its own behaviour.
+
 Transport-level failures (the server process died, its pipes closed, an invalid
 response, unknown/duplicate response ID or mid-message EOF) fail the transport and
 reject pending and future calls. Message-limit errors retain `MessageTooLarge`.

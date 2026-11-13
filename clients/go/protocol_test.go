@@ -19,9 +19,10 @@ func TestHelloAcceptsCompatibleMinorAndNegotiatesLimits(t *testing.T) {
 			return nil, &rpcError{Code: ErrCodeUnknownMethod, Message: method}
 		}
 		var request struct {
-			Protocol ProtocolVersion `json:"protocol"`
+			Protocol    ProtocolVersion `json:"protocol"`
+			Understands ProtocolVersion `json:"understands"`
 		}
-		if err := json.Unmarshal(params, &request); err != nil || request.Protocol != (ProtocolVersion{Major: 2, Minor: 0}) {
+		if err := json.Unmarshal(params, &request); err != nil || request.Protocol != (ProtocolVersion{Major: 2, Minor: 0}) || request.Understands != (ProtocolVersion{Major: 2, Minor: 2}) {
 			t.Errorf("hello params = %s, error = %v", params, err)
 		}
 		return info, nil
