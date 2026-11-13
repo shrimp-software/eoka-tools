@@ -18,18 +18,31 @@ consume those contracts. The Go client implements the same wire protocol.
 - A serialized message is limited to 33,554,432 bytes (32 MiB), excluding its
   line terminator. Input is bounded while reading. Oversized output becomes a
   structured error rather than an unlimited JSON message.
-- At most 128 requests may remain in flight. Respect advertised limits and
+- At most 128 requests may remain in flight. A request stops counting before its
+  response is written, so a client that keeps at most `maxInFlight` unanswered
+  requests is never refused with `ServerBusy`. Respect advertised limits and
   stdout backpressure; an unread pipe is not permission to buffer indefinitely.
 - Request IDs are positive integers through 9,007,199,254,740,991, unique among
   in-flight requests. Responses echo the ID. A malformed message without a
   recoverable valid ID may receive an error with `id: null`.
-- Ordinary page requests and action admission retain serialized dispatch.
-  Operation waiters and list snapshots run independently. Get/cancel for an
-  already-admitted operation also bypass a blocked ordinary request; unknown IDs
-  fall back behind earlier queued admissions. List returns the current admitted
-  snapshot, not a barrier for queued mutations. Controls still consume the
-  advertised in-flight budget; shutdown retains its separate admission.
-  Responses can arrive out of order. Always correlate by ID.
+- Requests are dispatched per page. Requests that name the same `pageId`,
+  including action admission, catalog operations and `browser.close_tab`, run
+  one at a time in the order received. Requests for different pages run
+  concurrently, so a page whose request is slow or never answers delays only
+  its own later requests. `browser.new_page` and `browser.tabs` belong to no
+  page and are never queued behind one. `browser.launch`, `browser.connect` and
+  `browser.close` are barriers: each waits for every request received before it
+  and holds back every request received after it until it finishes.
+- Catalog operations share one engine and run one at a time across pages; a slow
+  catalog operation delays catalog operations on other pages, not their
+  registered `page.*` methods. `agent.observe` and `agent.step` likewise share
+  one agent session.
+- Operation waiters and list snapshots run independently. Get/cancel for an
+  already-admitted operation also bypass a blocked page; an unknown ID waits
+  only for an earlier queued request carrying the same operation ID. List
+  returns the current admitted snapshot, not a barrier for queued mutations.
+  Controls still consume the advertised in-flight budget; shutdown retains its
+  separate admission. Responses can arrive out of order. Always correlate by ID.
 - Local request timeout or connection loss does not prove a browser action was
   cancelled. Durable operation IDs remain the recovery mechanism.
 
@@ -317,7 +330,7 @@ Element handles do not cross this wire.
 - Cloudflare: `page.solve_turnstile` (`{pageId, timeoutMs?}`, default 30000, at
   most 120000) clicks the Turnstile checkbox through its closed shadow root until
   the page leaves the challenge and returns `{clicks, elapsedMs}`; a normal page
-  returns zero clicks. It holds the request queue for up to `timeoutMs`.
+  returns zero clicks. It holds that page's request queue for up to `timeoutMs`.
 - Other implemented methods include `page.solve_captcha` and `page.close`.
 
 JSON results are dynamic data, not statically known application types. Type
@@ -448,6 +461,22 @@ as complete. A record can instead report `not_dispatched` or `outcome_unknown`.
 No uncertain action is automatically replayed. Local waiter cancellation,
 transport loss and shutdown remain separate from the site's business outcome.
 See [OPERATIONS.md](OPERATIONS.md) for deduplication and durable recovery.
+
+Chrome answers no page-level request (`page.title`, `page.url`, evaluation,
+element reads) for a page whose main-frame navigation is still waiting for the
+site's response; such a request waits until the navigation commits, fails or is
+stopped, or until its own command deadline (30 seconds, 90 behind a proxy). To keep that from
+outliving the operation, a navigation operation that ends while its navigation
+command is still unanswered (its deadline passes, or it is cancelled after
+dispatch) stops the pending load. The page stays on its current document, the
+record keeps `outcome_unknown`, and requests queued for the page then answer.
+A navigation that committed before its deadline is left to finish loading.
+`browser.new_page` with a `url` creates the page, then navigates it; when that
+navigation command gets no answer the load is stopped the same way and the
+error is returned.
+
+`page.close` and `browser.close_tab` cancel the running operations of that page
+only. Operations on other pages keep running.
 
 ### Agent operations
 

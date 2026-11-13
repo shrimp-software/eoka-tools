@@ -230,7 +230,7 @@ pub async fn click_shadow(state: &AppState, params: Value) -> Result<Value, Serv
 pub async fn solve_turnstile(state: &AppState, params: Value) -> Result<Value, ServerError> {
     let params: SolveTurnstileParams = parse_params(params)?;
     let receipt = crate::cloudflare::solve_turnstile(
-        state.page(&params.page_id)?,
+        &state.page(&params.page_id)?,
         std::time::Duration::from_millis(params.timeout_ms),
     )
     .await?;
@@ -466,14 +466,14 @@ pub async fn solve_captcha(state: &AppState, params: Value) -> Result<Value, Ser
         params.callback.as_deref(),
     );
     let page = state.page(&params.page_id)?;
-    let mut result = captcha_injection_result(page, &script).await?;
+    let mut result = captcha_injection_result(&page, &script).await?;
     let callback_count = result
         .get("callbacks")
         .and_then(Value::as_array)
         .map_or(0, Vec::len);
     if callback_count <= 1 {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        let settled = captcha_injection_result(page, &script).await?;
+        let settled = captcha_injection_result(&page, &script).await?;
         if settled
             .get("callbacks")
             .and_then(Value::as_array)
@@ -497,7 +497,7 @@ async fn captcha_injection_result(page: &eoka::Page, script: &str) -> Result<Val
     })
 }
 
-pub async fn close(state: &mut AppState, params: Value) -> Result<Value, ServerError> {
+pub async fn close(state: &AppState, params: Value) -> Result<Value, ServerError> {
     let params: PageIdParams = parse_params(params)?;
     if let Some(error) = close_tab_impl(state, &params.page_id).await? {
         return Err(error);

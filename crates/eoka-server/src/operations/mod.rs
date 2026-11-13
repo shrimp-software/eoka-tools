@@ -3,14 +3,20 @@ pub mod sidecar;
 pub(crate) mod store;
 
 use anyhow::{anyhow, Context, Result};
-use eoka::{Action, ActionOptions, ActionOutcome, DispatchObserver, Error, Page};
+use eoka::{
+    Action, ActionOptions, ActionOutcome, ActionReceipt, DispatchObserver, DispatchState, Error,
+    Page,
+};
 use eoka_protocol::{OperationListArgs, OperationRecord, OperationState};
 use std::{
     collections::HashMap,
     future::Future,
     path::PathBuf,
     pin::Pin,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     time::Duration,
 };
 use store::{timestamp, Store};
@@ -24,7 +30,12 @@ pub struct OperationManager {
 struct Manager {
     store: OnceCell<Arc<Store>>,
     directory: Option<PathBuf>,
-    jobs: Mutex<HashMap<String, watch::Sender<bool>>>,
+    jobs: Mutex<HashMap<String, ActiveOperation>>,
+}
+
+struct ActiveOperation {
+    target_id: String,
+    cancel: watch::Sender<bool>,
 }
 
 #[derive(Default)]
@@ -73,6 +84,25 @@ impl DispatchObserver for Intent {
                         std::io::Error::other(error),
                     )
                 })
+        })
+    }
+}
+
+struct TrackedIntent {
+    intent: Intent,
+    dispatched: Arc<AtomicBool>,
+}
+impl DispatchObserver for TrackedIntent {
+    fn before_dispatch(
+        &self,
+        preparation: bool,
+    ) -> Pin<Box<dyn Future<Output = eoka::Result<()>> + Send + '_>> {
+        Box::pin(async move {
+            self.intent.before_dispatch(preparation).await?;
+            if !preparation {
+                self.dispatched.store(true, Ordering::Release);
+            }
+            Ok(())
         })
     }
 }
@@ -173,14 +203,25 @@ impl OperationManager {
             .jobs
             .lock()
             .map_err(|_| commands::uncertain(anyhow!("Operation registry unavailable")))?
-            .insert(id.clone(), cancel);
-        options.observer = Some(Arc::new(Intent {
-            store: store.clone(),
-            id: id.clone(),
+            .insert(
+                id.clone(),
+                ActiveOperation {
+                    target_id: page.target_id().into(),
+                    cancel,
+                },
+            );
+        let dispatched = Arc::new(AtomicBool::new(false));
+        options.observer = Some(Arc::new(TrackedIntent {
+            intent: Intent {
+                store: store.clone(),
+                id: id.clone(),
+            },
+            dispatched: dispatched.clone(),
         }));
         let manager = self.clone();
         tokio::spawn(async move {
             let sensitive = action_values(&action);
+            let navigation = navigates(&action);
             let result = tokio::select! {
                 biased;
                 _ = canceled.changed() => None,
@@ -189,42 +230,13 @@ impl OperationManager {
                     else { page.act(action, options).await }
                 } => Some(result),
             };
+            if navigation && navigation_unanswered(&result, dispatched.load(Ordering::Acquire)) {
+                abandon_navigation(&page).await;
+            }
             let diagnostic = result
                 .as_ref()
                 .and_then(|result| result.as_ref().err())
-                .map(|error| {
-                    let (code, source) = match error {
-                        Error::Action { code, source, .. } => (code.as_str(), source.as_ref()),
-                        error => ("action_failed", error),
-                    };
-                    let mut message = source.to_string();
-                    for value in &sensitive {
-                        if !value.is_empty() {
-                            message = message.replace(value, "[redacted]");
-                        }
-                    }
-                    let phase = if message.contains("preparation") {
-                        "preparation"
-                    } else if message.contains("queue admission") {
-                        "queue"
-                    } else if message.contains("input dispatch") {
-                        "dispatch"
-                    } else if message.contains("verification") {
-                        "verification"
-                    } else {
-                        "execution"
-                    };
-                    eoka_protocol::ErrorDetail::new(
-                        code,
-                        message.chars().take(8192).collect::<String>(),
-                    )
-                    .retryable(false)
-                    .context(eoka_protocol::ErrorContext {
-                        operation_id: Some(id.clone()),
-                        phase: Some(phase.into()),
-                        ..Default::default()
-                    })
-                });
+                .map(|error| diagnostic(error, &sensitive, &id));
             let finish = store
                 .update(id.clone(), move |record| {
                     record.state = OperationState::Finished;
@@ -326,24 +338,37 @@ impl OperationManager {
                 .jobs
                 .lock()
                 .map_err(|_| anyhow!("Operation registry unavailable"))?;
-            let sender = jobs.get(id).ok_or_else(|| {
+            let active = jobs.get(id).ok_or_else(|| {
                 anyhow!("operation_owned_elsewhere: request cancellation from the owning runtime")
             })?;
-            sender.send_replace(true);
+            active.cancel.send_replace(true);
         }
         Ok(record)
     }
     pub async fn stop(&self) {
-        let ids = if let Ok(jobs) = self.inner.jobs.lock() {
+        self.stop_where(|_| true).await;
+    }
+
+    pub async fn stop_target(&self, target_id: &str) {
+        self.stop_where(|active| active == target_id).await;
+    }
+
+    fn signal(&self, selected: impl Fn(&str) -> bool) -> Vec<String> {
+        if let Ok(jobs) = self.inner.jobs.lock() {
             jobs.iter()
-                .map(|(id, cancel)| {
-                    cancel.send_replace(true);
+                .filter(|(_, active)| selected(&active.target_id))
+                .map(|(id, active)| {
+                    active.cancel.send_replace(true);
                     id.clone()
                 })
                 .collect::<Vec<_>>()
         } else {
             Vec::new()
-        };
+        }
+    }
+
+    async fn stop_where(&self, selected: impl Fn(&str) -> bool) {
+        let ids = self.signal(selected);
         for id in ids {
             if let Err(error) = self.wait(&id, 5000).await {
                 tracing::warn!(operation_id = %id, %error, "Could not confirm operation shutdown");
@@ -367,5 +392,137 @@ fn action_values(action: &Action) -> Vec<String> {
         Action::Fill { value, .. } => vec![value.clone()],
         Action::Type { text, .. } | Action::InsertText { text } => vec![text.clone()],
         _ => Vec::new(),
+    }
+}
+
+fn failure_phase(description: &str) -> &'static str {
+    if description.contains("preparation") {
+        "preparation"
+    } else if description.contains("queue admission") {
+        "queue"
+    } else if description.contains("input dispatch") {
+        "dispatch"
+    } else if description.contains("verification") {
+        "verification"
+    } else {
+        "execution"
+    }
+}
+
+fn diagnostic(
+    error: &Error,
+    sensitive: &[String],
+    operation_id: &str,
+) -> eoka_protocol::ErrorDetail {
+    let (code, source) = match error {
+        Error::Action { code, source, .. } => (code.as_str(), source.as_ref()),
+        error => ("action_failed", error),
+    };
+    let description = source.to_string();
+    let phase = failure_phase(&description);
+    let message = redact(&description, sensitive);
+    eoka_protocol::ErrorDetail::new(code, message.chars().take(8192).collect::<String>())
+        .retryable(false)
+        .context(eoka_protocol::ErrorContext {
+            operation_id: Some(operation_id.to_owned()),
+            phase: Some(phase.into()),
+            ..Default::default()
+        })
+}
+
+const REDACTED: &str = "[redacted]";
+
+fn word_character(character: char) -> bool {
+    character.is_alphanumeric() || character == '_'
+}
+
+fn echoed_forms(value: &str) -> Vec<String> {
+    let mut forms = vec![value.to_owned()];
+    let escaped = serde_json::to_string(value)
+        .ok()
+        .and_then(|quoted| Some(quoted.get(1..quoted.len().checked_sub(1)?)?.to_owned()));
+    if let Some(escaped) = escaped.filter(|escaped| escaped != value) {
+        forms.push(escaped);
+    }
+    forms
+}
+
+fn redact_standalone(message: &str, value: &str) -> String {
+    let mut redacted = String::with_capacity(message.len());
+    let mut rest = 0;
+    let mut search = 0;
+    while let Some(found) = message[search..].find(value) {
+        let start = search + found;
+        let end = start + value.len();
+        let embedded = message[..start]
+            .chars()
+            .next_back()
+            .is_some_and(word_character)
+            || message[end..].chars().next().is_some_and(word_character);
+        if embedded {
+            search = start + message[start..].chars().next().map_or(1, char::len_utf8);
+            continue;
+        }
+        redacted.push_str(&message[rest..start]);
+        redacted.push_str(REDACTED);
+        rest = end;
+        search = end;
+    }
+    redacted.push_str(&message[rest..]);
+    redacted
+}
+
+pub(crate) fn redact(message: &str, sensitive: &[String]) -> String {
+    sensitive
+        .iter()
+        .filter(|value| !value.is_empty())
+        .flat_map(|value| echoed_forms(value))
+        .fold(message.to_owned(), |message, form| {
+            redact_standalone(&message, &form)
+        })
+}
+
+fn navigates(action: &Action) -> bool {
+    matches!(
+        action,
+        Action::Navigate { .. }
+            | Action::NavigateWithHeaders { .. }
+            | Action::Reload
+            | Action::Back
+            | Action::Forward
+            | Action::History { .. }
+    )
+}
+
+fn navigation_unanswered(result: &Option<eoka::Result<ActionReceipt>>, dispatched: bool) -> bool {
+    match result {
+        None => dispatched,
+        Some(Err(Error::Action { receipt, .. })) => {
+            receipt.dispatch == DispatchState::MayHaveBeenSent
+        }
+        Some(_) => false,
+    }
+}
+
+const NAVIGATION_ABANDON_DEADLINE: Duration = Duration::from_secs(2);
+
+pub(crate) async fn abandon_navigation(page: &Page) {
+    let stopped = tokio::time::timeout(
+        NAVIGATION_ABANDON_DEADLINE,
+        page.session()
+            .send::<_, serde_json::Value>("Page.stopLoading", &serde_json::json!({})),
+    )
+    .await;
+    match stopped {
+        Ok(Ok(_)) => {}
+        Ok(Err(error)) => {
+            tracing::warn!(target_id = page.target_id(), %error, "Could not stop an unanswered navigation");
+        }
+        Err(_) => {
+            tracing::warn!(
+                target_id = page.target_id(),
+                "Stopping an unanswered navigation exceeded its deadline"
+            );
+        }
     }
 }
