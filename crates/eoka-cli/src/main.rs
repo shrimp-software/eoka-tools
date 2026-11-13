@@ -304,14 +304,10 @@ async fn main() {
     }
     let request_cmd = request.cmd();
 
-    let response = match client::send_command(&effective_session, request, spec.clone()).await {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("Error: {}", e);
-            std::process::exit(1);
-        }
-    }
-    .with_meta(response_meta(&effective_session, request_cmd));
+    let response = client::send_command(&effective_session, request, spec.clone())
+        .await
+        .unwrap_or_else(|error| protocol::Response::err(error.to_string()))
+        .with_meta(response_meta(&effective_session, request_cmd));
 
     output::print_response(&response, json_mode);
 

@@ -87,9 +87,11 @@ An observation or step that meets a blocker returns within about half a second.
 A step that opens a dialog returns as soon as the dialog appears, with status
 `running` and `operation_error.code` `dialog_open`; handle the dialog, then
 inspect the same operation ID. The action is never repeated. A new navigation
-replaces a pending one and cancels the navigation operation that started it. An
-action whose deadline passes while the tab still waits for a server stops that
-load, so the tab stays usable; its record reports the outcome as unknown.
+replaces a pending one and cancels the navigation operation that started it. A
+navigation whose deadline passes without a response is stopped, and so is a load
+that another action left waiting for more than 5 s when that action ends, so the
+tab stays usable; the record reports the outcome as unknown. A load the page
+started on its own is reported as `navigation_pending` and left to the caller.
 
 The CLI daemon runs one command at a time. A command waits up to 5 s
 (`EOKA_QUEUE_WAIT_MS`) for its turn and is then refused with `daemon_busy`,

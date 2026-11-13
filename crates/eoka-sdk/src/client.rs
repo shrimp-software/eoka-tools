@@ -680,7 +680,12 @@ async fn daemon_activity(session_name: &str) -> (String, String) {
             "The daemon is still running `{command}` ({:.1} s so far).",
             activity["busy"]["for_ms"].as_u64().unwrap_or_default() as f64 / 1000.0
         ),
-        None => "The daemon is idle again, so the reply was lost after the command ended.".into(),
+        None if activity.is_object() => {
+            "The daemon is idle again, so the reply was lost after the command ended.".into()
+        }
+        None => {
+            "The daemon still answers status probes but does not report what it is running.".into()
+        }
     };
     let hint = match blocker {
         Some(blocker) => format!("{blocker} {status}."),

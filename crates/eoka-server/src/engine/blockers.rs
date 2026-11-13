@@ -636,17 +636,25 @@ pub async fn finish_navigation(
     operations: &crate::operations::OperationManager,
     page: &Page,
     navigation_action: bool,
+    timed_out: bool,
 ) -> Option<Navigation> {
+    let mut running = running_on(operations, page).await;
+    if navigation_action && !running.is_empty() {
+        for record in running.iter().filter(|record| navigates(&record.action)) {
+            settle(operations, &record.id).await;
+        }
+        running = running_on(operations, page).await;
+    }
     if !matches!(current(page), Some(Blocker::Navigation(_))) {
-        return None;
+        return (navigation_action && timed_out && running.is_empty())
+            .then(|| stopped_recently(page, RECENTLY_STOPPED))
+            .flatten();
     }
-    let mut running = false;
-    for record in running_on(operations, page).await {
-        running = true;
-        let navigation = navigation_action || navigates(&record.action);
-        release_when_finished(page.clone(), operations.clone(), record.id, navigation);
-    }
-    if running {
+    if !running.is_empty() {
+        for record in running {
+            let navigation = navigation_action || navigates(&record.action);
+            release_when_finished(page.clone(), operations.clone(), record.id, navigation);
+        }
         return None;
     }
     let grace = if navigation_action {
@@ -748,7 +756,9 @@ impl super::Engine {
     ) -> Option<Response> {
         let page = self.current_page()?;
         watch(&page);
-        if policy == Policy::Free {
+        let opens_own_tab =
+            command == "open" && self.state.as_ref().is_some_and(|state| state.is_live);
+        if policy == Policy::Free || opens_own_tab {
             return None;
         }
         let grace = if policy == Policy::Navigate {

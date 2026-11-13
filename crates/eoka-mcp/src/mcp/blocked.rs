@@ -154,14 +154,15 @@ impl EokaServer {
             return result;
         };
         let navigation_action = policy == Policy::Navigate;
+        let timed_out = timed_out(&text);
         if let Some(navigation) =
-            blockers::finish_navigation(&self.operations, &page, navigation_action).await
+            blockers::finish_navigation(&self.operations, &page, navigation_action, timed_out).await
         {
             return Ok(
                 refusal(blockers::navigation_timeout(&remedies(), &navigation, None)).into(),
             );
         }
-        if !timed_out(&text) {
+        if !timed_out {
             return result;
         }
         match blockers::confirmed(&page, Duration::ZERO).await {
