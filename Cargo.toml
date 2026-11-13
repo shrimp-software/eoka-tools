@@ -16,7 +16,7 @@ eoka = "0.10.2"
 captcha = { package = "eoka-captcha", version = "0.1.1", path = "crates/captcha" }
 eoka-datadome = { version = "0.6.0", path = "crates/datadome" }
 eoka-email = { version = "0.1.1", path = "crates/eoka-email" }
-eoka-protocol = { version = "0.9.5", path = "crates/eoka-protocol" }
+eoka-protocol = { version = "0.10.0", path = "crates/eoka-protocol" }
 eoka-proxy = { version = "0.2.0", path = "crates/eoka-proxy" }
 eoka-sdk = { version = "0.10.4", path = "crates/eoka-sdk" }
 eoka-server = { version = "0.10.0", path = "crates/eoka-server" }
