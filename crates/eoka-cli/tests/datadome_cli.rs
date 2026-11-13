@@ -497,13 +497,35 @@ async fn accepted_request_finishes_after_cli_disconnect_without_replay() {
     let pid = std::fs::read_to_string(cli.pid_path()).unwrap();
     let mut child = cli
         .command(&["captcha", "datadome", "--timeout-ms", "20000"])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
         .spawn()
         .unwrap();
-    tokio::time::timeout(Duration::from_secs(10), fixture.started.notified())
-        .await
-        .unwrap();
+    // Wait for the solver's press for as long as the command itself may run.
+    // A busy runner can take more than 10 s to get there; an early exit is a
+    // real failure and reports the command's output.
+    tokio::select! {
+        _ = fixture.started.notified() => {}
+        status = child.wait() => {
+            let mut output = String::new();
+            for stream in [
+                child.stdout.take().map(|s| Box::new(s) as Box<dyn tokio::io::AsyncRead + Unpin>),
+                child.stderr.take().map(|s| Box::new(s) as Box<dyn tokio::io::AsyncRead + Unpin>),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                let mut stream = stream;
+                tokio::io::AsyncReadExt::read_to_string(&mut stream, &mut output)
+                    .await
+                    .unwrap();
+            }
+            panic!("captcha exited before pressing the slider: {status:?}\n{output}");
+        }
+        _ = tokio::time::sleep(Duration::from_secs(20)) => {
+            panic!("captcha did not press the slider within its 20 s timeout");
+        }
+    }
     child.kill().await.unwrap();
     child.wait().await.unwrap();
     cli.ok(&["snapshot"]).await;
