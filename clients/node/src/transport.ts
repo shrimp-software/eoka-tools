@@ -348,7 +348,8 @@ export class SidecarTransport implements InvokeClient {
         options.signal.addEventListener('abort', current.abort, { once: true });
       }
       if (deadline !== undefined) {
-        const expired = `${method} exceeded ${options.timeoutMs === undefined ? `the ${timeoutMs} ms default deadline (defaultTimeoutMs)` : `its ${timeoutMs} ms local deadline`}`;
+        const origin = options.timeoutMs !== undefined ? 'local deadline' : timeoutMs === this.defaultTimeoutMs ? 'default deadline (defaultTimeoutMs)' : `default deadline (its server-side wait plus ${serverGraceMs} ms)`;
+        const expired = `${method} exceeded ${options.timeoutMs === undefined ? 'the' : 'its'} ${timeoutMs} ms ${origin}`;
         const remaining = deadline - performance.now();
         if (remaining <= 0) this.cancel(current, 'DeadlineExceeded', expired);
         else current.timer = setTimeout(() => this.cancel(current, 'DeadlineExceeded', expired), remaining);

@@ -272,7 +272,7 @@ test('the default deadline never undercuts a requested server-side wait and skip
   const transport = await start(t, 'silent', {}, { defaultTimeoutMs: 40 });
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const outcomes = new Map();
-  const watch = (name, call) => { call.then(() => outcomes.set(name, 'resolved'), error => outcomes.set(name, error.code)); };
+  const watch = (name, call) => { call.then(() => outcomes.set(name, { code: 'resolved' }), error => outcomes.set(name, error)); };
   const turn = () => new Promise(resolve => setImmediate(resolve));
   watch('explicit wait', transport.invoke('operations.wait', { id: operationId, timeout_ms: 500 }));
   watch('schema default wait', transport.invoke('operations.wait', { id: operationId }));
@@ -294,7 +294,9 @@ test('the default deadline never undercuts a requested server-side wait and skip
   assert.deepEqual(await settledAt(16_010), ['no wait', 'explicit wait', 'page wait', 'nested action wait']);
   assert.deepEqual(await settledAt(39_000), ['no wait', 'explicit wait', 'page wait', 'nested action wait']);
   assert.deepEqual(await settledAt(40_010), ['no wait', 'explicit wait', 'page wait', 'nested action wait', 'schema default wait']);
-  assert.deepEqual([...new Set(outcomes.values())], ['DeadlineExceeded']);
+  assert.deepEqual([...new Set([...outcomes.values()].map(error => error.code))], ['DeadlineExceeded']);
+  assert.match(outcomes.get('no wait').message, /page\.title exceeded the 40 ms default deadline \(defaultTimeoutMs\)/);
+  assert.match(outcomes.get('explicit wait').message, /operations\.wait exceeded the 10500 ms default deadline \(its server-side wait plus 10000 ms\)/);
   void transport.invoke('browser.close', {}).catch(() => {});
   const terminal = [...transport.pending.values()].find(entry => entry.method === 'browser.close');
   assert.equal(terminal.timer, undefined);
