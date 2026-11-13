@@ -1,18 +1,33 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { mkdtemp, rm, stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
-import { EokaError } from '../dist/index.js';
+import { Browser, EokaError } from '../dist/index.js';
 import {
-  closeQuietly, describeOutcome, descendants, goneWithin, killSurvivors, launchBrowser, rejection, resolution, settle, skipRealBrowser, startFixture,
+  closeQuietly, describeOutcome, descendants, goneWithin, killSurvivors, launchBrowser, launchOptions, rejection, resolution, settle, skipRealBrowser, startFixture,
 } from './fixtures/eval-support.mjs';
 
 const sleepOneSecond = '()=>new Promise(r=>setTimeout(()=>r(1),1000))';
 const neverSettles = '()=>new Promise(()=>{})';
 const fieldValue = "()=>document.querySelector('#name').value";
 const processChild = fileURLToPath(new URL('./fixtures/eval-process-child.mjs', import.meta.url));
+
+const pngSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+
+function describeCapture(outcome) {
+  return describeOutcome(outcome.state === 'resolved' ? { ...outcome, value: `${outcome.value?.length} bytes` } : outcome);
+}
+
+function png(outcome, label) {
+  const image = resolution(outcome);
+  assert.ok(Buffer.isBuffer(image) && image.length > pngSignature.length, `expected ${label} to return a non-empty image; got ${image?.length} bytes`);
+  assert.deepEqual(image.subarray(0, pngSignature.length), pngSignature, `expected ${label} to return a PNG`);
+}
 
 function within(outcome, limitMs, label) {
   resolution(outcome);
@@ -238,5 +253,96 @@ describe('K14: process hygiene', { skip: skipRealBrowser || process.platform ===
       child.kill('SIGKILL');
       killSurvivors(tree);
     }
+  });
+});
+
+describe('K15: capturing a tab that is not in front', { skip: skipRealBrowser, concurrency: true }, () => {
+  const rows = ['screenshot', 'file', 'front', 'together'];
+  const stages = new Map();
+  let fixture;
+  let directory;
+
+  before(async () => {
+    fixture = await startFixture();
+    directory = await mkdtemp(join(tmpdir(), 'eoka-capture-'));
+    const launched = await Promise.allSettled(rows.map(() => launchBrowser()));
+    rows.forEach((row, index) => {
+      if (launched[index].status === 'fulfilled') stages.set(row, { browser: launched[index].value });
+    });
+    const failed = launched.find(result => result.status === 'rejected');
+    if (failed) throw failed.reason;
+    await Promise.all(rows.map(async row => {
+      const stage = stages.get(row);
+      stage.a = await stage.browser.newPage(fixture.pageUrl(`${row}-a`));
+      stage.b = await stage.browser.newPage(fixture.pageUrl(`${row}-b`));
+      stage.visibility = [await stage.a.evaluate('()=>document.visibilityState'), await stage.b.evaluate('()=>document.visibilityState')];
+    }));
+    await delay(3000);
+  }, { timeout: 120000 });
+
+  after(async () => {
+    await closeQuietly(...[...stages.values()].map(stage => stage.browser));
+    await fixture?.close();
+    if (directory) await rm(directory, { recursive: true, force: true });
+  }, { timeout: 60000 });
+
+  test('K15: screenshot() of a tab that has been behind for 3 s resolves within 5 s with a non-empty PNG', { timeout: 60000 }, async t => {
+    const { a, visibility } = stages.get('screenshot');
+    const outcome = await settle(async () => await a.screenshot(), 5000);
+    t.diagnostic(`${describeCapture(outcome)}; tab visibility ${visibility.join(', ')}`);
+    png(outcome, 'screenshot() of the tab behind');
+  });
+
+  test('K15: screenshotToFile() of a tab that has been behind for 3 s resolves within 5 s and writes a non-empty file', { timeout: 60000 }, async t => {
+    const { a } = stages.get('file');
+    const path = join(directory, 'behind.png');
+    const outcome = await settle(async () => await a.screenshotToFile({ path }), 5000);
+    const written = await stat(path).then(entry => entry.size, () => null);
+    t.diagnostic(`${describeOutcome(outcome)}; file ${written === null ? 'missing' : `${written} bytes`}`);
+    resolution(outcome);
+    assert.ok(written > 0, `expected a non-empty file at ${path}; ${written === null ? 'it does not exist' : `it has ${written} bytes`}`);
+  });
+
+  test('K15: after capturing the tab behind, screenshot() of the front tab still resolves within 5 s', { timeout: 60000 }, async t => {
+    const { a, b } = stages.get('front');
+    const behind = await settle(async () => await a.screenshot(), 5000);
+    const front = await settle(async () => await b.screenshot(), 5000);
+    t.diagnostic(`tab behind: ${describeCapture(behind)}; front tab afterwards: ${describeCapture(front)}`);
+    png(front, 'screenshot() of the front tab');
+  });
+
+  test('K15: screenshot() of the tab behind and of the front tab together both resolve within 10 s', { timeout: 60000 }, async t => {
+    const { a, b } = stages.get('together');
+    const [behind, front] = await Promise.all([settle(async () => await a.screenshot(), 10000), settle(async () => await b.screenshot(), 10000)]);
+    t.diagnostic(`tab behind: ${describeCapture(behind)}; front tab: ${describeCapture(front)}`);
+    png(behind, 'screenshot() of the tab behind');
+    png(front, 'screenshot() of the front tab');
+  });
+});
+
+describe('browsers shutting down together', { skip: skipRealBrowser }, () => {
+  test('close race: eight browsers in one process close at once without a rejection, three rounds', { timeout: 300000 }, async t => {
+    const rejected = [];
+    for (let round = 1; round <= 3; round++) {
+      const started = performance.now();
+      const launched = await Promise.allSettled(Array.from({ length: 8 }, () => Browser.launch({ ...launchOptions(), timeoutMs: 90000 })));
+      const browsers = launched.filter(result => result.status === 'fulfilled').map(result => result.value);
+      let closed;
+      try {
+        const failed = launched.find(result => result.status === 'rejected');
+        if (failed) throw failed.reason;
+        await Promise.all(browsers.map(async browser => {
+          const page = await browser.newPage('data:text/html,<title>t</title>');
+          await page.title();
+        }));
+      } finally {
+        closed = await Promise.allSettled(browsers.map(browser => browser.close()));
+      }
+      const failures = closed.filter(result => result.status === 'rejected').map(result => result.reason);
+      const codes = [...new Set(failures.map(error => error?.code))].join(', ');
+      t.diagnostic(`round ${round}: ${failures.length} of ${closed.length} close() calls rejected${failures.length ? ` with ${codes}` : ''} in ${Math.round(performance.now() - started)} ms`);
+      rejected.push(...failures);
+    }
+    assert.deepEqual(rejected.map(error => `${error?.code}: ${error?.message}`), []);
   });
 });

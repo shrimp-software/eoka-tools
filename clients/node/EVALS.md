@@ -39,8 +39,10 @@ Rows that share a call (for example K4, K9 and K11 on `fill('#missing')`) share 
 | K2 | tab A's `goto` to a server that never answers has rejected | the same two budgets, both right after the rejection and while `a.title()` is in flight; `a.title()` settles within 35 s |
 | K14 | the Node process is killed with `SIGKILL` | the sidecar and every Chrome process are gone within 5 s |
 | K14 | the script throws an uncaught exception | exit code is non-zero within 10 s and no child process is left 5 s later |
+| K15 | tab A has been behind tab B for 3 s | `a.screenshot()` returns a non-empty PNG within 5 s; `a.screenshotToFile()` writes a non-empty file within 5 s; `b.screenshot()` still works within 5 s afterwards; both together resolve within 10 s |
+| close race | eight browsers in one process, a `data:` page in each, all closed at once, three rounds | no `close()` rejects |
 
-K14 spawns `tests/fixtures/eval-process-child.mjs` and follows its process tree with `ps`; it is skipped on Windows.
+K14 spawns `tests/fixtures/eval-process-child.mjs` and follows its process tree with `ps`; it is skipped on Windows. Each K15 row has its own browser and pair of tabs, so a capture that is still running cannot leak into another row. The close-race row holds eight Chrome copies in the temporary directory at once (about 2.3 GB), so point `TMPDIR` at a disk with room; a long `TMPDIR` path stops Chrome from starting.
 
 ### `readme-examples.test.mjs`
 
@@ -56,7 +58,7 @@ export EOKA_RELIABILITY_CHROME=/path/to/chrome
 node --test tests/mistakes.test.mjs tests/misbehaving-pages.test.mjs tests/readme-examples.test.mjs
 ```
 
-Without `EOKA_RELIABILITY_SERVER` the browser tests are skipped and only the README parse and type checks run. CI sets both variables in the `Browser (clients)` job, which runs `tests/*.test.mjs`. Each test prints what it observed (`ℹ rejected in 2001 ms with … code=…`), so a failure shows the measured time, code and message. On a debug server expect about 35 s for `mistakes` (one row waits out the 30-second default), up to 80 s for `misbehaving-pages` and 10 s for `readme-examples`; the files run in parallel.
+Without `EOKA_RELIABILITY_SERVER` the browser tests are skipped and only the README parse and type checks run. CI sets both variables in the `Browser (clients)` job, which runs `tests/*.test.mjs`. Each test prints what it observed (`ℹ rejected in 2001 ms with … code=…`), so a failure shows the measured time, code and message. On a debug server expect about 35 s for `mistakes` (one row waits out the 30-second default), 90 to 120 s for `misbehaving-pages` (the close-race row alone launches 24 browsers) and 10 s for `readme-examples`; the files run in parallel.
 
 The time budgets are part of the contract. Do not raise one to make a row pass.
 
@@ -64,7 +66,7 @@ The time budgets are part of the contract. Do not raise one to make a row pass.
 
 - Real sites and real networks. Every page is a local fixture.
 - `Browser.connect`, headed mode, macOS and Windows. The browser rows run wherever the two variables are set, which in CI is Linux x64.
-- What `browser.close()` reports. These suites close their browsers on a best-effort basis so that a cleanup error cannot mask or fake a contract row; `browser-lifecycle.test.mjs` and `reliability-browser.test.mjs` own that.
+- What `browser.close()` reports, outside the close-race row. The other suites close their browsers on a best-effort basis so that a cleanup error cannot mask or fake a contract row; `browser-lifecycle.test.mjs` and `reliability-browser.test.mjs` own that.
 - Error wording beyond the fragments listed above.
 - Unknown option keys outside `actionOptions`, such as `screenshot({ fullpage: true })`. The README type check catches them in examples; nothing asserts that the runtime rejects them.
 - The catalog operations under `page.ops`, a frozen sidecar, and navigation failures other than a server that never answers.
