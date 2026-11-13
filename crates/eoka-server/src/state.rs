@@ -13,6 +13,7 @@ pub struct AppState {
     pub operations: crate::operations::OperationManager,
     pub recordings: crate::recordings::RecordingManager,
     browser: Option<Arc<Browser>>,
+    engine: Option<crate::engine::Engine>,
     pages: HashMap<String, Page>,
     cloudflare: Option<crate::cloudflare::CloudflareWatcher>,
     shutdown: bool,
@@ -28,7 +29,18 @@ impl AppState {
     }
 
     pub fn take_browser(&mut self) -> Option<Arc<Browser>> {
+        // The engine shares the browser; release its handle with ours.
+        self.engine = None;
         self.browser.take()
+    }
+
+    /// The catalog operation engine for this browser, created on first use.
+    pub fn engine(&mut self) -> Result<&mut crate::engine::Engine, ServerError> {
+        let browser = self.browser()?.clone();
+        let operations = self.operations.clone();
+        Ok(self
+            .engine
+            .get_or_insert_with(|| crate::engine::Engine::adopt("sidecar", browser, operations)))
     }
 
     pub fn is_launched(&self) -> bool {
@@ -49,6 +61,9 @@ impl AppState {
     }
 
     pub fn remove_page(&mut self, id: &str) -> Option<Page> {
+        if let Some(engine) = &mut self.engine {
+            engine.forget_tab(id);
+        }
         let page = self.pages.remove(id);
         self.publish_pages();
         page

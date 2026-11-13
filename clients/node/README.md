@@ -45,6 +45,13 @@ String targets are CSS selectors. An action resolves only after its result is ve
 - **Waits:** `waitFor`, `waitForVisible`, `waitForText`
 - **Actions:** `goto`, `fill`, `select`, `hover`, `click`, `type`, `pressKey`, `submit`, `drag`
 
+Everything the `eoka` CLI can do is also callable by its catalog name through the typed `page.invoke`, for operations without a dedicated method yet (console and error logs, cookies and storage, network recording and interception, downloads, JavaScript policy, and more). Params are the operation's input plus the page ID; results are untyped for now.
+
+```js
+await page.invoke("network.record.start", { pageId: page.id });
+const logs = await page.invoke("console", { pageId: page.id });
+```
+
 ## Shadow DOM and Turnstile
 
 `page.frames()` lists every frame, including cross-origin OOPIFs. `page.clickShadow(selector, { frameId?, resolveTimeoutMs? })` searches the frame's light DOM and every shadow root (closed roots included), maps the matched node's center to viewport coordinates, and clicks with human-like movement. `resolveTimeoutMs` bounds the server-side resolution; `CallOptions.timeoutMs` remains the RPC deadline and defaults to the resolution deadline plus 10 seconds when omitted:

@@ -53,7 +53,7 @@ The result contains:
 | `limits.maxMessageBytes` | Maximum serialized message size |
 | `limits.maxInFlight` | Maximum in-flight requests |
 
-Protocol major 2/minor 0 is supported. Version 1 clients must migrate. A
+Protocol major 2 through minor 1 is supported; minor 1 adds catalog operations. Version 1 clients must migrate. A
 different major or a requested minor newer than the server supports returns
 `ProtocolMismatch` without launching a browser. Existing low-level clients can
 still call compatible methods directly; the Go client requires protocol 1.1
@@ -116,8 +116,30 @@ method-specific results:
 cargo run --quiet --locked -p eoka-protocol --bin export-sidecar-schema
 ```
 
-This is the sidecar registry, not the tool catalog used by the CLI daemon.
-Wire names and existing result shapes remain stable across canonicalization.
+The registry has two parts. Methods registered in `eoka-protocol::sidecar`
+(`server.*`, `browser.*`, `page.*`, `recording.*` and the shared `actions.*`,
+`operations.*` and `agent.*` methods) keep their existing wire names and result
+shapes.
+
+### Catalog operations (protocol 2.1)
+
+Servers advertising the `operationCatalog` capability also serve the operation
+catalog used by the CLI daemon, MCP and Tack. Each catalog operation is a method
+named by its catalog path (`console`, `cookies`, `network.record.start`,
+`intercept.add`, `download.start`, ...), executed by the same engine as the CLI
+daemon. The schema bundle lists them under `catalogMethods`.
+
+- Params are the operation's catalog input plus a required string `pageId`.
+- The result is the operation's `data` value; results are not yet typed.
+- Failures return an `Operation` error carrying the catalog `ErrorDetail`.
+- Session lifecycle and tab management are not projected: use `server.shutdown`,
+  `browser.close`, `browser.new_page`, `browser.tabs` and `browser.close_tab`.
+- A catalog path that already names a registered method keeps that method's
+  contract.
+
+```json
+{"id":7,"method":"console","params":{"pageId":"<id>","clear":false}}
+```
 
 ### Server lifecycle
 

@@ -3,10 +3,11 @@ use serde_json::Value;
 use crate::methods::{browser, page};
 use crate::state::AppState;
 use eoka_protocol::sidecar::{
-    method_names, validate_params, validate_safe_numbers, AgentObserveParams, AgentStepParams,
-    ErrorCode, HelloParams, HelloResult, ServerError, TransportLimits,
-    CAPABILITY_CLOUDFLARE_AUTO_SOLVE, CAPABILITY_NATIVE_RECORDING, CAPABILITY_SCREENSHOT_FILE,
-    CAPABILITY_SCREENSHOT_OPTIONS, MAX_IN_FLIGHT, MAX_MESSAGE_BYTES, PROTOCOL_VERSION,
+    catalog_operation, catalog_request, method_names, validate_params, validate_safe_numbers,
+    AgentObserveParams, AgentStepParams, ErrorCode, HelloParams, HelloResult, ServerError,
+    TransportLimits, CAPABILITY_CLOUDFLARE_AUTO_SOLVE, CAPABILITY_NATIVE_RECORDING,
+    CAPABILITY_OPERATION_CATALOG, CAPABILITY_SCREENSHOT_FILE, CAPABILITY_SCREENSHOT_OPTIONS,
+    MAX_IN_FLIGHT, MAX_MESSAGE_BYTES, PROTOCOL_VERSION,
 };
 
 pub async fn dispatch(
@@ -65,6 +66,26 @@ pub async fn dispatch(
     }
     if crate::recordings::supports_control(method) {
         return crate::recordings::control(&state.recordings, method, params).await;
+    }
+    if let Some(operation) = catalog_operation(method) {
+        let (page_id, request) = catalog_request(operation, &params)?;
+        let page = state.page(&page_id)?.clone();
+        let response = state
+            .engine()?
+            .handle_on(&page_id, &page, operation.cmd, &request.args_json())
+            .await;
+        if response.ok {
+            return Ok(response.data.unwrap_or(Value::Null));
+        }
+        return Err(match response.error_detail {
+            Some(detail) => ServerError::from_detail(detail),
+            None => ServerError::new(
+                ErrorCode::Operation,
+                response
+                    .error
+                    .unwrap_or_else(|| "Operation failed".to_owned()),
+            ),
+        });
     }
     if matches!(method, "browser.tabs" | "browser.close") {
         validate_params(method, &params)?;
@@ -164,6 +185,7 @@ pub fn hello(params: Value) -> Result<Value, ServerError> {
             CAPABILITY_SCREENSHOT_FILE.to_owned(),
             CAPABILITY_NATIVE_RECORDING.to_owned(),
             CAPABILITY_CLOUDFLARE_AUTO_SOLVE.to_owned(),
+            CAPABILITY_OPERATION_CATALOG.to_owned(),
         ],
         limits: TransportLimits {
             max_message_bytes: MAX_MESSAGE_BYTES,

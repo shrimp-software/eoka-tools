@@ -14,7 +14,13 @@ const configPath = join(root, 'scripts/surface-parity.json');
 const read = path => readFileSync(join(root, path), 'utf8');
 const sources = (dir, keep) => readdirSync(join(root, dir)).filter(keep).map(name => read(join(dir, name))).join('\n');
 
-const methods = Object.keys(JSON.parse(read('clients/node/src/generated/schema-bundle.json')).methods).sort();
+// Catalog operations projected into the sidecar are exposed by construction:
+// the catalog defines them, Node's typed `invoke` covers every generated
+// method, and Go reaches them through `Page.Invoke`. Only hand-registered
+// sidecar methods need a per-surface check.
+const bundle = JSON.parse(read('clients/node/src/generated/schema-bundle.json'));
+const catalogMethods = new Set(bundle.catalogMethods);
+const methods = Object.keys(bundle.methods).filter(method => !catalogMethods.has(method)).sort();
 const node = sources('clients/node/src', name => name.endsWith('.ts'));
 const go = sources('clients/go', name => name.endsWith('.go') && !name.endsWith('_test.go'));
 const catalogCommands = new Set([...read('crates/eoka-protocol/src/catalog.rs').matchAll(/\bcmd:\s*"([^"]+)"/g)].map(match => match[1]));

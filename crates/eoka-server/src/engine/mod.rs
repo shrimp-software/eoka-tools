@@ -115,6 +115,48 @@ impl Engine {
         }
     }
 
+    /// An engine over a browser the caller owns and keeps managing, sharing
+    /// the caller's durable operation records. Tabs are supplied per call
+    /// through [`Engine::handle_on`]; the engine never closes the browser.
+    pub fn adopt(
+        session_name: impl Into<String>,
+        browser: std::sync::Arc<eoka::Browser>,
+        operations: crate::operations::OperationManager,
+    ) -> Self {
+        let mut engine = Self::new(session_name, LaunchSpec::Reuse);
+        engine.operations = operations;
+        engine.state = Some(BrowserState::adopted(browser));
+        engine
+    }
+
+    /// Run one catalog command against a specific tab instead of the current one.
+    pub async fn handle_on(
+        &mut self,
+        tab_id: &str,
+        page: &eoka::Page,
+        cmd: &str,
+        args: &Value,
+    ) -> Response {
+        if let Some(state) = self.state.as_mut() {
+            state
+                .tabs
+                .entry(tab_id.to_owned())
+                .or_insert_with(|| TabState::new(page.clone()));
+            state.current_tab_id = Some(tab_id.to_owned());
+        }
+        self.handle(cmd, args).await
+    }
+
+    /// Stop tracking a tab the caller closed.
+    pub fn forget_tab(&mut self, tab_id: &str) {
+        if let Some(state) = self.state.as_mut() {
+            state.tabs.remove(tab_id);
+            if state.current_tab_id.as_deref() == Some(tab_id) {
+                state.current_tab_id = None;
+            }
+        }
+    }
+
     async fn ensure_browser(&mut self) -> Result<(), String> {
         if self.state.is_some() {
             return Ok(());
@@ -628,8 +670,9 @@ impl Engine {
     where
         F: FnOnce(
             &eoka::Page,
-        )
-            -> std::pin::Pin<Box<dyn std::future::Future<Output = eoka::Result<()>> + '_>>,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = eoka::Result<()>> + Send + '_>,
+        >,
     {
         let page = self.require_tab()?.page.clone();
         let drain = self.start_fetch_drain();

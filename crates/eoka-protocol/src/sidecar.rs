@@ -8,7 +8,7 @@ pub use crate::{OperationIdArgs, OperationListArgs, OperationWaitArgs};
 pub const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 pub const MAX_MESSAGE_BYTES: usize = 32 * 1024 * 1024;
 pub const MAX_IN_FLIGHT: usize = 128;
-pub const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion { major: 2, minor: 0 };
+pub const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion { major: 2, minor: 1 };
 pub const MAX_BOUNDED_FETCH_BYTES: usize = 1024 * 1024;
 pub const MAX_SCREENSHOT_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_RECORDING_FPS: u32 = 120;
@@ -16,6 +16,9 @@ pub const CAPABILITY_SCREENSHOT_OPTIONS: &str = "screenshotOptions";
 pub const CAPABILITY_SCREENSHOT_FILE: &str = "screenshotFile";
 pub const CAPABILITY_NATIVE_RECORDING: &str = "nativeRecording";
 pub const CAPABILITY_CLOUDFLARE_AUTO_SOLVE: &str = "cloudflareAutoSolve";
+/// Catalog operations are callable as sidecar methods named by their catalog
+/// path, with a `pageId` added to the operation's input.
+pub const CAPABILITY_OPERATION_CATALOG: &str = "operationCatalog";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProtocolVersion {
@@ -1306,12 +1309,79 @@ dto!(GetAttributeParams {
     name: String
 });
 
+/// Catalog operations served through the sidecar under their catalog path.
+///
+/// Session lifecycle and tab management stay with the sidecar's own
+/// `server.*` and `browser.*` methods, and a path that already names a sidecar
+/// method keeps that method's contract.
+pub fn catalog_operations() -> impl Iterator<Item = &'static crate::OperationSpec> {
+    crate::all_operations().iter().filter(|operation| {
+        operation.exposure != crate::OperationExposure::Lifecycle
+            && !operation.path.starts_with("tab.")
+            && !matches!(operation.path, "close" | "shutdown")
+            && !METHODS.iter().any(|method| method.name == operation.path)
+    })
+}
+
+pub fn catalog_operation(method: &str) -> Option<&'static crate::OperationSpec> {
+    catalog_operations().find(|operation| operation.path == method)
+}
+
+/// Split catalog method params into the target `pageId` and the operation's
+/// own typed input.
+pub fn catalog_request(
+    operation: &crate::OperationSpec,
+    params: &Value,
+) -> Result<(String, crate::Request), ServerError> {
+    let mut input = params.clone();
+    let page_id = input
+        .as_object_mut()
+        .and_then(|object| object.remove("pageId"))
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .ok_or_else(|| ServerError::invalid_params("missing string field `pageId`"))?;
+    let request =
+        crate::request_from_cmd(operation.cmd, input).map_err(ServerError::invalid_params)?;
+    Ok((page_id, request))
+}
+
+fn catalog_params_schema(operation: &crate::OperationSpec) -> Value {
+    let page_id = json!({
+        "type": "object",
+        "properties": {"pageId": {"type": "string"}},
+        "required": ["pageId"],
+    });
+    let mut input = crate::input_schema_for_operation(operation);
+    constrain_integers(&mut input);
+    let plain_object = input["type"] == "object"
+        && ["oneOf", "anyOf", "allOf", "$ref"]
+            .iter()
+            .all(|key| input.get(key).is_none());
+    if !plain_object {
+        return json!({"allOf": [input, page_id]});
+    }
+    let object = input.as_object_mut().expect("checked above");
+    let properties = object.entry("properties").or_insert_with(|| json!({}));
+    properties["pageId"] = page_id["properties"]["pageId"].clone();
+    match object.entry("required").or_insert_with(|| json!([])) {
+        Value::Array(required) => required.push(json!("pageId")),
+        _ => unreachable!("JSON schema `required` is an array"),
+    }
+    input
+}
+
 pub fn method_names() -> Vec<&'static str> {
-    METHODS.iter().map(|method| method.name).collect()
+    METHODS
+        .iter()
+        .map(|method| method.name)
+        .chain(catalog_operations().map(|operation| operation.path))
+        .collect()
 }
 
 pub fn validate_params(method: &str, params: &Value) -> Result<(), ServerError> {
     validate_safe_numbers(params)?;
+    if let Some(operation) = catalog_operation(method) {
+        return catalog_request(operation, params).map(|_| ());
+    }
     let spec = METHODS
         .iter()
         .find(|spec| spec.name == method)
@@ -1328,6 +1398,13 @@ pub fn schema_bundle() -> Value {
                 json!({"params": (method.params_schema)(), "result": (method.result_schema)()}),
             )
         })
+        // Catalog results are the operation's `data`, not yet typed.
+        .chain(catalog_operations().map(|operation| {
+            (
+                operation.path,
+                json!({"params": catalog_params_schema(operation), "result": {}}),
+            )
+        }))
         .collect();
     let mut bundle = json!({
         "protocolVersion": PROTOCOL_VERSION,
@@ -1355,6 +1432,9 @@ pub fn schema_bundle() -> Value {
             "RecordingFailure": schema::<RecordingFailure>(), "RecordingFailureStage": schema::<RecordingFailureStage>()
         }
     });
+    bundle["catalogMethods"] = catalog_operations()
+        .map(|operation| operation.path)
+        .collect();
     bundle["types"]["InputMode"] = schema::<crate::InputMode>();
     bundle["types"]["Destination"] = schema::<crate::Destination>();
     bundle["types"]["CloudflareAutoSolve"] = schema::<CloudflareAutoSolve>();
@@ -1413,6 +1493,76 @@ mod tests {
                 height: 1.0,
             };
             assert!(validate_screenshot(None, None, Some(&clip), None).is_err());
+        }
+    }
+
+    #[test]
+    fn catalog_operations_are_sidecar_methods_addressed_by_page() {
+        let names = method_names();
+        let unique: std::collections::BTreeSet<_> = names.iter().collect();
+        assert_eq!(unique.len(), names.len(), "method names must be unique");
+
+        // Every catalog operation is either projected or deliberately served
+        // by a sidecar method of its own.
+        for operation in crate::all_operations() {
+            let projected = catalog_operation(operation.path).is_some();
+            let own_method = METHODS.iter().any(|method| method.name == operation.path);
+            let sidecar_lifecycle = operation.exposure == crate::OperationExposure::Lifecycle
+                || operation.path.starts_with("tab.")
+                || matches!(operation.path, "close" | "shutdown");
+            assert_eq!(
+                projected,
+                !own_method && !sidecar_lifecycle,
+                "{}",
+                operation.path
+            );
+            assert!(
+                names.contains(&operation.path) || sidecar_lifecycle,
+                "{} is not reachable through the sidecar",
+                operation.path
+            );
+        }
+
+        let bundle = schema_bundle();
+        for operation in catalog_operations() {
+            let params = &bundle["methods"][operation.path]["params"];
+            assert_eq!(params["properties"]["pageId"]["type"], "string");
+            assert!(params["required"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("pageId")));
+            assert_eq!(
+                validate_params(operation.path, &json!({}))
+                    .unwrap_err()
+                    .code,
+                ErrorCode::InvalidParams,
+                "{} must require pageId",
+                operation.path
+            );
+        }
+        assert_eq!(
+            bundle["catalogMethods"].as_array().unwrap().len(),
+            catalog_operations().count()
+        );
+
+        let console = catalog_operation("console").unwrap();
+        let (page, request) =
+            catalog_request(console, &json!({"pageId":"p","clear":true})).unwrap();
+        assert_eq!(page, "p");
+        assert_eq!(request.cmd(), "console");
+        assert_eq!(request.args_json()["clear"], true);
+        assert!(request.args_json().get("pageId").is_none());
+        assert!(validate_params("cookies", &json!({"pageId":"p"})).is_ok());
+        assert!(validate_params("cookies", &json!({"pageId":7})).is_err());
+        assert!(validate_params("find", &json!({"pageId":"p"})).is_err());
+        for absent in [
+            "close",
+            "shutdown",
+            "tab.list",
+            "session.hello",
+            "actions.command",
+        ] {
+            assert!(catalog_operation(absent).is_none(), "{absent}");
         }
     }
 

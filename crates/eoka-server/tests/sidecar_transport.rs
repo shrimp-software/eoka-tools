@@ -777,6 +777,91 @@ fn oversized_evaluation_returns_structured_size_error_and_remains_usable() {
 
 #[test]
 #[ignore = "requires Chrome"]
+fn catalog_operations_run_on_the_addressed_page_and_report_structured_errors() {
+    let (root, state, scratch) = directories();
+    let mut server = Sidecar::start(&state, &scratch);
+    let hello = server.request(90, "server.hello", json!({"protocol":PROTOCOL_VERSION}));
+    assert!(hello["result"]["capabilities"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("operationCatalog")));
+    let first = launch(&mut server, &root.path().join("profile"));
+    let second = server.request(3, "browser.new_page", json!({}))["result"]["pageId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    // Each call targets the page named by pageId, in either order.
+    for (id, page, title) in [(4, &first, "first"), (5, &second, "second")] {
+        let response = server.request(
+            id,
+            "exec",
+            json!({"pageId":page,"raw":true,"code":format!("document.title = '{title}'; void 0")}),
+        );
+        assert!(response.get("result").is_some(), "{response}");
+    }
+    for (id, page, title) in [(6, &second, "second"), (7, &first, "first")] {
+        let response = server.request(id, "info", json!({"pageId":page}));
+        assert!(response["result"].to_string().contains(title), "{response}");
+        // The sidecar's own method sees the same page.
+        let legacy = server.request(id + 10, "page.title", json!({"pageId":page}));
+        assert_eq!(legacy["result"]["title"], title, "{legacy}");
+    }
+
+    // An operation with no sidecar equivalent: console capture.
+    assert!(server
+        .request(20, "console", json!({"pageId":first}))
+        .get("result")
+        .is_some());
+    server.request(
+        21,
+        "exec",
+        json!({"pageId":first,"raw":true,"code":"console.log('catalog-marker'); void 0"}),
+    );
+    let console = server.request(22, "console", json!({"pageId":first}));
+    assert!(
+        console["result"].to_string().contains("catalog-marker"),
+        "{console}"
+    );
+    let other = server.request(23, "console", json!({"pageId":second}));
+    assert!(
+        !other["result"].to_string().contains("catalog-marker"),
+        "{other}"
+    );
+
+    for (id, method, params, code) in [
+        (30, "info", json!({}), "InvalidParams"),
+        (31, "info", json!({"pageId":"missing"}), "InvalidPage"),
+        (
+            32,
+            "console",
+            json!({"pageId":first,"clear":"yes"}),
+            "InvalidParams",
+        ),
+        (33, "find", json!({"pageId":first}), "InvalidParams"),
+        (34, "tab.list", json!({"pageId":first}), "UnknownMethod"),
+        (35, "close", json!({"pageId":first}), "UnknownMethod"),
+    ] {
+        let response = server.request(id, method, params);
+        assert_eq!(response["error"]["code"], code, "{method}: {response}");
+    }
+
+    // The browser stays under sidecar ownership and closes with it.
+    assert!(server
+        .request(40, "browser.close_tab", json!({"pageId":second}))
+        .get("result")
+        .is_some());
+    let closed = server.request(41, "info", json!({"pageId":second}));
+    assert_eq!(closed["error"]["code"], "InvalidPage", "{closed}");
+    assert!(server
+        .request(42, "text", json!({"pageId":first}))
+        .get("result")
+        .is_some());
+    server.shutdown(43);
+}
+
+#[test]
+#[ignore = "requires Chrome"]
 fn shutdown_during_launch_does_not_abandon_the_owned_browser() {
     let (root, state, scratch) = directories();
     let profile = root.path().join("profile");

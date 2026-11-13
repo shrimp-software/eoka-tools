@@ -734,7 +734,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-protocol"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "eoka",
  "schemars",
@@ -790,7 +790,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-server"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
