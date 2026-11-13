@@ -316,3 +316,38 @@ fn navigation_actions_are_the_only_ones_that_can_be_abandoned() {
         assert!(!navigates(&action), "{}", action.kind());
     }
 }
+
+#[tokio::test]
+async fn stopping_one_target_leaves_other_targets_running() {
+    let manager = OperationManager::default();
+    let mut receivers = Vec::new();
+    for (id, target) in [("first", "a"), ("second", "b"), ("third", "a")] {
+        let (cancel, canceled) = watch::channel(false);
+        manager.inner.jobs.lock().unwrap().insert(
+            id.into(),
+            ActiveOperation {
+                target_id: target.into(),
+                cancel,
+            },
+        );
+        receivers.push((id, canceled));
+    }
+    let signalled = |receivers: &[(&str, watch::Receiver<bool>)]| -> Vec<String> {
+        receivers
+            .iter()
+            .filter(|(_, canceled)| *canceled.borrow())
+            .map(|(id, _)| (*id).to_owned())
+            .collect()
+    };
+    let selected = manager.signal(|target| target == "a");
+    assert_eq!(
+        selected
+            .iter()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>(),
+        ["first", "third"].into_iter().collect()
+    );
+    assert_eq!(signalled(&receivers), ["first", "third"]);
+    manager.signal(|_| true);
+    assert_eq!(signalled(&receivers), ["first", "second", "third"]);
+}

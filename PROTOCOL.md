@@ -473,6 +473,9 @@ A navigation that committed before its deadline is left to finish loading.
 navigation command gets no answer the load is stopped the same way and the
 error is returned.
 
+`page.close` and `browser.close_tab` cancel the running operations of that page
+only. Operations on other pages keep running.
+
 ### Agent operations
 
 `agent.observe` and `agent.step` use canonical agent schemas plus `pageId`.

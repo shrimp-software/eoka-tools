@@ -30,7 +30,12 @@ pub struct OperationManager {
 struct Manager {
     store: OnceCell<Arc<Store>>,
     directory: Option<PathBuf>,
-    jobs: Mutex<HashMap<String, watch::Sender<bool>>>,
+    jobs: Mutex<HashMap<String, ActiveOperation>>,
+}
+
+struct ActiveOperation {
+    target_id: String,
+    cancel: watch::Sender<bool>,
 }
 
 #[derive(Default)]
@@ -198,7 +203,13 @@ impl OperationManager {
             .jobs
             .lock()
             .map_err(|_| commands::uncertain(anyhow!("Operation registry unavailable")))?
-            .insert(id.clone(), cancel);
+            .insert(
+                id.clone(),
+                ActiveOperation {
+                    target_id: page.target_id().into(),
+                    cancel,
+                },
+            );
         let dispatched = Arc::new(AtomicBool::new(false));
         options.observer = Some(Arc::new(TrackedIntent {
             intent: Intent {
@@ -354,24 +365,37 @@ impl OperationManager {
                 .jobs
                 .lock()
                 .map_err(|_| anyhow!("Operation registry unavailable"))?;
-            let sender = jobs.get(id).ok_or_else(|| {
+            let active = jobs.get(id).ok_or_else(|| {
                 anyhow!("operation_owned_elsewhere: request cancellation from the owning runtime")
             })?;
-            sender.send_replace(true);
+            active.cancel.send_replace(true);
         }
         Ok(record)
     }
     pub async fn stop(&self) {
-        let ids = if let Ok(jobs) = self.inner.jobs.lock() {
+        self.stop_where(|_| true).await;
+    }
+
+    pub async fn stop_target(&self, target_id: &str) {
+        self.stop_where(|active| active == target_id).await;
+    }
+
+    fn signal(&self, selected: impl Fn(&str) -> bool) -> Vec<String> {
+        if let Ok(jobs) = self.inner.jobs.lock() {
             jobs.iter()
-                .map(|(id, cancel)| {
-                    cancel.send_replace(true);
+                .filter(|(_, active)| selected(&active.target_id))
+                .map(|(id, active)| {
+                    active.cancel.send_replace(true);
                     id.clone()
                 })
                 .collect::<Vec<_>>()
         } else {
             Vec::new()
-        };
+        }
+    }
+
+    async fn stop_where(&self, selected: impl Fn(&str) -> bool) {
+        let ids = self.signal(selected);
         for id in ids {
             if let Err(error) = self.wait(&id, 5000).await {
                 tracing::warn!(operation_id = %id, %error, "Could not confirm operation shutdown");

@@ -83,7 +83,9 @@ pub async fn dispatch_shared(
         validate_params(method, &params)?;
     }
     if matches!(method, "browser.close_tab" | "page.close") {
-        state.operations.stop().await;
+        if let Some(page_id) = params.get("pageId").and_then(Value::as_str) {
+            state.operations.stop_target(page_id).await;
+        }
     }
     match method {
         "browser.launch" => browser::launch(state, params).await,

@@ -2013,3 +2013,43 @@ fn server_wait(inbox: &mut Inbox, server: &mut Sidecar, id: u64, operation: &str
         )
         .0
 }
+
+#[test]
+#[ignore = "requires Chrome"]
+fn closing_one_tab_leaves_an_operation_on_another_tab_running() {
+    let (root, state, scratch) = directories();
+    let origin = format!("http://{}", stalling_server());
+    let mut server = Sidecar::start(&state, &scratch);
+    let (acting, closing) = two_fixture_pages(&mut server, &root.path().join("profile"), &origin);
+    let operation = uuid::Uuid::new_v4().to_string();
+    let target = eoka_server::eoka::LocatorSpec::css("#go");
+    let action = eoka_server::eoka::Action::Click {
+        target: target.clone(),
+        human: false,
+        double: false,
+    };
+    let expect = eoka_server::eoka::Expectation::Text {
+        target,
+        value: "never appears".into(),
+        contains: false,
+    };
+    let record = server.request(
+        10,
+        "actions.perform",
+        json!({"pageId":acting,"operation_id":operation,"action":action,"options":{"expect":expect,"timeout_ms":60_000}}),
+    );
+    assert_eq!(record["result"]["id"], operation, "{record}");
+    let closed = server.request(11, "browser.close_tab", json!({"pageId":closing}));
+    assert!(closed.get("result").is_some(), "{closed}");
+    let record = server.request(12, "operations.get", json!({"id":operation}));
+    assert_eq!(record["result"]["state"], "running", "{record}");
+    let closed = server.request(13, "page.close", json!({"pageId":acting}));
+    assert!(closed.get("result").is_some(), "{closed}");
+    let record = server.request(14, "operations.get", json!({"id":operation}));
+    assert_eq!(record["result"]["state"], "finished", "{record}");
+    assert_eq!(
+        record["result"]["error_code"], "operation_canceled",
+        "{record}"
+    );
+    server.shutdown(15);
+}
