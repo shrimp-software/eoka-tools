@@ -338,6 +338,15 @@ Install the local CLI from this checkout:
 mise run install-cli
 ```
 
+Update an installed CLI to the latest GitHub release (Linux and macOS, x86_64
+and aarch64). The download is verified against the release `SHA256SUMS` before
+the running binary is replaced:
+
+```sh
+eoka update --check   # report installed and latest versions
+eoka update           # install; add --kill-daemons to stop old session daemons
+```
+
 Inspect the generated protocol-backed tool catalog:
 
 ```sh

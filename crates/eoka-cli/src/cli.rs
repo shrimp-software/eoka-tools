@@ -634,6 +634,12 @@ pub enum Command {
     Doctor,
     #[command(about = "Force-kill daemon")]
     Kill,
+    #[command(
+        visible_alias = "upgrade",
+        about = "Update this eoka binary from the latest GitHub release",
+        long_about = "Update this eoka binary from the latest GitHub release.\n\nDownloads the release archive for this platform, verifies it against the release SHA256SUMS and replaces the running executable. Session daemons keep running their old version until restarted; they are listed, and stopped only with --kill-daemons."
+    )]
+    Update(UpdateArgs),
     #[command(about = "Close browser and daemon")]
     Close,
     #[command(
@@ -1000,4 +1006,21 @@ pub enum OperationCommand {
         #[arg(help = OPERATION_ID)]
         id: String,
     },
+}
+
+#[derive(Args)]
+pub struct UpdateArgs {
+    #[arg(
+        long,
+        conflicts_with_all = ["force", "kill_daemons"],
+        help = "Report the installed and latest versions without installing"
+    )]
+    pub check: bool,
+    #[arg(long, help = "Reinstall even when already on the latest release")]
+    pub force: bool,
+    #[arg(
+        long,
+        help = "Stop session daemons still running another version (closes their browsers)"
+    )]
+    pub kill_daemons: bool,
 }
