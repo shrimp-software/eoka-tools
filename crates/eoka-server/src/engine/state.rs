@@ -267,7 +267,10 @@ impl BrowserState {
         if self.tabs.len() <= 1 {
             return Err(eoka::Error::cdp_msg("Cannot close the last tab"));
         }
-        let release_result = page.release_all_inputs().await;
+        let release_result =
+            tokio::time::timeout(std::time::Duration::from_secs(2), page.release_all_inputs())
+                .await
+                .unwrap_or(Ok(()));
         self.browser.close_tab(tab_id).await?;
         if let Some(next_tab_id) =
             reconcile_closed_tab(&mut self.tabs, &mut self.current_tab_id, tab_id)
@@ -286,11 +289,24 @@ impl BrowserState {
         } = self;
         let mut release_error = None;
         for tab in tabs.values() {
-            if let Err(error) = tab.page.release_all_inputs().await {
-                release_error.get_or_insert(error);
+            let released = tokio::time::timeout(
+                std::time::Duration::from_secs(2),
+                tab.page.release_all_inputs(),
+            )
+            .await;
+            match released {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    release_error.get_or_insert(error);
+                }
+                Err(_) if adopted => {
+                    release_error.get_or_insert(eoka::Error::Timeout(
+                        "Held input was not released within 2 s".into(),
+                    ));
+                }
+                Err(_) => {}
             }
         }
-        // A browser adopted from another owner is released, not closed.
         if !adopted {
             Arc::try_unwrap(browser)
                 .map_err(|_| eoka::Error::cdp_msg("Browser is still in use"))?

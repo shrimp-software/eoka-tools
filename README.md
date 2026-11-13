@@ -93,6 +93,18 @@ response retains the known job ID without claiming a current state. Wait timeout
 leave jobs running; inspect or wait for the same job instead of starting again.
 Old daemons need an explicit restart to provide the new evidence.
 
+## Blocked and busy sessions
+
+No CLI command blocks indefinitely. A tab with an open JavaScript dialog, or one
+waiting for a server that never answers, is reported within about half a second
+as `dialog_open` or `navigation_pending` with the command that clears it, instead
+of a 30-second protocol timeout per command. A navigation that gets no response
+before its deadline is stopped and reported as `navigation_timeout`, leaving the
+tab on its previous page. While one command runs, another waits at most 5 s and
+is then refused with `daemon_busy`, naming the running command. `eoka status`
+reports what a session is running and what blocks its tab. MCP tools and Tack
+receive the same codes. See [agent browsing](AGENT-BROWSING.md#blocked-and-busy-sessions).
+
 ## Browser downloads and bounded fetch
 
 Use an existing Eoka-owned session to save files with Chrome's cookies, proxy and
