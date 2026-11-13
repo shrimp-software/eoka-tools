@@ -148,3 +148,62 @@ async fn verify_is_default_and_timeout_preserves_diagnostics_without_input_value
     assert_eq!(stored.error.unwrap().message, error.message);
     browser.close().await.unwrap();
 }
+
+#[tokio::test]
+#[ignore = "requires Chrome; hidden tab capture recovery"]
+async fn a_capture_stuck_on_a_hidden_tab_is_finished_by_the_next_server_capture() {
+    let browser = Browser::launch_with_config(StealthConfig {
+        headless: true,
+        geo_align: false,
+        cdp_timeout: 3,
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    let behind = browser
+        .new_page("data:text/html,<h1>behind</h1>")
+        .await
+        .unwrap();
+    let front = browser
+        .new_page("data:text/html,<h1>front</h1>")
+        .await
+        .unwrap();
+    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    if let Err(stuck) = behind.screenshot().await {
+        assert!(
+            stuck.to_string().contains("native completion is pending"),
+            "{stuck}"
+        );
+        let waiting = behind.screenshot().await.unwrap_err();
+        assert!(
+            waiting
+                .to_string()
+                .contains("awaiting native command completion"),
+            "{waiting}"
+        );
+    }
+    for _ in 0..2 {
+        let started = std::time::Instant::now();
+        let png = eoka_server::capture::screenshot(&behind, &Default::default())
+            .await
+            .unwrap();
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
+        assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
+    }
+    assert_eq!(
+        behind
+            .evaluate::<String>("document.visibilityState")
+            .await
+            .unwrap(),
+        "hidden"
+    );
+    assert_eq!(
+        front
+            .evaluate::<String>("document.visibilityState")
+            .await
+            .unwrap(),
+        "visible"
+    );
+    drop((behind, front));
+    browser.close().await.unwrap();
+}
