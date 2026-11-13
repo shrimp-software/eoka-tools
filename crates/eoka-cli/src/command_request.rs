@@ -184,6 +184,17 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
         Command::Text => Request::Text,
         Command::Find { text } => Request::Find(TextArgs { text: text.clone() }),
         Command::Content => Request::Content,
+        Command::Dialog { action } => match action {
+            crate::cli::DialogAction::Accept { prompt_text } => {
+                Request::DialogAccept(eoka_protocol::DialogAcceptArgs {
+                    prompt_text: prompt_text.clone(),
+                })
+            }
+            crate::cli::DialogAction::Dismiss => Request::DialogDismiss,
+        },
+        Command::Captcha {
+            action: CaptchaAction::Detect,
+        } => Request::CaptchaDetect,
         Command::GetText { selector } => Request::GetText(eoka_protocol::SelectorArgs {
             selector: selector.clone(),
         }),
@@ -776,6 +787,9 @@ mod tests {
             &["eoka", "text"],
             &["eoka", "find", "Submit"],
             &["eoka", "content"],
+            &["eoka", "dialog", "accept", "--prompt-text", "yes"],
+            &["eoka", "dialog", "dismiss"],
+            &["eoka", "captcha", "detect"],
             &[
                 "eoka",
                 "screenshot",

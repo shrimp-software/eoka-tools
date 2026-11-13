@@ -6,6 +6,7 @@ package eoka
 const (
 	OpBack                = "back"
 	OpCaptchaDatadome     = "captcha.datadome"
+	OpCaptchaDetect       = "captcha.detect"
 	OpCaptchaInject       = "captcha.inject"
 	OpCaptchaTurnstile    = "captcha.turnstile"
 	OpClearCookies        = "clear_cookies"
@@ -16,6 +17,8 @@ const (
 	OpContent             = "content"
 	OpCookies             = "cookies"
 	OpDeleteCookie        = "delete_cookie"
+	OpDialogAccept        = "dialog.accept"
+	OpDialogDismiss       = "dialog.dismiss"
 	OpDoubleClick         = "double_click"
 	OpDownloadCancel      = "download.cancel"
 	OpDownloadGet         = "download.get"
@@ -90,6 +93,7 @@ const (
 var CatalogMethods = []string{
 	OpBack,
 	OpCaptchaDatadome,
+	OpCaptchaDetect,
 	OpCaptchaInject,
 	OpCaptchaTurnstile,
 	OpClearCookies,
@@ -100,6 +104,8 @@ var CatalogMethods = []string{
 	OpContent,
 	OpCookies,
 	OpDeleteCookie,
+	OpDialogAccept,
+	OpDialogDismiss,
 	OpDoubleClick,
 	OpDownloadCancel,
 	OpDownloadGet,
