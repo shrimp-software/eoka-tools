@@ -38,9 +38,10 @@ impl AppState {
     pub fn engine(&mut self) -> Result<&mut crate::engine::Engine, ServerError> {
         let browser = self.browser()?.clone();
         let operations = self.operations.clone();
-        Ok(self
-            .engine
-            .get_or_insert_with(|| crate::engine::Engine::adopt("sidecar", browser, operations)))
+        let recordings = self.recordings.clone();
+        Ok(self.engine.get_or_insert_with(|| {
+            crate::engine::Engine::adopt("sidecar", browser, operations, recordings)
+        }))
     }
 
     pub fn is_launched(&self) -> bool {

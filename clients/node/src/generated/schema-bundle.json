@@ -22846,10 +22846,78 @@
     },
     "screenshot": {
       "params": {
+        "$defs": {
+          "ScreenshotClip": {
+            "properties": {
+              "height": {
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "width": {
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "x": {
+                "format": "double",
+                "minimum": 0,
+                "type": "number"
+              },
+              "y": {
+                "format": "double",
+                "minimum": 0,
+                "type": "number"
+              }
+            },
+            "required": [
+              "x",
+              "y",
+              "width",
+              "height"
+            ],
+            "type": "object"
+          },
+          "ScreenshotFormat": {
+            "enum": [
+              "png",
+              "jpeg",
+              "webp"
+            ],
+            "type": "string"
+          }
+        },
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
           "annotate": {
             "default": false,
+            "type": "boolean"
+          },
+          "clip": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ScreenshotClip"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Document-relative CSS pixel region; conflicts with full_page."
+          },
+          "format": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ScreenshotFormat"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Image format; PNG when omitted."
+          },
+          "full_page": {
+            "default": false,
+            "description": "Capture the whole scrollable page instead of the viewport.",
             "type": "boolean"
           },
           "output": {
@@ -22860,6 +22928,17 @@
           },
           "pageId": {
             "type": "string"
+          },
+          "quality": {
+            "default": null,
+            "description": "JPEG or WebP quality, 0 to 100.",
+            "format": "uint8",
+            "maximum": 100,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
           }
         },
         "required": [

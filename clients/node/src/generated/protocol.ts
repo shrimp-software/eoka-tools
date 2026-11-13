@@ -988,7 +988,9 @@ export type MethodSaveStateParams = { "pageId": string; "path": string; [key: st
 
 export type MethodSaveStateResult = unknown;
 
-export type MethodScreenshotParams = { "annotate"?: boolean; "output"?: (string | null); "pageId": string; [key: string]: unknown; };
+export type MethodScreenshotParams = { "annotate"?: boolean; "clip"?: (MethodScreenshotParams__ScreenshotClip | null); "format"?: (MethodScreenshotParams__ScreenshotFormat | null); "full_page"?: boolean; "output"?: (string | null); "pageId": string; "quality"?: (number | null); [key: string]: unknown; };
+export type MethodScreenshotParams__ScreenshotClip = { "height": number; "width": number; "x": number; "y": number; [key: string]: unknown; };
+export type MethodScreenshotParams__ScreenshotFormat = (("png" | "jpeg" | "webp") & string);
 
 export type MethodScreenshotResult = unknown;
 

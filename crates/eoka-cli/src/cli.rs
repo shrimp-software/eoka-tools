@@ -258,6 +258,27 @@ pub enum Command {
         output: Option<PathBuf>,
         #[arg(long, help = "Overlay numbered labels on interactive elements")]
         annotate: bool,
+        #[arg(long, value_parser = ["png", "jpeg", "webp"], help = "Image format [default: png]")]
+        format: Option<String>,
+        #[arg(long, help = "JPEG or WebP quality, 0 to 100")]
+        quality: Option<u8>,
+        #[arg(
+            long,
+            conflicts_with = "clip",
+            help = "Capture the whole scrollable page"
+        )]
+        full_page: bool,
+        #[arg(
+            long,
+            value_name = "X,Y,WIDTH,HEIGHT",
+            help = "Capture a document-relative region in CSS pixels"
+        )]
+        clip: Option<String>,
+    },
+    #[command(about = "Record the current tab to an MP4 file")]
+    Recording {
+        #[command(subcommand)]
+        action: RecordingAction,
     },
     #[command(about = "Handle CAPTCHAs locally or solve/inject provider tokens")]
     Captcha {
@@ -1044,6 +1065,38 @@ pub enum OperationCommand {
     #[command(about = "Cancel a running operation")]
     Cancel {
         #[arg(help = OPERATION_ID)]
+        id: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum RecordingAction {
+    #[command(about = "Start recording the current tab; prints the recording ID")]
+    Start {
+        #[arg(help = "MP4 file to write")]
+        path: PathBuf,
+        #[arg(long, help = "UUID naming this recording [default: generated]")]
+        id: Option<String>,
+        #[arg(long, help = "Frames per second, 1 to 120")]
+        fps: Option<u32>,
+        #[arg(long, help = "Scale frames down to at most this width")]
+        max_width: Option<u32>,
+        #[arg(long, help = "Scale frames down to at most this height")]
+        max_height: Option<u32>,
+    },
+    #[command(about = "Show a recording's state")]
+    Status {
+        #[arg(help = "Recording ID from start")]
+        id: String,
+    },
+    #[command(about = "Stop a recording and finalize its file")]
+    Stop {
+        #[arg(help = "Recording ID from start")]
+        id: String,
+    },
+    #[command(about = "Cancel a recording and discard its file")]
+    Cancel {
+        #[arg(help = "Recording ID from start")]
         id: String,
     },
 }

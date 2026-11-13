@@ -44,6 +44,23 @@ pub mod test_support {
     pub use super::intercept_files::FILE_SLOT;
 }
 
+/// Map a recording result onto a catalog response, keeping the record that a
+/// failure carries so the caller can still read its state and partial path.
+fn recording_response(
+    result: Result<Value, eoka_protocol::sidecar::ServerError>,
+) -> Result<Response, String> {
+    match result {
+        Ok(record) => Ok(Response::ok(record)),
+        Err(error) => {
+            let mut response = Response::err(error.message.clone());
+            response.data = serde_json::to_value(&error.data)
+                .ok()
+                .filter(|v| !v.is_null());
+            Ok(response)
+        }
+    }
+}
+
 static HOST_VERSION: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
 
 /// Record the version of the binary hosting the engine. It is reported by
@@ -75,6 +92,7 @@ pub struct Engine {
     fetch_dropped: std::sync::Arc<std::sync::atomic::AtomicU64>,
     fetch_sessions: HashMap<String, CdpSession>,
     cloudflare: Option<crate::cloudflare::CloudflareWatcher>,
+    recordings: crate::recordings::RecordingManager,
 }
 
 impl Engine {
@@ -112,19 +130,22 @@ impl Engine {
             fetch_dropped: Default::default(),
             fetch_sessions: HashMap::new(),
             cloudflare: None,
+            recordings: Default::default(),
         }
     }
 
     /// An engine over a browser the caller owns and keeps managing, sharing
-    /// the caller's durable operation records. Tabs are supplied per call
+    /// the caller's durable operation records and recordings. Tabs are supplied per call
     /// through [`Engine::handle_on`]; the engine never closes the browser.
     pub fn adopt(
         session_name: impl Into<String>,
         browser: std::sync::Arc<eoka::Browser>,
         operations: crate::operations::OperationManager,
+        recordings: crate::recordings::RecordingManager,
     ) -> Self {
         let mut engine = Self::new(session_name, LaunchSpec::Reuse);
         engine.operations = operations;
+        engine.recordings = recordings;
         engine.state = Some(BrowserState::adopted(browser));
         engine
     }
@@ -383,6 +404,10 @@ impl Engine {
             "text" => self.cmd_text().await,
             "find" => self.cmd_find(args).await,
             "content" => self.cmd_content().await,
+            "recording_start" => self.cmd_recording_start(args).await,
+            "recording_get" | "recording_stop" | "recording_cancel" => {
+                self.cmd_recording_control(cmd, args).await
+            }
             "get_text" => self.cmd_get_text(args).await,
             "get_attribute" => self.cmd_get_attribute(args).await,
             "exists" => self.cmd_exists(args).await,
@@ -753,6 +778,31 @@ impl Engine {
 
         let (tab, viewport_only) = self.tab_with_config()?;
 
+        let capture: eoka_protocol::ScreenshotArgs =
+            serde_json::from_value(args.clone()).map_err(|e| e.to_string())?;
+        let params = eoka_protocol::sidecar::ScreenshotParams {
+            page_id: String::new(),
+            format: capture.format,
+            quality: capture.quality,
+            clip: capture.clip,
+            full_page: capture.full_page.then_some(true),
+        };
+        params.validate().map_err(|error| error.message)?;
+        let plain = params.format.is_none()
+            && params.quality.is_none()
+            && params.clip.is_none()
+            && params.full_page.is_none();
+        if annotate_flag && !plain {
+            return Err(
+                "--annotate cannot be combined with format, quality, clip or full page".into(),
+            );
+        }
+        let extension = match params.format {
+            Some(eoka_protocol::sidecar::ScreenshotFormat::Jpeg) => "jpg",
+            Some(eoka_protocol::sidecar::ScreenshotFormat::Webp) => "webp",
+            _ => "png",
+        };
+
         let png = if annotate_flag {
             if tab.elements.is_empty() {
                 tab.elements = observe::observe(&tab.page, viewport_only)
@@ -762,8 +812,13 @@ impl Engine {
             annotate::annotated_screenshot(&tab.page, &tab.elements)
                 .await
                 .map_err(|e| e.to_string())?
-        } else {
+        } else if plain {
             tab.page.screenshot().await.map_err(|e| e.to_string())?
+        } else {
+            tab.page
+                .screenshot_with_options(&params.options())
+                .await
+                .map_err(|e| e.to_string())?
         };
 
         let path = match output {
@@ -773,7 +828,7 @@ impl Engine {
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_millis();
-                std::env::temp_dir().join(format!("eoka-screenshot-{}.png", ts))
+                std::env::temp_dir().join(format!("eoka-screenshot-{ts}.{extension}"))
             }
         };
 
@@ -854,6 +909,42 @@ impl Engine {
         let tab = self.require_tab()?;
         let text = tab.page.text().await.map_err(|e| e.to_string())?;
         Ok(Response::ok_text(text))
+    }
+
+    async fn cmd_recording_start(&mut self, args: &Value) -> Result<Response, String> {
+        let args: eoka_protocol::RecordingStartArgs =
+            serde_json::from_value(args.clone()).map_err(|e| e.to_string())?;
+        let state = self
+            .state
+            .as_ref()
+            .ok_or("No browser open. Use 'open' first.")?;
+        let page_id = state.current_tab_id.clone().ok_or("Open a tab first")?;
+        let page = self.require_tab()?.page.clone();
+        let params = eoka_protocol::sidecar::RecordingStartParams {
+            page_id,
+            recording_id: args
+                .recording_id
+                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+            path: args.path,
+            max_width: args.max_width,
+            max_height: args.max_height,
+            fps: args.fps,
+        };
+        let record = self.recordings.start(params, Ok(page)).await;
+        recording_response(record.and_then(|record| {
+            serde_json::to_value(record)
+                .map_err(|e| eoka_protocol::sidecar::ServerError::internal(e.to_string()))
+        }))
+    }
+
+    async fn cmd_recording_control(&mut self, cmd: &str, args: &Value) -> Result<Response, String> {
+        let method = match cmd {
+            "recording_get" => "recording.get",
+            "recording_stop" => "recording.stop",
+            _ => "recording.cancel",
+        };
+        let params = json!({"recordingId": args["recording_id"]});
+        recording_response(crate::recordings::control(&self.recordings, method, params).await)
     }
 
     async fn cmd_content(&mut self) -> Result<Response, String> {
@@ -2103,6 +2194,9 @@ impl Engine {
             let _ = recorder.stop(session).await;
         }
         self.disable_all_fetch_sessions().await;
+        if let Err(error) = self.recordings.shutdown().await {
+            eprintln!("[eoka] recording cleanup failed: {}", error.message);
+        }
         if let Some(state) = self.state.take() {
             state.close().await.map_err(|e| e.to_string())?;
         }

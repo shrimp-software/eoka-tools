@@ -39,6 +39,7 @@
     "page.reset_viewport": "emulate",
     "page.restore_state": "load_state",
     "page.screenshot": "screenshot",
+    "page.screenshot_to_file": "screenshot",
     "page.select": "select",
     "page.set_viewport": "emulate",
     "page.solve_turnstile": "captcha_turnstile",
@@ -48,6 +49,10 @@
     "page.wait_for": "wait",
     "page.wait_for_text": "wait",
     "page.wait_for_visible": "wait",
+    "recording.cancel": "recording_cancel",
+    "recording.get": "recording_get",
+    "recording.start": "recording_start",
+    "recording.stop": "recording_stop",
     "server.shutdown": "shutdown"
   },
   "gaps": {
@@ -93,13 +98,8 @@
       "page.human_click",
       "page.human_click_text",
       "page.human_fill",
-      "page.screenshot_to_file",
       "page.solve_captcha",
       "page.type_into",
-      "recording.cancel",
-      "recording.get",
-      "recording.start",
-      "recording.stop",
       "server.hello"
     ]
   }

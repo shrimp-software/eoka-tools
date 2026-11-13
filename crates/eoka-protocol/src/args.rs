@@ -38,6 +38,40 @@ pub struct ScreenshotArgs {
     pub output: Option<String>,
     #[serde(default)]
     pub annotate: bool,
+    #[serde(default)]
+    #[schemars(description = "Image format; PNG when omitted.")]
+    pub format: Option<crate::sidecar::ScreenshotFormat>,
+    #[serde(default)]
+    #[schemars(range(max = 100), description = "JPEG or WebP quality, 0 to 100.")]
+    pub quality: Option<u8>,
+    #[serde(default)]
+    #[schemars(description = "Document-relative CSS pixel region; conflicts with full_page.")]
+    pub clip: Option<crate::sidecar::ScreenshotClip>,
+    #[serde(default)]
+    #[schemars(description = "Capture the whole scrollable page instead of the viewport.")]
+    pub full_page: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+pub struct RecordingStartArgs {
+    #[schemars(description = "Absolute path of the MP4 file to write.")]
+    pub path: String,
+    #[serde(default)]
+    #[schemars(description = "UUID naming this recording; generated when omitted.")]
+    pub recording_id: Option<String>,
+    #[serde(default)]
+    pub max_width: Option<u32>,
+    #[serde(default)]
+    pub max_height: Option<u32>,
+    #[serde(default)]
+    #[schemars(range(min = 1, max = 120))]
+    pub fps: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+pub struct RecordingIdArgs {
+    #[schemars(description = "Recording UUID returned by recording_start.")]
+    pub recording_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]

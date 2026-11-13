@@ -114,12 +114,59 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
             max: *max,
             structured: *structured || agent_mode,
         }),
-        Command::Screenshot { output, annotate } => Request::Screenshot(ScreenshotArgs {
+        Command::Screenshot {
+            output,
+            annotate,
+            format,
+            quality,
+            full_page,
+            clip,
+        } => Request::Screenshot(ScreenshotArgs {
             output: output
                 .as_ref()
                 .map(|path| path.to_string_lossy().to_string()),
             annotate: *annotate,
+            format: format.as_deref().map(|format| match format {
+                "jpeg" => eoka_protocol::sidecar::ScreenshotFormat::Jpeg,
+                "webp" => eoka_protocol::sidecar::ScreenshotFormat::Webp,
+                _ => eoka_protocol::sidecar::ScreenshotFormat::Png,
+            }),
+            quality: *quality,
+            clip: clip.as_deref().map(parse_clip),
+            full_page: *full_page,
         }),
+        Command::Recording { action } => {
+            let id = |id: &String| eoka_protocol::RecordingIdArgs {
+                recording_id: id.clone(),
+            };
+            match action {
+                crate::cli::RecordingAction::Start {
+                    path,
+                    id,
+                    fps,
+                    max_width,
+                    max_height,
+                } => Request::RecordingStart(eoka_protocol::RecordingStartArgs {
+                    path: std::path::absolute(path)
+                        .unwrap_or_else(|_| path.clone())
+                        .to_string_lossy()
+                        .to_string(),
+                    recording_id: id.clone(),
+                    max_width: *max_width,
+                    max_height: *max_height,
+                    fps: *fps,
+                }),
+                crate::cli::RecordingAction::Status { id: value } => {
+                    Request::RecordingGet(id(value))
+                }
+                crate::cli::RecordingAction::Stop { id: value } => {
+                    Request::RecordingStop(id(value))
+                }
+                crate::cli::RecordingAction::Cancel { id: value } => {
+                    Request::RecordingCancel(id(value))
+                }
+            }
+        }
         Command::Emulate {
             width,
             height,
@@ -470,6 +517,25 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
     }
 }
 
+/// Parse `X,Y,WIDTH,HEIGHT`; a malformed value becomes an empty region, which
+/// the engine rejects with the usual validation error.
+fn parse_clip(value: &str) -> eoka_protocol::sidecar::ScreenshotClip {
+    let numbers: Vec<f64> = value
+        .split(',')
+        .map(|part| part.trim().parse().unwrap_or(f64::NAN))
+        .collect();
+    let at = |index: usize| match numbers.len() {
+        4 => numbers[index],
+        _ => f64::NAN,
+    };
+    eoka_protocol::sidecar::ScreenshotClip {
+        x: at(0),
+        y: at(1),
+        width: at(2),
+        height: at(3),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -709,6 +775,35 @@ mod tests {
             &["eoka", "text"],
             &["eoka", "find", "Submit"],
             &["eoka", "content"],
+            &[
+                "eoka",
+                "screenshot",
+                "--format",
+                "jpeg",
+                "--quality",
+                "80",
+                "--clip",
+                "0,0,10,20",
+            ],
+            &["eoka", "recording", "start", "out.mp4", "--fps", "30"],
+            &[
+                "eoka",
+                "recording",
+                "status",
+                "b9b87b7a-cc6d-4a25-b098-73271cc9c4cb",
+            ],
+            &[
+                "eoka",
+                "recording",
+                "stop",
+                "b9b87b7a-cc6d-4a25-b098-73271cc9c4cb",
+            ],
+            &[
+                "eoka",
+                "recording",
+                "cancel",
+                "b9b87b7a-cc6d-4a25-b098-73271cc9c4cb",
+            ],
             &["eoka", "get-text", "h1"],
             &["eoka", "get-attribute", "a", "href"],
             &["eoka", "exists", "#save"],
