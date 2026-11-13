@@ -308,6 +308,11 @@ Element handles do not cross this wire.
   and must fit the negotiated JSON message limit. `ScreenshotTooLarge` directs
   callers to `page.screenshot_to_file`, which accepts the same capture fields
   plus an absolute `path` and returns artifact metadata without base64.
+  A page behind another tab is captured in place: Chrome paints no frames for a
+  hidden tab, so the server holds a throwaway screencast on a second session of
+  that page for the duration of the capture. The page is not brought to the
+  front, no page's `visibilityState` changes, and pages can be captured
+  concurrently. The catalog `screenshot` operation behaves the same.
 - Viewport: `page.set_viewport` takes `{pageId, width, height, deviceScaleFactor?}`
   with positive CSS dimensions up to 2,147,483,647 and finite positive DPR
   (default 1), returning `{}`. `page.reset_viewport` takes `{pageId}` and returns

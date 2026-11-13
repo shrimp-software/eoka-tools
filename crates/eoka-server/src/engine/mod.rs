@@ -950,10 +950,8 @@ impl Engine {
                 tab.elements = observe::observe(&tab.page, viewport_only).await?;
             }
             annotate::annotated_screenshot(&tab.page, &tab.elements).await?
-        } else if plain {
-            tab.page.screenshot().await?
         } else {
-            tab.page.screenshot_with_options(&params.options()).await?
+            crate::capture::screenshot(&tab.page, &params.options()).await?
         };
 
         let path = match output {

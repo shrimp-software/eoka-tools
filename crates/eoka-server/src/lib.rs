@@ -4,6 +4,7 @@ pub mod artifacts;
 pub mod browser;
 pub mod browser_fetch;
 pub mod captcha;
+pub mod capture;
 pub mod cloudflare;
 pub mod dispatch;
 pub mod downloads;
