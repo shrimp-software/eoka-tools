@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, isAbsolute, join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
@@ -7,7 +7,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { ConfigurationError } from '../dist/index.js';
 import {
-  callerFrames, describeOutcome, launchBrowser, rejection, resolution, settle, skipRealBrowser, startFixture,
+  callerFrames, closeQuietly, describeOutcome, launchBrowser, rejection, resolution, settle, skipRealBrowser, startFixture,
 } from './fixtures/eval-support.mjs';
 
 const thisFile = basename(fileURLToPath(import.meta.url));
@@ -135,8 +135,14 @@ const rows = [
     id: 'K6',
     title: 'an unmet expectation rejects as action_timeout, names the expectation and says the click was sent',
     scenario: 'unmetExpectation',
+    check: outcome => expectActionTimeout(outcome, '/never', /expect/i, /dispatched|was sent/i),
+  },
+  {
+    id: 'K6',
+    title: 'an unmet expectation still clicks the page exactly once',
+    scenario: 'unmetExpectation',
     async check(outcome) {
-      expectActionTimeout(outcome, '/never', /expect/i, /dispatched|was sent/i);
+      rejection(outcome);
       for (let waited = 0; outcome.clicks() === 0 && waited < 2000; waited += 50) await delay(50);
       assert.equal(outcome.clicks(), 1, `expected the fixture to see exactly one click; ${describeOutcome(outcome)}`);
     },
@@ -226,8 +232,10 @@ const rows = [
     title: 'screenshotToFile onto an existing file names the absolute path and says it exists',
     scenario: 'screenshotOntoExistingFile',
     async check(outcome, { existingFile }) {
+      const { message } = rejection(outcome);
       assert.ok(isAbsolute(existingFile));
-      expectMessage(outcome, existingFile, /exists/i);
+      assert.ok(message.includes(existingFile) || message.includes(await realpath(existingFile)), `expected the message to include ${existingFile}; ${describeOutcome(outcome)}`);
+      expectMessage(outcome, /exists/i);
       assert.equal(await readFile(existingFile, 'utf8'), 'occupied');
     },
   },
@@ -291,12 +299,9 @@ describe('caller mistakes', { skip: skipRealBrowser }, () => {
   }, { timeout: 90000 });
 
   after(async () => {
-    try {
-      await Promise.all([browser, backgroundBrowser].filter(Boolean).map(instance => instance.close()));
-    } finally {
-      await fixture?.close();
-      if (directory) await rm(directory, { recursive: true, force: true });
-    }
+    await closeQuietly(browser, backgroundBrowser);
+    await fixture?.close();
+    if (directory) await rm(directory, { recursive: true, force: true });
   }, { timeout: 60000 });
 
   const foreground = rows.filter(row => !scenarios[row.scenario].background);

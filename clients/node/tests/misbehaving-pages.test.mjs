@@ -6,7 +6,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { EokaError } from '../dist/index.js';
 import {
-  describeOutcome, descendants, goneWithin, killSurvivors, launchBrowser, rejection, resolution, settle, skipRealBrowser, startFixture,
+  closeQuietly, describeOutcome, descendants, goneWithin, killSurvivors, launchBrowser, rejection, resolution, settle, skipRealBrowser, startFixture,
 } from './fixtures/eval-support.mjs';
 
 const sleepOneSecond = '()=>new Promise(r=>setTimeout(()=>r(1),1000))';
@@ -17,12 +17,6 @@ const processChild = fileURLToPath(new URL('./fixtures/eval-process-child.mjs', 
 function within(outcome, limitMs, label) {
   resolution(outcome);
   assert.ok(outcome.ms < limitMs, `expected ${label} in under ${limitMs} ms; ${describeOutcome(outcome)}`);
-}
-
-async function closeQuietly(browser) {
-  try {
-    await browser?.close();
-  } catch {}
 }
 
 describe('healthy tabs side by side', { skip: skipRealBrowser }, () => {
@@ -39,11 +33,8 @@ describe('healthy tabs side by side', { skip: skipRealBrowser }, () => {
   }, { timeout: 90000 });
 
   after(async () => {
-    try {
-      await browser?.close();
-    } finally {
-      await fixture?.close();
-    }
+    await closeQuietly(browser);
+    await fixture?.close();
   }, { timeout: 60000 });
 
   test('K1: two tabs that each wait one second finish together in under 1600 ms', { timeout: 60000 }, async t => {

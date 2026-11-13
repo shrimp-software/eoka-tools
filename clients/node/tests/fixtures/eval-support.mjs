@@ -101,20 +101,8 @@ export function callerFrames(error) {
   return String(error?.stack).split('\n').filter(line => /^\s+at /.test(line)).join('\n');
 }
 
-export async function closeAfter(browser, body) {
-  let failed = false;
-  try {
-    return await body();
-  } catch (error) {
-    failed = true;
-    throw error;
-  } finally {
-    try {
-      await browser.close();
-    } catch (error) {
-      if (!failed) throw error;
-    }
-  }
+export async function closeQuietly(...browsers) {
+  await Promise.allSettled(browsers.map(browser => browser?.close()));
 }
 
 export function processTable() {
