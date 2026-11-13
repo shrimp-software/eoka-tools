@@ -545,7 +545,7 @@ mod tests {
     use eoka_protocol::operation_by_cmd;
     use serde_json::json;
 
-    fn assert_command_maps_to_cataloged_operation(args: &[&str]) {
+    fn assert_command_maps_to_cataloged_operation(args: &[&str]) -> &'static str {
         let (_cli, command) = parsed_command(args);
         let request = command_to_request(&command, false);
         assert!(
@@ -554,6 +554,7 @@ mod tests {
             args,
             request.cmd()
         );
+        request.cmd()
     }
 
     #[test]
@@ -872,10 +873,57 @@ mod tests {
             &["eoka", "network", "intercept", "log"],
             &["eoka", "clone-from", "9222"],
             &["eoka", "close"],
+            &["eoka", "view"],
+            &[
+                "eoka",
+                "step",
+                r#"{"action":{"kind":"press_key","key":"Tab"}}"#,
+            ],
+            &[
+                "eoka",
+                "action",
+                r#"{"operation_id":"a116d158-2cc5-4473-b73c-616b4b73cb0e","action":{"kind":"reload"}}"#,
+            ],
+            &["eoka", "operations", "get", "operation"],
+            &["eoka", "operations", "list"],
+            &["eoka", "operations", "wait", "operation"],
+            &["eoka", "operations", "cancel", "operation"],
+            &[
+                "eoka",
+                "download",
+                "--url",
+                "https://example.com/file",
+                "--out",
+                "/tmp/file",
+            ],
+            &["eoka", "download", "list"],
+            &["eoka", "download", "status", "job"],
+            &["eoka", "download", "wait", "job"],
+            &["eoka", "download", "cancel", "job"],
+            &["eoka", "captcha", "datadome"],
         ];
 
-        for args in commands {
-            assert_command_maps_to_cataloged_operation(args);
-        }
+        let reached: std::collections::BTreeSet<&str> = commands
+            .iter()
+            .map(|args| assert_command_maps_to_cataloged_operation(args))
+            .collect();
+
+        // The catalog is the single list of operations: anything added to it
+        // must be reachable from the CLI. These are the only exceptions, each
+        // reached another way.
+        let not_cli_commands = [
+            "session_hello",  // sent by every client connection, not a command
+            "action_command", // envelope `main` wraps around back/forward/reload
+            "shutdown",       // `eoka kill` signals the daemon instead
+        ];
+        let unreachable: Vec<&str> = eoka_protocol::all_operations()
+            .iter()
+            .map(|operation| operation.cmd)
+            .filter(|cmd| !reached.contains(cmd) && !not_cli_commands.contains(cmd))
+            .collect();
+        assert!(
+            unreachable.is_empty(),
+            "catalog operations with no CLI command (add one in cli.rs and list it here): {unreachable:?}"
+        );
     }
 }

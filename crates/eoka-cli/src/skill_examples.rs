@@ -119,3 +119,33 @@ fn skill_examples_parse_with_the_real_cli() {
         failures.join("\n\n")
     );
 }
+
+/// Every action kind the core library accepts must be described in the
+/// actions reference, so a new kind cannot ship undocumented.
+#[test]
+fn every_action_kind_is_documented() {
+    let bundle = eoka_protocol::sidecar::schema_bundle();
+    let mut found = std::collections::BTreeSet::new();
+    // Only the action variants themselves, not the locator kinds nested in them.
+    for variant in bundle["types"]["Action"]["oneOf"].as_array().unwrap() {
+        if let Some(kind) = variant["properties"]["kind"]["const"].as_str() {
+            found.insert(kind.to_owned());
+        }
+    }
+    assert!(
+        found.contains("click"),
+        "action kinds were not found in the schema"
+    );
+
+    let reference = Path::new(env!("CARGO_MANIFEST_DIR")).join("references/actions.md");
+    let text = std::fs::read_to_string(&reference).unwrap();
+    let undocumented: Vec<&String> = found
+        .iter()
+        .filter(|kind| !text.contains(&format!("`{kind}`")))
+        .collect();
+    assert!(
+        undocumented.is_empty(),
+        "describe these action kinds in {}: {undocumented:?}",
+        reference.display()
+    );
+}

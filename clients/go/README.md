@@ -67,7 +67,8 @@ stable recording/file error constants are available for classification.
 `Page.Invoke(ctx, method, params, &result)` calls any page-scoped server method
 by name and adds the page ID. Protocol 2.1 servers (capability
 `operationCatalog`) serve every `eoka` CLI operation this way under its catalog
-name, such as `"console"`, `"cookies"` or `"network.record.start"`.
+name. The generated `Op*` constants name them (`OpConsole`, `OpCookies`,
+`OpNetworkRecordStart`), and `CatalogMethods` lists them all.
 
 Click/type/key methods accept `ActionOptions{Expect: ...}` and require a fresh
 observable completion condition. Use `NewOperationID` plus `Page.Perform` to retain
