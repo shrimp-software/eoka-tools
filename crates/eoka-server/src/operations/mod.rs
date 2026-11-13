@@ -236,34 +236,7 @@ impl OperationManager {
             let diagnostic = result
                 .as_ref()
                 .and_then(|result| result.as_ref().err())
-                .map(|error| {
-                    let (code, source) = match error {
-                        Error::Action { code, source, .. } => (code.as_str(), source.as_ref()),
-                        error => ("action_failed", error),
-                    };
-                    let message = redact(&source.to_string(), &sensitive);
-                    let phase = if message.contains("preparation") {
-                        "preparation"
-                    } else if message.contains("queue admission") {
-                        "queue"
-                    } else if message.contains("input dispatch") {
-                        "dispatch"
-                    } else if message.contains("verification") {
-                        "verification"
-                    } else {
-                        "execution"
-                    };
-                    eoka_protocol::ErrorDetail::new(
-                        code,
-                        message.chars().take(8192).collect::<String>(),
-                    )
-                    .retryable(false)
-                    .context(eoka_protocol::ErrorContext {
-                        operation_id: Some(id.clone()),
-                        phase: Some(phase.into()),
-                        ..Default::default()
-                    })
-                });
+                .map(|error| diagnostic(error, &sensitive, &id));
             let finish = store
                 .update(id.clone(), move |record| {
                     record.state = OperationState::Finished;
@@ -420,6 +393,41 @@ fn action_values(action: &Action) -> Vec<String> {
         Action::Type { text, .. } | Action::InsertText { text } => vec![text.clone()],
         _ => Vec::new(),
     }
+}
+
+fn failure_phase(description: &str) -> &'static str {
+    if description.contains("preparation") {
+        "preparation"
+    } else if description.contains("queue admission") {
+        "queue"
+    } else if description.contains("input dispatch") {
+        "dispatch"
+    } else if description.contains("verification") {
+        "verification"
+    } else {
+        "execution"
+    }
+}
+
+fn diagnostic(
+    error: &Error,
+    sensitive: &[String],
+    operation_id: &str,
+) -> eoka_protocol::ErrorDetail {
+    let (code, source) = match error {
+        Error::Action { code, source, .. } => (code.as_str(), source.as_ref()),
+        error => ("action_failed", error),
+    };
+    let description = source.to_string();
+    let phase = failure_phase(&description);
+    let message = redact(&description, sensitive);
+    eoka_protocol::ErrorDetail::new(code, message.chars().take(8192).collect::<String>())
+        .retryable(false)
+        .context(eoka_protocol::ErrorContext {
+            operation_id: Some(operation_id.to_owned()),
+            phase: Some(phase.into()),
+            ..Default::default()
+        })
 }
 
 const REDACTED: &str = "[redacted]";

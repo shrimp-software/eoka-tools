@@ -213,6 +213,67 @@ fn redaction_still_removes_an_echoed_value() {
     }
 }
 
+fn deadline(context: &str) -> Error {
+    Error::Action {
+        code: "action_timeout".into(),
+        receipt: Box::new(receipt(DispatchState::NotSent)),
+        source: Box::new(Error::Timeout(format!(
+            "Action deadline exceeded during {context}"
+        ))),
+    }
+}
+
+#[test]
+fn a_stored_diagnostic_keeps_its_wording_for_every_single_character_value() {
+    let id = "6e8b0670-a457-4ce1-8d21-f1e4cf8c8e9b";
+    let expected = "Timeout: Action deadline exceeded during preparation: target not found";
+    let error = deadline("preparation: target not found");
+    for value in ('a'..='z')
+        .chain('A'..='Z')
+        .chain('0'..='9')
+        .chain(" :.-_".chars())
+    {
+        let stored = diagnostic(&error, &sensitive(&value.to_string()), id);
+        assert_eq!(stored.message, expected, "{value:?}");
+        assert_eq!(stored.code, "action_timeout");
+        let context = stored.context.unwrap();
+        assert_eq!(context.phase.as_deref(), Some("preparation"), "{value:?}");
+        assert_eq!(context.operation_id.as_deref(), Some(id));
+    }
+    let record = serde_json::to_string(&diagnostic(&error, &sensitive("o"), id)).unwrap();
+    assert!(record.contains(expected), "{record}");
+    assert!(!record.contains(REDACTED), "{record}");
+}
+
+#[test]
+fn the_failure_phase_is_read_before_the_value_is_removed() {
+    let id = "6e8b0670-a457-4ce1-8d21-f1e4cf8c8e9b";
+    for (context, phase) in [
+        ("preparation", "preparation"),
+        ("queue admission", "queue"),
+        ("input dispatch", "dispatch"),
+        ("verification", "verification"),
+    ] {
+        let stored = diagnostic(&deadline(context), &sensitive(context), id);
+        assert_eq!(
+            stored.message,
+            "Timeout: Action deadline exceeded during [redacted]"
+        );
+        assert_eq!(stored.context.unwrap().phase.as_deref(), Some(phase));
+    }
+    let echoed = Error::cdp_msg("JavaScript error: rejected hunter2 during verification");
+    let stored = diagnostic(&echoed, &sensitive("hunter2"), id);
+    assert_eq!(stored.code, "action_failed");
+    assert!(!stored.message.contains("hunter2"), "{}", stored.message);
+    assert!(stored
+        .message
+        .contains("rejected [redacted] during verification"));
+    assert_eq!(
+        stored.context.unwrap().phase.as_deref(),
+        Some("verification")
+    );
+}
+
 #[test]
 fn redaction_leaves_a_value_embedded_in_a_longer_word_alone() {
     assert_eq!(

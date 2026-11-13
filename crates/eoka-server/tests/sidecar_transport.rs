@@ -2084,21 +2084,32 @@ fn diagnostics_keep_their_wording_and_file_output_names_the_occupied_path() {
     let origin = format!("http://{}", stalling_server());
     let mut server = Sidecar::start(&state, &scratch);
     let (page, _) = two_fixture_pages(&mut server, &root.path().join("profile"), &origin);
-    let operation = uuid::Uuid::new_v4().to_string();
-    let record = server.request(
-        10,
-        "page.fill",
-        json!({"pageId":page,"operation_id":operation,"selector":"#missing","value":"x","options":{"timeout_ms":500}}),
-    );
-    assert_eq!(record["result"]["id"], operation, "{record}");
-    let finished = server.request(
-        11,
-        "operations.wait",
-        json!({"id":operation,"timeout_ms":30_000}),
-    );
-    let message = finished["result"]["error"]["message"].as_str().unwrap();
-    assert!(message.contains("exceeded"), "{message}");
-    assert!(!message.contains("[redacted]"), "{message}");
+    for (id, value) in [(20, "x"), (30, "o"), (40, "e"), (50, "t")] {
+        let operation = uuid::Uuid::new_v4().to_string();
+        let record = server.request(
+            id,
+            "page.fill",
+            json!({"pageId":page,"operation_id":operation,"selector":"#missing","value":value,"options":{"timeout_ms":500}}),
+        );
+        assert_eq!(record["result"]["id"], operation, "{record}");
+        let finished = server.request(
+            id + 1,
+            "operations.wait",
+            json!({"id":operation,"timeout_ms":30_000}),
+        );
+        let stored = server.request(id + 2, "operations.get", json!({"id":operation}));
+        for record in [&finished, &stored] {
+            let error = &record["result"]["error"];
+            assert_eq!(
+                error["message"],
+                "Timeout: Action deadline exceeded during preparation: target not found",
+                "{value:?}: {record}"
+            );
+            assert_eq!(error["code"], "action_timeout", "{record}");
+            assert_eq!(error["context"]["phase"], "preparation", "{record}");
+            assert!(!record.to_string().contains("[redacted]"), "{record}");
+        }
+    }
 
     let directory = std::fs::canonicalize(root.path()).unwrap();
     let occupied = directory.join("occupied.png");
