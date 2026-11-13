@@ -13,7 +13,7 @@ const DOWNLOAD_BASE: &str = "https://github.com/shrimp-software/eoka-tools/relea
 const TAG_PREFIX: &str = "eoka-cli-v";
 const MAX_ARCHIVE_BYTES: usize = 256 * 1024 * 1024;
 const MAX_METADATA_BYTES: usize = 4 * 1024 * 1024;
-const SKILL_HINT: &str = "npx skills add https://github.com/shrimp-software/eoka-tools/tree/main/crates/eoka-cli --skill eoka";
+const SKILL_HINT: &str = "npx skills add https://github.com/shrimp-software/eoka-tools/tree/main/crates/eoka-cli/skill --skill eoka --global";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct Version(u64, u64, u64);
