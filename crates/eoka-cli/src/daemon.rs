@@ -42,6 +42,7 @@ pub async fn run(session_name: &str, spec: LaunchSpec) -> anyhow::Result<()> {
     eprintln!("[eoka] socket: {}", sock_path.display());
 
     eoka_server::engine::set_host_version(env!("CARGO_PKG_VERSION"));
+    eoka_server::engine::blockers::set_surface(eoka_server::engine::blockers::Surface::Cli);
     let mut handler = Engine::new(session_name, spec);
     let mut last_activity = Instant::now();
     let mut waiters = tokio::task::JoinSet::new();

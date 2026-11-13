@@ -8,6 +8,7 @@ use eoka_protocol::{
 };
 use tokio::time::{timeout_at, Instant};
 
+use crate::engine::blockers::{self, Blocker, Remedies};
 use crate::snapshot::SnapshotRef;
 use crate::target::LivePattern;
 use crate::{
@@ -15,8 +16,6 @@ use crate::{
     page_context, snapshot,
 };
 
-/// One agent session shared by every adapter over the same browser, so a
-/// target reference from one adapter's observation resolves in another's action.
 pub type SharedAgentSession = std::sync::Arc<tokio::sync::Mutex<AgentSession>>;
 
 #[derive(Default)]
@@ -150,7 +149,7 @@ impl AgentSession {
     ) -> Result<AgentObservation> {
         validate_limits(args.max_controls, args.timeout_ms)?;
         let deadline = Instant::now() + Duration::from_millis(args.timeout_ms);
-        timeout_at(deadline, async {
+        let capture = timeout_at(deadline, async {
             if let Some(cursor) = &args.cursor {
                 let (id, offset) = cursor
                     .rsplit_once(':')
@@ -176,9 +175,16 @@ impl AgentSession {
                 return paginate(&view.observation, offset, args.max_controls);
             }
             self.capture(browser, page, &args).await
-        })
-        .await
-        .context("observation_timeout: no fresh targets were issued")?
+        });
+        tokio::select! {
+            biased;
+            captured = capture => {
+                captured.context("observation_timeout: no fresh targets were issued")?
+            }
+            blocker = blockers::interrupted(page, true) => {
+                bail!("{}: {}; no fresh targets were issued", blocker.code(), blocker.describe())
+            }
+        }
     }
 
     async fn capture(
@@ -395,7 +401,9 @@ impl AgentSession {
         let id = *view
             .targets
             .get(target)
-            .ok_or_else(|| anyhow!("stale_reference: target not present in this document"))?;
+            .ok_or_else(|| {
+                anyhow!("stale_reference: target not present in this document; observe again and copy a current target, or use a live locator such as text:Submit or css:#id")
+            })?;
         if view.document != document_identity(page).await? {
             bail!("stale_reference: document navigated; call view again");
         }
@@ -568,17 +576,53 @@ impl AgentSession {
             }
             Ok::<_, anyhow::Error>(record)
         };
-        let (operation, operation_error, status) = match timeout_at(operation_deadline, execution).await {
-            Ok(Ok(record)) => {
-                let error = record.error.clone().or_else(|| record.error_code.as_ref().map(|code| ErrorDetail::new(code, "Historical operation detail unavailable")));
+        let waited = tokio::select! {
+            biased;
+            waited = timeout_at(operation_deadline, execution) => Some(waited),
+            _ = blockers::interrupted(page, false) => None,
+        };
+        let pending = || {
+            ErrorDetail::new("operation_pending", "Response budget reached; inspect this operation ID. Admission or execution may still be running; do not repeat the action.").retryable(false)
+        };
+        let (operation, operation_error, status) = match waited {
+            None => {
+                let record = operations.get(&id).await.ok();
+                let status = record
+                    .as_ref()
+                    .map_or(OperationStatus::Running, OperationRecord::status);
+                let detail = blockers::current(page).map_or_else(pending, |blocker| {
+                    blocker.detail(
+                        &Remedies::new(None),
+                        "step",
+                        blockers::Stage::ActionInterrupted,
+                    )
+                });
+                (record, Some(detail), status)
+            }
+            Some(Ok(Ok(record))) => {
+                let error = record.error.clone().or_else(|| {
+                    record.error_code.as_ref().map(|code| {
+                        ErrorDetail::new(code, "Historical operation detail unavailable")
+                    })
+                });
                 let status = record.status();
                 (Some(record), error, status)
-            },
-            Ok(Err(error)) => {
-                let status = if error.downcast_ref::<RejectedAction>().is_some() { OperationStatus::NotDispatched } else { OperationStatus::OutcomeUnknown };
-                (None, Some(ErrorDetail::new("operation_error", format!("{error:#}")).retryable(false)), status)
-            },
-            Err(_) => (None, Some(ErrorDetail::new("operation_pending", "Response budget reached; inspect this operation ID. Admission or execution may still be running; do not repeat the action.").retryable(false)), OperationStatus::Running),
+            }
+            Some(Ok(Err(error))) => {
+                let status = if error.downcast_ref::<RejectedAction>().is_some() {
+                    OperationStatus::NotDispatched
+                } else {
+                    OperationStatus::OutcomeUnknown
+                };
+                (
+                    None,
+                    Some(
+                        ErrorDetail::new("operation_error", format!("{error:#}")).retryable(false),
+                    ),
+                    status,
+                )
+            }
+            Some(Err(_)) => (None, Some(pending()), OperationStatus::Running),
         };
         let destination_id = operation
             .as_ref()
@@ -604,6 +648,13 @@ impl AgentSession {
             let page = observation_page.as_ref().ok_or_else(|| {
                 anyhow!("Verified destination could not be attached; select its tab explicitly")
             })?;
+            if let Some(blocker @ Blocker::Dialog(_)) = blockers::current(page) {
+                bail!(
+                    "{}: {}; handle the dialog, then observe again",
+                    blocker.code(),
+                    blocker.describe()
+                );
+            }
             self.capture(browser, page, &observe_args).await
         })
         .await
