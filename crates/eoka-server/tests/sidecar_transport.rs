@@ -1030,6 +1030,299 @@ fn catalog_operations_run_on_the_addressed_page_and_report_structured_errors() {
     server.shutdown(43);
 }
 
+/// A same-origin fixture: a small form page at any path, plain text at `/data`.
+fn fixture_server() -> std::net::SocketAddr {
+    const PAGE: &str = "<!doctype html><title>fixture</title><h1>Heading</h1>\
+        <input id=name aria-label=Name><select id=pick><option value=a>A<option value=b>B</select>\
+        <button id=go onclick=\"document.getElementById('status').textContent='clicked'\">Go</button>\
+        <p id=status></p><a id=link href=/next>Next</a><iframe id=inner srcdoc='<p>inner</p>'></iframe>";
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            std::thread::spawn(move || {
+                let mut request = [0u8; 4096];
+                let read = std::io::Read::read(&mut stream, &mut request).unwrap_or(0);
+                let head = String::from_utf8_lossy(&request[..read]).to_string();
+                let (kind, body) = if head.starts_with("GET /data") {
+                    ("text/plain", "ok")
+                } else {
+                    ("text/html", PAGE)
+                };
+                let _ = stream.write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: {kind}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                        body.len()
+                    )
+                    .as_bytes(),
+                );
+            });
+        }
+    });
+    address
+}
+
+#[test]
+#[ignore = "requires Chrome; calls every projected catalog operation once"]
+fn every_catalog_operation_answers_through_the_sidecar() {
+    let (root, state, scratch) = directories();
+    let mut server = Sidecar::start(&state, &scratch);
+    let page = launch(&mut server, &root.path().join("profile"));
+    let origin = format!("http://{}", fixture_server());
+    let file = |name: &str| scratch.join(name).to_string_lossy().into_owned();
+    let status = json!({"kind":"text","target":{"query":{"kind":"css","selector":"#status"}},"value":"clicked"});
+
+    // `true` means the call must succeed. `false` means the operation has
+    // nothing to act on in this fixture (no CAPTCHA, no WASM, no dialog) and
+    // only has to answer with a structured operation error.
+    let calls: Vec<(&str, Value, bool)> = vec![
+        ("open", json!({"url":format!("{origin}/page")}), true),
+        ("info", json!({}), true),
+        ("text", json!({}), true),
+        ("content", json!({}), true),
+        ("find", json!({"text":"Go"}), true),
+        ("observe", json!({}), true),
+        ("snapshot", json!({}), true),
+        ("exists", json!({"selector":"#go"}), true),
+        ("get_text", json!({"selector":"h1"}), true),
+        (
+            "get_attribute",
+            json!({"selector":"#link","name":"href"}),
+            true,
+        ),
+        ("frames", json!({}), true),
+        ("frame_eval", json!({"frame":"#inner","code":"1+1"}), true),
+        ("eval", json!({"code":"() => 1 + 1"}), true),
+        (
+            "exec",
+            json!({"code":"() => { window.touched = true; }"}),
+            true,
+        ),
+        ("console", json!({}), true),
+        ("errors", json!({}), true),
+        ("set_cookie", json!({"name":"sid","value":"1"}), true),
+        ("cookies", json!({}), true),
+        ("delete_cookie", json!({"name":"sid"}), true),
+        ("clear_cookies", json!({}), true),
+        ("set_storage", json!({"key":"k","value":"v"}), true),
+        ("storage", json!({"key":"k"}), true),
+        ("dump_storage", json!({}), true),
+        ("save_state", json!({"path":file("state.json")}), true),
+        (
+            "load_state",
+            json!({"path":file("state.json"),"no_navigate":true}),
+            true,
+        ),
+        (
+            "headers",
+            json!({"headers_json":"{\"x-test\":\"1\"}"}),
+            true,
+        ),
+        (
+            "emulate",
+            json!({"width":800,"height":600,"desktop":true}),
+            true,
+        ),
+        ("emulate", json!({"reset":true}), true),
+        ("screenshot", json!({"output":file("shot.png")}), true),
+        ("wait", json!({"ms":10}), true),
+        ("wait", json!({"selector":"h1","timeout":3000}), true),
+        ("fetch", json!({"url":format!("{origin}/data")}), true),
+        ("scroll", json!({"target":"css:#go"}), true),
+        ("hover", json!({"target":"css:#go","timeout_ms":5000}), true),
+        (
+            "click",
+            json!({"target":"css:#go","expect":status,"timeout_ms":5000}),
+            true,
+        ),
+        (
+            "double_click",
+            json!({"target":"css:#go","timeout_ms":1000}),
+            true,
+        ),
+        (
+            "fill",
+            json!({"target":"css:#name","text":"ada","timeout_ms":5000}),
+            true,
+        ),
+        (
+            "select",
+            json!({"target":"css:#pick","value":"b","timeout_ms":5000}),
+            true,
+        ),
+        ("key", json!({"key":"Tab","timeout_ms":1000}), true),
+        ("key.down", json!({"key":"Shift"}), true),
+        ("key.up", json!({"key":"Shift"}), true),
+        ("mouse.move", json!({"x":10,"y":10}), true),
+        ("mouse.down", json!({"x":10,"y":10,"button":"left"}), true),
+        ("mouse.up", json!({"x":10,"y":10,"button":"left"}), true),
+        ("release_all_inputs", json!({}), true),
+        ("network.record.start", json!({}), true),
+        ("network.record.status", json!({}), true),
+        ("fetch", json!({"url":format!("{origin}/data")}), true),
+        ("network.log", json!({}), true),
+        ("network.show", json!({"id":1}), false),
+        (
+            "network.wait",
+            json!({"timeout":200,"pattern":"*never*"}),
+            false,
+        ),
+        ("network.export", json!({"path":file("capture.har")}), true),
+        ("network.clear", json!({}), true),
+        ("network.record.stop", json!({}), true),
+        (
+            "intercept.add",
+            json!({"url_pattern":"*never-matches*","capture":file("capture")}),
+            true,
+        ),
+        ("intercept.list", json!({}), true),
+        ("intercept.log", json!({}), true),
+        ("fetch", json!({"url":format!("{origin}/data")}), true),
+        ("intercept.remove", json!({"id":"1"}), false),
+        ("js.list", json!({}), true),
+        ("js.allow", json!({"domain":"example.com"}), true),
+        ("js.block", json!({"domain":"ads.example"}), true),
+        ("js.remove", json!({"domain":"example.com"}), true),
+        ("js.mode", json!({"mode":"allow-all"}), true),
+        ("spa.info", json!({}), true),
+        ("spa.navigate", json!({"path":"/next"}), false),
+        ("reload", json!({}), true),
+        ("back", json!({}), true),
+        ("forward", json!({}), true),
+        ("dialog.accept", json!({}), false),
+        ("dialog.dismiss", json!({}), false),
+        ("captcha.detect", json!({}), true),
+        ("captcha.inject", json!({"token":"token"}), false),
+        ("captcha.turnstile", json!({"timeout_ms":1000}), false),
+        (
+            "captcha.datadome",
+            json!({"max_attempts":1,"timeout_ms":5000}),
+            false,
+        ),
+        (
+            "click_shadow",
+            json!({"selector":"#absent","timeout_ms":300}),
+            false,
+        ),
+        ("wasm.info", json!({}), false),
+        ("wasm.read", json!({"addr":"0x0","len":4}), false),
+        ("wasm.write", json!({"addr":"0x0","hex":"00"}), false),
+        ("wasm.find", json!({"pattern":"00"}), false),
+        ("download.list", json!({}), true),
+        ("download.get", json!({"id":"missing"}), false),
+        (
+            "download.wait",
+            json!({"id":"missing","timeout_ms":100}),
+            false,
+        ),
+        ("download.cancel", json!({"id":"missing"}), false),
+        (
+            "download.start",
+            json!({"output":file("download.txt"),"url":format!("{origin}/data"),"start_timeout_ms":3000}),
+            false,
+        ),
+        (
+            "clone_from",
+            json!({"source":"ws://127.0.0.1:1/devtools/browser/none"}),
+            false,
+        ),
+        ("fake_camera", json!({"file":file("missing.mp4")}), false),
+    ];
+
+    let mut called = std::collections::BTreeSet::new();
+    let mut problems = Vec::new();
+    for (index, (method, params, must_succeed)) in calls.into_iter().enumerate() {
+        called.insert(method);
+        let mut params = params;
+        params["pageId"] = json!(page);
+        let started = Instant::now();
+        let response = server.request(1000 + index as u64, method, params);
+        let elapsed = started.elapsed();
+        let summary: String = response.to_string().chars().take(260).collect();
+        if elapsed > Duration::from_secs(20) {
+            problems.push(format!("#{index} {method} took {elapsed:?}: {summary}"));
+        }
+        match response["error"]["code"].as_str() {
+            None => {}
+            // A wrong name, a rejected input or a server fault is a defect in
+            // the projection whatever the fixture contains.
+            Some(code @ ("UnknownMethod" | "InvalidParams" | "Internal" | "InvalidPage")) => {
+                problems.push(format!("{method} failed with {code}: {summary}"))
+            }
+            Some(_) if must_succeed => problems.push(format!("{method} failed: {summary}")),
+            Some(_) => {}
+        }
+        // An action that was admitted answers with its record either way.
+        if must_succeed && response["result"]["outcome"].is_string() {
+            let outcome = response["result"]["outcome"].as_str().unwrap();
+            let unverified_by_design = matches!(method, "double_click" | "key");
+            if outcome != "verified_complete" && !unverified_by_design {
+                problems.push(format!("{method} ended {outcome}: {summary}"));
+            }
+        }
+    }
+    // The server is still healthy and the page is still the one addressed.
+    let title = server.request(5000, "page.title", json!({"pageId":page}));
+    if title["result"]["title"] != "fixture" {
+        problems.push(format!("page was lost: {title}"));
+    }
+    let missing: Vec<&str> = eoka_protocol::sidecar::catalog_operations()
+        .map(|operation| operation.path)
+        .filter(|path| !called.contains(path))
+        .collect();
+    assert!(missing.is_empty(), "sweep does not call {missing:?}");
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+    server.shutdown(5001);
+}
+
+#[test]
+#[ignore = "requires Chrome; catalog open on a browser the sidecar does not own"]
+fn catalog_open_navigates_the_addressed_page_on_a_borrowed_browser() {
+    let (root, state, scratch) = directories();
+    let profile = root.path().join("profile");
+    let mut owner = Sidecar::start(&state, &scratch);
+    launch(&mut owner, &profile);
+    let mut borrower = Sidecar::start(
+        &root.path().join("borrower-state"),
+        &root.path().join("borrower-tmp"),
+    );
+    let response = borrower.request(
+        1,
+        "browser.launch",
+        json!({"headless":true,"userDataDir":profile}),
+    );
+    assert_eq!(response["result"]["ownership"], "borrowed", "{response}");
+    let page = borrower.request(2, "browser.new_page", json!({}))["result"]["pageId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let before = borrower.request(3, "browser.tabs", json!({}))["result"]["tabs"]
+        .as_array()
+        .unwrap()
+        .len();
+    let origin = format!("http://{}", fixture_server());
+    let opened = borrower.request(
+        4,
+        "open",
+        json!({"pageId":page,"url":format!("{origin}/page")}),
+    );
+    assert!(opened.get("result").is_some(), "{opened}");
+    let url = borrower.request(5, "page.url", json!({"pageId":page}));
+    assert_eq!(url["result"]["url"], format!("{origin}/page"), "{url}");
+    let after = borrower.request(6, "browser.tabs", json!({}))["result"]["tabs"]
+        .as_array()
+        .unwrap()
+        .len();
+    assert_eq!(after, before, "open must not create a tab");
+    borrower.shutdown(7);
+    assert!(owner
+        .request(8, "browser.tabs", json!({}))
+        .get("result")
+        .is_some());
+    owner.shutdown(9);
+}
+
 #[test]
 #[ignore = "requires Chrome"]
 fn shutdown_during_launch_does_not_abandon_the_owned_browser() {

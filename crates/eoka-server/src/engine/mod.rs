@@ -1305,7 +1305,13 @@ impl Engine {
 
     async fn cmd_fetch(&mut self, args: &Value) -> Result<Response, EngineError> {
         let args = serde_json::from_value(args.clone()).map_err(|error| error.to_string())?;
-        Ok(crate::browser_fetch::fetch(&self.require_tab()?.page, args).await)
+        let page = self.require_tab()?.page.clone();
+        // The request this makes is paused like any other when interception
+        // is on, so it needs a drain running while it is awaited.
+        let drain = self.start_fetch_drain();
+        let response = crate::browser_fetch::fetch(&page, args).await;
+        self.stop_fetch_drain(drain).await;
+        Ok(response)
     }
 
     async fn cmd_cookies(&mut self) -> Result<Response, EngineError> {
