@@ -197,12 +197,7 @@ impl OperationManager {
                         Error::Action { code, source, .. } => (code.as_str(), source.as_ref()),
                         error => ("action_failed", error),
                     };
-                    let mut message = source.to_string();
-                    for value in &sensitive {
-                        if !value.is_empty() {
-                            message = message.replace(value, "[redacted]");
-                        }
-                    }
+                    let message = redact(&source.to_string(), &sensitive);
                     let phase = if message.contains("preparation") {
                         "preparation"
                     } else if message.contains("queue admission") {
@@ -368,4 +363,56 @@ fn action_values(action: &Action) -> Vec<String> {
         Action::Type { text, .. } | Action::InsertText { text } => vec![text.clone()],
         _ => Vec::new(),
     }
+}
+
+const REDACTED: &str = "[redacted]";
+
+fn word_character(character: char) -> bool {
+    character.is_alphanumeric() || character == '_'
+}
+
+fn echoed_forms(value: &str) -> Vec<String> {
+    let mut forms = vec![value.to_owned()];
+    let escaped = serde_json::to_string(value)
+        .ok()
+        .and_then(|quoted| Some(quoted.get(1..quoted.len().checked_sub(1)?)?.to_owned()));
+    if let Some(escaped) = escaped.filter(|escaped| escaped != value) {
+        forms.push(escaped);
+    }
+    forms
+}
+
+fn redact_standalone(message: &str, value: &str) -> String {
+    let mut redacted = String::with_capacity(message.len());
+    let mut rest = 0;
+    let mut search = 0;
+    while let Some(found) = message[search..].find(value) {
+        let start = search + found;
+        let end = start + value.len();
+        let embedded = message[..start]
+            .chars()
+            .next_back()
+            .is_some_and(word_character)
+            || message[end..].chars().next().is_some_and(word_character);
+        if embedded {
+            search = start + message[start..].chars().next().map_or(1, char::len_utf8);
+            continue;
+        }
+        redacted.push_str(&message[rest..start]);
+        redacted.push_str(REDACTED);
+        rest = end;
+        search = end;
+    }
+    redacted.push_str(&message[rest..]);
+    redacted
+}
+
+pub(crate) fn redact(message: &str, sensitive: &[String]) -> String {
+    sensitive
+        .iter()
+        .filter(|value| !value.is_empty())
+        .flat_map(|value| echoed_forms(value))
+        .fold(message.to_owned(), |message, form| {
+            redact_standalone(&message, &form)
+        })
 }

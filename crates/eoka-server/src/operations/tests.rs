@@ -137,3 +137,90 @@ async fn abrupt_process_exit_preserves_admission_intent_and_completion() {
         assert!(!matches!(record.state, OperationState::Running));
     }
 }
+
+fn sensitive(value: &str) -> Vec<String> {
+    vec![value.to_owned()]
+}
+
+fn fuses_with_a_word(message: &str) -> bool {
+    message.match_indices(REDACTED).any(|(start, marker)| {
+        message[..start]
+            .chars()
+            .next_back()
+            .is_some_and(word_character)
+            || message[start + marker.len()..]
+                .chars()
+                .next()
+                .is_some_and(word_character)
+    })
+}
+
+#[test]
+fn redaction_never_rewrites_the_inside_of_a_word() {
+    let prose = "Timeout: Action deadline exceeded during preparation: target not found";
+    for value in ["x", "e", "ex", "ded", "prep", "o", " ", ": ", "t n"] {
+        let message = redact(prose, &sensitive(value));
+        assert!(message.contains("exceeded"), "{value:?}: {message}");
+        assert!(!fuses_with_a_word(&message), "{value:?}: {message}");
+    }
+    assert_eq!(redact(prose, &sensitive("x")), prose);
+    assert_eq!(redact(prose, &sensitive("")), prose);
+    assert_eq!(redact(prose, &[]), prose);
+    assert_eq!(
+        redact(
+            "CDP command 'Runtime.evaluate' timed out after 30s (id=48)",
+            &sensitive("30")
+        ),
+        "CDP command 'Runtime.evaluate' timed out after 30s (id=48)"
+    );
+}
+
+#[test]
+fn redaction_still_removes_an_echoed_value() {
+    for (value, message, expected) in [
+        (
+            "hunter2-Secret!",
+            "Evaluation failed: rejected value \"hunter2-Secret!\" for #password",
+            "Evaluation failed: rejected value \"[redacted]\" for #password",
+        ),
+        (
+            "correct horse battery",
+            "TypeError: cannot store correct horse battery, correct horse battery.",
+            "TypeError: cannot store [redacted], [redacted].",
+        ),
+        ("x", "unexpected value: x", "unexpected value: [redacted]"),
+        (
+            "123",
+            "invalid cvv=123; retry",
+            "invalid cvv=[redacted]; retry",
+        ),
+        (
+            "4111 1111",
+            "card '4111 1111' declined",
+            "card '[redacted]' declined",
+        ),
+        ("pässwörd", "wrong: pässwörd", "wrong: [redacted]"),
+        (
+            "a\"b\\c",
+            r#"SyntaxError: bad literal "a\"b\\c" near a"b\c"#,
+            r#"SyntaxError: bad literal "[redacted]" near [redacted]"#,
+        ),
+        ("secret", "secret", "[redacted]"),
+    ] {
+        let redacted = redact(message, &sensitive(value));
+        assert_eq!(redacted, expected, "{value:?}");
+        assert!(!fuses_with_a_word(&redacted), "{value:?}: {redacted}");
+    }
+}
+
+#[test]
+fn redaction_leaves_a_value_embedded_in_a_longer_word_alone() {
+    assert_eq!(
+        redact("unexpected token in maxed_out", &sensitive("x")),
+        "unexpected token in maxed_out"
+    );
+    assert_eq!(
+        redact("id=sessionid42 rejected 42", &sensitive("42")),
+        "id=sessionid42 rejected [redacted]"
+    );
+}
