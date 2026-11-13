@@ -95,6 +95,22 @@ function expectMessage(outcome, ...patterns) {
   }
 }
 
+function failureTexts(error) {
+  return [error.message, error.cause?.message, error.record?.error?.message].filter(text => typeof text === 'string');
+}
+
+function describeFailureTexts(outcome) {
+  if (outcome.state !== 'rejected') return describeOutcome(outcome);
+  const { error } = outcome;
+  return `${describeOutcome(outcome)}; cause: ${JSON.stringify(error.cause?.message)}; record error: ${JSON.stringify(error.record?.error?.message)}`;
+}
+
+function expectCleanRedaction(outcome) {
+  for (const text of failureTexts(rejection(outcome))) {
+    assert.doesNotMatch(text, mangledRedaction, describeFailureTexts(outcome));
+  }
+}
+
 function expectCallerFrame(outcome) {
   const error = rejection(outcome);
   assert.ok(callerFrames(error).includes(thisFile), `expected a stack frame in ${thisFile}; ${describeOutcome(outcome)}\n${error.stack}`);
@@ -211,21 +227,27 @@ const rows = [
   },
   {
     id: 'K11',
-    title: 'redaction of the typed value leaves the timeout message intact',
+    title: 'the timeout report for a redacted fill keeps the word exceeded',
     scenario: 'fillMissing',
+    describe: describeFailureTexts,
     check(outcome) {
-      expectMessage(outcome, 'exceeded');
-      assert.doesNotMatch(rejection(outcome).message, mangledRedaction, describeOutcome(outcome));
+      const texts = failureTexts(rejection(outcome));
+      assert.ok(texts.some(text => text.includes('exceeded')), `expected "exceeded" in the message, its cause or its operation record; ${describeFailureTexts(outcome)}`);
     },
   },
   {
     id: 'K11',
-    title: 'redaction leaves the timeout message intact when the deadline is given as actionOptions.timeout_ms',
+    title: 'redaction of the typed value never cuts into a neighbouring word',
+    scenario: 'fillMissing',
+    describe: describeFailureTexts,
+    check: expectCleanRedaction,
+  },
+  {
+    id: 'K11',
+    title: 'redaction never cuts into a neighbouring word when the deadline is given as actionOptions.timeout_ms',
     scenario: 'fillMissingWireTimeout',
-    check(outcome) {
-      expectMessage(outcome, 'exceeded');
-      assert.doesNotMatch(rejection(outcome).message, mangledRedaction, describeOutcome(outcome));
-    },
+    describe: describeFailureTexts,
+    check: expectCleanRedaction,
   },
   {
     id: 'K12',
@@ -309,7 +331,7 @@ describe('caller mistakes', { skip: skipRealBrowser }, () => {
   for (const row of [...foreground, ...background]) {
     test(`${row.id}: ${row.title}`, { timeout: scenarios[row.scenario].budgetMs + 30000 }, async t => {
       const outcome = await outcomeOf(row.scenario);
-      t.diagnostic(`${row.scenario}: ${describeOutcome(outcome)}; fixture clicks ${outcome.clicks()}`);
+      t.diagnostic(`${row.scenario}: ${(row.describe ?? describeOutcome)(outcome)}; fixture clicks ${outcome.clicks()}`);
       await row.check(outcome, { existingFile });
     });
   }

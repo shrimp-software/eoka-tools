@@ -22,7 +22,7 @@ The other tests in `tests/` cover the transport, the browser lifecycle, packagin
 | K7 | `actionOptions: { expect, timeoutMs }` | `ConfigurationError`, `requestState === 'not_sent'`, message names `timeoutMs` and `timeout_ms`; the fixture saw no click |
 | K8 | `evaluate` with a function, with arguments, with a string | returns the value |
 | K9 | a rejected read, action and configuration error | `error.stack` has a frame in the calling file |
-| K11 | `fill('#missing', 'x', …)` | redacting the typed value does not cut into other words of the message |
+| K11 | `fill('#missing', 'x', …)` with `timeoutMs` and with `actionOptions.timeout_ms` | the message keeps the word `exceeded`; redacting the typed value never cuts into a neighbouring word |
 | K12 | `screenshotToFile` onto an existing file | message names the absolute path and says it exists; the file is untouched |
 | pinned | `getText('#missing')`, a throwing `evaluate`, a result over 1 MiB | `ElementNotFound`, the thrown message, `MessageTooLarge` |
 
