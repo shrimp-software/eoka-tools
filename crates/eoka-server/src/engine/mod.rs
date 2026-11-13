@@ -581,10 +581,12 @@ impl Engine {
                 let drain = self.start_fetch_drain();
                 let page = self.current_page();
                 let session = self.session_name.clone();
+                let remedies = blockers::Remedies::new(Some(&session));
+                let name = remedies.name(cmd, args);
                 let result = blockers::guard(
                     page.as_ref(),
-                    blockers::Remedies::new(Some(&session)),
-                    cmd,
+                    remedies,
+                    &name,
                     blockers::Policy::Script,
                     None,
                     async {

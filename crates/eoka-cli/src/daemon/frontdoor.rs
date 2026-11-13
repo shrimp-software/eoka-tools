@@ -115,8 +115,9 @@ impl Board {
         locked(&self.page).clone()
     }
 
-    fn blocker(&self) -> Option<Blocker> {
-        self.page().as_ref().and_then(blockers::current)
+    async fn blocker(&self) -> Option<Blocker> {
+        let page = self.page()?;
+        blockers::confirmed(&page, Duration::ZERO).await
     }
 
     fn busy(&self) -> Option<(String, Duration)> {
@@ -125,14 +126,15 @@ impl Board {
             .map(|running| (running.command.clone(), running.since.elapsed()))
     }
 
-    fn activity(&self) -> Value {
+    async fn activity(&self) -> Value {
+        let blocker = self.blocker().await;
         json!({
             "busy": self.busy().map(|(command, elapsed)| json!({
                 "cmd": command,
                 "for_ms": elapsed.as_millis() as u64,
             })),
             "queued": self.queued.load(Ordering::SeqCst),
-            "blocker": self.blocker().map(|blocker| {
+            "blocker": blocker.map(|blocker| {
                 let mut summary = blocker.summary();
                 summary["description"] = json!(blocker.describe());
                 summary["hint"] = json!(blocker.remedy(&self.remedies()));
@@ -141,15 +143,15 @@ impl Board {
         })
     }
 
-    fn hello(&self) -> Value {
+    async fn hello(&self) -> Value {
         let mut hello = self.hello.clone();
         if hello.is_object() {
-            hello["activity"] = self.activity();
+            hello["activity"] = self.activity().await;
         }
         hello
     }
 
-    fn busy_response(&self, command: &str) -> Response {
+    async fn busy_response(&self, command: &str) -> Response {
         let remedies = self.remedies();
         let waiting = self.queued.load(Ordering::SeqCst).saturating_sub(1);
         let others = match waiting {
@@ -164,7 +166,7 @@ impl Board {
             ),
             None => format!("another command holds the browser{others}"),
         };
-        let hint = match self.blocker() {
+        let hint = match self.blocker().await {
             Some(blocker) => format!("{}. {}", blocker.describe(), blocker.remedy(&remedies)),
             None => format!(
                 "Run it again once the running command returns; {} shows what the session is doing.",
@@ -239,7 +241,7 @@ async fn connection_task(
         }
     };
     if matches!(request, Request::SessionHello) {
-        reply(&mut writer, Response::ok(board.hello())).await;
+        reply(&mut writer, Response::ok(board.hello().await)).await;
         return;
     }
     if raw["protocol_major"] != eoka_protocol::sidecar::PROTOCOL_VERSION.major {
@@ -292,7 +294,7 @@ async fn connection_task(
             tokio::select! {
                 turn = board.turn.clone().lock_owned() => turn,
                 _ = tokio::time::sleep(budget) => {
-                    reply(&mut writer, board.busy_response(&name)).await;
+                    reply(&mut writer, board.busy_response(&name).await).await;
                     return;
                 }
                 _ = hung_up(&mut reader) => return,
@@ -354,26 +356,26 @@ mod tests {
         Board::new("work", json!({"protocol_major":2,"mode":"headless"}))
     }
 
-    #[test]
-    fn hello_reports_what_the_session_is_doing() {
+    #[tokio::test]
+    async fn hello_reports_what_the_session_is_doing() {
         let board = board();
-        assert!(board.hello()["activity"]["busy"].is_null());
+        assert!(board.hello().await["activity"]["busy"].is_null());
         board.started("action_command", &json!({"command":"reload"}));
-        let hello = board.hello();
+        let hello = board.hello().await;
         assert_eq!(hello["protocol_major"], 2);
         assert_eq!(hello["activity"]["busy"]["cmd"], "reload");
         assert_eq!(hello["activity"]["queued"], 0);
         board.finished(None);
-        assert!(board.hello()["activity"]["busy"].is_null());
+        assert!(board.hello().await["activity"]["busy"].is_null());
     }
 
-    #[test]
-    fn a_busy_refusal_names_the_running_command_and_the_next_step() {
+    #[tokio::test]
+    async fn a_busy_refusal_names_the_running_command_and_the_next_step() {
         let board = board();
         board.started("agent_observe", &Value::Null);
         let _first = Counted::new(&board.queued);
         let _second = Counted::new(&board.queued);
-        let response = board.busy_response("info");
+        let response = board.busy_response("info").await;
         let detail = response.error_detail.unwrap();
         assert_eq!(detail.code, "daemon_busy");
         assert!(detail.message.contains("Session `work` is busy"));

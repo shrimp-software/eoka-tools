@@ -15,6 +15,7 @@ pub const READ_LIMIT: Duration = Duration::from_secs(15);
 const PROBE_LIMIT: Duration = Duration::from_millis(400);
 const CONTROL_LIMIT: Duration = Duration::from_secs(2);
 const SETTLE_LIMIT: Duration = Duration::from_secs(1);
+const RECENTLY_STOPPED: Duration = Duration::from_secs(5);
 const TRACKED_FRAMES: usize = 256;
 
 #[derive(Clone, Debug)]
@@ -118,12 +119,14 @@ impl<'a> Remedies<'a> {
             "action_command" => arguments["command"].as_str().unwrap_or(command),
             command => command,
         };
+        let path = eoka_protocol::operation_by_cmd(command).map_or(command, |spec| spec.path);
         match (self.surface, command) {
             (Surface::Cli, "agent_observe") => "view".into(),
             (Surface::Cli, "agent_step") => "step".into(),
             (Surface::Cli, "action_perform") => "action".into(),
-            (Surface::Cli, command) => command.replace('_', "-"),
-            (_, command) => command.to_owned(),
+            (Surface::Cli, _) => path.replace('.', " ").replace('_', "-"),
+            (Surface::Catalog, _) => path.to_owned(),
+            (Surface::Mcp, command) => command.to_owned(),
         }
     }
 
@@ -172,10 +175,18 @@ impl<'a> Remedies<'a> {
     }
 }
 
+struct Ended {
+    frame: String,
+    navigation: Navigation,
+    committed: bool,
+    at: Instant,
+}
+
 #[derive(Default)]
 struct SessionState {
     dialog: Option<Dialog>,
     navigations: HashMap<String, Navigation>,
+    ended: Option<Ended>,
 }
 
 #[derive(Default)]
@@ -233,21 +244,47 @@ impl Sessions {
                 }
                 true
             }
-            "Page.frameNavigated" => self.finish(session, params["frame"]["id"].as_str()),
+            "Page.frameNavigated" => {
+                self.finish(session, params["frame"]["id"].as_str(), true, now)
+            }
             "Page.frameStoppedLoading" | "Page.frameDetached" => {
-                self.finish(session, params["frameId"].as_str())
+                self.finish(session, params["frameId"].as_str(), false, now)
             }
             _ => false,
         }
     }
 
-    fn finish(&mut self, session: &str, frame: Option<&str>) -> bool {
-        let Some(frame) = frame else {
+    fn finish(
+        &mut self,
+        session: &str,
+        frame: Option<&str>,
+        committed: bool,
+        now: Instant,
+    ) -> bool {
+        let (Some(frame), Some(state)) = (frame, self.0.get_mut(session)) else {
             return false;
         };
+        let Some(navigation) = state.navigations.remove(frame) else {
+            return false;
+        };
+        state.ended = Some(Ended {
+            frame: frame.to_owned(),
+            navigation,
+            committed,
+            at: now,
+        });
+        true
+    }
+
+    fn stopped(&self, session: &str, target: &str, within: Duration) -> Option<Navigation> {
         self.0
-            .get_mut(session)
-            .is_some_and(|state| state.navigations.remove(frame).is_some())
+            .get(session)?
+            .ended
+            .as_ref()
+            .filter(|ended| {
+                ended.frame == target && !ended.committed && ended.at.elapsed() <= within
+            })
+            .map(|ended| ended.navigation.clone())
     }
 
     fn current(&self, session: &str, target: &str) -> Option<Blocker> {
@@ -363,6 +400,12 @@ pub fn current(page: &Page) -> Option<Blocker> {
     watcher(page)
         .sessions()
         .current(page.session().session_id(), page.target_id())
+}
+
+pub fn stopped_recently(page: &Page, within: Duration) -> Option<Navigation> {
+    watcher(page)
+        .sessions()
+        .stopped(page.session().session_id(), page.target_id(), within)
 }
 
 fn clear(page: &Page) {
@@ -718,7 +761,7 @@ impl super::Engine {
         arguments: &Value,
     ) -> Result<Response, super::EngineError> {
         let policy = policy(command, arguments);
-        let sleeps = command == "wait" && policy == Policy::Free;
+        let sleeps = matches!(command, "wait" | "network_wait") && policy == Policy::Free;
         if !sleeps && !matches!(policy, Policy::Read | Policy::Wait | Policy::Capture) {
             return self.dispatch(command, arguments).await;
         }
@@ -756,48 +799,57 @@ impl super::Engine {
         watch(&page);
         let id = operation_id(response);
         let navigation_action = policy == Policy::Navigate;
-        if let (Some(id), Some(Blocker::Navigation(_))) = (id.as_deref(), current(&page)) {
+        let pending = || matches!(current(&page), Some(Blocker::Navigation(_)));
+        if let Some(id) = id.as_deref().filter(|_| navigation_action || pending()) {
             settle(&self.operations, id).await;
             let record = self.operations.get(id).await.ok();
             let running = record.as_ref().is_some_and(|record| {
                 matches!(record.state, eoka_protocol::OperationState::Running)
             });
-            if running {
+            if running && pending() {
                 release_when_finished(
                     page.clone(),
                     self.operations.clone(),
                     id.to_owned(),
                     navigation_action,
                 );
+            }
+            let grace = if navigation_action {
+                Duration::ZERO
             } else {
-                let grace = if navigation_action {
-                    Duration::ZERO
-                } else {
-                    NAVIGATION_GRACE
-                };
-                if let Some(navigation) = abandon_navigation(&page, grace).await {
-                    if let Some(record) = record {
-                        let status = record.status();
-                        if let Some(data) = response.data.as_mut().filter(|data| data.is_object()) {
-                            if data.get("observation").is_some()
-                                || data.get("observation_error").is_some()
-                            {
-                                data["operation"] = json!(record);
-                            } else if let Ok(Value::Object(fields)) = serde_json::to_value(&record)
-                            {
-                                for (key, value) in fields {
-                                    data[key] = value;
-                                }
-                            }
-                            data["status"] = json!(status);
-                        }
+                NAVIGATION_GRACE
+            };
+            let stopped = match running {
+                true => None,
+                false => match abandon_navigation(&page, grace).await {
+                    Some(navigation) => Some(navigation),
+                    None if navigation_action && timed_out(response) => {
+                        stopped_recently(&page, RECENTLY_STOPPED)
                     }
-                    replace_error(
-                        response,
-                        navigation_timeout(&remedies, &navigation, Some(id)),
-                    );
-                    return;
+                    None => None,
+                },
+            };
+            if let Some(navigation) = stopped {
+                if let Some(record) = record {
+                    let status = record.status();
+                    if let Some(data) = response.data.as_mut().filter(|data| data.is_object()) {
+                        if data.get("observation").is_some()
+                            || data.get("observation_error").is_some()
+                        {
+                            data["operation"] = json!(record);
+                        } else if let Ok(Value::Object(fields)) = serde_json::to_value(&record) {
+                            for (key, value) in fields {
+                                data[key] = value;
+                            }
+                        }
+                        data["status"] = json!(status);
+                    }
                 }
+                replace_error(
+                    response,
+                    navigation_timeout(&remedies, &navigation, Some(id)),
+                );
+                return;
             }
         }
         if !timed_out(response) {
@@ -1170,6 +1222,9 @@ mod tests {
             json!({"frame":{"id":"top","url":"https://slow.test/"}}),
         ));
         assert!(sessions.current("session", "top").is_none());
+        assert!(sessions
+            .stopped("session", "top", Duration::from_secs(5))
+            .is_none());
         event(
             &mut sessions,
             "Page.frameStartedLoading",
@@ -1182,6 +1237,17 @@ mod tests {
             json!({"frameId":"top"})
         ));
         assert!(sessions.current("session", "top").is_none());
+        assert!(sessions
+            .stopped("session", "top", Duration::from_secs(5))
+            .is_some());
+        assert!(sessions
+            .stopped("session", "child", Duration::from_secs(5))
+            .is_none());
+        assert!(!event(
+            &mut sessions,
+            "Page.frameStoppedLoading",
+            json!({"frameId":"top"})
+        ));
     }
 
     #[test]
@@ -1320,6 +1386,24 @@ mod tests {
             Some(Duration::from_secs(6))
         );
         assert_eq!(limit(Policy::Script, &none), None);
+    }
+
+    #[test]
+    fn commands_are_named_the_way_each_surface_spells_them() {
+        let cli = Remedies::for_surface(Surface::Cli, None);
+        let none = Value::Null;
+        assert_eq!(cli.name("agent_observe", &none), "view");
+        assert_eq!(cli.name("captcha_datadome", &none), "captcha datadome");
+        assert_eq!(cli.name("get_text", &none), "get-text");
+        assert_eq!(cli.name("tab_list", &none), "tab list");
+        assert_eq!(
+            cli.name("action_command", &json!({"command":"reload"})),
+            "reload"
+        );
+        let catalog = Remedies::for_surface(Surface::Catalog, None);
+        assert_eq!(catalog.name("agent_observe", &none), "agent.observe");
+        let mcp = Remedies::for_surface(Surface::Mcp, None);
+        assert_eq!(mcp.name("page_text", &none), "page_text");
     }
 
     #[test]

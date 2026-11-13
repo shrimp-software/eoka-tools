@@ -267,7 +267,10 @@ impl BrowserState {
         if self.tabs.len() <= 1 {
             return Err(eoka::Error::cdp_msg("Cannot close the last tab"));
         }
-        let release_result = page.release_all_inputs().await;
+        let release_result =
+            tokio::time::timeout(std::time::Duration::from_secs(2), page.release_all_inputs())
+                .await
+                .unwrap_or(Ok(()));
         self.browser.close_tab(tab_id).await?;
         if let Some(next_tab_id) =
             reconcile_closed_tab(&mut self.tabs, &mut self.current_tab_id, tab_id)
