@@ -142,7 +142,7 @@ impl Engine {
         &mut self,
         args: &eoka_protocol::DomainArgs,
     ) -> Result<Response, EngineError> {
-        let domain = args.domain.as_str().to_string();
+        let domain = args.domain.clone();
         self.script_policy.add_allow(domain);
         Ok(Response::ok(self.script_policy.status_json()))
     }
@@ -151,7 +151,7 @@ impl Engine {
         &mut self,
         args: &eoka_protocol::DomainArgs,
     ) -> Result<Response, EngineError> {
-        let domain = args.domain.as_str().to_string();
+        let domain = args.domain.clone();
         self.script_policy.add_block(domain);
         Ok(Response::ok(self.script_policy.status_json()))
     }

@@ -526,8 +526,17 @@ impl Stop {
     pub fn detail(&self, remedies: &Remedies<'_>, command: &str, stage: Stage) -> ErrorDetail {
         match self {
             Stop::Blocked(blocker) => blocker.detail(remedies, command, stage),
-            Stop::Unresponsive(limit) => unresponsive(remedies, command, *limit),
-            Stop::Frozen => frozen(remedies, command),
+            Stop::Unresponsive(limit) => stalled(
+                remedies,
+                format!(
+                    "`{command}` got no answer from the page within {} s.",
+                    limit.as_secs()
+                ),
+            ),
+            Stop::Frozen => stalled(
+                remedies,
+                format!("`{command}` timed out and the page does not answer a liveness probe."),
+            ),
         }
     }
 }
@@ -1117,28 +1126,10 @@ impl Blocker {
     }
 }
 
-pub fn unresponsive(remedies: &Remedies<'_>, command: &str, limit: Duration) -> ErrorDetail {
+fn stalled(remedies: &Remedies<'_>, observed: String) -> ErrorDetail {
     ErrorDetail::new(
         "page_unresponsive",
-        format!(
-            "`{command}` got no answer from the page within {} s. No dialog or pending navigation is known, so the page's main thread is busy or frozen.",
-            limit.as_secs()
-        ),
-    )
-    .retryable(false)
-    .hint(format!(
-        "Retry once the page settles. If it stays frozen, continue in a fresh tab with {}. {} clears a dialog that was already open before this session attached.",
-        remedies.new_tab(),
-        remedies.dismiss()
-    ))
-}
-
-pub fn frozen(remedies: &Remedies<'_>, command: &str) -> ErrorDetail {
-    ErrorDetail::new(
-        "page_unresponsive",
-        format!(
-            "`{command}` timed out and the page does not answer a liveness probe. No dialog or pending navigation is known, so the page's main thread is busy or frozen."
-        ),
+        format!("{observed} No dialog or pending navigation is known, so the page's main thread is busy or frozen."),
     )
     .retryable(false)
     .hint(format!(
@@ -1531,7 +1522,8 @@ mod tests {
         assert!(detail.message.contains("returned without a result"));
         assert!(detail.hint.unwrap().contains("`reload`"));
         let default = Remedies::for_surface(Surface::Cli, Some("default"));
-        assert!(unresponsive(&default, "info", READ_LIMIT)
+        assert!(Stop::Unresponsive(READ_LIMIT)
+            .detail(&default, "info", Stage::ReadInterrupted)
             .hint
             .unwrap()
             .contains("`eoka tab new URL`"));

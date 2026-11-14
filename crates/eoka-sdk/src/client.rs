@@ -470,26 +470,19 @@ pub async fn send_command(
         args.operation_id
             .get_or_insert_with(|| uuid::Uuid::new_v4().to_string());
     }
-    if matches!(
-        request.cmd(),
-        "agent_step"
-            | "agent_observe"
-            | "click"
-            | "dblclick"
-            | "fill"
-            | "select"
-            | "hover"
-            | "key"
-            | "back"
-            | "forward"
-            | "reload"
-            | "action_perform"
-            | "action_command"
-            | "operation_get"
-            | "operation_list"
-            | "operation_wait"
-            | "operation_cancel"
-    ) {
+    if request.is_convenience_action()
+        || matches!(
+            request,
+            Request::AgentStep(_)
+                | Request::AgentObserve(_)
+                | Request::ActionPerform(_)
+                | Request::ActionCommand(_)
+                | Request::OperationGet(_)
+                | Request::OperationList(_)
+                | Request::OperationWait(_)
+                | Request::OperationCancel(_)
+        )
+    {
         return send_operation(session_name, request, &spec, reply_limit).await;
     }
     if matches!(
@@ -1100,10 +1093,7 @@ async fn send_operation(
         .map(str::to_owned)
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let mut wire = serde_json::to_value(&request)?;
-    if matches!(
-        request.cmd(),
-        "click" | "dblclick" | "fill" | "select" | "hover" | "key" | "back" | "forward" | "reload"
-    ) {
+    if request.is_convenience_action() {
         wire = serde_json::json!({"cmd":"action_command","args":{"operation_id":id,"command":request.cmd(),"arguments":args}});
     }
     if !matches!(request, Request::AgentObserve(_)) {

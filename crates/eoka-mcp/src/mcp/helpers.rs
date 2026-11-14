@@ -1,4 +1,3 @@
-use super::state::TabState;
 use std::collections::HashMap;
 use std::fmt::Write;
 
@@ -77,29 +76,6 @@ pub(crate) fn element_list(elements: &[InteractiveElement]) -> String {
     out
 }
 
-const CONSOLE_CAPTURE_JS: &str = include_str!("../js/console_capture.js");
-
-pub(crate) async fn ensure_console_capture(tab: &mut TabState) -> Result<(), ErrorData> {
-    if tab.console_injected {
-        return Ok(());
-    }
-    tab.page
-        .session()
-        .send::<_, serde_json::Value>(
-            "Page.addScriptToEvaluateOnNewDocument",
-            &serde_json::json!({ "source": CONSOLE_CAPTURE_JS }),
-        )
-        .await
-        .map_err(internal)?;
-    let _: String = tab
-        .page
-        .evaluate_sync(CONSOLE_CAPTURE_JS)
-        .await
-        .unwrap_or_default();
-    tab.console_injected = true;
-    Ok(())
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SavedState {
     pub url: String,
@@ -155,56 +131,6 @@ impl SavedCookie {
             },
         }
     }
-}
-
-pub(crate) async fn capture_state(page: &Page) -> Result<SavedState, ErrorData> {
-    let cookies: Vec<SavedCookie> = page
-        .cookies()
-        .await
-        .map_err(internal)?
-        .into_iter()
-        .map(SavedCookie::from)
-        .collect();
-
-    let local_storage: HashMap<String, String> = page
-        .evaluate_sync(
-            "(() => { try { return Object.fromEntries(Object.entries(localStorage)) } catch(e) { return {} } })()",
-        )
-        .await
-        .map_err(internal)?;
-
-    let session_storage: HashMap<String, String> = page
-        .evaluate_sync(
-            "(() => { try { return Object.fromEntries(Object.entries(sessionStorage)) } catch(e) { return {} } })()",
-        )
-        .await
-        .map_err(internal)?;
-
-    let url: String = page
-        .evaluate_sync("location.href")
-        .await
-        .map_err(internal)?;
-
-    let user_agent: String = page
-        .evaluate_sync("navigator.userAgent")
-        .await
-        .map_err(internal)?;
-
-    let saved_at = {
-        let d = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default();
-        format!("{}", d.as_secs())
-    };
-
-    Ok(SavedState {
-        url,
-        cookies,
-        local_storage,
-        session_storage,
-        user_agent,
-        saved_at,
-    })
 }
 
 pub(crate) async fn restore_state(

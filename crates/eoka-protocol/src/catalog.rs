@@ -1050,6 +1050,21 @@ impl OperationSpec {
 }
 
 impl Request {
+    pub fn is_convenience_action(&self) -> bool {
+        matches!(
+            self,
+            Request::Click(_)
+                | Request::DblClick(_)
+                | Request::Fill(_)
+                | Request::Select(_)
+                | Request::Hover(_)
+                | Request::Key(_)
+                | Request::Back
+                | Request::Forward
+                | Request::Reload
+        )
+    }
+
     pub fn spec(&self) -> &'static OperationSpec {
         operation_by_cmd(self.cmd()).expect("every request variant is a catalog operation")
     }

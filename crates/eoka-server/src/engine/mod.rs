@@ -484,16 +484,8 @@ impl Engine {
                 Some(response) => response,
                 None => Response::err(format!("Unknown command: {cmd}")),
             },
-            Request::Click(_)
-            | Request::DblClick(_)
-            | Request::Fill(_)
-            | Request::Select(_)
-            | Request::Hover(_)
-            | Request::Key(_)
-            | Request::Back
-            | Request::Forward
-            | Request::Reload
-            | Request::ActionPerform(_) => self.handle_action(cmd, args).await,
+            Request::ActionPerform(_) => self.handle_action(cmd, args).await,
+            action if action.is_convenience_action() => self.handle_action(cmd, args).await,
             Request::DownloadStart(start) => {
                 if let Err(error) = self.downloads.restore().await {
                     return Response::err_detail(error);
@@ -985,8 +977,8 @@ impl Engine {
             return Ok(Response::ok_text("Device emulation cleared"));
         }
 
-        let width = u64::from(args.width);
-        let height = u64::from(args.height);
+        let width = args.width;
+        let height = args.height;
         let dpr = args.dpr;
         let mobile = !args.desktop;
 
@@ -1660,7 +1652,7 @@ impl Engine {
         &mut self,
         args: &eoka_protocol::TabIdArgs,
     ) -> Result<Response, EngineError> {
-        let tab_id = args.tab_id.as_str().to_string();
+        let tab_id = args.tab_id.clone();
         self.ensure_browser().await?;
         let state = self.require_state_mut()?;
         state.attach_existing_tab(&tab_id).await?;
@@ -1679,7 +1671,7 @@ impl Engine {
         &mut self,
         args: &eoka_protocol::CloneFromArgs,
     ) -> Result<Response, EngineError> {
-        let source = args.source.as_str().to_string();
+        let source = args.source.clone();
         let to = args.to.as_deref().map(std::path::PathBuf::from);
 
         let saved = persist::clone_state_from_source(&source).await?;
@@ -1722,7 +1714,7 @@ impl Engine {
         &mut self,
         args: &eoka_protocol::TabIdArgs,
     ) -> Result<Response, EngineError> {
-        let tab_id = args.tab_id.as_str().to_string();
+        let tab_id = args.tab_id.clone();
         let closing_session = self
             .state
             .as_ref()
@@ -2262,10 +2254,10 @@ impl Engine {
         &mut self,
         args: &eoka_protocol::InterceptAddArgs,
     ) -> Result<Response, EngineError> {
-        let url_pattern = args.url_pattern.as_str().to_string();
+        let url_pattern = args.url_pattern.clone();
         let capture = args.capture.as_deref().map(std::path::PathBuf::from);
         let respond = args.respond.as_deref().map(std::path::PathBuf::from);
-        let status = u64::from(args.status) as u16;
+        let status = args.status;
 
         let id = self
             .intercept

@@ -24,7 +24,6 @@ fn reconcile_closed_tab<T>(
 pub(crate) struct TabState {
     pub page: Page,
     pub elements: Vec<InteractiveElement>,
-    pub console_injected: bool,
 }
 
 impl TabState {
@@ -32,7 +31,6 @@ impl TabState {
         Self {
             page,
             elements: Vec::new(),
-            console_injected: false,
         }
     }
 

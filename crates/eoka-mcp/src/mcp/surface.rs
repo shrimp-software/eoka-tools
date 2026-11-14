@@ -399,3 +399,44 @@ async fn an_operation_started_by_the_engine_can_be_cancelled_from_mcp() {
     call(&client, "close", json!({})).await.unwrap();
     let _ = client.cancel().await;
 }
+
+#[tokio::test]
+#[ignore = "requires Chrome; an engine tool notices a lost browser and the next navigation relaunches"]
+async fn a_lost_browser_is_noticed_by_an_engine_tool_and_relaunched() {
+    let server = EokaServer::listing(false);
+    let client = connect(server.clone()).await;
+    call(
+        &client,
+        "navigate",
+        json!({"url": "data:text/html,<title>one</title><p>first</p>"}),
+    )
+    .await
+    .unwrap();
+    let page = server
+        .state
+        .lock()
+        .await
+        .as_ref()
+        .unwrap()
+        .current_tab()
+        .unwrap()
+        .page
+        .clone();
+    page.session().transport().close().await.unwrap();
+    let lost = call(&client, "page_text", json!({})).await.unwrap();
+    assert_eq!(lost.is_error, Some(true), "{}", text(&lost));
+    assert!(text(&lost).contains("connection lost"), "{}", text(&lost));
+    assert!(server.state.lock().await.as_ref().unwrap().unhealthy);
+    let relaunched = call(
+        &client,
+        "navigate",
+        json!({"url": "data:text/html,<title>two</title><p>second</p>"}),
+    )
+    .await
+    .unwrap();
+    assert_ne!(relaunched.is_error, Some(true), "{}", text(&relaunched));
+    let read = call(&client, "page_text", json!({})).await.unwrap();
+    assert!(text(&read).contains("second"), "{}", text(&read));
+    call(&client, "close", json!({})).await.unwrap();
+    let _ = client.cancel().await;
+}
