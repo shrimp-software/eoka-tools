@@ -252,7 +252,6 @@ impl Engine {
         engine
     }
 
-    /// Run one catalog command against a specific tab instead of the current one.
     pub async fn handle_on(
         &mut self,
         tab_id: &str,
@@ -266,15 +265,11 @@ impl Engine {
                 .tabs
                 .entry(tab_id.to_owned())
                 .or_insert_with(|| TabState::new(page.clone()));
-            // The owner navigates and acts on this page outside the engine,
-            // so nothing cached about its document can be trusted.
             tab.invalidate();
             switched = state.current_tab_id.as_deref() != Some(tab_id);
             state.current_tab_id = Some(tab_id.to_owned());
         }
         if switched {
-            // Interception rules, script policy and recording follow the
-            // addressed page rather than the last one used.
             if let Err(error) = self.sync_current_target_features().await {
                 return Response::err(error);
             }
