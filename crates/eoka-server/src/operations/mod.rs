@@ -2,6 +2,7 @@ pub mod commands;
 pub mod sidecar;
 pub(crate) mod store;
 
+use crate::engine::blockers::{self, Blocker};
 use anyhow::{anyhow, Context, Result};
 use eoka::{
     Action, ActionOptions, ActionOutcome, ActionReceipt, DispatchObserver, DispatchState, Error,
@@ -9,7 +10,7 @@ use eoka::{
 };
 use eoka_protocol::{OperationListArgs, OperationRecord, OperationState};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     future::Future,
     path::PathBuf,
     pin::Pin,
@@ -31,6 +32,8 @@ struct Manager {
     store: OnceCell<Arc<Store>>,
     directory: Option<PathBuf>,
     jobs: Mutex<HashMap<String, ActiveOperation>>,
+    halts_on_dialog: AtomicBool,
+    interrupted_targets: Mutex<HashSet<String>>,
 }
 
 struct ActiveOperation {
@@ -116,6 +119,50 @@ impl OperationManager {
             }),
         }
     }
+    pub fn halt_on_dialog(&self) {
+        self.inner.halts_on_dialog.store(true, Ordering::Release);
+    }
+
+    async fn dialog_opened(&self, page: &Page) -> Blocker {
+        if self.inner.halts_on_dialog.load(Ordering::Acquire) {
+            blockers::interrupted(page, false).await
+        } else {
+            std::future::pending().await
+        }
+    }
+
+    fn note_interrupted(&self, target_id: &str, interrupted: bool) -> bool {
+        self.inner
+            .interrupted_targets
+            .lock()
+            .map(|mut targets| {
+                if interrupted {
+                    targets.insert(target_id.to_owned())
+                } else {
+                    targets.remove(target_id)
+                }
+            })
+            .unwrap_or(false)
+    }
+
+    async fn release_interrupted_input(&self, page: &Page) {
+        if !self.note_interrupted(page.target_id(), false) {
+            return;
+        }
+        if matches!(blockers::current(page), Some(Blocker::Dialog(_))) {
+            self.note_interrupted(page.target_id(), true);
+            return;
+        }
+        let released =
+            tokio::time::timeout(INTERRUPTED_INPUT_RELEASE, page.release_all_inputs()).await;
+        if !matches!(released, Ok(Ok(()))) {
+            tracing::warn!(
+                target_id = page.target_id(),
+                "Could not release input left by an action a dialog interrupted"
+            );
+        }
+    }
+
     pub(crate) async fn store(&self) -> Result<&Arc<Store>> {
         self.inner
             .store
@@ -198,6 +245,8 @@ impl OperationManager {
         if !created {
             return Ok(record);
         }
+        blockers::watch(&page);
+        self.release_interrupted_input(&page).await;
         let (cancel, mut canceled) = watch::channel(false);
         self.inner
             .jobs
@@ -222,17 +271,29 @@ impl OperationManager {
         tokio::spawn(async move {
             let sensitive = action_values(&action);
             let navigation = navigates(&action);
+            let kind = action.kind();
+            let mut dialog = None;
             let result = tokio::select! {
                 biased;
                 _ = canceled.changed() => None,
+                opened = manager.dialog_opened(&page) => {
+                    dialog = Some(opened);
+                    None
+                },
                 result = async {
                     if execution.exploratory { page.explore(action, options).await }
                     else { page.act(action, options).await }
                 } => Some(result),
             };
-            if navigation && navigation_unanswered(&result, dispatched.load(Ordering::Acquire)) {
+            if dialog.is_some() {
+                manager.note_interrupted(page.target_id(), true);
+            } else if navigation
+                && navigation_unanswered(&result, dispatched.load(Ordering::Acquire))
+            {
                 abandon_navigation(&page).await;
             }
+            let interruption = dialog
+                .map(|dialog| interruption(&dialog, kind, &id, dispatched.load(Ordering::Acquire)));
             let diagnostic = result
                 .as_ref()
                 .and_then(|result| result.as_ref().err())
@@ -251,6 +312,16 @@ impl OperationManager {
                             record.outcome = receipt.outcome;
                             record.receipt = Some(*receipt);
                             record.error_code = Some(code);
+                        }
+                        None if interruption.is_some() => {
+                            record.outcome = if record.dispatch_intent {
+                                ActionOutcome::OutcomeUnknown
+                            } else {
+                                ActionOutcome::NotDispatched
+                            };
+                            record.receipt = Some(interrupted_receipt(record));
+                            record.error_code = interruption.as_ref().map(|detail| detail.code.clone());
+                            record.error = interruption;
                         }
                         other => {
                             record.outcome = if record.dispatch_intent {
@@ -428,6 +499,65 @@ fn diagnostic(
             phase: Some(phase.into()),
             ..Default::default()
         })
+}
+
+const INTERRUPTED_INPUT_RELEASE: Duration = Duration::from_secs(5);
+
+fn interruption(
+    dialog: &Blocker,
+    action: &str,
+    operation_id: &str,
+    dispatched: bool,
+) -> eoka_protocol::ErrorDetail {
+    let remedy = dialog.remedy(&blockers::Remedies::new(None));
+    let (consequence, hint, status) = if dispatched {
+        (
+            format!("It opened after the {action} input was dispatched: the input was sent to the page once and is not repeated, and the {action} stopped waiting for its result."),
+            format!("{remedy} Do not repeat the {action} blindly: its page effects may already have happened."),
+            eoka_protocol::ActionStatus::MayHaveExecuted,
+        )
+    } else {
+        (
+            format!("It opened before the {action} input was dispatched, so nothing was sent to the page."),
+            remedy,
+            eoka_protocol::ActionStatus::NotAttempted,
+        )
+    };
+    eoka_protocol::ErrorDetail::new(
+        dialog.code(),
+        format!("{}. {consequence}", dialog.describe()),
+    )
+    .retryable(false)
+    .hint(hint)
+    .context(eoka_protocol::ErrorContext {
+        operation_id: Some(operation_id.to_owned()),
+        phase: Some("execution".into()),
+        action_status: Some(status),
+        ..Default::default()
+    })
+}
+
+fn interrupted_receipt(record: &OperationRecord) -> ActionReceipt {
+    let finished_at_ms = record.finished_at_ms.unwrap_or_else(timestamp);
+    ActionReceipt {
+        destination_target_id: None,
+        started_at_ms: record.started_at_ms,
+        finished_at_ms,
+        download_guid: None,
+        action: record.action.clone(),
+        target_id: record.target_id.clone(),
+        outcome: record.outcome,
+        dispatch: if record.dispatch_intent {
+            DispatchState::MayHaveBeenSent
+        } else {
+            DispatchState::NotSent
+        },
+        preparation_may_have_executed: record.preparation_intent || record.dispatch_intent,
+        verification: None,
+        elapsed_ms: finished_at_ms.saturating_sub(record.started_at_ms),
+        already_satisfied: false,
+        cleanup_pending: record.dispatch_intent,
+    }
 }
 
 const REDACTED: &str = "[redacted]";

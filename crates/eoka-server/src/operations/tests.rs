@@ -412,3 +412,115 @@ async fn stopping_one_target_leaves_other_targets_running() {
     manager.signal(|_| true);
     assert_eq!(signalled(&receivers), ["first", "second", "third"]);
 }
+
+fn open_dialog() -> Blocker {
+    Blocker::Dialog(blockers::Dialog {
+        kind: "alert".into(),
+        message: "are you sure?".into(),
+        url: "https://example.test/".into(),
+        since: std::time::Instant::now(),
+    })
+}
+
+#[test]
+fn an_operation_a_dialog_interrupts_says_whether_its_input_was_sent() {
+    let id = "6e8b0670-a457-4ce1-8d21-f1e4cf8c8e9b";
+    let sent = interruption(&open_dialog(), "click", id, true);
+    assert_eq!(sent.code, "dialog_open");
+    assert!(sent.message.contains("dialog is open"), "{}", sent.message);
+    assert!(sent.message.contains("are you sure?"), "{}", sent.message);
+    assert!(
+        sent.message.contains("click input was dispatched"),
+        "{}",
+        sent.message
+    );
+    assert!(
+        sent.message.contains("was sent to the page once"),
+        "{}",
+        sent.message
+    );
+    assert!(sent.message.contains("is not repeated"), "{}", sent.message);
+    let hint = sent.hint.unwrap();
+    assert!(
+        hint.contains("dialog.accept") && hint.contains("dialog.dismiss"),
+        "{hint}"
+    );
+    assert!(hint.contains("Do not repeat the click blindly"), "{hint}");
+    let context = sent.context.unwrap();
+    assert_eq!(context.operation_id.as_deref(), Some(id));
+    assert_eq!(context.phase.as_deref(), Some("execution"));
+    assert!(matches!(
+        context.action_status,
+        Some(eoka_protocol::ActionStatus::MayHaveExecuted)
+    ));
+    assert_eq!(sent.retryable, Some(false));
+
+    let unsent = interruption(&open_dialog(), "fill", id, false);
+    assert!(
+        unsent
+            .message
+            .contains("before the fill input was dispatched"),
+        "{}",
+        unsent.message
+    );
+    assert!(
+        unsent.message.contains("nothing was sent"),
+        "{}",
+        unsent.message
+    );
+    assert!(!unsent.hint.unwrap().contains("Do not repeat"));
+    assert!(matches!(
+        unsent.context.unwrap().action_status,
+        Some(eoka_protocol::ActionStatus::NotAttempted)
+    ));
+}
+
+#[tokio::test]
+async fn an_interrupted_operation_keeps_a_receipt_of_what_was_dispatched() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = Store::open(directory.path().into()).await.unwrap();
+    let mut stored = record(&store, "6e8b0670-a457-4ce1-8d21-f1e4cf8c8e9b");
+    stored.started_at_ms = 1_000;
+    stored.finished_at_ms = Some(1_480);
+    stored.preparation_intent = true;
+    stored.dispatch_intent = true;
+    stored.outcome = ActionOutcome::OutcomeUnknown;
+    let receipt = interrupted_receipt(&stored);
+    assert_eq!(receipt.dispatch, DispatchState::MayHaveBeenSent);
+    assert!(matches!(receipt.outcome, ActionOutcome::OutcomeUnknown));
+    assert_eq!(receipt.target_id, stored.target_id);
+    assert_eq!(receipt.action, stored.action);
+    assert_eq!(
+        (receipt.started_at_ms, receipt.finished_at_ms),
+        (1_000, 1_480)
+    );
+    assert_eq!(receipt.elapsed_ms, 480);
+    assert!(receipt.preparation_may_have_executed);
+    assert!(receipt.cleanup_pending);
+    assert!(receipt.verification.is_none());
+
+    stored.dispatch_intent = false;
+    stored.preparation_intent = false;
+    stored.outcome = ActionOutcome::NotDispatched;
+    let receipt = interrupted_receipt(&stored);
+    assert_eq!(receipt.dispatch, DispatchState::NotSent);
+    assert!(matches!(receipt.outcome, ActionOutcome::NotDispatched));
+    assert!(!receipt.preparation_may_have_executed);
+    assert!(!receipt.cleanup_pending);
+}
+
+#[test]
+fn interrupted_targets_are_remembered_until_their_input_is_released() {
+    let manager = OperationManager::default();
+    assert!(manager.note_interrupted("a", true));
+    assert!(!manager.note_interrupted("a", true));
+    assert!(manager.note_interrupted("a", false));
+    assert!(!manager.note_interrupted("a", false));
+    assert!(!manager.inner.halts_on_dialog.load(Ordering::Acquire));
+    manager.halt_on_dialog();
+    assert!(manager.inner.halts_on_dialog.load(Ordering::Acquire));
+    assert!(!OperationManager::default()
+        .inner
+        .halts_on_dialog
+        .load(Ordering::Acquire));
+}
