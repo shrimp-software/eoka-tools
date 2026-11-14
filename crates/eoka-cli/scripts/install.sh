@@ -63,7 +63,8 @@ expected="$(awk -v name="$asset" '$2 == name { print $1 }' "$scratch/SHA256SUMS"
 test "${#expected}" = 64 || { echo "SHA256SUMS has no entry for $asset" >&2; exit 1; }
 test "$(sha256 "$scratch/$asset")" = "$expected" || { echo "Checksum mismatch for $asset" >&2; exit 1; }
 tar -xzf "$scratch/$asset" -C "$scratch" eoka
-test "$("$scratch/eoka" --version)" = "eoka $version" || { echo "Downloaded binary reports the wrong version" >&2; exit 1; }
+reported="$("$scratch/eoka" --version 2>/dev/null)" || { echo "The downloaded binary cannot run here. On Linux it needs glibc 2.35 or newer (2.39 on arm64). Install from source instead: cargo install eoka-cli" >&2; exit 1; }
+test "$reported" = "eoka $version" || { echo "Downloaded binary reports the wrong version" >&2; exit 1; }
 mkdir -p "$install_dir"
 install -m 755 "$scratch/eoka" "$install_dir/.eoka-new"
 mv -f "$install_dir/.eoka-new" "$install_dir/eoka"
