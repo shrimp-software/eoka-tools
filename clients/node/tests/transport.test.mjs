@@ -181,7 +181,7 @@ test('calls beyond the negotiated in-flight limit queue locally and all resolve'
 });
 
 test('queued calls that expire or abort before being sent report not_sent and never reach the peer', async t => {
-  const transport = await start(t, 'concurrency', { EOKA_TRANSPORT_TEST_IN_FLIGHT: '2' });
+  const transport = await start(t, 'concurrency', { EOKA_TRANSPORT_TEST_IN_FLIGHT: '2', EOKA_TRANSPORT_TEST_REPLY_DELAY_MS: '250' });
   const controller = new AbortController();
   const first = evaluate(transport);
   const expired = evaluate(transport, 'null', { timeoutMs: 0.01 });

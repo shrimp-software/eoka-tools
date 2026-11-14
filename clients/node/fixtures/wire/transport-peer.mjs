@@ -8,6 +8,7 @@ const mode = process.env.EOKA_TRANSPORT_TEST_MODE ?? 'normal';
 const maxInFlight = Number(process.env.EOKA_TRANSPORT_TEST_IN_FLIGHT ?? 128);
 const maxMessageBytes = Number(process.env.EOKA_TRANSPORT_TEST_MESSAGE_BYTES ?? 33554432);
 const capacity = Number(process.env.EOKA_TRANSPORT_TEST_CAPACITY ?? Infinity);
+const replyDelayMs = Number(process.env.EOKA_TRANSPORT_TEST_REPLY_DELAY_MS ?? 2);
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
 let evaluations = 0;
 let outstanding = 0;
@@ -139,7 +140,7 @@ input.on('line', async line => {
     setTimeout(() => {
       outstanding--;
       reply(request.id, { result: { peak, received: ++evaluations } });
-    }, 2);
+    }, replyDelayMs);
     return;
   }
   evaluations++;
