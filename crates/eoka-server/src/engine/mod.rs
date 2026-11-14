@@ -17,6 +17,15 @@ mod state;
 mod target;
 mod wasm;
 
+use eoka_protocol::{
+    ActionCommandArgs, AttributeArgs, CaptchaInjectArgs, ClearFlagArgs, ClickShadowArgs,
+    CloneFromArgs, ConsoleArgs, DeleteCookieArgs, EmulateArgs, FakeCameraArgs, FetchArgs,
+    HeadersArgs, IdArgs, InterceptAddArgs, KeyArgs, LoadStateArgs, MouseButtonArgs, MouseMoveArgs,
+    NetworkExportArgs, NetworkLogArgs, NetworkRecordStartArgs, NetworkShowArgs, NetworkWaitArgs,
+    ObserveArgs, OpenArgs, PathArgs, PathStringArgs, RecordingIdArgs, RecordingStartArgs,
+    ScreenshotArgs, SelectorArgs, SetCookieArgs, SetStorageArgs, SnapshotArgs, StorageArgs,
+    TabIdArgs, TabNewArgs, TargetArgs, TextArgs, WaitArgs,
+};
 use std::collections::HashMap;
 use std::fmt::Write as FmtWrite;
 
@@ -497,7 +506,7 @@ impl Engine {
         }
     }
 
-    async fn action_command(&mut self, envelope: eoka_protocol::ActionCommandArgs) -> Response {
+    async fn action_command(&mut self, envelope: ActionCommandArgs) -> Response {
         let command = envelope.command.as_str();
         if (!crate::operations::commands::is_action(command) && command != "download_start")
             || command == "action_perform"
@@ -695,7 +704,7 @@ impl Engine {
         Ok((tab, vp))
     }
 
-    async fn cmd_open(&mut self, args: &eoka_protocol::OpenArgs) -> Result<Response, EngineError> {
+    async fn cmd_open(&mut self, args: &OpenArgs) -> Result<Response, EngineError> {
         let requested_url = args.url.clone();
         let open_state = args
             .load_state
@@ -867,10 +876,7 @@ impl Engine {
         Ok(Response::action_result(record))
     }
 
-    async fn cmd_snapshot(
-        &mut self,
-        args: &eoka_protocol::SnapshotArgs,
-    ) -> Result<Response, EngineError> {
+    async fn cmd_snapshot(&mut self, args: &SnapshotArgs) -> Result<Response, EngineError> {
         self.ensure_browser().await?;
         let include_all = args.all;
         let tab = self.require_tab_mut()?;
@@ -880,20 +886,14 @@ impl Engine {
         Ok(Response::ok_text(result.tree_text))
     }
 
-    async fn cmd_observe(
-        &mut self,
-        args: &eoka_protocol::ObserveArgs,
-    ) -> Result<Response, EngineError> {
+    async fn cmd_observe(&mut self, args: &ObserveArgs) -> Result<Response, EngineError> {
         let (tab, viewport_only) = self.tab_with_config()?;
         let (elements, data) = observe::inspect(&tab.page, viewport_only, args).await?;
         tab.elements = elements;
         Ok(Response::ok(data))
     }
 
-    async fn cmd_screenshot(
-        &mut self,
-        capture: eoka_protocol::ScreenshotArgs,
-    ) -> Result<Response, EngineError> {
+    async fn cmd_screenshot(&mut self, capture: ScreenshotArgs) -> Result<Response, EngineError> {
         let annotate_flag = capture.annotate;
         let output = capture.output.as_deref();
 
@@ -955,10 +955,7 @@ impl Engine {
         Ok(Response::ok(result))
     }
 
-    async fn cmd_emulate(
-        &mut self,
-        args: &eoka_protocol::EmulateArgs,
-    ) -> Result<Response, EngineError> {
+    async fn cmd_emulate(&mut self, args: &EmulateArgs) -> Result<Response, EngineError> {
         self.ensure_browser().await?;
         let reset = args.reset;
         let tab = self.require_tab_mut()?;
@@ -1024,7 +1021,7 @@ impl Engine {
 
     async fn cmd_recording_start(
         &mut self,
-        args: eoka_protocol::RecordingStartArgs,
+        args: RecordingStartArgs,
     ) -> Result<Response, EngineError> {
         let state = self
             .state
@@ -1052,7 +1049,7 @@ impl Engine {
     async fn cmd_recording_control(
         &mut self,
         method: &str,
-        args: &eoka_protocol::RecordingIdArgs,
+        args: &RecordingIdArgs,
     ) -> Result<Response, EngineError> {
         let params = json!({"recordingId": args.recording_id});
         recording_response(crate::recordings::control(&self.recordings, method, params).await)
@@ -1092,20 +1089,14 @@ impl Engine {
         Ok(Response::ok_text(html?))
     }
 
-    async fn cmd_get_text(
-        &mut self,
-        args: &eoka_protocol::SelectorArgs,
-    ) -> Result<Response, EngineError> {
+    async fn cmd_get_text(&mut self, args: &SelectorArgs) -> Result<Response, EngineError> {
         let selector = args.selector.as_str();
         let element = self.require_tab()?.page.find(selector).await;
         let text = element?.text().await;
         Ok(Response::ok_text(text?))
     }
 
-    async fn cmd_get_attribute(
-        &mut self,
-        args: &eoka_protocol::AttributeArgs,
-    ) -> Result<Response, EngineError> {
+    async fn cmd_get_attribute(&mut self, args: &AttributeArgs) -> Result<Response, EngineError> {
         let selector = args.selector.as_str();
         let name = args.name.as_str();
         let element = self.require_tab()?.page.find(selector).await;
@@ -1113,19 +1104,13 @@ impl Engine {
         Ok(Response::ok(json!({"value": value?})))
     }
 
-    async fn cmd_exists(
-        &mut self,
-        args: &eoka_protocol::SelectorArgs,
-    ) -> Result<Response, EngineError> {
+    async fn cmd_exists(&mut self, args: &SelectorArgs) -> Result<Response, EngineError> {
         let selector = args.selector.as_str();
         let exists = self.require_tab()?.page.exists(selector).await;
         Ok(Response::ok(json!({"exists": exists})))
     }
 
-    async fn cmd_click_shadow(
-        &mut self,
-        args: &eoka_protocol::ClickShadowArgs,
-    ) -> Result<Response, EngineError> {
+    async fn cmd_click_shadow(&mut self, args: &ClickShadowArgs) -> Result<Response, EngineError> {
         let page = &self.require_tab()?.page;
         let receipt = crate::capture::painting(
             page,
@@ -1145,7 +1130,7 @@ impl Engine {
         })))
     }
 
-    async fn cmd_find(&mut self, args: &eoka_protocol::TextArgs) -> Result<Response, EngineError> {
+    async fn cmd_find(&mut self, args: &TextArgs) -> Result<Response, EngineError> {
         let text = args.text.as_str();
         let (tab, viewport_only) = self.tab_with_config()?;
 
@@ -1176,10 +1161,7 @@ impl Engine {
         }
     }
 
-    async fn cmd_mouse_down(
-        &mut self,
-        args: &eoka_protocol::MouseButtonArgs,
-    ) -> Result<Response, EngineError> {
+    async fn cmd_mouse_down(&mut self, args: &MouseButtonArgs) -> Result<Response, EngineError> {
         let button = self.mouse_button(args.button);
         self.require_tab()?
             .page
@@ -1188,10 +1170,7 @@ impl Engine {
         Ok(Response::ok_text("Mouse button held"))
     }
 
-    async fn cmd_mouse_move(
-        &mut self,
-        args: &eoka_protocol::MouseMoveArgs,
-    ) -> Result<Response, EngineError> {
+    async fn cmd_mouse_move(&mut self, args: &MouseMoveArgs) -> Result<Response, EngineError> {
         let x = args.x;
         let y = args.y;
         let page = &self.require_tab()?.page;
@@ -1199,10 +1178,7 @@ impl Engine {
         Ok(Response::ok_text("Mouse moved"))
     }
 
-    async fn cmd_mouse_up(
-        &mut self,
-        args: &eoka_protocol::MouseButtonArgs,
-    ) -> Result<Response, EngineError> {
+    async fn cmd_mouse_up(&mut self, args: &MouseButtonArgs) -> Result<Response, EngineError> {
         let button = self.mouse_button(args.button);
         self.require_tab()?
             .page
@@ -1211,16 +1187,13 @@ impl Engine {
         Ok(Response::ok_text("Mouse button released"))
     }
 
-    async fn cmd_key_down(
-        &mut self,
-        args: &eoka_protocol::KeyArgs,
-    ) -> Result<Response, EngineError> {
+    async fn cmd_key_down(&mut self, args: &KeyArgs) -> Result<Response, EngineError> {
         let key = args.key.as_str();
         self.require_tab()?.page.key_down(key).await?;
         Ok(Response::ok_text(format!("Held {key}")))
     }
 
-    async fn cmd_key_up(&mut self, args: &eoka_protocol::KeyArgs) -> Result<Response, EngineError> {
+    async fn cmd_key_up(&mut self, args: &KeyArgs) -> Result<Response, EngineError> {
         let key = args.key.as_str();
         self.require_tab()?.page.key_up(key).await?;
         Ok(Response::ok_text(format!("Released {key}")))
@@ -1231,10 +1204,7 @@ impl Engine {
         Ok(Response::ok_text("Released all held inputs"))
     }
 
-    async fn cmd_scroll(
-        &mut self,
-        args: &eoka_protocol::TargetArgs,
-    ) -> Result<Response, EngineError> {
+    async fn cmd_scroll(&mut self, args: &TargetArgs) -> Result<Response, EngineError> {
         let target_str = args.target.as_str();
         let tab = self.require_tab()?;
 
@@ -1281,7 +1251,7 @@ impl Engine {
 
     async fn cmd_captcha_inject(
         &mut self,
-        args: &eoka_protocol::CaptchaInjectArgs,
+        args: &CaptchaInjectArgs,
     ) -> Result<Response, EngineError> {
         self.ensure_browser().await?;
         let token = args.token.as_str();
@@ -1315,7 +1285,7 @@ impl Engine {
         Ok(Response::ok(parsed))
     }
 
-    async fn cmd_fetch(&mut self, args: eoka_protocol::FetchArgs) -> Result<Response, EngineError> {
+    async fn cmd_fetch(&mut self, args: FetchArgs) -> Result<Response, EngineError> {
         let page = self.require_tab()?.page.clone();
         let drain = self.start_fetch_drain();
         let remedies = blockers::Remedies::new(Some(&self.session_name));
@@ -1349,10 +1319,7 @@ impl Engine {
         Ok(Response::ok(Value::Array(json)))
     }
 
-    async fn cmd_set_cookie(
-        &mut self,
-        args: &eoka_protocol::SetCookieArgs,
-    ) -> Result<Response, EngineError> {
+    async fn cmd_set_cookie(&mut self, args: &SetCookieArgs) -> Result<Response, EngineError> {
         let name = args.name.as_str();
         let value = args.value.as_str();
         let path = args.path.as_deref().unwrap_or("/");
@@ -1379,7 +1346,7 @@ impl Engine {
 
     async fn cmd_delete_cookie(
         &mut self,
-        args: &eoka_protocol::DeleteCookieArgs,
+        args: &DeleteCookieArgs,
     ) -> Result<Response, EngineError> {
         let name = args.name.as_str();
         let tab = self.require_tab()?;
@@ -1407,10 +1374,7 @@ impl Engine {
         Ok(Response::ok_text("Cleared all cookies"))
     }
 
-    async fn cmd_storage(
-        &mut self,
-        args: &eoka_protocol::StorageArgs,
-    ) -> Result<Response, EngineError> {
+    async fn cmd_storage(&mut self, args: &StorageArgs) -> Result<Response, EngineError> {
         let key = args.key.as_deref();
         let session = args.session_storage;
         let s = if session {
@@ -1430,10 +1394,7 @@ impl Engine {
         }
     }
 
-    async fn cmd_set_storage(
-        &mut self,
-        args: &eoka_protocol::SetStorageArgs,
-    ) -> Result<Response, EngineError> {
+    async fn cmd_set_storage(&mut self, args: &SetStorageArgs) -> Result<Response, EngineError> {
         let key = args.key.as_str();
         let value = args.value.as_str();
         let session = args.session_storage;
@@ -1460,10 +1421,7 @@ impl Engine {
         Ok(Response::ok(eval_json_or_string(&tab.page, js).await?))
     }
 
-    async fn cmd_save_state(
-        &mut self,
-        args: &eoka_protocol::PathArgs,
-    ) -> Result<Response, EngineError> {
+    async fn cmd_save_state(&mut self, args: &PathArgs) -> Result<Response, EngineError> {
         let path = args.path.as_str();
         let tab = self.require_tab()?;
         let state = capture_state(&tab.page).await?;
@@ -1478,10 +1436,7 @@ impl Engine {
         )))
     }
 
-    async fn cmd_load_state(
-        &mut self,
-        args: &eoka_protocol::LoadStateArgs,
-    ) -> Result<Response, EngineError> {
+    async fn cmd_load_state(&mut self, args: &LoadStateArgs) -> Result<Response, EngineError> {
         let path = args.path.as_str();
         let no_navigate = args.no_navigate;
 
@@ -1513,10 +1468,7 @@ impl Engine {
         )))
     }
 
-    async fn cmd_headers(
-        &mut self,
-        args: &eoka_protocol::HeadersArgs,
-    ) -> Result<Response, EngineError> {
+    async fn cmd_headers(&mut self, args: &HeadersArgs) -> Result<Response, EngineError> {
         let headers: HashMap<String, String> =
             serde_json::from_str(&args.headers_json).map_err(|_| "Invalid headers JSON")?;
 
@@ -1528,10 +1480,7 @@ impl Engine {
         )))
     }
 
-    async fn cmd_console(
-        &mut self,
-        args: &eoka_protocol::ConsoleArgs,
-    ) -> Result<Response, EngineError> {
+    async fn cmd_console(&mut self, args: &ConsoleArgs) -> Result<Response, EngineError> {
         let clear = args.clear;
         let level = args.level.as_deref();
 
@@ -1556,10 +1505,7 @@ impl Engine {
         Ok(Response::ok(parsed))
     }
 
-    async fn cmd_errors(
-        &mut self,
-        args: &eoka_protocol::ClearFlagArgs,
-    ) -> Result<Response, EngineError> {
+    async fn cmd_errors(&mut self, args: &ClearFlagArgs) -> Result<Response, EngineError> {
         let clear = args.clear;
         let tab = self.require_tab_mut()?;
         ensure_console_capture(tab).await?;
@@ -1596,10 +1542,7 @@ impl Engine {
         }))
     }
 
-    async fn cmd_tab_new(
-        &mut self,
-        args: &eoka_protocol::TabNewArgs,
-    ) -> Result<Response, EngineError> {
+    async fn cmd_tab_new(&mut self, args: &TabNewArgs) -> Result<Response, EngineError> {
         self.ensure_browser().await?;
         let url = args.url.as_deref();
         let active_recorder = self.network.clone();
@@ -1630,10 +1573,7 @@ impl Engine {
         )))
     }
 
-    async fn cmd_tab_switch(
-        &mut self,
-        args: &eoka_protocol::TabIdArgs,
-    ) -> Result<Response, EngineError> {
+    async fn cmd_tab_switch(&mut self, args: &TabIdArgs) -> Result<Response, EngineError> {
         let tab_id = args.tab_id.as_str();
         let state = self.require_state_mut()?;
         state.switch_tab(tab_id).await?;
@@ -1648,10 +1588,7 @@ impl Engine {
         )))
     }
 
-    async fn cmd_tab_attach(
-        &mut self,
-        args: &eoka_protocol::TabIdArgs,
-    ) -> Result<Response, EngineError> {
+    async fn cmd_tab_attach(&mut self, args: &TabIdArgs) -> Result<Response, EngineError> {
         let tab_id = args.tab_id.clone();
         self.ensure_browser().await?;
         let state = self.require_state_mut()?;
@@ -1667,10 +1604,7 @@ impl Engine {
         )))
     }
 
-    async fn cmd_clone_from(
-        &mut self,
-        args: &eoka_protocol::CloneFromArgs,
-    ) -> Result<Response, EngineError> {
+    async fn cmd_clone_from(&mut self, args: &CloneFromArgs) -> Result<Response, EngineError> {
         let source = args.source.clone();
         let to = args.to.as_deref().map(std::path::PathBuf::from);
 
@@ -1710,10 +1644,7 @@ impl Engine {
         )))
     }
 
-    async fn cmd_tab_close(
-        &mut self,
-        args: &eoka_protocol::TabIdArgs,
-    ) -> Result<Response, EngineError> {
+    async fn cmd_tab_close(&mut self, args: &TabIdArgs) -> Result<Response, EngineError> {
         let tab_id = args.tab_id.clone();
         let closing_session = self
             .state
@@ -1734,7 +1665,7 @@ impl Engine {
         Ok(Response::ok_text(format!("Closed tab [{}]", tab_id)))
     }
 
-    async fn cmd_wait(&mut self, args: &eoka_protocol::WaitArgs) -> Result<Response, EngineError> {
+    async fn cmd_wait(&mut self, args: &WaitArgs) -> Result<Response, EngineError> {
         if let Some(ms) = args.ms {
             let ms = ms.min(30_000);
             tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
@@ -1797,10 +1728,7 @@ impl Engine {
         })))
     }
 
-    async fn cmd_spa_navigate(
-        &mut self,
-        args: &eoka_protocol::PathStringArgs,
-    ) -> Result<Response, EngineError> {
+    async fn cmd_spa_navigate(&mut self, args: &PathStringArgs) -> Result<Response, EngineError> {
         let path = args.path.as_str();
         let drain = self.start_fetch_drain();
         let result = async {
@@ -1821,10 +1749,7 @@ impl Engine {
         Ok(Response::ok_text(format!("SPA navigated to: {}", url)))
     }
 
-    async fn cmd_fake_camera(
-        &mut self,
-        args: &eoka_protocol::FakeCameraArgs,
-    ) -> Result<Response, EngineError> {
+    async fn cmd_fake_camera(&mut self, args: &FakeCameraArgs) -> Result<Response, EngineError> {
         let file_path = args.file.as_str();
         let loop_video = args.loop_video;
 
@@ -2081,7 +2006,7 @@ impl Engine {
 
     async fn cmd_network_record_start(
         &mut self,
-        args: &eoka_protocol::NetworkRecordStartArgs,
+        args: &NetworkRecordStartArgs,
     ) -> Result<Response, EngineError> {
         self.ensure_browser().await?;
         if self
@@ -2138,10 +2063,7 @@ impl Engine {
         }
     }
 
-    async fn cmd_network_log(
-        &mut self,
-        args: &eoka_protocol::NetworkLogArgs,
-    ) -> Result<Response, EngineError> {
+    async fn cmd_network_log(&mut self, args: &NetworkLogArgs) -> Result<Response, EngineError> {
         let Some(recorder) = self.network.as_ref() else {
             return Ok(Response::ok(json!({
                 "meta": self.network_empty_meta(),
@@ -2163,10 +2085,7 @@ impl Engine {
         ))
     }
 
-    async fn cmd_network_show(
-        &mut self,
-        args: &eoka_protocol::NetworkShowArgs,
-    ) -> Result<Response, EngineError> {
+    async fn cmd_network_show(&mut self, args: &NetworkShowArgs) -> Result<Response, EngineError> {
         let id = args.id;
         let body = args.body;
         let max_body = args.max_body;
@@ -2185,7 +2104,7 @@ impl Engine {
 
     async fn cmd_network_export(
         &mut self,
-        args: &eoka_protocol::NetworkExportArgs,
+        args: &NetworkExportArgs,
     ) -> Result<Response, EngineError> {
         let path = args.path.as_str();
         let format = args.format.as_str();
@@ -2200,10 +2119,7 @@ impl Engine {
         ))
     }
 
-    async fn cmd_network_wait(
-        &mut self,
-        args: &eoka_protocol::NetworkWaitArgs,
-    ) -> Result<Response, EngineError> {
+    async fn cmd_network_wait(&mut self, args: &NetworkWaitArgs) -> Result<Response, EngineError> {
         let Some(recorder) = self.network.as_ref() else {
             return Err("No network recorder has been started".into());
         };
@@ -2252,7 +2168,7 @@ impl Engine {
 
     async fn cmd_intercept_add(
         &mut self,
-        args: &eoka_protocol::InterceptAddArgs,
+        args: &InterceptAddArgs,
     ) -> Result<Response, EngineError> {
         let url_pattern = args.url_pattern.clone();
         let capture = args.capture.as_deref().map(std::path::PathBuf::from);
@@ -2275,10 +2191,7 @@ impl Engine {
         Ok(Response::ok(self.intercept.list_json()))
     }
 
-    async fn cmd_intercept_remove(
-        &mut self,
-        args: &eoka_protocol::IdArgs,
-    ) -> Result<Response, EngineError> {
+    async fn cmd_intercept_remove(&mut self, args: &IdArgs) -> Result<Response, EngineError> {
         let id = args.id.as_str();
         if id == "all" {
             self.intercept.remove_all();
@@ -2295,10 +2208,7 @@ impl Engine {
         }
     }
 
-    async fn cmd_intercept_log(
-        &mut self,
-        args: &eoka_protocol::ClearFlagArgs,
-    ) -> Result<Response, EngineError> {
+    async fn cmd_intercept_log(&mut self, args: &ClearFlagArgs) -> Result<Response, EngineError> {
         self.drain_fetch_events().await;
         if let Some(recorder) = self.network.clone() {
             self.intercept

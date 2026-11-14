@@ -1,4 +1,5 @@
 use eoka::cdp::Session as CdpSession;
+use eoka_protocol::{FrameEvalArgs, ScriptArgs};
 use serde_json::{json, Value};
 
 use super::target::json_str;
@@ -44,10 +45,7 @@ impl Engine {
         result
     }
 
-    async fn cmd_eval(
-        &mut self,
-        args: &eoka_protocol::ScriptArgs,
-    ) -> Result<Response, EngineError> {
+    async fn cmd_eval(&mut self, args: &ScriptArgs) -> Result<Response, EngineError> {
         let code = resolve_js(args.file.as_deref(), args.code.as_deref())?;
         let max_size = args.max_size;
         if !args.raw {
@@ -102,10 +100,7 @@ impl Engine {
         ))
     }
 
-    async fn cmd_exec(
-        &mut self,
-        args: &eoka_protocol::ScriptArgs,
-    ) -> Result<Response, EngineError> {
+    async fn cmd_exec(&mut self, args: &ScriptArgs) -> Result<Response, EngineError> {
         let code = resolve_js(args.file.as_deref(), args.code.as_deref())?;
         let tab = self.require_tab()?;
         if args.no_await {
@@ -142,10 +137,7 @@ impl Engine {
             .collect::<Vec<_>>())))
     }
 
-    async fn cmd_frame_eval(
-        &mut self,
-        args: &eoka_protocol::FrameEvalArgs,
-    ) -> Result<Response, EngineError> {
+    async fn cmd_frame_eval(&mut self, args: &FrameEvalArgs) -> Result<Response, EngineError> {
         let code = resolve_js(args.file.as_deref(), args.code.as_deref())?;
         let frame = args.frame.as_str();
         if frame.is_empty()

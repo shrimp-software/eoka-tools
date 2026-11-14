@@ -1,5 +1,6 @@
 //! `wasm` subcommand group: read/write/find/info against WebAssembly linear memory.
 
+use eoka_protocol::{WasmFindArgs, WasmReadArgs, WasmWriteArgs};
 use serde_json::Value;
 
 use super::Engine;
@@ -21,7 +22,7 @@ impl Engine {
 
     pub(super) async fn cmd_wasm_read(
         &mut self,
-        args: &eoka_protocol::WasmReadArgs,
+        args: &WasmReadArgs,
     ) -> Result<Response, EngineError> {
         let addr = parse_addr(args.addr.as_str())?;
         let len = args.len;
@@ -88,7 +89,7 @@ impl Engine {
 
     pub(super) async fn cmd_wasm_write(
         &mut self,
-        args: &eoka_protocol::WasmWriteArgs,
+        args: &WasmWriteArgs,
     ) -> Result<Response, EngineError> {
         let addr = parse_addr(args.addr.as_str())?;
         let hex = args.hex.as_str();
@@ -132,7 +133,7 @@ impl Engine {
 
     pub(super) async fn cmd_wasm_find(
         &mut self,
-        args: &eoka_protocol::WasmFindArgs,
+        args: &WasmFindArgs,
     ) -> Result<Response, EngineError> {
         let pattern = args.pattern.as_str();
         let memory = args.memory.as_deref();
