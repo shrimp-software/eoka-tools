@@ -167,6 +167,9 @@ way:
 - A request already in flight ends as soon as a dialog opens, or once a
   navigation that started under it has waited five seconds. Its message says it
   returned without a result; a script or input may already have taken effect.
+  `agent.observe`, `agent.step` and action admission stop by themselves and
+  return their own evidence: `agent.observe` fails with the same code, and
+  `agent.step` and the operation record carry `dialog_open`.
 - Reads (`page.title`, `page.url`, `page.text`, `page.content`,
   `page.get_text`, `page.get_attribute`, `page.exists`, `page.frames`,
   `page.capture_state`) that get no answer within 15 seconds end as
