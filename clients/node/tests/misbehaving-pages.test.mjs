@@ -320,6 +320,129 @@ describe('K15: capturing a tab that is not in front', { skip: skipRealBrowser, c
   });
 });
 
+describe('K16: acting on a tab that is not in front', { skip: skipRealBrowser, concurrency: true }, () => {
+  const pointerDocument = `<!doctype html><title>fixture</title>
+<input id="n">
+<button id="b" onclick="document.getElementById('s').textContent='Saved'">Go</button>
+<p id="s"></p>`;
+  const saved = { kind: 'text', target: { query: { kind: 'css', selector: '#s' } }, value: 'Saved' };
+  const countVisibilityChanges = "()=>{window.visibilityChanges=0;document.addEventListener('visibilitychange',()=>{window.visibilityChanges++})}";
+  const visibilityReport = '()=>({state:document.visibilityState,changes:window.visibilityChanges})';
+  const click = page => page.click('#b', { timeoutMs: 8000, actionOptions: { expect: saved } });
+  const scenarios = {
+    click: async ({ a }) => ({ behind: await settle(async () => await click(a), 3000) }),
+    hover: async ({ a }) => ({ behind: await settle(async () => await a.hover('#b', { timeoutMs: 8000 }), 3000) }),
+    front: async ({ b }) => ({ front: await settle(async () => await click(b), 3000) }),
+    async together({ a, b }) {
+      const [behind, front] = await Promise.all([settle(async () => await click(a), 5000), settle(async () => await click(b), 5000)]);
+      return { behind, front };
+    },
+    async fill({ a }) {
+      const behind = await settle(async () => await a.fill('#n', 'hello', { timeoutMs: 8000 }), 8000);
+      const value = await settle(async () => await a.evaluate("()=>document.querySelector('#n').value"), 5000);
+      return { behind, value };
+    },
+  };
+  const stages = new Map();
+  const results = new Map();
+  let fixture;
+
+  async function run(name) {
+    const stage = stages.get(name);
+    const result = await scenarios[name](stage);
+    const visibility = await settle(async () => await Promise.all([stage.a.evaluate(visibilityReport), stage.b.evaluate(visibilityReport)]), 5000);
+    return { ...result, visibility };
+  }
+
+  function resultOf(name) {
+    if (!results.has(name)) {
+      const pending = run(name);
+      pending.catch(() => {});
+      results.set(name, pending);
+    }
+    return results.get(name);
+  }
+
+  function describeAction(outcome) {
+    return describeOutcome(outcome.state === 'resolved' && typeof outcome.value === 'object' ? { ...outcome, value: `outcome ${outcome.value?.outcome}` } : outcome);
+  }
+
+  function observed(result) {
+    return Object.entries(result).map(([name, outcome]) => `${name}: ${name === 'visibility' ? describeOutcome(outcome) : describeAction(outcome)}`).join('; ');
+  }
+
+  function untouched(result) {
+    const [behind, front] = resolution(result.visibility);
+    assert.deepEqual({ behind, front }, { behind: { state: 'hidden', changes: 0 }, front: { state: 'visible', changes: 0 } });
+  }
+
+  const rows = [
+    {
+      title: 'a click on a tab that has been behind for 3 s resolves within 3 s as verified_complete',
+      scenario: 'click',
+      check: ({ behind }) => assert.equal(resolution(behind).outcome, 'verified_complete'),
+    },
+    { title: 'that click leaves the tab hidden, the front tab visible and fires no visibilitychange', scenario: 'click', check: untouched },
+    { title: 'a hover on a tab that has been behind for 3 s resolves within 3 s', scenario: 'hover', check: ({ behind }) => resolution(behind) },
+    { title: 'that hover leaves the tab hidden, the front tab visible and fires no visibilitychange', scenario: 'hover', check: untouched },
+    {
+      title: 'a click on the front tab still resolves within 3 s',
+      scenario: 'front',
+      check: ({ front }) => assert.equal(resolution(front).outcome, 'verified_complete'),
+    },
+    {
+      title: 'a click on the tab behind and a click on the front tab issued together both resolve within 5 s',
+      scenario: 'together',
+      check({ behind, front }) {
+        resolution(behind);
+        resolution(front);
+      },
+    },
+    { title: 'those two clicks leave the tab behind hidden, the front tab visible and fire no visibilitychange', scenario: 'together', check: untouched },
+    {
+      title: 'pinned: fill on a tab that has been behind for 3 s resolves and the field holds the text',
+      scenario: 'fill',
+      check({ behind, value }) {
+        resolution(behind);
+        assert.equal(resolution(value), 'hello');
+      },
+    },
+    { title: 'that fill leaves the tab hidden, the front tab visible and fires no visibilitychange', scenario: 'fill', check: untouched },
+  ];
+
+  before(async () => {
+    fixture = await startFixture(pointerDocument);
+    const names = Object.keys(scenarios);
+    const launched = await Promise.allSettled(names.map(() => launchBrowser()));
+    names.forEach((name, index) => {
+      if (launched[index].status === 'fulfilled') stages.set(name, { browser: launched[index].value });
+    });
+    const failed = launched.find(result => result.status === 'rejected');
+    if (failed) throw failed.reason;
+    await Promise.all(names.map(async name => {
+      const stage = stages.get(name);
+      stage.a = await stage.browser.newPage(fixture.pageUrl(`${name}-a`));
+      stage.b = await stage.browser.newPage(fixture.pageUrl(`${name}-b`));
+      await stage.a.execute(countVisibilityChanges);
+      await stage.b.execute(countVisibilityChanges);
+    }));
+    await delay(3000);
+  }, { timeout: 120000 });
+
+  after(async () => {
+    await closeQuietly(...[...stages.values()].map(stage => stage.browser));
+    await fixture?.close();
+  }, { timeout: 60000 });
+
+  for (const row of rows) {
+    test(`K16: ${row.title}`, { timeout: 60000 }, async t => {
+      const result = await resultOf(row.scenario);
+      t.diagnostic(observed(result));
+      await row.check(result);
+    });
+  }
+});
+
 describe('browsers shutting down together', { skip: skipRealBrowser }, () => {
   test('close race: eight browsers in one process close at once without a rejection, three rounds', { timeout: 300000 }, async t => {
     const rejected = [];
