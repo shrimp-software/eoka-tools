@@ -77,6 +77,48 @@ For every other call, `timeoutMs` is a local deadline for that call, and server-
 
 The sidecar accepts a limited number of requests at once (`browser.hello.limits.maxInFlight`). Calls beyond that limit wait inside the SDK and are sent as earlier ones finish, so `Promise.all` over many calls works. A waiting call still honors its `timeoutMs` and `signal`, and then rejects with `requestState: "not_sent"`.
 
+## Dialogs and stalled pages
+
+An open JavaScript dialog (`alert`, `confirm`, `prompt` or a "leave this page?" prompt) and a navigation that is still waiting for its response both stop Chrome from answering anything else on that tab. Calls on such a tab reject promptly, say what is in the way and what to do next:
+
+| `error.code` | What happened | Next step |
+| --- | --- | --- |
+| `DialogOpen` | The call was made on a tab that has a dialog open. | `page.ops.dialogAccept()` or `page.ops.dialogDismiss()` |
+| `dialog_open` | An action's own input opened a dialog. The input was sent. | Clear the dialog, then check the page. |
+| `NavigationPending` | The tab is waiting for a navigation that has not answered. | Wait, or navigate again with `page.goto(url)`. |
+| `navigation_timeout` | A navigation got no response within its deadline. The load was stopped and the tab still shows the previous page. | Allow more time, or check the URL and network. |
+| `PageUnresponsive` | The page answers nothing and neither cause is known. | Let it settle, or continue in `browser.newPage(url)`. |
+
+The message keeps the server's own text, including the dialog's message or the pending URL, and ends with the next step. An action that was interrupted after its input was sent reports `navigation_pending` or `page_unresponsive` in the same way as `dialog_open`. All of this needs a server with the `pageBlockers` capability (`browser.hasCapability("pageBlockers")`); without it such calls run into their deadline instead.
+
+```js
+try {
+  await page.click("#delete", {
+    actionOptions: { expect: { kind: "hidden", target: { query: { kind: "css", selector: "#row" } } } },
+  });
+} catch (error) {
+  if (!(error instanceof EokaError) || error.code !== "dialog_open") throw error;
+  await page.ops.dialogAccept(); // { prompt_text: "Ada" } answers a prompt()
+}
+```
+
+On `DialogOpen` and `NavigationPending`, `error.blocker` describes the obstacle: `{ kind: "dialog", dialogType, message, url, elapsedMs }` or `{ kind: "navigation", url, elapsedMs }`. The action codes in `snake_case` come from the operation record, which carries the text but no `blocker`.
+
+```js
+try {
+  console.log(await page.title());
+} catch (error) {
+  if (!(error instanceof EokaError) || error.blocker === undefined) throw error;
+  if (error.blocker.kind === "dialog") {
+    console.log(error.blocker.dialogType, error.blocker.message);
+    await page.ops.dialogDismiss();
+  } else {
+    console.log("still waiting for", error.blocker.url);
+    await page.goto("https://example.com"); // or page.ops.reload() to return to the page still displayed
+  }
+}
+```
+
 ## Shadow DOM and Turnstile
 
 `page.frames()` lists every frame, including cross-origin OOPIFs. `page.clickShadow(selector, { frameId?, resolveTimeoutMs? })` searches the frame's light DOM and every shadow root (closed roots included), maps the matched node's center to viewport coordinates, and clicks with human-like movement. `resolveTimeoutMs` bounds the server-side resolution; `CallOptions.timeoutMs` remains the RPC deadline and defaults to the resolution deadline plus 10 seconds when omitted:
@@ -167,7 +209,7 @@ try {
 }
 ```
 
-`error.stack` includes the line of your code that made the call. A failed action also carries `record`, `receipt` and, as `cause`, the server's own message.
+`error.stack` includes the line of your code that made the call. A failed action also carries `record`, `receipt` and, as `cause`, the server's own message. `error.requestState` says whether the request was `not_sent`, `may_have_been_sent` or `acknowledged`, and `error.blocker` is set when a dialog or a pending navigation is in the way (see [Dialogs and stalled pages](#dialogs-and-stalled-pages)).
 
 ## Linux and Docker
 
