@@ -253,6 +253,49 @@ test('rejected calls carry the frame of the code that made them', async t => {
   }
 });
 
+test('blocked-page replies reject at once with the blocker, the server text and a Node next step', async t => {
+  const here = fileURLToPath(import.meta.url);
+  const transport = await start(t, 'echo-error');
+  const limit = transport.pendingLimit;
+  const settled = call => new Promise(resolve => { call.then(resolve, resolve); });
+  const dialogText = 'A JavaScript confirm dialog is open on this tab ("Delete it?"). Chrome answers no page commands until the dialog is accepted or dismissed, so `page.title` was not started.';
+  const pendingText = 'This tab has been waiting 6.5 s for a response from http://127.0.0.1:4000/hang. Chrome answers no page commands until that navigation commits or is abandoned, so `page.title` was not started.';
+  const frozenText = '`page.title` got no answer from the page within 5 s. No dialog or pending navigation is known, so the page\'s main thread is busy or frozen.';
+  const stoppedText = 'No response from http://127.0.0.1:4000/hang after 30 s. The pending load was stopped, so the tab still shows the page it had before and accepts commands.';
+  const dialog = (dialogType, context) => ({ kind: 'dialog', dialogType, message: 'Delete it?', url: 'http://127.0.0.1:4000/', elapsedMs: 1234, ...context });
+  const detail = (code, message, status) => ({ code, message, retryable: false, hint: 'Run `dialog.accept` or `dialog.dismiss`, then `agent.observe`.', ...(status === undefined ? {} : { context: { action_status: status } }) });
+  const dialogStep = 'Call page.ops.dialogAccept() or page.ops.dialogDismiss() on this page to close the dialog.';
+  const navigationStep = 'Keep waiting, for example with page.ops.wait({ url, timeout }), or abandon the load: page.goto(url) navigates again and page.ops.reload() returns to the page that is still displayed.';
+  for (const [wire, step] of [
+    [{ code: 'DialogOpen', message: dialogText, data: { detail: detail('dialog_open', dialogText, 'not_attempted'), blocker: dialog('confirm') } }, dialogStep],
+    [{ code: 'DialogOpen', message: dialogText, data: { detail: detail('dialog_open', dialogText, 'not_attempted'), blocker: dialog('prompt') } }, 'Call page.ops.dialogAccept({ prompt_text }) to answer the prompt or page.ops.dialogDismiss() to cancel it.'],
+    [{ code: 'DialogOpen', message: dialogText, data: { detail: detail('dialog_open', dialogText, 'not_attempted'), blocker: dialog('beforeunload') } }, 'Call page.ops.dialogAccept() to leave the page or page.ops.dialogDismiss() to stay.'],
+    [{ code: 'DialogOpen', message: dialogText, data: { detail: detail('dialog_open', dialogText, 'may_have_executed'), blocker: dialog('alert') } }, `${dialogStep} The interrupted call may already have changed the page; inspect the page before deciding what to do next.`],
+    [{ code: 'DialogOpen', message: 'maxInFlight pending requests exceeded' }, dialogStep],
+    [{ code: 'NavigationPending', message: pendingText, data: { detail: detail('navigation_pending', pendingText, 'not_attempted'), blocker: { kind: 'navigation', url: 'http://127.0.0.1:4000/hang', elapsedMs: 6500 } } }, navigationStep],
+    [{ code: 'NavigationPending', message: pendingText, data: { detail: detail('navigation_pending', pendingText), blocker: { kind: 'navigation', elapsedMs: 6500 } } }, navigationStep],
+    [{ code: 'PageUnresponsive', message: frozenText, data: { detail: detail('page_unresponsive', frozenText) } }, 'Give the page time to settle; if it stays frozen, continue in a new tab with browser.newPage(url). After Browser.connect, page.ops.dialogDismiss() clears a dialog that was already open when the browser was attached.'],
+    [{ code: 'Operation', message: stoppedText, data: { detail: detail('navigation_timeout', stoppedText) } }, 'Allow more time if the site is slow (timeoutMs on page.goto), or check the URL, network and proxy.'],
+    [{ code: 'ElementNotFound', message: 'Element not found: #missing' }, undefined],
+    [{ code: 'ServerBusy', message: 'Recording capacity is exhausted' }, undefined],
+  ]) {
+    const error = await settled(evaluate(transport, JSON.stringify(wire)));
+    assert.ok(error instanceof ServerOperationError, `${wire.code} did not reject as a server error`);
+    assert.equal(error.code, wire.code);
+    assert.equal(error.requestState, 'acknowledged');
+    assert.equal(error.message, step === undefined ? wire.message : `${wire.message.replace(/\.?$/, '.')} ${step}`);
+    assert.equal(error.wireError.message, wire.message);
+    assert.deepEqual(error.data, wire.data);
+    assert.deepEqual(error.blocker, wire.data?.blocker);
+    assert.ok(error.stack.split('\n').slice(1).some(frame => frame.includes(here)), `${wire.code} stack has no caller frame`);
+    assert.equal(transport.pending.size, 0);
+    assert.equal(transport.inFlight, 0);
+    assert.equal(transport.queuedBytes, 0);
+    assert.equal(transport.pendingLimit, limit);
+  }
+  assert.equal(transport.failure, undefined);
+});
+
 test('a call without timeoutMs gets the configured default deadline against a silent peer', async t => {
   const transport = await start(t, 'silent', {}, { defaultTimeoutMs: 40 });
   const started = performance.now();

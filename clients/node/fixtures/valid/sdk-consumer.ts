@@ -33,6 +33,7 @@ import type {
   LocatorSpec,
   MethodResults,
   OperationRecord,
+  PageBlocker,
   PerformOptions,
   WaitOptions,
   Artifact,
@@ -92,6 +93,22 @@ export const callOptions: CallOptions = { signal: new AbortController().signal, 
 export const details: ErrorDetails = { operationId: performOptions.operationId! };
 export const wireError: ServerError = { code: "InvalidParams", message: "Invalid request" };
 export const response: ProtocolResponse<"page.evaluate"> = { id: 1, result: { result: { answer: 42 } } };
+
+export function describeBlocker(error: EokaError): string | undefined {
+  const blocker: PageBlocker | undefined = error.blocker;
+  if (blocker?.kind === "dialog") {
+    const dialogType: string = blocker.dialogType;
+    const text: string = blocker.message;
+    return `${dialogType} "${text}" on ${blocker.url} for ${blocker.elapsedMs} ms`;
+  }
+  if (blocker?.kind === "navigation") {
+    const url: string | null | undefined = blocker.url;
+    const elapsedMs: number = blocker.elapsedMs;
+    return `${url ?? "a navigation"} pending for ${elapsedMs} ms`;
+  }
+  return undefined;
+}
+export const blockedDetails: ErrorDetails = { blocker: { kind: "navigation", elapsedMs: 6500 } };
 
 export async function useClient<M extends MethodName>(client: InvokeClient, method: M, params: MethodParams[M]): Promise<MethodResults[M]> {
   return client.invoke(method, params, callOptions);

@@ -519,6 +519,145 @@ test('rejections from every layer carry the frame of the code that made the call
   }
 });
 
+const dialogStep = 'Call page.ops.dialogAccept() or page.ops.dialogDismiss() on this page to close the dialog.';
+const navigationStep = 'Keep waiting, for example with page.ops.wait({ url, timeout }), or abandon the load: page.goto(url) navigates again and page.ops.reload() returns to the page that is still displayed.';
+const frozenStep = 'Give the page time to settle; if it stays frozen, continue in a new tab with browser.newPage(url). After Browser.connect, page.ops.dialogDismiss() clears a dialog that was already open when the browser was attached.';
+const inspect = 'The action was not rolled back; inspect the page before deciding what to do next.';
+
+function blockedWire(code, detailCode, message, blocker) {
+  return { code, message, data: { detail: { code: detailCode, message, retryable: false, hint: 'Run `dialog.accept` or `dialog.dismiss`, then `agent.observe`.', context: { action_status: 'not_attempted' } }, ...(blocker === undefined ? {} : { blocker }) } };
+}
+
+function blockedRecord(action, code, message, dispatch = 'acknowledged') {
+  const outcome = dispatch === 'not_sent' ? 'not_dispatched' : 'outcome_unknown';
+  return record({
+    action, state: 'finished', outcome, finished_at_ms: 30, error_code: code,
+    error: { code, message, retryable: false, hint: 'Run `dialog.accept` or `dialog.dismiss`, then `agent.observe`. Do not repeat the interrupted command blindly: its page effects may already have happened.', context: { operation_id: id, action_status: dispatch === 'not_sent' ? 'not_attempted' : 'may_have_executed' } },
+    receipt: receipt({ action, outcome, dispatch, verification: null }),
+  });
+}
+
+test('reads on a blocked tab keep the server text, add the Node next step and expose the blocker', async () => {
+  const here = import.meta.filename;
+  const later = error => new Promise((resolve, reject) => { setTimeout(() => reject(error()), 1); });
+  const settled = call => new Promise(resolve => { call.then(resolve, resolve); });
+  const dialog = blockedWire('DialogOpen', 'dialog_open',
+    'A JavaScript confirm dialog is open on this tab ("Delete it?"). Chrome answers no page commands until the dialog is accepted or dismissed, so `title` was not started.',
+    { kind: 'dialog', dialogType: 'confirm', message: 'Delete it?', url: 'https://example.test/list', elapsedMs: 1234 });
+  const pending = blockedWire('NavigationPending', 'navigation_pending',
+    'This tab has been waiting 6.5 s for a response from https://example.test/slow. Chrome answers no page commands until that navigation commits or is abandoned, so `title` was not started.',
+    { kind: 'navigation', url: 'https://example.test/slow', elapsedMs: 6500 });
+  const frozen = blockedWire('PageUnresponsive', 'page_unresponsive',
+    "`title` got no answer from the page within 5 s. No dialog or pending navigation is known, so the page's main thread is busy or frozen.");
+  for (const [wire, step] of [[dialog, dialogStep], [pending, navigationStep], [frozen, frozenStep]]) {
+    const page = new Page({ invoke: () => later(() => new ServerOperationError(wire, { requestId: 4, requestState: 'acknowledged' })) }, 'tab');
+    for (const read of [() => page.title(), () => page.evaluate(() => 1), () => page.getText('h1'), () => page.exists('h1'), () => page.ops.text()]) {
+      const error = await settled(read());
+      assert.ok(error instanceof EokaError);
+      assert.ok(error instanceof ServerOperationError);
+      assert.equal(error.code, wire.code);
+      assert.equal(error.message, `${wire.message} ${step}`);
+      assert.equal(error.wireError.message, wire.message);
+      assert.equal(error.data, wire.data);
+      assert.deepEqual(error.blocker, wire.data.blocker);
+      assert.equal(error.requestState, 'acknowledged');
+      assert.ok(error.stack.split('\n').slice(1).some(frame => frame.includes(here)), `${wire.code} stack has no caller frame:\n${error.stack}`);
+    }
+  }
+  const error = await settled(new Page({ invoke: () => later(() => new ServerOperationError(dialog)) }, 'tab').title());
+  assert.match(error.message, /dialog/i);
+  assert.match(error.message, /Delete it\?/);
+  assert.match(error.message, /dialogAccept|dialogDismiss/);
+  assert.equal(error.blocker.kind, 'dialog');
+  assert.equal(error.blocker.dialogType, 'confirm');
+  const stalled = await settled(new Page({ invoke: () => later(() => new ServerOperationError(pending)) }, 'tab').title());
+  assert.match(stalled.message, /https:\/\/example\.test\/slow/);
+  assert.match(stalled.message, /page\.goto/);
+  assert.equal(stalled.blocker.url, 'https://example.test/slow');
+});
+
+test('an action whose input opened a dialog says it was dispatched and how to clear the dialog', async () => {
+  const serverText = 'A JavaScript confirm dialog is open on this tab ("Delete it?"). Chrome answers no page commands until the dialog is accepted or dismissed, so `click` returned without a result.';
+  for (const [dispatch, wording] of [['acknowledged', 'was dispatched'], ['may_have_been_sent', 'may have been dispatched']]) {
+    const latest = blockedRecord('click', 'dialog_open', serverText, dispatch);
+    await assert.rejects(failingPage(latest).click('#delete', { operationId: id, actionOptions: { expect } }), (error) => {
+      assert.ok(error instanceof OperationError);
+      assert.equal(error.code, 'dialog_open');
+      assert.equal(error.message, `click "#delete" ${wording}, then a dialog blocked the page before the result could be verified. ${serverText} ${dialogStep} ${inspect}`);
+      assert.match(error.message, /dialog/i);
+      assert.match(error.message, /dispatched|was sent/i);
+      assert.match(error.message, /dialogAccept|dialogDismiss/);
+      assert.doesNotMatch(error.message, /retry|try again|repeat/i);
+      assert.equal(error.record, latest);
+      assert.equal(error.receipt, latest.receipt);
+      assert.equal(error.requestState, 'acknowledged');
+      assert.equal(error.cause.code, 'dialog_open');
+      assert.equal(error.cause.message, serverText);
+      assert.equal(error.cause.data, latest.error);
+      assert.equal(error.blocker, undefined);
+      return true;
+    });
+  }
+});
+
+test('an action refused because a dialog is already open carries the wire code, the blocker and the next step', async () => {
+  const wire = blockedWire('DialogOpen', 'dialog_open',
+    'A JavaScript alert dialog is open on this tab ("Saved"). Chrome answers no page commands until the dialog is accepted or dismissed, so `actions.perform` was not started.',
+    { kind: 'dialog', dialogType: 'alert', message: 'Saved', url: 'https://example.test/', elapsedMs: 40 });
+  const source = new ServerOperationError(wire, { requestId: 9, requestState: 'acknowledged' });
+  let sent = 0;
+  const page = new Page({ invoke: async () => { sent++; throw source; } }, 'tab');
+  await assert.rejects(page.fill('#name', 'Ada', { operationId: id }), (error) => {
+    assert.ok(error instanceof OperationError);
+    assert.equal(error.code, 'DialogOpen');
+    assert.equal(error.message, `${wire.message} ${dialogStep}`);
+    assert.deepEqual(error.blocker, wire.data.blocker);
+    assert.equal(error.data, wire.data);
+    assert.equal(error.cause, source);
+    assert.equal(error.operationId, id);
+    return true;
+  });
+  assert.equal(sent, 1);
+});
+
+for (const [name, run, latest, expected] of [
+  ['a navigation that got no response', page => page.goto('https://example.test/slow?token=hunter2', { operationId: id, timeoutMs: 3_000 }),
+    blockedRecord('navigate', 'navigation_timeout', 'No response from https://example.test/slow after 3.0 s. The pending load was stopped, so the tab still shows the page it had before and accepts commands.'),
+    'navigate "https://example.test/slow" was dispatched, but the navigation got no response. No response from https://example.test/slow after 3.0 s. The pending load was stopped, so the tab still shows the page it had before and accepts commands. Allow more time if the site is slow (timeoutMs on page.goto), or check the URL, network and proxy.'],
+  ['an action interrupted by a pending navigation', page => page.click('#next', { operationId: id, actionOptions: { expect } }),
+    blockedRecord('click', 'navigation_pending', 'This tab has been waiting 6.5 s for a response from https://example.test/slow. Chrome answers no page commands until that navigation commits or is abandoned, so `click` returned without a result.'),
+    `click "#next" was dispatched, then a pending navigation blocked the page before the result could be verified. This tab has been waiting 6.5 s for a response from https://example.test/slow. Chrome answers no page commands until that navigation commits or is abandoned, so \`click\` returned without a result. ${navigationStep} ${inspect}`],
+  ['an action refused by a pending navigation', page => page.fill('#name', 'Ada', { operationId: id }),
+    blockedRecord('fill', 'navigation_pending', 'This tab has been waiting 6.5 s for a response from https://example.test/slow. Chrome answers no page commands until that navigation commits or is abandoned, so `fill` was not started', 'not_sent'),
+    `fill "#name" could not start because the page is waiting on a navigation. This tab has been waiting 6.5 s for a response from https://example.test/slow. Chrome answers no page commands until that navigation commits or is abandoned, so \`fill\` was not started. ${navigationStep} The page received no input.`],
+  ['an action on a page that stopped answering', page => page.click('#busy', { operationId: id, actionOptions: { expect } }),
+    blockedRecord('click', 'page_unresponsive', "`click` timed out and the page does not answer a liveness probe. No dialog or pending navigation is known, so the page's main thread is busy or frozen."),
+    `click "#busy" was dispatched, then the page stopped answering before the result could be verified. \`click\` timed out and the page does not answer a liveness probe. No dialog or pending navigation is known, so the page's main thread is busy or frozen. ${frozenStep} ${inspect}`],
+  ['an action refused because a dialog is open', page => page.hover('#menu', { operationId: id }),
+    blockedRecord('hover', 'dialog_open', 'A JavaScript alert dialog is open on this tab ("Saved"). Chrome answers no page commands until the dialog is accepted or dismissed, so `hover` was not started.', 'not_sent'),
+    `hover "#menu" could not start because a dialog is open on the page. A JavaScript alert dialog is open on this tab ("Saved"). Chrome answers no page commands until the dialog is accepted or dismissed, so \`hover\` was not started. ${dialogStep} The page received no input.`],
+]) {
+  test(`${name} gets its own sentence, the server text and a Node next step`, async () => {
+    await assert.rejects(run(failingPage(latest)), (error) => {
+      assert.ok(error instanceof OperationError);
+      assert.equal(error.code, latest.error_code);
+      assert.equal(error.message, expected);
+      assert.doesNotMatch(error.message, /retry|try again|hunter2/i);
+      assert.equal(error.record, latest);
+      assert.equal(error.receipt, latest.receipt);
+      assert.equal(error.cause.message, latest.error.message);
+      return true;
+    });
+  });
+}
+
+test('a blocker passed in error details wins over one found in the data', () => {
+  const blocker = { kind: 'navigation', elapsedMs: 10 };
+  assert.equal(new EokaError('NavigationPending', 'pending', { blocker, data: { blocker: { kind: 'dialog', dialogType: 'alert', message: 'x', url: 'about:blank', elapsedMs: 1 } } }).blocker, blocker);
+  assert.equal(new EokaError('Internal', 'no blocker', { data: { blocker: { kind: 'other' } } }).blocker, undefined);
+  assert.equal(new EokaError('Internal', 'no data').blocker, undefined);
+});
+
 test('canonical locator identity and intrinsic conveniences remain unchanged', async () => {
   const locator = { query: { kind: 'role', role: 'button' }, frame_id: 'frame', index: 2 };
   const actions = [];

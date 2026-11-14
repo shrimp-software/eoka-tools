@@ -76,6 +76,7 @@ export type {
   MethodResults,
   OperationRecord,
   OperationState,
+  PageBlocker,
   ProtocolRequest,
   ProtocolResponse,
   ProtocolVersion,

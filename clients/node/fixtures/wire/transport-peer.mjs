@@ -125,6 +125,10 @@ input.on('line', async line => {
     return;
   }
   if (mode === 'silent') return;
+  if (mode === 'echo-error') {
+    process.stdout.write(`${JSON.stringify({ id: request.id, error: JSON.parse(request.params.function) })}\n`);
+    return;
+  }
   if (mode === 'concurrency') {
     if (outstanding >= capacity) {
       process.stdout.write(`${JSON.stringify({ id: request.id, error: { code: 'ServerBusy', message: 'maxInFlight pending requests exceeded' } })}\n`);

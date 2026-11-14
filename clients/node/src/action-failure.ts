@@ -1,9 +1,15 @@
 import type { Action, Expectation, OperationRecord } from './generated/protocol.js';
+import { blockedPage, inspectBeforeContinuing, nodeNextStep } from './page-blockers.js';
 
 type Fields = Record<string, unknown>;
 
 const preparationReasons = ['target not found', 'target disconnected', 'target disabled', 'target hidden', 'target readonly or not editable', 'target moving', 'target covered'];
-const notRolledBack = 'The action was not rolled back; inspect the page before deciding what to do next.';
+const notRolledBack = `The action was not rolled back; ${inspectBeforeContinuing}.`;
+const interruptions = {
+  dialog: ['then a dialog blocked the page before the result could be verified', 'could not start because a dialog is open on the page'],
+  navigation: ['then a pending navigation blocked the page before the result could be verified', 'could not start because the page is waiting on a navigation'],
+  unresponsive: ['then the page stopped answering before the result could be verified', 'could not start because the page is not answering'],
+} as const;
 
 function fields(value: unknown): Fields | undefined {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Fields : undefined;
@@ -68,6 +74,16 @@ export function actionFailureMessage(action: Action, expect: Expectation | null 
   const what = subject(action);
   const dispatch = record.receipt?.dispatch ?? (record.dispatch_intent ? 'may_have_been_sent' : 'not_sent');
   const dispatched = dispatch === 'acknowledged' ? 'was dispatched' : 'may have been dispatched';
+  const blocked = blockedPage(record.error_code, detail.code);
+  if (blocked !== undefined) {
+    const told = detail.message.trimEnd();
+    const report = `${told}${/[.!?]$/.test(told) ? '' : '.'} ${nodeNextStep(blocked)}`;
+    if (blocked === 'navigation_timeout') {
+      return dispatch === 'not_sent' ? `${what} did not complete. ${report}` : `${what} ${dispatched}, but the navigation got no response. ${report}`;
+    }
+    const [interrupted, refused] = interruptions[blocked];
+    return dispatch === 'not_sent' ? `${what} ${refused}. ${report} The page received no input.` : `${what} ${dispatched}, ${interrupted}. ${report} ${notRolledBack}`;
+  }
   if (record.error_code !== 'action_timeout') {
     const reason = detail.message.replace(/[.\s]+$/, '');
     return dispatch === 'not_sent' ? `${what} failed: ${reason}. The page received no input.` : `${what} ${dispatched} and failed: ${reason}. ${notRolledBack}`;
