@@ -215,9 +215,10 @@ impl EokaServer {
             }
         }
         if guard.is_none() {
-            let state = BrowserState::new(self.headless, self.agent.clone())
-                .await
-                .map_err(internal)?;
+            let state =
+                BrowserState::new(self.headless, self.agent.clone(), self.operations.clone())
+                    .await
+                    .map_err(internal)?;
             *guard = Some(state);
         }
         Ok(())

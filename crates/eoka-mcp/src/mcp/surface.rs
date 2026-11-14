@@ -338,3 +338,64 @@ async fn every_mcp_tool_answers() {
     let _ = std::fs::remove_dir_all(&scratch);
     assert_locked("replies.jsonl", &transcript);
 }
+
+#[tokio::test]
+#[ignore = "requires Chrome; an operation the engine admitted is cancelled from an MCP tool"]
+async fn an_operation_started_by_the_engine_can_be_cancelled_from_mcp() {
+    use eoka_server::eoka::{Action, ActionOptions, Expectation, LocatorSpec};
+    let server = EokaServer::listing(false);
+    let client = connect(server.clone()).await;
+    call(
+        &client,
+        "navigate",
+        json!({"url": "data:text/html,<title>one</title><button id='b'>Press</button>"}),
+    )
+    .await
+    .unwrap();
+    let (page, engine_operations) = {
+        let guard = server.state.lock().await;
+        let state = guard.as_ref().unwrap();
+        (
+            state.current_tab().unwrap().page.clone(),
+            state.server.operations.clone(),
+        )
+    };
+    let id = uuid::Uuid::new_v4().to_string();
+    let mut options: ActionOptions = serde_json::from_value(json!({"timeout_ms": 20000})).unwrap();
+    options.expect = Some(Expectation::Text {
+        target: LocatorSpec::css("#never"),
+        value: "never".into(),
+        contains: false,
+    });
+    engine_operations
+        .submit(
+            page,
+            id.clone(),
+            Action::Click {
+                target: LocatorSpec::css("#b"),
+                human: false,
+                double: false,
+            },
+            options,
+        )
+        .await
+        .unwrap();
+    let cancelled = call(&client, "operation_cancel", json!({"id": id}))
+        .await
+        .unwrap();
+    assert_ne!(cancelled.is_error, Some(true), "{}", text(&cancelled));
+    let waited = call(
+        &client,
+        "operation_wait",
+        json!({"id": id, "timeout_ms": 5000}),
+    )
+    .await
+    .unwrap();
+    assert!(
+        !text(&waited).contains("\"state\":\"running\""),
+        "{}",
+        text(&waited)
+    );
+    call(&client, "close", json!({})).await.unwrap();
+    let _ = client.cancel().await;
+}
