@@ -8,6 +8,7 @@ The other tests in `tests/` cover the transport, the browser lifecycle, packagin
 | --- | --- | --- |
 | `tests/mistakes.test.mjs` | One row per caller mistake. Each row makes one call on a fresh tab, with a time budget, and asserts the error code and the fragments of the message a caller needs. | yes |
 | `tests/misbehaving-pages.test.mjs` | Tabs stay independent, a stuck tab does not block the others, calls queue instead of failing, and no process outlives the Node process. | yes |
+| `tests/blocked-tabs.test.mjs` | A tab blocked by a JavaScript dialog or by its own stalled navigation refuses calls fast with a code that says why, can be unblocked, and does not slow other tabs. | yes |
 | `tests/readme-examples.test.mjs` | Every fenced `js` block in `README.md` parses and type-checks; the first block (Quick start) runs twice in one directory. | only the run |
 | `.github/workflows/node-published-smoke.yml` | Nightly: `npm install @cbxss/eoka@latest` into an empty directory on the minimum and the newest Node release that `engines` allows, then launch, open a local page, read its title and close. | GitHub-hosted |
 
@@ -44,6 +45,20 @@ Rows that share a call (for example K4, K9 and K11 on `fill('#missing')`) share 
 
 K14 spawns `tests/fixtures/eval-process-child.mjs` and follows its process tree with `ps`; it is skipped on Windows. Each K15 row has its own browser and pair of tabs, so a capture that is still running cannot leak into another row. The close-race row holds eight Chrome copies in the temporary directory at once (about 2.3 GB), so point `TMPDIR` at a disk with room; a long `TMPDIR` path stops Chrome from starting.
 
+### `blocked-tabs.test.mjs`
+
+| Row | Scenario | Must hold |
+| --- | --- | --- |
+| E1 | a page timer opens `alert('are you sure?')`; then `title()`, `evaluate('()=>1')`, `getText('h1')` or `exists('h1')` | rejects within 2 s as an `EokaError` with `code === 'DialogOpen'`; the message mentions the dialog and quotes its text; a separate row requires it to name `dialogAccept` or `dialogDismiss` |
+| E2 | `page.ops.dialogAccept()` or `page.ops.dialogDismiss()` while the dialog is open | resolves within 2 s, and `title()` answers within 2 s afterwards |
+| E3 | tab A has a dialog open | `b.title()` under 1 s |
+| E4 | `click` on a button whose handler reports the click, calls `alert`, then writes `Deleted`; the click expects that text | rejects within 3 s with `code === 'dialog_open'`; the message mentions the dialog and says the click was dispatched; a separate row requires the hint; the fixture saw exactly one click; after `dialogAccept()` the text is `Deleted` |
+| E5 | `evaluate("()=>confirm('sure?')")` | rejects within 2 s with `DialogOpen` |
+| E6 | a page timer sets `location.href` to a URL that never answers; 6.5 s later | `title()` rejects within 2 s with `code === 'NavigationPending'` and names the URL path; `b.title()` under 1 s; `goto()` to a working page resolves within 8 s and `title()` answers within 2 s |
+| E7 | `title()` sent 500 ms after that navigation starts | rejects with `NavigationPending` within 8 s |
+
+Three browsers keep the groups apart: reads that may stay stuck behind a dialog, rows that clear their dialog, and stalled navigations. Every row has its own tab. A read that outlives its budget is abandoned; nothing queued on that tab can dismiss the dialog until the read ends, so the browser is closed at the end instead. The two navigation scenarios start when the file starts and run in the background.
+
 ### `readme-examples.test.mjs`
 
 Blocks are found by their fence, so the test follows README edits. Parsing uses `node --check`. Type-checking compiles each block as a module against `dist/*.d.ts`, with `page`, `browser` and every SDK export in scope; a name that a fragment carries over from an earlier block is assumed to exist and reported as a diagnostic. The run rewrites every `http(s)` origin in the Quick start block to the fixture, resolves `@cbxss/eoka` to this checkout, and requires both runs to exit 0 and to load the fixture.
@@ -55,10 +70,10 @@ npm ci --ignore-scripts --omit=optional
 npm run build
 export EOKA_RELIABILITY_SERVER=/path/to/target/debug/eoka-server
 export EOKA_RELIABILITY_CHROME=/path/to/chrome
-node --test tests/mistakes.test.mjs tests/misbehaving-pages.test.mjs tests/readme-examples.test.mjs
+node --test tests/mistakes.test.mjs tests/misbehaving-pages.test.mjs tests/blocked-tabs.test.mjs tests/readme-examples.test.mjs
 ```
 
-Without `EOKA_RELIABILITY_SERVER` the browser tests are skipped and only the README parse and type checks run. CI sets both variables in the `Browser (clients)` job, which runs `tests/*.test.mjs`. Each test prints what it observed (`ℹ rejected in 2001 ms with … code=…`), so a failure shows the measured time, code and message. On a debug server expect about 35 s for `mistakes` (one row waits out the 30-second default), 90 to 120 s for `misbehaving-pages` (the close-race row alone launches 24 browsers) and 10 s for `readme-examples`; the files run in parallel.
+Without `EOKA_RELIABILITY_SERVER` the browser tests are skipped and only the README parse and type checks run. CI sets both variables in the `Browser (clients)` job, which runs `tests/*.test.mjs`. Each test prints what it observed (`ℹ rejected in 2001 ms with … code=…`), so a failure shows the measured time, code and message. On a debug server expect about 35 s for `mistakes` (one row waits out the 30-second default), 90 to 120 s for `misbehaving-pages` (the close-race row alone launches 24 browsers), 15 to 30 s for `blocked-tabs` and 10 s for `readme-examples`; the files run in parallel.
 
 The time budgets are part of the contract. Do not raise one to make a row pass.
 
