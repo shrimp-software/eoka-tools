@@ -211,14 +211,16 @@ pub async fn evaluate_in_frame(state: &AppState, params: Value) -> Result<Value,
 
 pub async fn click_shadow(state: &AppState, params: Value) -> Result<Value, ServerError> {
     let params: ClickShadowParams = parse_params(params)?;
-    let receipt = state
-        .page(&params.page_id)?
-        .click_shadow_with_timeout(
+    let page = state.page(&params.page_id)?;
+    let receipt = crate::capture::painting(
+        &page,
+        page.click_shadow_with_timeout(
             params.frame_id.as_deref(),
             &params.selector,
             std::time::Duration::from_millis(params.timeout_ms),
-        )
-        .await?;
+        ),
+    )
+    .await?;
     encode(ClickShadowResult {
         frame_id: receipt.frame_id,
         selector: receipt.selector,
@@ -387,10 +389,8 @@ pub async fn mouse_down(state: &AppState, params: Value) -> Result<Value, Server
 
 pub async fn mouse_move(state: &AppState, params: Value) -> Result<Value, ServerError> {
     let params: MouseMoveParams = parse_params(params)?;
-    state
-        .page(&params.page_id)?
-        .mouse_move(params.mouse.x, params.mouse.y)
-        .await?;
+    let page = state.page(&params.page_id)?;
+    crate::capture::painting(&page, page.mouse_move(params.mouse.x, params.mouse.y)).await?;
     Ok(json!({}))
 }
 

@@ -278,6 +278,7 @@ impl AppState {
         if let Some(watcher) = watcher {
             watcher.stop().await;
         }
+        crate::capture::quiet().await;
         if let Some(engine) = self.shared.engine.lock().await.as_mut() {
             engine.release().await;
         }

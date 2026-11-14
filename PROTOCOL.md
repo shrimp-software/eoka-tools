@@ -238,9 +238,9 @@ daemon. The schema bundle lists them under `catalogMethods`.
 Some catalog state belongs to the browser session rather than one page: the
 network recorder and its log, the download slot, and the JavaScript policy
 (`js.*`, which applies to navigations made through catalog `open`). Interception
-rules are re-applied to whichever page a catalog call addresses. Actions that
-check actionability wait on animation frames, which a background tab does not
-run; act on the foreground page.
+rules are re-applied to whichever page a catalog call addresses. Catalog actions
+reach a page behind another tab the same way `actions.perform` does (see
+[Durable actions](#durable-actions-and-operation-queries)).
 
 The catalog includes operations that read or write local files chosen by the
 caller (`save_state`, `load_state`, `network.export`, `intercept.add` with
@@ -556,6 +556,23 @@ error is returned.
 
 `page.close` and `browser.close_tab` cancel the running operations of that page
 only. Operations on other pages keep running.
+
+An action on a page behind another tab runs in place. Chrome produces no frames
+for a hidden tab, while a click, hover, drag or scroll into view waits two
+animation frames to confirm its target has stopped moving, and Chrome delivers
+pointer movement with a frame. For as long as an action is in flight on a hidden
+page, the server therefore keeps one screenshot request open on a second session
+of that page, which makes Chrome produce frames for it, and completes that
+request when the action ends. The page is not brought to the front, and no
+page's `visibilityState` changes or receives `visibilitychange`. The hidden
+page's animation frames, and whatever its scripts and styles drive from them,
+run for the duration of the action and stop within about a second of its end; a
+page can observe that. A visible page is only asked for its visibility. The
+typed action methods, `agent.step`, catalog actions, `page.mouse_move`,
+`page.click_shadow` and `page.solve_turnstile` behave the same, and a page that
+becomes hidden while its action waits is covered from then on. When a click,
+hover, drag or scroll into view times out in preparation on a page that ran no
+animation frame, `error.message` says so and says whether the tab was hidden.
 
 ### Agent operations
 
