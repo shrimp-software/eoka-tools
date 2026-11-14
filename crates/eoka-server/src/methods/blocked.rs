@@ -4,12 +4,11 @@ use std::time::Duration;
 use eoka::Page;
 use eoka_protocol::sidecar::{PageBlocker, ServerError};
 use eoka_protocol::ErrorDetail;
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use crate::engine::blockers::{self, Blocker, Policy, Remedies, Stage};
 use crate::operations::OperationManager;
 
-const LIVENESS_PROBE: Duration = Duration::from_millis(400);
 const WAIT_MARGIN: Duration = Duration::from_secs(2);
 const BLOCKER_MESSAGE_LIMIT: usize = 4096;
 
@@ -123,6 +122,13 @@ pub(crate) fn named(code: &str, description: &str, method: &str, page: &Page) ->
     }
 }
 
+fn stopped(stop: &blockers::Stop, method: &str, stage: Stage) -> ServerError {
+    ServerError::blocked(
+        stop.detail(&Remedies::new(None), method, stage),
+        stop.blocker().map(page_blocker),
+    )
+}
+
 fn blocked(blocker: &Blocker, method: &str, stage: Stage) -> ServerError {
     ServerError::blocked(
         blocker.detail(&Remedies::new(None), method, stage),
@@ -135,25 +141,6 @@ fn timed_out(error: &ServerError) -> bool {
     error.code == eoka_protocol::sidecar::ErrorCode::Timeout
         || message.contains("timed out")
         || message.contains("deadline")
-}
-
-async fn responsive(page: &Page) -> bool {
-    tokio::time::timeout(
-        LIVENESS_PROBE,
-        page.session().send::<_, Value>(
-            "Runtime.evaluate",
-            &json!({"expression":"1","returnByValue":true}),
-        ),
-    )
-    .await
-    .is_ok_and(|answer| answer.is_ok())
-}
-
-async fn interrupted(page: &Page, policy: Policy, ends_itself: bool) -> Blocker {
-    if ends_itself {
-        return std::future::pending().await;
-    }
-    blockers::interrupted(page, policy != Policy::Wait).await
 }
 
 pub(crate) async fn guarded<F>(
@@ -174,41 +161,12 @@ where
     if policy == Policy::Free {
         return work.await;
     }
-    blockers::watch(page);
-    let grace = if policy == Policy::Navigate {
-        Duration::ZERO
-    } else {
-        blockers::NAVIGATION_GRACE
-    };
-    match blockers::confirmed(page, grace).await {
-        Some(Blocker::Navigation(_)) if policy == Policy::Navigate => {
-            blockers::supersede_navigation(operations, page).await;
-        }
-        Some(Blocker::Navigation(_)) if matches!(policy, Policy::Wait | Policy::Capture) => {}
-        Some(blocker) => return Err(blocked(&blocker, &method, Stage::NotStarted)),
-        None => {}
+    if let Some(blocker) = blockers::admit(operations, page, policy).await {
+        return Err(blocked(&blocker, &method, Stage::NotStarted));
     }
-    let deadline = async {
-        match limit {
-            Some(limit) => tokio::time::sleep(limit).await,
-            None => std::future::pending().await,
-        }
-    };
-    let answered = tokio::select! {
-        biased;
-        answered = work => answered,
-        blocker = interrupted(page, policy, ends_itself) => {
-            return Err(blocked(&blocker, &method, policy.interrupted()));
-        }
-        _ = deadline => {
-            return Err(match blockers::current(page) {
-                Some(blocker) => blocked(&blocker, &method, policy.interrupted()),
-                None => ServerError::blocked(
-                    blockers::unresponsive(&Remedies::new(None), &method, limit.unwrap_or_default()),
-                    None,
-                ),
-            });
-        }
+    let answered = match blockers::race(page, policy, limit, !ends_itself, work).await {
+        Ok(answered) => answered,
+        Err(stop) => return Err(stopped(&stop, &method, policy.interrupted())),
     };
     let Err(error) = answered else {
         return answered;
@@ -216,12 +174,8 @@ where
     if !timed_out(&error) {
         return Err(error);
     }
-    match blockers::confirmed(page, Duration::ZERO).await {
-        Some(blocker) => Err(blocked(&blocker, &method, policy.interrupted())),
-        None if !responsive(page).await => Err(ServerError::blocked(
-            blockers::frozen(&Remedies::new(None), &method),
-            None,
-        )),
+    match blockers::after_timeout(page, true).await {
+        Some(stop) => Err(stopped(&stop, &method, policy.interrupted())),
         None => Err(error),
     }
 }
@@ -229,6 +183,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
     use std::time::Instant;
 
     #[test]

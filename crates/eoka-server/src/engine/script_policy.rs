@@ -129,26 +129,38 @@ pub fn parse_mode(raw: &str) -> Result<ScriptPolicyMode, String> {
 }
 
 impl Engine {
-    pub(super) async fn cmd_js_mode(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let mode = parse_mode(self.arg_str(args, "mode")?)?;
+    pub(super) async fn cmd_js_mode(
+        &mut self,
+        args: &eoka_protocol::ModeArgs,
+    ) -> Result<Response, EngineError> {
+        let mode = parse_mode(args.mode.as_str())?;
         self.script_policy.set_mode(mode);
         Ok(Response::ok(self.script_policy.status_json()))
     }
 
-    pub(super) async fn cmd_js_allow(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let domain = self.arg_str(args, "domain")?.to_string();
+    pub(super) async fn cmd_js_allow(
+        &mut self,
+        args: &eoka_protocol::DomainArgs,
+    ) -> Result<Response, EngineError> {
+        let domain = args.domain.as_str().to_string();
         self.script_policy.add_allow(domain);
         Ok(Response::ok(self.script_policy.status_json()))
     }
 
-    pub(super) async fn cmd_js_block(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let domain = self.arg_str(args, "domain")?.to_string();
+    pub(super) async fn cmd_js_block(
+        &mut self,
+        args: &eoka_protocol::DomainArgs,
+    ) -> Result<Response, EngineError> {
+        let domain = args.domain.as_str().to_string();
         self.script_policy.add_block(domain);
         Ok(Response::ok(self.script_policy.status_json()))
     }
 
-    pub(super) async fn cmd_js_remove(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let domain = self.arg_str(args, "domain")?;
+    pub(super) async fn cmd_js_remove(
+        &mut self,
+        args: &eoka_protocol::DomainArgs,
+    ) -> Result<Response, EngineError> {
+        let domain = args.domain.as_str();
         if self.script_policy.remove(domain) {
             Ok(Response::ok(self.script_policy.status_json()))
         } else {

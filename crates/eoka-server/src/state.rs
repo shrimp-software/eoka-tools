@@ -94,8 +94,8 @@ impl AppState {
     pub async fn catalog(
         &self,
         page_id: &str,
-        operation: &eoka_protocol::OperationSpec,
-        request: &eoka_protocol::Request,
+        request: eoka_protocol::Request,
+        spoken: Option<&str>,
     ) -> Result<serde_json::Value, ServerError> {
         use eoka_protocol::sidecar::ErrorCode;
         let page = self.page(page_id)?;
@@ -109,18 +109,16 @@ impl AppState {
                 }
             }
             self.shared.engine_pages.lock().insert(page_id.to_owned());
-            engine
-                .get_or_insert_with(|| {
-                    crate::engine::Engine::adopt(
-                        "sidecar",
-                        browser,
-                        self.operations.clone(),
-                        self.recordings.clone(),
-                        self.agent.clone(),
-                    )
-                })
-                .handle_on(page_id, &page, operation.cmd, &request.args_json())
-                .await
+            let engine = engine.get_or_insert_with(|| {
+                crate::engine::Engine::adopt(
+                    "sidecar",
+                    browser,
+                    self.operations.clone(),
+                    self.recordings.clone(),
+                    self.agent.clone(),
+                )
+            });
+            Box::pin(engine.handle_on(page_id, &page, request, spoken)).await
         };
         if response.ok {
             return Ok(response.data.unwrap_or(serde_json::Value::Null));

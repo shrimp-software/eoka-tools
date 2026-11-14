@@ -14,6 +14,7 @@ macro_rules! define_operations {
                 read_only: $read_only:literal,
                 destructive: $destructive:literal
                 $(, input: $input:ty)?
+                $(, cli: $cli:literal)?
                 $(,)?
             }
         ),+ $(,)?
@@ -58,6 +59,14 @@ macro_rules! define_operations {
                 destructive: $destructive,
             }),+
         ];
+        impl OperationSpec {
+            fn cli_override(&self) -> Option<&'static str> {
+                match self.id {
+                    $(OperationId::$variant => define_operations!(@cli $($cli)?),)+
+                }
+            }
+        }
+
         pub fn all_operations() -> &'static [OperationSpec] {
             OPERATIONS
         }
@@ -192,6 +201,14 @@ macro_rules! define_operations {
 
     (@match_variant $variant:path) => {
         $variant
+    };
+
+    (@cli $cli:literal) => {
+        Some($cli)
+    };
+
+    (@cli) => {
+        None
     };
 
 }

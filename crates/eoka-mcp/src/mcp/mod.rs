@@ -79,10 +79,11 @@ const MCP_OWN_TOOL_COMMANDS: &[(&str, &str)] = &[
     ("inject_captcha_token", "captcha_inject"),
 ];
 
-/// Register a tool for every catalog operation that has no hand-written tool,
-/// so an operation added to the catalog reaches MCP without code here. Opt-in
-/// operations are listed only when `include_opt_in` is set.
-fn add_catalog_tools(router: &mut ToolRouter<EokaServer>, include_opt_in: bool) {
+fn add_catalog_tools(
+    router: &mut ToolRouter<EokaServer>,
+    include_opt_in: bool,
+) -> std::collections::HashSet<String> {
+    let mut added = std::collections::HashSet::new();
     let covered: std::collections::HashSet<&str> = MCP_PROTOCOL_TOOL_ROUTES
         .iter()
         .chain(MCP_OWN_TOOL_COMMANDS)
@@ -95,6 +96,8 @@ fn add_catalog_tools(router: &mut ToolRouter<EokaServer>, include_opt_in: bool) 
         if hidden || covered.contains(operation.cmd) || router.map.contains_key(name.as_str()) {
             continue;
         }
+        added.insert(name.clone());
+        let spoken = name.clone();
         let mut tool = Tool::new(
             name,
             operation.description,
@@ -108,16 +111,18 @@ fn add_catalog_tools(router: &mut ToolRouter<EokaServer>, include_opt_in: bool) 
         router.add_route(rmcp::handler::server::router::tool::ToolRoute::new_dyn(
             tool,
             move |context: rmcp::handler::server::tool::ToolCallContext<'_, EokaServer>| {
+                let spoken = spoken.clone();
                 Box::pin(async move {
                     context
                         .service
-                        .catalog_tool(operation, context.arguments)
+                        .catalog_tool(operation, &spoken, context.arguments)
                         .await
                         .map(Into::into)
                 })
             },
         ));
     }
+    added
 }
 
 fn apply_protocol_tool_metadata(router: &mut ToolRouter<EokaServer>) {
@@ -144,6 +149,7 @@ pub struct EokaServer {
     running: Arc<std::sync::Mutex<Option<(String, std::time::Instant)>>>,
     headless: bool,
     tool_router: ToolRouter<EokaServer>,
+    engine_tools: Arc<std::collections::HashSet<String>>,
     downloads: eoka_server::downloads::DownloadManager,
     operations: eoka_server::operations::OperationManager,
 }
@@ -170,10 +176,10 @@ impl EokaServer {
         Ok(guard)
     }
 
-    /// Run a catalog operation on the current tab through the shared engine.
     async fn catalog_tool(
         &self,
         operation: &'static eoka_protocol::OperationSpec,
+        spoken: &str,
         arguments: Option<JsonObject>,
     ) -> Result<CallToolResult, ErrorData> {
         let mut guard = self.lock_browser().await?;
@@ -189,7 +195,7 @@ impl EokaServer {
             Value::Object(arguments.unwrap_or_default()),
         )
         .map_err(invalid)?;
-        let result = state.server.catalog(&page_id, operation, &request).await;
+        let result = state.server.catalog(&page_id, request, Some(spoken)).await;
         if !operation.read_only {
             if let Some(tab) = state.current_tab_mut() {
                 tab.invalidate();
@@ -198,9 +204,12 @@ impl EokaServer {
         match result {
             Ok(Value::String(text)) => text_ok(text),
             Ok(data) => text_ok(serde_json::to_string(&data).map_err(internal)?),
-            Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(
-                serde_json::to_string(&error).map_err(internal)?,
-            )])),
+            Err(error) => match blocked::blocked_detail(&error) {
+                Some(detail) => Ok(blocked::refusal(detail)),
+                None => Ok(CallToolResult::error(vec![ContentBlock::text(
+                    serde_json::to_string(&error).map_err(internal)?,
+                )])),
+            },
         }
     }
 
@@ -261,7 +270,7 @@ impl EokaServer {
             .unwrap_or(true);
         let mut tool_router = Self::tool_router();
         apply_protocol_tool_metadata(&mut tool_router);
-        add_catalog_tools(&mut tool_router, include_opt_in);
+        let engine_tools = Arc::new(add_catalog_tools(&mut tool_router, include_opt_in));
         eoka_server::engine::blockers::set_surface(eoka_server::engine::blockers::Surface::Mcp);
         Self {
             agent: Default::default(),
@@ -269,6 +278,7 @@ impl EokaServer {
             running: Default::default(),
             headless,
             tool_router,
+            engine_tools,
             downloads: Default::default(),
             operations: Default::default(),
         }
@@ -1902,18 +1912,18 @@ impl ServerHandler for EokaServer {
         self.started(&tool);
         let context = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
         let call = self.tool_router.call(context);
-        use eoka_server::engine::blockers::Policy;
+        use eoka_server::engine::blockers::{self, Policy};
         let result = match &page {
             Some(page)
-                if matches!(
-                    policy,
-                    Policy::Read | Policy::Script | Policy::Wait | Policy::Observe
-                ) =>
+                if !self.engine_tools.contains(&tool)
+                    && matches!(
+                        policy,
+                        Policy::Read | Policy::Script | Policy::Wait | Policy::Observe
+                    ) =>
             {
-                tokio::select! {
-                    biased;
-                    result = call => result,
-                    interrupted = Self::interrupted(&tool, policy, page) => Ok(interrupted.into()),
+                match blockers::race(page, policy, None, true, call).await {
+                    Ok(result) => result,
+                    Err(stop) => Ok(blocked::stopped(&tool, policy, &stop).into()),
                 }
             }
             _ => call.await,
@@ -2066,7 +2076,7 @@ mod tests {
         }
         let server = EokaServer::new();
         let missing = server
-            .catalog_tool(operation_by_cmd("content").unwrap(), None)
+            .catalog_tool(operation_by_cmd("content").unwrap(), "content", None)
             .await;
         assert!(missing.is_err(), "catalog tools must not launch a browser");
         server
@@ -2081,7 +2091,7 @@ mod tests {
             .await
             .unwrap();
         let content = server
-            .catalog_tool(operation_by_cmd("content").unwrap(), None)
+            .catalog_tool(operation_by_cmd("content").unwrap(), "content", None)
             .await
             .unwrap();
         assert!(text(&content).contains("Heading"), "{}", text(&content));
@@ -2089,20 +2099,28 @@ mod tests {
         arguments.insert("selector".into(), json!("a"));
         arguments.insert("name".into(), json!("href"));
         let attribute = server
-            .catalog_tool(operation_by_cmd("get_attribute").unwrap(), Some(arguments))
+            .catalog_tool(
+                operation_by_cmd("get_attribute").unwrap(),
+                "get_attribute",
+                Some(arguments),
+            )
             .await
             .unwrap();
         assert!(text(&attribute).contains("/next"), "{}", text(&attribute));
         // Missing required input is rejected before the engine runs.
         let invalid = server
-            .catalog_tool(operation_by_cmd("get_text").unwrap(), None)
+            .catalog_tool(operation_by_cmd("get_text").unwrap(), "get_text", None)
             .await;
         assert!(invalid.is_err(), "missing selector must be invalid params");
         // A missing element is a tool error the model can read, not a crash.
         let mut arguments = JsonObject::new();
         arguments.insert("selector".into(), json!("#absent"));
         let absent = server
-            .catalog_tool(operation_by_cmd("get_text").unwrap(), Some(arguments))
+            .catalog_tool(
+                operation_by_cmd("get_text").unwrap(),
+                "get_text",
+                Some(arguments),
+            )
             .await
             .unwrap();
         assert_eq!(absent.is_error, Some(true), "{}", text(&absent));
@@ -2114,7 +2132,7 @@ mod tests {
         // An action tool needs no caller-supplied operation ID and returns
         // the record of what it did.
         let reload = server
-            .catalog_tool(operation_by_cmd("reload").unwrap(), None)
+            .catalog_tool(operation_by_cmd("reload").unwrap(), "reload", None)
             .await
             .unwrap();
         assert_ne!(reload.is_error, Some(true), "{}", text(&reload));

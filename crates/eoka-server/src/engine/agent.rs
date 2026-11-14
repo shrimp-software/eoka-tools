@@ -1,7 +1,12 @@
 use super::*;
 
+pub(super) enum AgentCall {
+    Observe(eoka_protocol::AgentObserveArgs),
+    Step(eoka_protocol::AgentStepArgs),
+}
+
 impl Engine {
-    pub(super) async fn handle_agent(&mut self, cmd: &str, args: &Value) -> Response {
+    pub(super) async fn handle_agent(&mut self, call: AgentCall) -> Response {
         let mut result: anyhow::Result<Response> = async {
             let state = self
                 .state
@@ -12,27 +17,21 @@ impl Engine {
                 .ok_or_else(|| anyhow::anyhow!("Open a tab first"))?
                 .page
                 .clone();
-            match cmd {
-                "agent_observe" => Ok(Response::ok(serde_json::to_value(
+            match call {
+                AgentCall::Observe(args) => Ok(Response::ok(serde_json::to_value(
                     self.agent
                         .lock()
                         .await
-                        .observe(&state.browser, &page, serde_json::from_value(args.clone())?)
+                        .observe(&state.browser, &page, args)
                         .await?,
                 )?)),
-                "agent_step" => Ok(Response::agent_result(
+                AgentCall::Step(args) => Ok(Response::agent_result(
                     self.agent
                         .lock()
                         .await
-                        .step_selected(
-                            &state.browser,
-                            &page,
-                            &self.operations,
-                            serde_json::from_value(args.clone())?,
-                        )
+                        .step_selected(&state.browser, &page, &self.operations, args)
                         .await?,
                 )),
-                _ => anyhow::bail!("Unknown agent tool"),
             }
         }
         .await;
