@@ -17,6 +17,7 @@ pub(crate) struct Call {
     method: String,
     policy: Policy,
     limit: Option<Duration>,
+    ends_itself: bool,
 }
 
 fn navigates(action: &Value) -> bool {
@@ -77,6 +78,10 @@ fn limit(policy: Policy, params: &Value) -> Option<Duration> {
     }
 }
 
+fn ends_itself(method: &str) -> bool {
+    method.starts_with("agent.") || crate::operations::sidecar::supports(method)
+}
+
 impl Call {
     pub(crate) fn new(method: &str, params: &Value) -> Self {
         let policy = policy(method, params);
@@ -84,6 +89,7 @@ impl Call {
             method: method.to_owned(),
             policy,
             limit: limit(policy, params),
+            ends_itself: ends_itself(method),
         }
     }
 }
@@ -143,6 +149,13 @@ async fn responsive(page: &Page) -> bool {
     .is_ok_and(|answer| answer.is_ok())
 }
 
+async fn interrupted(page: &Page, policy: Policy, ends_itself: bool) -> Blocker {
+    if ends_itself {
+        return std::future::pending().await;
+    }
+    blockers::interrupted(page, policy != Policy::Wait).await
+}
+
 pub(crate) async fn guarded<F>(
     operations: &OperationManager,
     page: &Page,
@@ -156,6 +169,7 @@ where
         method,
         policy,
         limit,
+        ends_itself,
     } = call;
     if policy == Policy::Free {
         return work.await;
@@ -183,7 +197,7 @@ where
     let answered = tokio::select! {
         biased;
         answered = work => answered,
-        blocker = blockers::interrupted(page, policy != Policy::Wait) => {
+        blocker = interrupted(page, policy, ends_itself) => {
             return Err(blocked(&blocker, &method, policy.interrupted()));
         }
         _ = deadline => {
@@ -276,6 +290,31 @@ mod tests {
         assert_eq!(policy("page.screenshot", &json!({})), Policy::Capture);
         assert_eq!(policy("page.wait_for", &json!({})), Policy::Wait);
         assert_eq!(policy("console", &json!({})), Policy::Free);
+    }
+
+    #[test]
+    fn admissions_and_agent_calls_end_themselves_when_a_dialog_opens() {
+        for method in [
+            "actions.perform",
+            "page.goto",
+            "page.click",
+            "page.fill",
+            "page.press_key",
+            "agent.step",
+            "agent.observe",
+        ] {
+            assert!(ends_itself(method), "{method}");
+        }
+        for method in [
+            "page.title",
+            "page.evaluate",
+            "page.wait_for",
+            "page.screenshot",
+            "page.mouse_up",
+            "page.click_shadow",
+        ] {
+            assert!(!ends_itself(method), "{method}");
+        }
     }
 
     #[test]
