@@ -121,14 +121,16 @@ impl<'a> Remedies<'a> {
             "action_command" => arguments["command"].as_str().unwrap_or(command),
             command => command,
         };
-        let path = eoka_protocol::operation_by_cmd(command).map_or(command, |spec| spec.path);
-        match (self.surface, command) {
-            (Surface::Cli, "agent_observe") => "view".into(),
-            (Surface::Cli, "agent_step") => "step".into(),
-            (Surface::Cli, "action_perform") => "action".into(),
-            (Surface::Cli, _) => path.replace('.', " ").replace('_', "-"),
-            (Surface::Catalog | Surface::Sidecar, _) => path.to_owned(),
-            (Surface::Mcp, command) => command.to_owned(),
+        let operation = eoka_protocol::operation_by_cmd(command);
+        match self.surface {
+            Surface::Cli => operation.map_or_else(
+                || command.replace('.', " ").replace('_', "-"),
+                |operation| operation.cli_command(),
+            ),
+            Surface::Catalog | Surface::Sidecar => operation
+                .map_or(command, |operation| operation.path)
+                .to_owned(),
+            Surface::Mcp => command.to_owned(),
         }
     }
 
@@ -164,14 +166,14 @@ impl<'a> Remedies<'a> {
         if self.surface == Surface::Sidecar {
             return "`browser.new_page`".into();
         }
-        self.command("tab new URL", "new_tab", "tabs.new")
+        self.command("tab new URL", "new_tab", "tab.new")
     }
 
     pub fn status(&self) -> String {
         if self.surface == Surface::Sidecar {
             return "`browser.tabs`".into();
         }
-        self.command("status", "list_tabs", "tabs.list")
+        self.command("status", "list_tabs", "tab.list")
     }
 
     pub fn operation(&self, id: &str) -> String {
@@ -507,6 +509,100 @@ pub async fn interrupted(page: &Page, navigation: bool) -> Blocker {
     }
 }
 
+pub enum Stop {
+    Blocked(Blocker),
+    Unresponsive(Duration),
+    Frozen,
+}
+
+impl Stop {
+    pub fn blocker(&self) -> Option<&Blocker> {
+        match self {
+            Stop::Blocked(blocker) => Some(blocker),
+            Stop::Unresponsive(_) | Stop::Frozen => None,
+        }
+    }
+
+    pub fn detail(&self, remedies: &Remedies<'_>, command: &str, stage: Stage) -> ErrorDetail {
+        match self {
+            Stop::Blocked(blocker) => blocker.detail(remedies, command, stage),
+            Stop::Unresponsive(limit) => stalled(
+                remedies,
+                format!(
+                    "`{command}` got no answer from the page within {} s.",
+                    limit.as_secs()
+                ),
+            ),
+            Stop::Frozen => stalled(
+                remedies,
+                format!("`{command}` timed out and the page does not answer a liveness probe."),
+            ),
+        }
+    }
+}
+
+pub async fn admit(
+    operations: &crate::operations::OperationManager,
+    page: &Page,
+    policy: Policy,
+) -> Option<Blocker> {
+    watch(page);
+    if policy == Policy::Free {
+        return None;
+    }
+    let grace = if policy == Policy::Navigate {
+        Duration::ZERO
+    } else {
+        NAVIGATION_GRACE
+    };
+    match confirmed(page, grace).await? {
+        Blocker::Navigation(_) if policy == Policy::Navigate => {
+            supersede_navigation(operations, page).await;
+            None
+        }
+        Blocker::Navigation(_) if matches!(policy, Policy::Wait | Policy::Capture) => None,
+        blocker => Some(blocker),
+    }
+}
+
+pub async fn race<T>(
+    page: &Page,
+    policy: Policy,
+    limit: Option<Duration>,
+    interruptible: bool,
+    work: impl Future<Output = T>,
+) -> Result<T, Stop> {
+    let deadline = async {
+        match limit {
+            Some(limit) => tokio::time::sleep(limit).await,
+            None => std::future::pending().await,
+        }
+    };
+    let interruption = async {
+        match interruptible {
+            true => interrupted(page, policy != Policy::Wait).await,
+            false => std::future::pending().await,
+        }
+    };
+    tokio::select! {
+        biased;
+        finished = work => Ok(finished),
+        blocker = interruption => Err(Stop::Blocked(blocker)),
+        _ = deadline => Err(match current(page) {
+            Some(blocker) => Stop::Blocked(blocker),
+            None => Stop::Unresponsive(limit.unwrap_or_default()),
+        }),
+    }
+}
+
+pub async fn after_timeout(page: &Page, probes: bool) -> Option<Stop> {
+    match confirmed(page, Duration::ZERO).await {
+        Some(blocker) => Some(Stop::Blocked(blocker)),
+        None if probes && !responsive(page).await => Some(Stop::Frozen),
+        None => None,
+    }
+}
+
 tokio::task_local! {
     static ABANDON: watch::Receiver<bool>;
 }
@@ -743,6 +839,18 @@ fn with_operation(
 }
 
 impl super::Engine {
+    pub(super) fn named(
+        &self,
+        remedies: &Remedies<'_>,
+        command: &str,
+        arguments: &Value,
+    ) -> String {
+        match &self.spoken {
+            Some(spoken) => spoken.clone(),
+            None => remedies.name(command, arguments),
+        }
+    }
+
     pub fn current_page(&self) -> Option<Page> {
         self.state
             .as_ref()
@@ -757,31 +865,15 @@ impl super::Engine {
         policy: Policy,
     ) -> Option<Response> {
         let page = self.current_page()?;
-        watch(&page);
-        let opens_own_tab =
-            command == "open" && self.state.as_ref().is_some_and(|state| state.is_live);
-        if policy == Policy::Free || opens_own_tab {
+        if command == "open" && self.state.as_ref().is_some_and(|state| state.is_live) {
+            watch(&page);
             return None;
         }
-        let grace = if policy == Policy::Navigate {
-            Duration::ZERO
-        } else {
-            NAVIGATION_GRACE
-        };
-        let blocker = match confirmed(&page, grace).await? {
-            Blocker::Navigation(_) if policy == Policy::Navigate => {
-                supersede_navigation(&self.operations, &page).await;
-                return None;
-            }
-            Blocker::Navigation(_) if matches!(policy, Policy::Wait | Policy::Capture) => {
-                return None
-            }
-            blocker => blocker,
-        };
+        let blocker = admit(&self.operations, &page, policy).await?;
         let remedies = Remedies::new(Some(&self.session_name));
         let mut response = Response::err_detail(blocker.detail(
             &remedies,
-            &remedies.name(command, arguments),
+            &self.named(&remedies, command, arguments),
             Stage::NotStarted,
         ));
         if matches!(policy, Policy::Gate | Policy::Navigate) {
@@ -795,25 +887,26 @@ impl super::Engine {
 
     pub(super) async fn dispatch_guarded(
         &mut self,
-        command: &str,
+        request: eoka_protocol::Request,
         arguments: &Value,
     ) -> Result<Response, super::EngineError> {
+        let command = request.cmd();
         let policy = policy(command, arguments);
         let sleeps = matches!(command, "wait" | "network_wait") && policy == Policy::Free;
         if !sleeps && !matches!(policy, Policy::Read | Policy::Wait | Policy::Capture) {
-            return self.dispatch(command, arguments).await;
+            return Box::pin(self.dispatch(request)).await;
         }
         let page = self.current_page();
         let session = self.session_name.clone();
         let remedies = Remedies::new(Some(&session));
-        let name = remedies.name(command, arguments);
+        let name = self.named(&remedies, command, arguments);
         guard(
             page.as_ref(),
             remedies,
             &name,
             policy,
             limit(policy, arguments),
-            self.dispatch(command, arguments),
+            Box::pin(self.dispatch(request)),
         )
         .await
     }
@@ -897,12 +990,11 @@ impl super::Engine {
         if !timed_out(response) {
             return;
         }
-        let name = remedies.name(command, arguments);
-        let detail = match confirmed(&page, Duration::ZERO).await {
-            Some(blocker) => blocker.detail(&remedies, &name, policy.interrupted()),
-            None if !responsive(&page).await => frozen(&remedies, &name),
-            None => return,
+        let Some(stop) = after_timeout(&page, true).await else {
+            return;
         };
+        let name = self.named(&remedies, command, arguments);
+        let detail = stop.detail(&remedies, &name, policy.interrupted());
         replace_error(response, with_operation(detail, &remedies, id.as_deref()));
     }
 }
@@ -1034,28 +1126,10 @@ impl Blocker {
     }
 }
 
-pub fn unresponsive(remedies: &Remedies<'_>, command: &str, limit: Duration) -> ErrorDetail {
+fn stalled(remedies: &Remedies<'_>, observed: String) -> ErrorDetail {
     ErrorDetail::new(
         "page_unresponsive",
-        format!(
-            "`{command}` got no answer from the page within {} s. No dialog or pending navigation is known, so the page's main thread is busy or frozen.",
-            limit.as_secs()
-        ),
-    )
-    .retryable(false)
-    .hint(format!(
-        "Retry once the page settles. If it stays frozen, continue in a fresh tab with {}. {} clears a dialog that was already open before this session attached.",
-        remedies.new_tab(),
-        remedies.dismiss()
-    ))
-}
-
-pub fn frozen(remedies: &Remedies<'_>, command: &str) -> ErrorDetail {
-    ErrorDetail::new(
-        "page_unresponsive",
-        format!(
-            "`{command}` timed out and the page does not answer a liveness probe. No dialog or pending navigation is known, so the page's main thread is busy or frozen."
-        ),
+        format!("{observed} No dialog or pending navigation is known, so the page's main thread is busy or frozen."),
     )
     .retryable(false)
     .hint(format!(
@@ -1095,45 +1169,122 @@ pub fn navigation_timeout(
 }
 
 pub fn policy(command: &str, arguments: &Value) -> Policy {
+    use eoka_protocol::OperationId as Id;
+    let Some(operation) = eoka_protocol::operation_by_cmd(command) else {
+        return Policy::Free;
+    };
     let navigates = |kind: Option<&str>| {
         matches!(
             kind,
             Some("navigate" | "navigate_with_headers" | "reload" | "back" | "forward" | "history")
         )
     };
-    match command {
-        "open" | "back" | "forward" | "reload" => Policy::Navigate,
-        "action_command" => match arguments["command"].as_str() {
+    match operation.id {
+        Id::Open | Id::Back | Id::Forward | Id::Reload => Policy::Navigate,
+        Id::ActionCommand => match arguments["command"].as_str() {
             Some("back" | "forward" | "reload") => Policy::Navigate,
             _ => Policy::Gate,
         },
-        "action_perform" | "agent_step" if navigates(arguments["action"]["kind"].as_str()) => {
+        Id::ActionPerform | Id::AgentStep if navigates(arguments["action"]["kind"].as_str()) => {
             Policy::Navigate
         }
-        "wait" => {
-            if arguments["ms"].is_u64() {
-                Policy::Free
-            } else {
-                Policy::Wait
-            }
-        }
-        "snapshot" | "observe" | "info" | "frames" | "text" | "find" | "content" | "get_text"
-        | "get_attribute" | "exists" | "storage" | "dump_storage" | "console" | "errors"
-        | "spa_info" | "wasm_info" | "wasm_read" | "wasm_find" => Policy::Read,
-        "eval" | "exec" | "frame_eval" | "fetch" => Policy::Script,
-        "screenshot" => {
-            if arguments["annotate"].as_bool().unwrap_or(false) {
-                Policy::Gate
-            } else {
-                Policy::Capture
-            }
-        }
-        "agent_observe" => Policy::Observe,
-        "agent_step" | "action_perform" | "click" | "dblclick" | "fill" | "select" | "hover"
-        | "key" | "click_shadow" | "mouse_down" | "mouse_move" | "mouse_up" | "key_down"
-        | "key_up" | "scroll" | "set_storage" | "save_state" | "spa_navigate" | "wasm_write"
-        | "captcha_detect" | "captcha_inject" | "download_start" => Policy::Gate,
-        _ => Policy::Free,
+        Id::Wait if arguments["ms"].is_u64() => Policy::Free,
+        Id::Wait => Policy::Wait,
+        Id::Snapshot
+        | Id::Observe
+        | Id::Info
+        | Id::Frames
+        | Id::Text
+        | Id::Find
+        | Id::Content
+        | Id::GetText
+        | Id::GetAttribute
+        | Id::Exists
+        | Id::Storage
+        | Id::DumpStorage
+        | Id::Console
+        | Id::Errors
+        | Id::SpaInfo
+        | Id::WasmInfo
+        | Id::WasmRead
+        | Id::WasmFind => Policy::Read,
+        Id::Eval | Id::Exec | Id::FrameEval | Id::Fetch => Policy::Script,
+        Id::Screenshot if arguments["annotate"].as_bool().unwrap_or(false) => Policy::Gate,
+        Id::Screenshot => Policy::Capture,
+        Id::AgentObserve => Policy::Observe,
+        Id::AgentStep
+        | Id::ActionPerform
+        | Id::Click
+        | Id::DblClick
+        | Id::Fill
+        | Id::Select
+        | Id::Hover
+        | Id::Key
+        | Id::ClickShadow
+        | Id::MouseDown
+        | Id::MouseMove
+        | Id::MouseUp
+        | Id::KeyDown
+        | Id::KeyUp
+        | Id::Scroll
+        | Id::SetStorage
+        | Id::SaveState
+        | Id::SpaNavigate
+        | Id::WasmWrite
+        | Id::CaptchaDetect
+        | Id::CaptchaInject
+        | Id::DownloadStart => Policy::Gate,
+        Id::SessionHello
+        | Id::OperationGet
+        | Id::OperationList
+        | Id::OperationWait
+        | Id::OperationCancel
+        | Id::Emulate
+        | Id::RecordingStart
+        | Id::RecordingGet
+        | Id::RecordingStop
+        | Id::RecordingCancel
+        | Id::ReleaseAllInputs
+        | Id::DownloadList
+        | Id::DownloadGet
+        | Id::DownloadWait
+        | Id::DownloadCancel
+        | Id::Cookies
+        | Id::SetCookie
+        | Id::DeleteCookie
+        | Id::ClearCookies
+        | Id::LoadState
+        | Id::Headers
+        | Id::TabList
+        | Id::TabNew
+        | Id::TabSwitch
+        | Id::TabClose
+        | Id::TabAttach
+        | Id::CloneFrom
+        | Id::FakeCamera
+        | Id::InterceptAdd
+        | Id::InterceptList
+        | Id::InterceptRemove
+        | Id::InterceptLog
+        | Id::JsMode
+        | Id::JsAllow
+        | Id::JsBlock
+        | Id::JsRemove
+        | Id::JsList
+        | Id::NetworkRecordStart
+        | Id::NetworkRecordStop
+        | Id::NetworkRecordStatus
+        | Id::NetworkLog
+        | Id::NetworkShow
+        | Id::NetworkWait
+        | Id::NetworkExport
+        | Id::NetworkClear
+        | Id::Close
+        | Id::Shutdown
+        | Id::CaptchaDatadome
+        | Id::CaptchaTurnstile
+        | Id::DialogAccept
+        | Id::DialogDismiss => Policy::Free,
     }
 }
 
@@ -1158,12 +1309,6 @@ pub async fn guard<E>(
     limit: Option<Duration>,
     work: impl Future<Output = Result<Response, E>>,
 ) -> Result<Response, E> {
-    let deadline = async {
-        match limit {
-            Some(limit) => tokio::time::sleep(limit).await,
-            None => std::future::pending().await,
-        }
-    };
     let Some(page) = page.filter(|_| policy != Policy::Free) else {
         return tokio::select! {
             biased;
@@ -1173,18 +1318,15 @@ pub async fn guard<E>(
     };
     tokio::select! {
         biased;
-        result = work => result,
+        raced = race(page, policy, limit, true, work) => match raced {
+            Ok(result) => result,
+            Err(stop) => Ok(Response::err_detail(stop.detail(
+                &remedies,
+                command,
+                policy.interrupted(),
+            ))),
+        },
         _ = abandoned() => Ok(abandoned_response(command)),
-        blocker = interrupted(page, policy != Policy::Wait) => {
-            Ok(Response::err_detail(blocker.detail(&remedies, command, policy.interrupted())))
-        }
-        _ = deadline => {
-            let limit = limit.unwrap_or_default();
-            Ok(Response::err_detail(match current(page) {
-                Some(blocker) => blocker.detail(&remedies, command, policy.interrupted()),
-                None => unresponsive(&remedies, command, limit),
-            }))
-        }
     }
 }
 
@@ -1380,7 +1522,8 @@ mod tests {
         assert!(detail.message.contains("returned without a result"));
         assert!(detail.hint.unwrap().contains("`reload`"));
         let default = Remedies::for_surface(Surface::Cli, Some("default"));
-        assert!(unresponsive(&default, "info", READ_LIMIT)
+        assert!(Stop::Unresponsive(READ_LIMIT)
+            .detail(&default, "info", Stage::ReadInterrupted)
             .hint
             .unwrap()
             .contains("`eoka tab new URL`"));
@@ -1438,12 +1581,18 @@ mod tests {
         assert_eq!(cli.name("captcha_datadome", &none), "captcha datadome");
         assert_eq!(cli.name("get_text", &none), "get-text");
         assert_eq!(cli.name("tab_list", &none), "tab list");
+        assert_eq!(cli.name("dblclick", &none), "dblclick");
+        assert_eq!(cli.name("mouse_down", &none), "mouse-down");
+        assert_eq!(cli.name("intercept_add", &none), "network intercept add");
+        assert_eq!(cli.name("recording_get", &none), "recording status");
         assert_eq!(
             cli.name("action_command", &json!({"command":"reload"})),
             "reload"
         );
         let catalog = Remedies::for_surface(Surface::Catalog, None);
         assert_eq!(catalog.name("agent_observe", &none), "agent.observe");
+        assert_eq!(catalog.new_tab(), "`tab.new`");
+        assert_eq!(catalog.status(), "`tab.list`");
         let mcp = Remedies::for_surface(Surface::Mcp, None);
         assert_eq!(mcp.name("page_text", &none), "page_text");
     }

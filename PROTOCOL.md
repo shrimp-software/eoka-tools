@@ -87,7 +87,7 @@ The server then speaks the older of its own version and the newest version the
 client named in either field, and never sends such a client an error code or
 field introduced after that version. A client that sends no `server.hello` is
 spoken to as protocol 2.0. Servers older than 2.2 ignore `understands`. Existing low-level clients can
-still call compatible methods directly; the Go client requires protocol 1.1
+still call compatible methods directly; the Go client requires protocol 2.0
 before launch or attachment and fails explicitly against older servers.
 The Node SDK requires protocol 2.0, including bounded browser fetch and capture contracts.
 

@@ -20,9 +20,11 @@ const FILES: &[(&str, &str)] = &[
     ),
 ];
 const DEFAULT_SKILL_ROOT: &str = ".agents/skills";
+const CLAUDE_HOME: &str = ".claude";
+const CLAUDE_SKILL_ROOT: &str = ".claude/skills";
 const HOME_SKILL_ROOTS: &[&str] = &[
     DEFAULT_SKILL_ROOT,
-    ".claude/skills",
+    CLAUDE_SKILL_ROOT,
     ".codex/skills",
     ".pi/agent/skills",
     ".config/opencode/skills",
@@ -191,21 +193,41 @@ pub(crate) fn installed_copies(search: &Search, write: bool) -> Value {
 }
 
 fn install(directory: Option<&Path>, search: &Search) -> Result<Value, String> {
-    let directory = match (directory, &search.home) {
-        (Some(directory), _) => directory.to_path_buf(),
-        (None, Some(home)) => home.join(DEFAULT_SKILL_ROOT).join(NAME),
+    let directories = match (directory, &search.home) {
+        (Some(directory), _) => vec![directory.to_path_buf()],
+        (None, Some(home)) => {
+            let claude = home.join(CLAUDE_HOME).is_dir();
+            std::iter::once(DEFAULT_SKILL_ROOT)
+                .chain(claude.then_some(CLAUDE_SKILL_ROOT))
+                .map(|root| home.join(root).join(NAME))
+                .collect()
+        }
         (None, None) => return Err("HOME is not set; name the skill directory".to_string()),
     };
-    if directory.join(MANIFEST).exists() && !holds_this_skill(&directory) {
+    if let Some(other) = directories
+        .iter()
+        .find(|directory| directory.join(MANIFEST).exists() && !holds_this_skill(directory))
+    {
         return Err(format!(
             "{} holds a different skill. Nothing was written.",
-            directory.display()
+            other.display()
         ));
     }
-    std::fs::create_dir_all(&directory)
-        .and_then(|()| std::fs::canonicalize(&directory))
-        .map(|directory| report(vec![copy_state(&directory, true)]))
-        .map_err(|error| format!("Cannot create {}: {error}", directory.display()))
+    let mut written = Vec::new();
+    for directory in directories {
+        let directory = std::fs::create_dir_all(&directory)
+            .and_then(|()| std::fs::canonicalize(&directory))
+            .map_err(|error| format!("Cannot create {}: {error}", directory.display()))?;
+        if !written.contains(&directory) {
+            written.push(directory);
+        }
+    }
+    Ok(report(
+        written
+            .iter()
+            .map(|directory| copy_state(directory, true))
+            .collect(),
+    ))
 }
 
 fn response(outcome: Result<Value, String>) -> protocol::Response {
@@ -477,6 +499,47 @@ mod tests {
             agent_homes: Vec::new(),
         };
         assert!(install(None, &homeless).unwrap_err().contains("HOME"));
+    }
+
+    #[test]
+    fn a_bare_install_also_reaches_claude_code() {
+        let home = tempfile::tempdir().unwrap();
+        let home = std::fs::canonicalize(home.path()).unwrap();
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        let default = home.join(".agents/skills/eoka");
+        let claude = home.join(".claude/skills/eoka");
+        let installed = install(None, &search(&home)).unwrap();
+        assert_eq!(
+            statuses(&installed),
+            [
+                (default.to_string_lossy().to_string(), "updated".to_string()),
+                (claude.to_string_lossy().to_string(), "updated".to_string()),
+            ]
+        );
+        assert!(holds_current_skill(&default) && holds_current_skill(&claude));
+
+        let linked = tempfile::tempdir().unwrap();
+        let linked = std::fs::canonicalize(linked.path()).unwrap();
+        std::fs::create_dir_all(linked.join(".agents/skills/eoka")).unwrap();
+        std::fs::create_dir_all(linked.join(".claude/skills")).unwrap();
+        std::os::unix::fs::symlink(
+            "../../.agents/skills/eoka",
+            linked.join(".claude/skills/eoka"),
+        )
+        .unwrap();
+        assert_eq!(statuses(&install(None, &search(&linked)).unwrap()).len(), 1);
+
+        let taken = tempfile::tempdir().unwrap();
+        let taken = std::fs::canonicalize(taken.path()).unwrap();
+        std::fs::create_dir_all(taken.join(".claude/skills/eoka")).unwrap();
+        std::fs::write(
+            taken.join(".claude/skills/eoka/SKILL.md"),
+            "---\nname: other\n---\n",
+        )
+        .unwrap();
+        let refused = install(None, &search(&taken)).unwrap_err();
+        assert!(refused.contains("holds a different skill"), "{refused}");
+        assert!(!taken.join(".agents/skills/eoka").exists());
     }
 
     #[test]

@@ -17,6 +17,15 @@ mod state;
 mod target;
 mod wasm;
 
+use eoka_protocol::{
+    ActionCommandArgs, AttributeArgs, CaptchaInjectArgs, ClearFlagArgs, ClickShadowArgs,
+    CloneFromArgs, ConsoleArgs, DeleteCookieArgs, EmulateArgs, FakeCameraArgs, FetchArgs,
+    HeadersArgs, IdArgs, InterceptAddArgs, KeyArgs, LoadStateArgs, MouseButtonArgs, MouseMoveArgs,
+    NetworkExportArgs, NetworkLogArgs, NetworkRecordStartArgs, NetworkShowArgs, NetworkWaitArgs,
+    ObserveArgs, OpenArgs, PathArgs, PathStringArgs, RecordingIdArgs, RecordingStartArgs,
+    ScreenshotArgs, SelectorArgs, SetCookieArgs, SetStorageArgs, SnapshotArgs, StorageArgs,
+    TabIdArgs, TabNewArgs, TargetArgs, TextArgs, WaitArgs,
+};
 use std::collections::HashMap;
 use std::fmt::Write as FmtWrite;
 
@@ -31,7 +40,7 @@ use eoka::MouseButton;
 use serde_json::{json, Value};
 
 use eoka_protocol::launch_spec::LaunchSpec;
-use eoka_protocol::Response;
+use eoka_protocol::{Request, Response};
 use intercept::{InterceptLog, InterceptLogEntry, InterceptRule, InterceptState};
 use network::{NetworkConfig, NetworkRecorder};
 use persist::{capture_state, ensure_console_capture, restore_cookies, restore_state, SavedState};
@@ -166,6 +175,7 @@ pub(crate) fn host_version() -> &'static str {
 }
 
 pub struct Engine {
+    spoken: Option<String>,
     agent: crate::agent::SharedAgentSession,
     operations: crate::operations::OperationManager,
     downloads: crate::downloads::DownloadManager,
@@ -204,6 +214,7 @@ impl Engine {
             LaunchSpec::Connect { .. } | LaunchSpec::Reuse => ScriptPolicyState::default(),
         };
         Self {
+            spoken: None,
             agent: Default::default(),
             operations: Default::default(),
             downloads: Default::default(),
@@ -241,13 +252,12 @@ impl Engine {
         engine
     }
 
-    /// Run one catalog command against a specific tab instead of the current one.
     pub async fn handle_on(
         &mut self,
         tab_id: &str,
         page: &eoka::Page,
-        cmd: &str,
-        args: &Value,
+        request: Request,
+        spoken: Option<&str>,
     ) -> Response {
         let mut switched = false;
         if let Some(state) = self.state.as_mut() {
@@ -255,22 +265,18 @@ impl Engine {
                 .tabs
                 .entry(tab_id.to_owned())
                 .or_insert_with(|| TabState::new(page.clone()));
-            // The owner navigates and acts on this page outside the engine,
-            // so nothing cached about its document can be trusted.
             tab.invalidate();
             switched = state.current_tab_id.as_deref() != Some(tab_id);
             state.current_tab_id = Some(tab_id.to_owned());
         }
         if switched {
-            // Interception rules, script policy and recording follow the
-            // addressed page rather than the last one used.
             if let Err(error) = self.sync_current_target_features().await {
                 return Response::err(error);
             }
         }
-        let response = self.handle(cmd, args).await;
-        // Nothing polls an adopted engine between calls, so leave a drain
-        // running for requests that interception pauses in the meantime.
+        self.spoken = spoken.map(str::to_owned);
+        let response = self.handle(request).await;
+        self.spoken = None;
         self.service_idle_fetch();
         response
     }
@@ -434,12 +440,14 @@ impl Engine {
             .ok_or_else(|| "No browser open. Use 'open' first.".to_string())
     }
 
-    pub async fn handle(&mut self, cmd: &str, args: &Value) -> Response {
+    pub async fn handle(&mut self, request: Request) -> Response {
+        let cmd = request.cmd();
+        let args = &request.args_json();
         let policy = blockers::policy(cmd, args);
         let response = match self.refuse_blocked(cmd, args, policy).await {
             Some(refusal) => refusal,
             None => {
-                let mut response = self.handle_command(cmd, args).await;
+                let mut response = Box::pin(self.handle_command(request, args)).await;
                 self.diagnose_blocked(cmd, args, policy, &mut response)
                     .await;
                 response
@@ -449,8 +457,8 @@ impl Engine {
         response
     }
 
-    async fn handle_command(&mut self, cmd: &str, args: &Value) -> Response {
-        if cmd == "session_hello" {
+    async fn handle_command(&mut self, request: Request, args: &Value) -> Response {
+        if matches!(request, Request::SessionHello) {
             let mode = match self.spec {
                 LaunchSpec::Launch { headless: true, .. } => "headless",
                 LaunchSpec::Launch {
@@ -466,50 +474,76 @@ impl Engine {
         if let Err(error) = crate::url_policy::ensure_args_allowed(args) {
             return Response::err(error);
         }
-        if matches!(cmd, "agent_observe" | "agent_step") {
-            return self.handle_agent(cmd, args).await;
-        }
-        if cmd == "action_command" {
-            let command = args["command"].as_str().unwrap_or_default();
-            if (!crate::operations::commands::is_action(command) && command != "download_start")
-                || command == "action_perform"
-            {
-                return Response::err("Invalid convenience action");
+        let cmd = request.cmd();
+        match request {
+            Request::AgentObserve(observe) => {
+                self.handle_agent(agent::AgentCall::Observe(observe)).await
             }
-            let mut arguments = args["arguments"].clone();
-            if !arguments.is_object() {
-                arguments = serde_json::json!({});
+            Request::AgentStep(step) => self.handle_agent(agent::AgentCall::Step(step)).await,
+            Request::ActionCommand(envelope) => self.action_command(envelope).await,
+            Request::OperationGet(_)
+            | Request::OperationList(_)
+            | Request::OperationWait(_)
+            | Request::OperationCancel(_) => match self.operations.query(cmd, args).await {
+                Some(response) => response,
+                None => Response::err(format!("Unknown command: {cmd}")),
+            },
+            Request::ActionPerform(_) => self.handle_action(cmd, args).await,
+            action if action.is_convenience_action() => self.handle_action(cmd, args).await,
+            Request::DownloadStart(start) => {
+                if let Err(error) = self.downloads.restore().await {
+                    return Response::err_detail(error);
+                }
+                self.cmd_download_start(start).await
             }
-            arguments["operation_id"] = args["operation_id"].clone();
-            if command == "download_start" {
-                return self.cmd_download_start(&arguments).await;
-            }
-            return self.handle_action(command, &arguments).await;
+            Request::CaptchaDatadome(datadome) => self.cmd_captcha_datadome(datadome).await,
+            page_command => self.page_command(page_command, args).await,
         }
-        if let Some(response) = self.operations.query(cmd, args).await {
-            return response;
+    }
+
+    async fn action_command(&mut self, envelope: ActionCommandArgs) -> Response {
+        let command = envelope.command.as_str();
+        if (!crate::operations::commands::is_action(command) && command != "download_start")
+            || command == "action_perform"
+        {
+            return Response::err("Invalid convenience action");
         }
-        if crate::operations::commands::is_action(cmd) {
-            return self.handle_action(cmd, args).await;
+        let mut arguments = envelope.arguments;
+        if !arguments.is_object() {
+            arguments = serde_json::json!({});
         }
-        if matches!(cmd, "close" | "tab_close") {
+        arguments["operation_id"] = Value::String(envelope.operation_id);
+        if command == "download_start" {
+            return match serde_json::from_value(arguments) {
+                Ok(start) => self.cmd_download_start(start).await,
+                Err(error) => crate::downloads::rejected(crate::downloads::failure(
+                    "invalid_input",
+                    error.to_string(),
+                )),
+            };
+        }
+        self.handle_action(command, &arguments).await
+    }
+
+    async fn page_command(&mut self, request: Request, args: &Value) -> Response {
+        if matches!(request, Request::Close | Request::TabClose(_)) {
             self.operations.stop().await;
         }
-        if cmd.starts_with("download_") {
+        if matches!(
+            request,
+            Request::DownloadList
+                | Request::DownloadGet(_)
+                | Request::DownloadWait(_)
+                | Request::DownloadCancel(_)
+        ) {
             if let Err(error) = self.downloads.restore().await {
                 return Response::err_detail(error);
             }
         }
-        if cmd == "download_start" {
-            return self.cmd_download_start(args).await;
-        }
-        if cmd == "captcha_datadome" {
-            return self.cmd_captcha_datadome(args).await;
-        }
         let idle = self.idle_fetch_drain.take();
         self.stop_fetch_drain(idle).await;
         self.drain_fetch_events().await;
-        let response = match self.dispatch_guarded(cmd, args).await {
+        let response = match self.dispatch_guarded(request, args).await {
             Ok(resp) => resp,
             Err(e) => e.into_response(),
         };
@@ -517,177 +551,143 @@ impl Engine {
         response
     }
 
-    async fn dispatch(&mut self, cmd: &str, args: &Value) -> Result<Response, EngineError> {
-        match cmd {
-            "download_list" => Ok(Response::ok(serde_json::to_value(self.downloads.list())?)),
-            "download_get" | "download_cancel" => {
-                let id = self.arg_str(args, "id")?;
-                if cmd == "download_cancel" {
-                    return Ok(crate::downloads::start_response(self.downloads.cancel(id)));
-                }
-                Ok(match self.downloads.get(id) {
-                    Ok(job) => crate::downloads::record_response(job.snapshot()),
-                    Err(error) => Response::err_detail(error),
-                })
+    async fn dispatch(&mut self, request: Request) -> Result<Response, EngineError> {
+        match request {
+            Request::DownloadList => Ok(Response::ok(serde_json::to_value(self.downloads.list())?)),
+            Request::DownloadGet(args) => Ok(match self.downloads.get(&args.id) {
+                Ok(job) => crate::downloads::record_response(job.snapshot()),
+                Err(error) => Response::err_detail(error),
+            }),
+            Request::DownloadCancel(args) => Ok(crate::downloads::start_response(
+                self.downloads.cancel(&args.id),
+            )),
+            Request::DownloadWait(args) => Ok(self.downloads.wait(&args.id, args.timeout_ms).await),
+            Request::Open(args) => self.cmd_open(&args).await,
+            Request::Snapshot(args) => self.cmd_snapshot(&args).await,
+            Request::Observe(args) => self.cmd_observe(&args).await,
+            Request::Screenshot(args) => self.cmd_screenshot(args).await,
+            Request::Emulate(args) => self.cmd_emulate(&args).await,
+            Request::Info => self.cmd_info().await,
+            Request::Frames => self.cmd_frames().await,
+            Request::Text => self.cmd_text().await,
+            Request::Find(args) => self.cmd_find(&args).await,
+            Request::Content => self.cmd_content().await,
+            Request::RecordingStart(args) => self.cmd_recording_start(args).await,
+            Request::RecordingGet(args) => self.cmd_recording_control("recording.get", &args).await,
+            Request::RecordingStop(args) => {
+                self.cmd_recording_control("recording.stop", &args).await
             }
-            "download_wait" => Ok(self
-                .downloads
-                .wait(
-                    self.arg_str(args, "id")?,
-                    args["timeout_ms"].as_u64().unwrap_or(30000),
-                )
-                .await),
-            "open" => self.cmd_open(args).await,
-            "back" => {
-                self.cmd_nav(|p| Box::pin(async { p.back().await }), "Back")
+            Request::RecordingCancel(args) => {
+                self.cmd_recording_control("recording.cancel", &args).await
+            }
+            Request::GetText(args) => self.cmd_get_text(&args).await,
+            Request::GetAttribute(args) => self.cmd_get_attribute(&args).await,
+            Request::Exists(args) => self.cmd_exists(&args).await,
+            Request::ClickShadow(args) => self.cmd_click_shadow(&args).await,
+            Request::MouseDown(args) => self.cmd_mouse_down(&args).await,
+            Request::MouseMove(args) => self.cmd_mouse_move(&args).await,
+            Request::MouseUp(args) => self.cmd_mouse_up(&args).await,
+            Request::KeyDown(args) => self.cmd_key_down(&args).await,
+            Request::KeyUp(args) => self.cmd_key_up(&args).await,
+            Request::ReleaseAllInputs => self.cmd_release_all_inputs().await,
+            Request::Scroll(args) => self.cmd_scroll(&args).await,
+            Request::Eval(args) => self.script("eval", eval::Script::Eval(args)).await,
+            Request::Exec(args) => self.script("exec", eval::Script::Exec(args)).await,
+            Request::FrameEval(args) => {
+                self.script("frame_eval", eval::Script::FrameEval(args))
                     .await
             }
-            "forward" => {
-                self.cmd_nav(|p| Box::pin(async { p.forward().await }), "Forward")
-                    .await
-            }
-            "reload" => self.cmd_reload().await,
-            "snapshot" => self.cmd_snapshot(args).await,
-            "observe" => self.cmd_observe(args).await,
-            "screenshot" => self.cmd_screenshot(args).await,
-            "emulate" => self.cmd_emulate(args).await,
-            "info" => self.cmd_info().await,
-            "frames" => self.cmd_frames().await,
-            "text" => self.cmd_text().await,
-            "find" => self.cmd_find(args).await,
-            "content" => self.cmd_content().await,
-            "recording_start" => self.cmd_recording_start(args).await,
-            "recording_get" | "recording_stop" | "recording_cancel" => {
-                self.cmd_recording_control(cmd, args).await
-            }
-            "get_text" => self.cmd_get_text(args).await,
-            "get_attribute" => self.cmd_get_attribute(args).await,
-            "exists" => self.cmd_exists(args).await,
-            "click_shadow" => self.cmd_click_shadow(args).await,
-            "click" => Ok(self.handle_action("click", args).await),
-            "dblclick" => Ok(self.handle_action("dblclick", args).await),
-            "fill" => Ok(self.handle_action("fill", args).await),
-            "select" => Ok(self.handle_action("select", args).await),
-            "hover" => Ok(self.handle_action("hover", args).await),
-            "key" => Ok(self.handle_action("key", args).await),
-            "mouse_down" => self.cmd_mouse_down(args).await,
-            "mouse_move" => self.cmd_mouse_move(args).await,
-            "mouse_up" => self.cmd_mouse_up(args).await,
-            "key_down" => self.cmd_key_down(args).await,
-            "key_up" => self.cmd_key_up(args).await,
-            "release_all_inputs" => self.cmd_release_all_inputs().await,
-            "scroll" => self.cmd_scroll(args).await,
-            "eval" | "exec" | "frame_eval" => {
+            Request::CaptchaInject(args) => self.cmd_captcha_inject(&args).await,
+            Request::CaptchaDetect => self.cmd_captcha_detect().await,
+            Request::DialogAccept(args) => self.cmd_dialog(Some(args.prompt_text.as_deref())).await,
+            Request::DialogDismiss => self.cmd_dialog(None).await,
+            Request::CaptchaTurnstile(args) => {
                 let drain = self.start_fetch_drain();
-                let page = self.current_page();
-                let session = self.session_name.clone();
-                let remedies = blockers::Remedies::new(Some(&session));
-                let name = remedies.name(cmd, args);
-                let result = blockers::guard(
-                    page.as_ref(),
-                    remedies,
-                    &name,
-                    blockers::Policy::Script,
-                    None,
-                    async {
-                        match cmd {
-                            "eval" => self.cmd_eval(args).await,
-                            "exec" => self.cmd_exec(args).await,
-                            _ => self.cmd_frame_eval(args).await,
-                        }
-                    },
-                )
-                .await;
+                let result = self.cmd_captcha_turnstile(&args).await;
                 if !self.stop_fetch_drain(drain).await {
                     return Err("Request interception cleanup failed".into());
                 }
                 result
             }
-            "captcha_datadome" => Ok(self.cmd_captcha_datadome(args).await),
-            "captcha_inject" => self.cmd_captcha_inject(args).await,
-            "captcha_detect" => self.cmd_captcha_detect().await,
-            "dialog_accept" => self.cmd_dialog(Some(args["prompt_text"].as_str())).await,
-            "dialog_dismiss" => self.cmd_dialog(None).await,
-            "captcha_turnstile" => {
-                let drain = self.start_fetch_drain();
-                let result = self.cmd_captcha_turnstile(args).await;
-                if !self.stop_fetch_drain(drain).await {
-                    return Err("Request interception cleanup failed".into());
-                }
-                result
+            Request::Fetch(args) => self.cmd_fetch(args).await,
+            Request::Cookies => self.cmd_cookies().await,
+            Request::SetCookie(args) => self.cmd_set_cookie(&args).await,
+            Request::DeleteCookie(args) => self.cmd_delete_cookie(&args).await,
+            Request::ClearCookies => self.cmd_clear_cookies().await,
+            Request::Storage(args) => self.cmd_storage(&args).await,
+            Request::SetStorage(args) => self.cmd_set_storage(&args).await,
+            Request::DumpStorage => self.cmd_dump_storage().await,
+            Request::SaveState(args) => self.cmd_save_state(&args).await,
+            Request::LoadState(args) => self.cmd_load_state(&args).await,
+            Request::Headers(args) => self.cmd_headers(&args).await,
+            Request::Console(args) => self.cmd_console(&args).await,
+            Request::Errors(args) => self.cmd_errors(&args).await,
+            Request::TabList => self.cmd_tab_list().await,
+            Request::TabNew(args) => self.cmd_tab_new(&args).await,
+            Request::TabSwitch(args) => self.cmd_tab_switch(&args).await,
+            Request::TabClose(args) => self.cmd_tab_close(&args).await,
+            Request::TabAttach(args) => self.cmd_tab_attach(&args).await,
+            Request::CloneFrom(args) => self.cmd_clone_from(&args).await,
+            Request::Wait(args) => self.cmd_wait(&args).await,
+            Request::SpaInfo => self.cmd_spa_info().await,
+            Request::SpaNavigate(args) => self.cmd_spa_navigate(&args).await,
+            Request::FakeCamera(args) => self.cmd_fake_camera(&args).await,
+            Request::WasmInfo => self.cmd_wasm_info().await,
+            Request::WasmRead(args) => self.cmd_wasm_read(&args).await,
+            Request::WasmWrite(args) => self.cmd_wasm_write(&args).await,
+            Request::WasmFind(args) => self.cmd_wasm_find(&args).await,
+            Request::InterceptAdd(args) => self.cmd_intercept_add(&args).await,
+            Request::InterceptList => self.cmd_intercept_list().await,
+            Request::InterceptRemove(args) => self.cmd_intercept_remove(&args).await,
+            Request::InterceptLog(args) => self.cmd_intercept_log(&args).await,
+            Request::JsMode(args) => self.cmd_js_mode(&args).await,
+            Request::JsAllow(args) => self.cmd_js_allow(&args).await,
+            Request::JsBlock(args) => self.cmd_js_block(&args).await,
+            Request::JsRemove(args) => self.cmd_js_remove(&args).await,
+            Request::JsList => self.cmd_js_list().await,
+            Request::NetworkRecordStart(args) => self.cmd_network_record_start(&args).await,
+            Request::NetworkRecordStop => self.cmd_network_record_stop().await,
+            Request::NetworkRecordStatus => self.cmd_network_record_status().await,
+            Request::NetworkLog(args) => self.cmd_network_log(&args).await,
+            Request::NetworkShow(args) => self.cmd_network_show(&args).await,
+            Request::NetworkExport(args) => self.cmd_network_export(&args).await,
+            Request::NetworkWait(args) => self.cmd_network_wait(&args).await,
+            Request::NetworkClear => self.cmd_network_clear().await,
+            Request::Close => self.cmd_close().await,
+            before_the_page @ (Request::SessionHello
+            | Request::AgentObserve(_)
+            | Request::AgentStep(_)
+            | Request::ActionCommand(_)
+            | Request::ActionPerform(_)
+            | Request::OperationGet(_)
+            | Request::OperationList(_)
+            | Request::OperationWait(_)
+            | Request::OperationCancel(_)
+            | Request::Click(_)
+            | Request::DblClick(_)
+            | Request::Fill(_)
+            | Request::Select(_)
+            | Request::Hover(_)
+            | Request::Key(_)
+            | Request::Back
+            | Request::Forward
+            | Request::Reload
+            | Request::DownloadStart(_)
+            | Request::CaptchaDatadome(_)
+            | Request::Shutdown) => {
+                Err(format!("Unknown command: {}", before_the_page.cmd()).into())
             }
-            "fetch" => self.cmd_fetch(args).await,
-            "cookies" => self.cmd_cookies().await,
-            "set_cookie" => self.cmd_set_cookie(args).await,
-            "delete_cookie" => self.cmd_delete_cookie(args).await,
-            "clear_cookies" => self.cmd_clear_cookies().await,
-            "storage" => self.cmd_storage(args).await,
-            "set_storage" => self.cmd_set_storage(args).await,
-            "dump_storage" => self.cmd_dump_storage().await,
-            "save_state" => self.cmd_save_state(args).await,
-            "load_state" => self.cmd_load_state(args).await,
-            "headers" => self.cmd_headers(args).await,
-            "console" => self.cmd_console(args).await,
-            "errors" => self.cmd_errors(args).await,
-            "tab_list" => self.cmd_tab_list().await,
-            "tab_new" => self.cmd_tab_new(args).await,
-            "tab_switch" => self.cmd_tab_switch(args).await,
-            "tab_close" => self.cmd_tab_close(args).await,
-            "tab_attach" => self.cmd_tab_attach(args).await,
-            "clone_from" => self.cmd_clone_from(args).await,
-            "wait" => self.cmd_wait(args).await,
-            "spa_info" => self.cmd_spa_info().await,
-            "spa_navigate" => self.cmd_spa_navigate(args).await,
-            "fake_camera" => self.cmd_fake_camera(args).await,
-            "wasm_info" => self.cmd_wasm_info().await,
-            "wasm_read" => self.cmd_wasm_read(args).await,
-            "wasm_write" => self.cmd_wasm_write(args).await,
-            "wasm_find" => self.cmd_wasm_find(args).await,
-            "intercept_add" => self.cmd_intercept_add(args).await,
-            "intercept_list" => self.cmd_intercept_list().await,
-            "intercept_remove" => self.cmd_intercept_remove(args).await,
-            "intercept_log" => self.cmd_intercept_log(args).await,
-            "js_mode" => self.cmd_js_mode(args).await,
-            "js_allow" => self.cmd_js_allow(args).await,
-            "js_block" => self.cmd_js_block(args).await,
-            "js_remove" => self.cmd_js_remove(args).await,
-            "js_list" => self.cmd_js_list().await,
-            "network_record_start" => self.cmd_network_record_start(args).await,
-            "network_record_stop" => self.cmd_network_record_stop().await,
-            "network_record_status" => self.cmd_network_record_status().await,
-            "network_log" => self.cmd_network_log(args).await,
-            "network_show" => self.cmd_network_show(args).await,
-            "network_export" => self.cmd_network_export(args).await,
-            "network_wait" => self.cmd_network_wait(args).await,
-            "network_clear" => self.cmd_network_clear().await,
-            "close" => self.cmd_close().await,
-            other => Err(format!("Unknown command: {}", other).into()),
         }
     }
 
-    fn arg_str<'a>(&self, args: &'a Value, key: &str) -> Result<&'a str, String> {
-        args[key]
-            .as_str()
-            .ok_or_else(|| format!("Missing '{}'", key))
-    }
-
-    fn arg_f64(&self, args: &Value, key: &str) -> Result<f64, String> {
-        args[key]
-            .as_f64()
-            .ok_or_else(|| format!("Missing '{}'", key))
-    }
-
-    fn mouse_button_args(&self, args: &Value) -> Result<(f64, f64, MouseButton), String> {
-        let button = serde_json::from_value::<eoka_protocol::MouseButton>(args["button"].clone())
-            .map_err(|error| error.to_string())?;
-        let button = match button {
+    fn mouse_button(&self, button: eoka_protocol::MouseButton) -> MouseButton {
+        match button {
             eoka_protocol::MouseButton::Left => MouseButton::Left,
             eoka_protocol::MouseButton::Middle => MouseButton::Middle,
             eoka_protocol::MouseButton::Right => MouseButton::Right,
             eoka_protocol::MouseButton::Back => MouseButton::Back,
             eoka_protocol::MouseButton::Forward => MouseButton::Forward,
-        };
-        Ok((self.arg_f64(args, "x")?, self.arg_f64(args, "y")?, button))
+        }
     }
 
     fn tab_with_config(&mut self) -> Result<(&mut TabState, bool), String> {
@@ -699,10 +699,11 @@ impl Engine {
         Ok((tab, vp))
     }
 
-    async fn cmd_open(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let requested_url = self.arg_str(args, "url")?.to_string();
-        let open_state = args["load_state"]
-            .as_str()
+    async fn cmd_open(&mut self, args: &OpenArgs) -> Result<Response, EngineError> {
+        let requested_url = args.url.clone();
+        let open_state = args
+            .load_state
+            .as_deref()
             .map(read_saved_state_file)
             .transpose()?;
         let url = resolve_open_url_for_state(&requested_url, open_state.as_ref())?;
@@ -713,12 +714,13 @@ impl Engine {
         self.ensure_browser().await?;
 
         let headers: Option<HashMap<String, String>> = args
-            .get("headers")
+            .headers
+            .as_ref()
             .filter(|v| !v.is_null())
             .and_then(|v| serde_json::from_value(v.clone()).ok());
-        let user_agent = args["user_agent"].as_str();
-        let bypass_csp = args["bypass_csp"].as_bool().unwrap_or(false);
-        let inject_js = args["inject_js"].as_str();
+        let user_agent = args.user_agent.as_deref();
+        let bypass_csp = args.bypass_csp;
+        let inject_js = args.inject_js.as_deref();
         let script_enabled = self.script_policy.is_active().then(|| {
             let host = url::Url::parse(&url)
                 .ok()
@@ -734,11 +736,13 @@ impl Engine {
             || script_enabled.is_some();
 
         let operations = self.operations.clone();
-        let operation_id = args["operation_id"]
-            .as_str()
-            .map(str::to_owned)
+        let operation_id = args
+            .operation
+            .operation_id
+            .clone()
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-        let options = crate::operations::commands::options(args)?;
+        let options =
+            crate::operations::commands::options(&serde_json::to_value(&args.operation)?)?;
         let budget = options.timeout_ms;
         let drain = self.start_fetch_drain();
         let active_recorder = self.network.clone();
@@ -867,64 +871,9 @@ impl Engine {
         Ok(Response::action_result(record))
     }
 
-    async fn cmd_nav<F>(&mut self, f: F, label: &str) -> Result<Response, EngineError>
-    where
-        F: FnOnce(
-            &eoka::Page,
-        ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = eoka::Result<()>> + Send + '_>,
-        >,
-    {
-        let page = self.require_tab()?.page.clone();
-        let drain = self.start_fetch_drain();
-        let result = async {
-            f(&page).await.map_err(|e| e.to_string())?;
-            let _ = wait_for_stable(&page).await;
-            page.url().await.map_err(|e| e.to_string())
-        }
-        .await;
-        self.stop_fetch_drain(drain).await;
-        let url = result?;
-        Ok(Response::ok_text(format!("{} to: {}", label, url)))
-    }
-
-    async fn cmd_reload(&mut self) -> Result<Response, EngineError> {
-        let page = self.require_tab()?.page.clone();
-        let script_enabled = if self.script_policy.is_active() {
-            let current_url = page.url().await?;
-            let host = url::Url::parse(&current_url)
-                .ok()
-                .and_then(|parsed| parsed.host_str().map(str::to_owned));
-            Some(self.script_policy.resolve(host.as_deref().unwrap_or("")))
-        } else {
-            None
-        };
-        let drain = self.start_fetch_drain();
-        let result = async {
-            if let Some(enabled) = script_enabled {
-                page.set_javascript_enabled(enabled)
-                    .await
-                    .map_err(|e| e.to_string())?;
-            }
-            page.reload().await.map_err(|e| e.to_string())?;
-            let _ = wait_for_stable(&page).await;
-            page.url().await.map_err(|e| e.to_string())
-        }
-        .await;
-        self.stop_fetch_drain(drain).await;
-        if let Some(enabled) = script_enabled {
-            self.script_policy.note_applied(enabled);
-        }
-        let url = result?;
-        if let Ok(tab) = self.require_tab_mut() {
-            tab.invalidate();
-        }
-        Ok(Response::ok_text(format!("Reloaded: {}", url)))
-    }
-
-    async fn cmd_snapshot(&mut self, args: &Value) -> Result<Response, EngineError> {
+    async fn cmd_snapshot(&mut self, args: &SnapshotArgs) -> Result<Response, EngineError> {
         self.ensure_browser().await?;
-        let include_all = args["all"].as_bool().unwrap_or(false);
+        let include_all = args.all;
         let tab = self.require_tab_mut()?;
 
         let result = snapshot::snapshot(&tab.page, include_all).await?;
@@ -932,22 +881,19 @@ impl Engine {
         Ok(Response::ok_text(result.tree_text))
     }
 
-    async fn cmd_observe(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let args: eoka_protocol::ObserveArgs =
-            serde_json::from_value(args.clone()).map_err(|error| error.to_string())?;
+    async fn cmd_observe(&mut self, args: &ObserveArgs) -> Result<Response, EngineError> {
         let (tab, viewport_only) = self.tab_with_config()?;
-        let (elements, data) = observe::inspect(&tab.page, viewport_only, &args).await?;
+        let (elements, data) = observe::inspect(&tab.page, viewport_only, args).await?;
         tab.elements = elements;
         Ok(Response::ok(data))
     }
 
-    async fn cmd_screenshot(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let annotate_flag = args["annotate"].as_bool().unwrap_or(false);
-        let output = args["output"].as_str();
+    async fn cmd_screenshot(&mut self, capture: ScreenshotArgs) -> Result<Response, EngineError> {
+        let annotate_flag = capture.annotate;
+        let output = capture.output.as_deref();
 
         let (tab, viewport_only) = self.tab_with_config()?;
 
-        let capture: eoka_protocol::ScreenshotArgs = serde_json::from_value(args.clone())?;
         let params = eoka_protocol::sidecar::ScreenshotParams {
             page_id: String::new(),
             format: capture.format,
@@ -1004,9 +950,9 @@ impl Engine {
         Ok(Response::ok(result))
     }
 
-    async fn cmd_emulate(&mut self, args: &Value) -> Result<Response, EngineError> {
+    async fn cmd_emulate(&mut self, args: &EmulateArgs) -> Result<Response, EngineError> {
         self.ensure_browser().await?;
-        let reset = args["reset"].as_bool().unwrap_or(false);
+        let reset = args.reset;
         let tab = self.require_tab_mut()?;
         let session = tab.page.session();
 
@@ -1023,10 +969,10 @@ impl Engine {
             return Ok(Response::ok_text("Device emulation cleared"));
         }
 
-        let width = args["width"].as_u64().unwrap_or(390);
-        let height = args["height"].as_u64().unwrap_or(844);
-        let dpr = args["dpr"].as_f64().unwrap_or(2.0);
-        let mobile = !args["desktop"].as_bool().unwrap_or(false);
+        let width = args.width;
+        let height = args.height;
+        let dpr = args.dpr;
+        let mobile = !args.desktop;
 
         session
             .send::<_, Value>(
@@ -1068,8 +1014,10 @@ impl Engine {
         Ok(Response::ok_text(text))
     }
 
-    async fn cmd_recording_start(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let args: eoka_protocol::RecordingStartArgs = serde_json::from_value(args.clone())?;
+    async fn cmd_recording_start(
+        &mut self,
+        args: RecordingStartArgs,
+    ) -> Result<Response, EngineError> {
         let state = self
             .state
             .as_ref()
@@ -1095,15 +1043,10 @@ impl Engine {
 
     async fn cmd_recording_control(
         &mut self,
-        cmd: &str,
-        args: &Value,
+        method: &str,
+        args: &RecordingIdArgs,
     ) -> Result<Response, EngineError> {
-        let method = match cmd {
-            "recording_get" => "recording.get",
-            "recording_stop" => "recording.stop",
-            _ => "recording.cancel",
-        };
-        let params = json!({"recordingId": args["recording_id"]});
+        let params = json!({"recordingId": args.recording_id});
         recording_response(crate::recordings::control(&self.recordings, method, params).await)
     }
 
@@ -1141,29 +1084,28 @@ impl Engine {
         Ok(Response::ok_text(html?))
     }
 
-    async fn cmd_get_text(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let selector = self.arg_str(args, "selector")?;
+    async fn cmd_get_text(&mut self, args: &SelectorArgs) -> Result<Response, EngineError> {
+        let selector = args.selector.as_str();
         let element = self.require_tab()?.page.find(selector).await;
         let text = element?.text().await;
         Ok(Response::ok_text(text?))
     }
 
-    async fn cmd_get_attribute(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let selector = self.arg_str(args, "selector")?;
-        let name = self.arg_str(args, "name")?;
+    async fn cmd_get_attribute(&mut self, args: &AttributeArgs) -> Result<Response, EngineError> {
+        let selector = args.selector.as_str();
+        let name = args.name.as_str();
         let element = self.require_tab()?.page.find(selector).await;
         let value = element?.get_attribute(name).await;
         Ok(Response::ok(json!({"value": value?})))
     }
 
-    async fn cmd_exists(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let selector = self.arg_str(args, "selector")?;
+    async fn cmd_exists(&mut self, args: &SelectorArgs) -> Result<Response, EngineError> {
+        let selector = args.selector.as_str();
         let exists = self.require_tab()?.page.exists(selector).await;
         Ok(Response::ok(json!({"exists": exists})))
     }
 
-    async fn cmd_click_shadow(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let args: eoka_protocol::ClickShadowArgs = serde_json::from_value(args.clone())?;
+    async fn cmd_click_shadow(&mut self, args: &ClickShadowArgs) -> Result<Response, EngineError> {
         let page = &self.require_tab()?.page;
         let receipt = crate::capture::painting(
             page,
@@ -1183,8 +1125,8 @@ impl Engine {
         })))
     }
 
-    async fn cmd_find(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let text = self.arg_str(args, "text")?;
+    async fn cmd_find(&mut self, args: &TextArgs) -> Result<Response, EngineError> {
+        let text = args.text.as_str();
         let (tab, viewport_only) = self.tab_with_config()?;
 
         if tab.elements.is_empty() {
@@ -1214,34 +1156,40 @@ impl Engine {
         }
     }
 
-    async fn cmd_mouse_down(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let (x, y, button) = self.mouse_button_args(args)?;
-        self.require_tab()?.page.mouse_down(x, y, button).await?;
+    async fn cmd_mouse_down(&mut self, args: &MouseButtonArgs) -> Result<Response, EngineError> {
+        let button = self.mouse_button(args.button);
+        self.require_tab()?
+            .page
+            .mouse_down(args.x, args.y, button)
+            .await?;
         Ok(Response::ok_text("Mouse button held"))
     }
 
-    async fn cmd_mouse_move(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let x = self.arg_f64(args, "x")?;
-        let y = self.arg_f64(args, "y")?;
+    async fn cmd_mouse_move(&mut self, args: &MouseMoveArgs) -> Result<Response, EngineError> {
+        let x = args.x;
+        let y = args.y;
         let page = &self.require_tab()?.page;
         crate::capture::painting(page, page.mouse_move(x, y)).await?;
         Ok(Response::ok_text("Mouse moved"))
     }
 
-    async fn cmd_mouse_up(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let (x, y, button) = self.mouse_button_args(args)?;
-        self.require_tab()?.page.mouse_up(x, y, button).await?;
+    async fn cmd_mouse_up(&mut self, args: &MouseButtonArgs) -> Result<Response, EngineError> {
+        let button = self.mouse_button(args.button);
+        self.require_tab()?
+            .page
+            .mouse_up(args.x, args.y, button)
+            .await?;
         Ok(Response::ok_text("Mouse button released"))
     }
 
-    async fn cmd_key_down(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let key = self.arg_str(args, "key")?;
+    async fn cmd_key_down(&mut self, args: &KeyArgs) -> Result<Response, EngineError> {
+        let key = args.key.as_str();
         self.require_tab()?.page.key_down(key).await?;
         Ok(Response::ok_text(format!("Held {key}")))
     }
 
-    async fn cmd_key_up(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let key = self.arg_str(args, "key")?;
+    async fn cmd_key_up(&mut self, args: &KeyArgs) -> Result<Response, EngineError> {
+        let key = args.key.as_str();
         self.require_tab()?.page.key_up(key).await?;
         Ok(Response::ok_text(format!("Released {key}")))
     }
@@ -1251,8 +1199,8 @@ impl Engine {
         Ok(Response::ok_text("Released all held inputs"))
     }
 
-    async fn cmd_scroll(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let target_str = self.arg_str(args, "target")?;
+    async fn cmd_scroll(&mut self, args: &TargetArgs) -> Result<Response, EngineError> {
+        let target_str = args.target.as_str();
         let tab = self.require_tab()?;
 
         match target_str {
@@ -1296,12 +1244,15 @@ impl Engine {
         Ok(Response::ok_text(format!("Scrolled {}", target_str)))
     }
 
-    async fn cmd_captcha_inject(&mut self, args: &Value) -> Result<Response, EngineError> {
+    async fn cmd_captcha_inject(
+        &mut self,
+        args: &CaptchaInjectArgs,
+    ) -> Result<Response, EngineError> {
         self.ensure_browser().await?;
-        let token = self.arg_str(args, "token")?;
-        let captcha_type = args["captcha_type"].as_str().unwrap_or("auto");
-        let callback = args["callback"].as_str();
-        let click_after = args["click_after"].as_str().map(str::to_string);
+        let token = args.token.as_str();
+        let captcha_type = args.captcha_type.as_str();
+        let callback = args.callback.as_deref();
+        let click_after = args.click_after.as_deref().map(str::to_string);
         let kind = parse_captcha_inject_kind(captcha_type).map_err(|error| error.to_string())?;
         let js = build_captcha_inject_js(token, kind, callback);
         let result: String = {
@@ -1329,14 +1280,15 @@ impl Engine {
         Ok(Response::ok(parsed))
     }
 
-    async fn cmd_fetch(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let args = serde_json::from_value(args.clone()).map_err(|error| error.to_string())?;
+    async fn cmd_fetch(&mut self, args: FetchArgs) -> Result<Response, EngineError> {
         let page = self.require_tab()?.page.clone();
         let drain = self.start_fetch_drain();
+        let remedies = blockers::Remedies::new(Some(&self.session_name));
+        let name = self.named(&remedies, "fetch", &Value::Null);
         let response = blockers::guard(
             Some(&page),
-            blockers::Remedies::new(Some(&self.session_name)),
-            "fetch",
+            remedies,
+            &name,
             blockers::Policy::Script,
             None,
             async { Ok::<_, EngineError>(crate::browser_fetch::fetch(&page, args).await) },
@@ -1362,13 +1314,13 @@ impl Engine {
         Ok(Response::ok(Value::Array(json)))
     }
 
-    async fn cmd_set_cookie(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let name = self.arg_str(args, "name")?;
-        let value = self.arg_str(args, "value")?;
-        let path = args["path"].as_str().unwrap_or("/");
+    async fn cmd_set_cookie(&mut self, args: &SetCookieArgs) -> Result<Response, EngineError> {
+        let name = args.name.as_str();
+        let value = args.value.as_str();
+        let path = args.path.as_deref().unwrap_or("/");
 
         let tab = self.require_tab()?;
-        let domain = match args["domain"].as_str() {
+        let domain = match args.domain.as_deref() {
             Some(d) => d.to_string(),
             None => tab.page.evaluate_sync("location.hostname").await?,
         };
@@ -1387,10 +1339,13 @@ impl Engine {
         Ok(Response::ok_text(format!("Set cookie: {}={}", name, value)))
     }
 
-    async fn cmd_delete_cookie(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let name = self.arg_str(args, "name")?;
+    async fn cmd_delete_cookie(
+        &mut self,
+        args: &DeleteCookieArgs,
+    ) -> Result<Response, EngineError> {
+        let name = args.name.as_str();
         let tab = self.require_tab()?;
-        let domain = match args["domain"].as_str() {
+        let domain = match args.domain.as_deref() {
             Some(d) => d.to_string(),
             None => {
                 tab.page
@@ -1414,9 +1369,9 @@ impl Engine {
         Ok(Response::ok_text("Cleared all cookies"))
     }
 
-    async fn cmd_storage(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let key = args["key"].as_str();
-        let session = args["session_storage"].as_bool().unwrap_or(false);
+    async fn cmd_storage(&mut self, args: &StorageArgs) -> Result<Response, EngineError> {
+        let key = args.key.as_deref();
+        let session = args.session_storage;
         let s = if session {
             "sessionStorage"
         } else {
@@ -1434,10 +1389,10 @@ impl Engine {
         }
     }
 
-    async fn cmd_set_storage(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let key = self.arg_str(args, "key")?;
-        let value = self.arg_str(args, "value")?;
-        let session = args["session_storage"].as_bool().unwrap_or(false);
+    async fn cmd_set_storage(&mut self, args: &SetStorageArgs) -> Result<Response, EngineError> {
+        let key = args.key.as_str();
+        let value = args.value.as_str();
+        let session = args.session_storage;
         let s = if session {
             "sessionStorage"
         } else {
@@ -1461,8 +1416,8 @@ impl Engine {
         Ok(Response::ok(eval_json_or_string(&tab.page, js).await?))
     }
 
-    async fn cmd_save_state(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let path = self.arg_str(args, "path")?;
+    async fn cmd_save_state(&mut self, args: &PathArgs) -> Result<Response, EngineError> {
+        let path = args.path.as_str();
         let tab = self.require_tab()?;
         let state = capture_state(&tab.page).await?;
         let json = serde_json::to_string_pretty(&state)?;
@@ -1476,9 +1431,9 @@ impl Engine {
         )))
     }
 
-    async fn cmd_load_state(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let path = self.arg_str(args, "path")?;
-        let no_navigate = args["no_navigate"].as_bool().unwrap_or(false);
+    async fn cmd_load_state(&mut self, args: &LoadStateArgs) -> Result<Response, EngineError> {
+        let path = args.path.as_str();
+        let no_navigate = args.no_navigate;
 
         let saved = read_saved_state_file(path)?;
 
@@ -1508,13 +1463,9 @@ impl Engine {
         )))
     }
 
-    async fn cmd_headers(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let raw = &args["headers_json"];
-        let headers: HashMap<String, String> = if let Some(s) = raw.as_str() {
-            serde_json::from_str(s).map_err(|_| "Invalid headers JSON")?
-        } else {
-            serde_json::from_value(raw.clone()).map_err(|_| "Invalid headers JSON")?
-        };
+    async fn cmd_headers(&mut self, args: &HeadersArgs) -> Result<Response, EngineError> {
+        let headers: HashMap<String, String> =
+            serde_json::from_str(&args.headers_json).map_err(|_| "Invalid headers JSON")?;
 
         let tab = self.require_tab()?;
         tab.page.set_extra_headers(headers.clone()).await?;
@@ -1524,9 +1475,9 @@ impl Engine {
         )))
     }
 
-    async fn cmd_console(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let clear = args["clear"].as_bool().unwrap_or(false);
-        let level = args["level"].as_str();
+    async fn cmd_console(&mut self, args: &ConsoleArgs) -> Result<Response, EngineError> {
+        let clear = args.clear;
+        let level = args.level.as_deref();
 
         let tab = self.require_tab_mut()?;
         ensure_console_capture(tab).await?;
@@ -1549,8 +1500,8 @@ impl Engine {
         Ok(Response::ok(parsed))
     }
 
-    async fn cmd_errors(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let clear = args["clear"].as_bool().unwrap_or(false);
+    async fn cmd_errors(&mut self, args: &ClearFlagArgs) -> Result<Response, EngineError> {
+        let clear = args.clear;
         let tab = self.require_tab_mut()?;
         ensure_console_capture(tab).await?;
 
@@ -1586,9 +1537,9 @@ impl Engine {
         }))
     }
 
-    async fn cmd_tab_new(&mut self, args: &Value) -> Result<Response, EngineError> {
+    async fn cmd_tab_new(&mut self, args: &TabNewArgs) -> Result<Response, EngineError> {
         self.ensure_browser().await?;
-        let url = args["url"].as_str();
+        let url = args.url.as_deref();
         let active_recorder = self.network.clone();
         let state = self.require_state_mut()?;
         let (tab_id, url, title) = {
@@ -1617,8 +1568,8 @@ impl Engine {
         )))
     }
 
-    async fn cmd_tab_switch(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let tab_id = self.arg_str(args, "tab_id")?;
+    async fn cmd_tab_switch(&mut self, args: &TabIdArgs) -> Result<Response, EngineError> {
+        let tab_id = args.tab_id.as_str();
         let state = self.require_state_mut()?;
         state.switch_tab(tab_id).await?;
         let (url, title) = {
@@ -1632,8 +1583,8 @@ impl Engine {
         )))
     }
 
-    async fn cmd_tab_attach(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let tab_id = self.arg_str(args, "tab_id")?.to_string();
+    async fn cmd_tab_attach(&mut self, args: &TabIdArgs) -> Result<Response, EngineError> {
+        let tab_id = args.tab_id.clone();
         self.ensure_browser().await?;
         let state = self.require_state_mut()?;
         state.attach_existing_tab(&tab_id).await?;
@@ -1648,9 +1599,9 @@ impl Engine {
         )))
     }
 
-    async fn cmd_clone_from(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let source = self.arg_str(args, "source")?.to_string();
-        let to = args["to"].as_str().map(std::path::PathBuf::from);
+    async fn cmd_clone_from(&mut self, args: &CloneFromArgs) -> Result<Response, EngineError> {
+        let source = args.source.clone();
+        let to = args.to.as_deref().map(std::path::PathBuf::from);
 
         let saved = persist::clone_state_from_source(&source).await?;
 
@@ -1688,8 +1639,8 @@ impl Engine {
         )))
     }
 
-    async fn cmd_tab_close(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let tab_id = self.arg_str(args, "tab_id")?.to_string();
+    async fn cmd_tab_close(&mut self, args: &TabIdArgs) -> Result<Response, EngineError> {
+        let tab_id = args.tab_id.clone();
         let closing_session = self
             .state
             .as_ref()
@@ -1709,36 +1660,31 @@ impl Engine {
         Ok(Response::ok_text(format!("Closed tab [{}]", tab_id)))
     }
 
-    async fn cmd_wait(&mut self, args: &Value) -> Result<Response, EngineError> {
-        if let Some(ms) = args["ms"].as_u64() {
+    async fn cmd_wait(&mut self, args: &WaitArgs) -> Result<Response, EngineError> {
+        if let Some(ms) = args.ms {
             let ms = ms.min(30_000);
             tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
             return Ok(Response::ok_text(format!("Waited {}ms", ms)));
         }
-        let timeout = args["timeout"].as_u64().unwrap_or(10_000);
+        let timeout = args.timeout.unwrap_or(10_000);
         let page = self.require_tab()?.page.clone();
         let drain = self.start_fetch_drain();
 
         let result = async {
-            if let Some(expect) = args.get("expect").filter(|v| !v.is_null()) {
-                page.wait_for_expectation(&serde_json::from_value(expect.clone())?, timeout)
-                    .await?;
+            if let Some(expect) = args.expect.as_ref() {
+                page.wait_for_expectation(expect, timeout).await?;
                 return Ok(Response::ok_text("Readiness condition satisfied"));
             }
-            if let Some(text) = args["text"].as_str() {
+            if let Some(text) = args.text.as_deref() {
                 page.wait_for_text(text, timeout).await?;
                 return Ok(Response::ok_text(format!("Text \"{}\" appeared", text)));
             }
-            if let Some(url_pat) = args["url"].as_str() {
+            if let Some(url_pat) = args.url.as_deref() {
                 page.wait_for_url_contains(url_pat, timeout).await?;
                 return Ok(Response::ok_text(format!("URL matched \"{}\"", url_pat)));
             }
-            if let Some(selector) = args["selector"].as_str() {
-                let state: eoka_protocol::WaitSelectorState = match args.get("state") {
-                    Some(state) if !state.is_null() => serde_json::from_value(state.clone())?,
-                    _ => Default::default(),
-                };
-                let (wait, outcome) = match state {
+            if let Some(selector) = args.selector.as_deref() {
+                let (wait, outcome) = match args.state.unwrap_or_default() {
                     eoka_protocol::WaitSelectorState::Attached => (
                         page.wait_for(selector, timeout).await.map(|_| ()),
                         "attached",
@@ -1754,7 +1700,7 @@ impl Engine {
                 wait?;
                 return Ok(Response::ok_text(format!("\"{selector}\" is {outcome}")));
             }
-            if args["load"].as_str().is_some() {
+            if args.load.as_deref().is_some() {
                 page.wait_for_network_idle(500, timeout).await?;
                 return Ok(Response::ok_text("Network idle"));
             }
@@ -1777,8 +1723,8 @@ impl Engine {
         })))
     }
 
-    async fn cmd_spa_navigate(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let path = self.arg_str(args, "path")?;
+    async fn cmd_spa_navigate(&mut self, args: &PathStringArgs) -> Result<Response, EngineError> {
+        let path = args.path.as_str();
         let drain = self.start_fetch_drain();
         let result = async {
             let tab = self.require_tab_mut()?;
@@ -1798,9 +1744,9 @@ impl Engine {
         Ok(Response::ok_text(format!("SPA navigated to: {}", url)))
     }
 
-    async fn cmd_fake_camera(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let file_path = self.arg_str(args, "file")?;
-        let loop_video = args["loop_video"].as_bool().unwrap_or(false);
+    async fn cmd_fake_camera(&mut self, args: &FakeCameraArgs) -> Result<Response, EngineError> {
+        let file_path = args.file.as_str();
+        let loop_video = args.loop_video;
 
         let data = std::fs::read(file_path)
             .map_err(|e| format!("Failed to read video file '{}': {}", file_path, e))?;
@@ -2053,7 +1999,10 @@ impl Engine {
         }
     }
 
-    async fn cmd_network_record_start(&mut self, args: &Value) -> Result<Response, EngineError> {
+    async fn cmd_network_record_start(
+        &mut self,
+        args: &NetworkRecordStartArgs,
+    ) -> Result<Response, EngineError> {
         self.ensure_browser().await?;
         if self
             .state
@@ -2063,26 +2012,14 @@ impl Engine {
         {
             self.require_state_mut()?.ensure_blank_tab().await?;
         }
-        let patterns = args
-            .get("patterns")
-            .and_then(Value::as_array)
-            .map(|values| {
-                values
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .map(str::to_string)
-                    .collect::<Vec<_>>()
-            })
+        let patterns = Some(args.patterns.clone())
             .filter(|patterns| !patterns.is_empty())
             .unwrap_or_else(|| NetworkConfig::default().patterns);
-        let max_body_bytes = args["max_body_bytes"]
-            .as_u64()
-            .and_then(|value| usize::try_from(value).ok())
-            .unwrap_or_else(|| NetworkConfig::default().max_body_bytes);
-        let clear = args["clear"].as_bool().unwrap_or(false);
+        let max_body_bytes = args.max_body_bytes;
+        let clear = args.clear;
         let config = NetworkConfig {
             patterns,
-            capture_bodies: !args["no_bodies"].as_bool().unwrap_or(false),
+            capture_bodies: !args.no_bodies,
             max_body_bytes,
             ..NetworkConfig::default()
         };
@@ -2121,7 +2058,7 @@ impl Engine {
         }
     }
 
-    async fn cmd_network_log(&mut self, args: &Value) -> Result<Response, EngineError> {
+    async fn cmd_network_log(&mut self, args: &NetworkLogArgs) -> Result<Response, EngineError> {
         let Some(recorder) = self.network.as_ref() else {
             return Ok(Response::ok(json!({
                 "meta": self.network_empty_meta(),
@@ -2130,18 +2067,12 @@ impl Engine {
                 "filters": args,
             })));
         };
-        let limit = args["limit"]
-            .as_u64()
-            .and_then(|value| usize::try_from(value).ok())
-            .unwrap_or(100)
-            .min(1000);
-        let pattern = args["pattern"].as_str();
-        let method = args["method"].as_str();
-        let status = args["status"]
-            .as_u64()
-            .and_then(|value| u16::try_from(value).ok());
-        let since = args["since"].as_u64();
-        let compact = args["compact"].as_bool().unwrap_or(false);
+        let limit = args.limit.unwrap_or(100).min(1000);
+        let pattern = args.pattern.as_deref();
+        let method = args.method.as_deref();
+        let status = args.status;
+        let since = args.since;
+        let compact = args.compact;
         Ok(Response::ok(
             recorder
                 .log(limit, pattern, method, status, since, compact)
@@ -2149,12 +2080,10 @@ impl Engine {
         ))
     }
 
-    async fn cmd_network_show(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let id = args["id"].as_u64().ok_or("Missing 'id'")?;
-        let body = args["body"].as_bool().unwrap_or(false);
-        let max_body = args["max_body"]
-            .as_u64()
-            .and_then(|value| usize::try_from(value).ok());
+    async fn cmd_network_show(&mut self, args: &NetworkShowArgs) -> Result<Response, EngineError> {
+        let id = args.id;
+        let body = args.body;
+        let max_body = args.max_body;
         let Some(recorder) = self.network.as_ref() else {
             return Err(format!("Network entry #{} not found", id).into());
         };
@@ -2168,10 +2097,13 @@ impl Engine {
             .ok_or_else(|| format!("Network entry #{} not found", id).into())
     }
 
-    async fn cmd_network_export(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let path = self.arg_str(args, "path")?;
-        let format = args["format"].as_str().unwrap_or("har");
-        let settle_ms = args["settle_ms"].as_u64();
+    async fn cmd_network_export(
+        &mut self,
+        args: &NetworkExportArgs,
+    ) -> Result<Response, EngineError> {
+        let path = args.path.as_str();
+        let format = args.format.as_str();
+        let settle_ms = args.settle_ms;
         let Some(recorder) = self.network.as_ref() else {
             return Err("No network recorder has been started".into());
         };
@@ -2182,18 +2114,16 @@ impl Engine {
         ))
     }
 
-    async fn cmd_network_wait(&mut self, args: &Value) -> Result<Response, EngineError> {
+    async fn cmd_network_wait(&mut self, args: &NetworkWaitArgs) -> Result<Response, EngineError> {
         let Some(recorder) = self.network.as_ref() else {
             return Err("No network recorder has been started".into());
         };
-        let timeout = args["timeout"].as_u64().unwrap_or(10_000);
-        let pattern = args["pattern"].as_str();
-        let method = args["method"].as_str();
-        let status = args["status"]
-            .as_u64()
-            .and_then(|value| u16::try_from(value).ok());
-        let since = args["since"].as_u64();
-        let include_existing = args["include_existing"].as_bool().unwrap_or(false);
+        let timeout = args.timeout.unwrap_or(10_000);
+        let pattern = args.pattern.as_deref();
+        let method = args.method.as_deref();
+        let status = args.status;
+        let since = args.since;
+        let include_existing = args.include_existing;
         recorder
             .wait(pattern, method, status, since, include_existing, timeout)
             .await
@@ -2231,11 +2161,14 @@ impl Engine {
         })
     }
 
-    async fn cmd_intercept_add(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let url_pattern = self.arg_str(args, "url_pattern")?.to_string();
-        let capture = args["capture"].as_str().map(std::path::PathBuf::from);
-        let respond = args["respond"].as_str().map(std::path::PathBuf::from);
-        let status = args["status"].as_u64().unwrap_or(200) as u16;
+    async fn cmd_intercept_add(
+        &mut self,
+        args: &InterceptAddArgs,
+    ) -> Result<Response, EngineError> {
+        let url_pattern = args.url_pattern.clone();
+        let capture = args.capture.as_deref().map(std::path::PathBuf::from);
+        let respond = args.respond.as_deref().map(std::path::PathBuf::from);
+        let status = args.status;
 
         let id = self
             .intercept
@@ -2253,8 +2186,8 @@ impl Engine {
         Ok(Response::ok(self.intercept.list_json()))
     }
 
-    async fn cmd_intercept_remove(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let id = self.arg_str(args, "id")?;
+    async fn cmd_intercept_remove(&mut self, args: &IdArgs) -> Result<Response, EngineError> {
+        let id = args.id.as_str();
         if id == "all" {
             self.intercept.remove_all();
             self.sync_fetch_interception().await?;
@@ -2270,7 +2203,7 @@ impl Engine {
         }
     }
 
-    async fn cmd_intercept_log(&mut self, args: &Value) -> Result<Response, EngineError> {
+    async fn cmd_intercept_log(&mut self, args: &ClearFlagArgs) -> Result<Response, EngineError> {
         self.drain_fetch_events().await;
         if let Some(recorder) = self.network.clone() {
             self.intercept
@@ -2293,7 +2226,7 @@ impl Engine {
                 })
                 .await;
         }
-        let clear = args["clear"].as_bool().unwrap_or(false);
+        let clear = args.clear;
         let result = self.intercept.log_json();
         if clear {
             self.intercept.clear_log();

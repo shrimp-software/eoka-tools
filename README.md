@@ -398,14 +398,15 @@ eoka tack 'return await tools.invoke({ path: "eoka.info", input: {} });'
 - [Go client](clients/go/README.md)
 - [server protocol](PROTOCOL.md)
 
-Install the skill from the binary, without Node. The default directory is
+Install the skill from the binary, without Node. With no directory it writes
 `~/.agents/skills/eoka`, which Codex and other agents that read
-`~/.agents/skills` use; name the directory for any other agent or for a
+`~/.agents/skills` use, and `~/.claude/skills/eoka` for Claude Code when
+`~/.claude` exists. Name a directory for any other agent or for a
 project-local copy:
 
 ```sh
 eoka skill install
-eoka skill install ~/.claude/skills/eoka
+eoka skill install .claude/skills/eoka
 ```
 
 Or install the Codex skill with the open skills CLI:

@@ -1,5 +1,6 @@
 //! `wasm` subcommand group: read/write/find/info against WebAssembly linear memory.
 
+use eoka_protocol::{WasmFindArgs, WasmReadArgs, WasmWriteArgs};
 use serde_json::Value;
 
 use super::Engine;
@@ -19,10 +20,13 @@ impl Engine {
         Ok(Response::ok(parsed))
     }
 
-    pub(super) async fn cmd_wasm_read(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let addr = parse_addr(self.arg_str(args, "addr")?)?;
-        let len = args["len"].as_u64().ok_or("Missing 'len'")? as usize;
-        let memory = args["memory"].as_str();
+    pub(super) async fn cmd_wasm_read(
+        &mut self,
+        args: &WasmReadArgs,
+    ) -> Result<Response, EngineError> {
+        let addr = parse_addr(args.addr.as_str())?;
+        let len = args.len;
+        let memory = args.memory.as_deref();
 
         let tab = self.require_tab()?;
         let mem_expr = wasm_memory_expr(memory);
@@ -83,10 +87,13 @@ impl Engine {
         Ok(Response::ok_text(formatted))
     }
 
-    pub(super) async fn cmd_wasm_write(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let addr = parse_addr(self.arg_str(args, "addr")?)?;
-        let hex = self.arg_str(args, "hex")?;
-        let memory = args["memory"].as_str();
+    pub(super) async fn cmd_wasm_write(
+        &mut self,
+        args: &WasmWriteArgs,
+    ) -> Result<Response, EngineError> {
+        let addr = parse_addr(args.addr.as_str())?;
+        let hex = args.hex.as_str();
+        let memory = args.memory.as_deref();
 
         let hex_clean: String = hex.chars().filter(|c| c.is_ascii_hexdigit()).collect();
         if !hex_clean.len().is_multiple_of(2) {
@@ -124,16 +131,20 @@ impl Engine {
         )))
     }
 
-    pub(super) async fn cmd_wasm_find(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let pattern = self.arg_str(args, "pattern")?;
-        let memory = args["memory"].as_str();
-        let max = args["max"].as_u64().unwrap_or(20) as usize;
-        let start = args["start"]
-            .as_str()
+    pub(super) async fn cmd_wasm_find(
+        &mut self,
+        args: &WasmFindArgs,
+    ) -> Result<Response, EngineError> {
+        let pattern = args.pattern.as_str();
+        let memory = args.memory.as_deref();
+        let max = args.max;
+        let start = args
+            .start
+            .as_deref()
             .map(parse_addr)
             .transpose()?
             .unwrap_or(0);
-        let end = args["end"].as_str().map(parse_addr).transpose()?;
+        let end = args.end.as_deref().map(parse_addr).transpose()?;
 
         let pattern_clean: String = pattern.chars().filter(|c| c.is_ascii_hexdigit()).collect();
         if !pattern_clean.len().is_multiple_of(2) || pattern_clean.is_empty() {

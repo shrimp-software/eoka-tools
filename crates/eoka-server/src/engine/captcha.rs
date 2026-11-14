@@ -59,10 +59,8 @@ fn outcome_response(outcome: SolveOutcome, tab_id: String, elapsed_ms: u64) -> R
 impl Engine {
     pub(super) async fn cmd_captcha_turnstile(
         &mut self,
-        args: &Value,
+        args: &CaptchaTurnstileArgs,
     ) -> Result<Response, EngineError> {
-        let args: CaptchaTurnstileArgs =
-            serde_json::from_value(args.clone()).map_err(|error| error.to_string())?;
         let page = self.require_tab()?.page.clone();
         let receipt =
             crate::cloudflare::solve_turnstile(&page, Duration::from_millis(args.timeout_ms))
@@ -78,17 +76,11 @@ impl Engine {
         ))
     }
 
-    pub(super) async fn cmd_captcha_datadome(&mut self, args: &Value) -> Response {
+    pub(super) async fn cmd_captcha_datadome(&mut self, args: CaptchaDatadomeArgs) -> Response {
         let started = Instant::now();
         let prior_failures = self
             .fetch_dropped
             .load(std::sync::atomic::Ordering::Relaxed);
-        let Ok(args) = serde_json::from_value::<CaptchaDatadomeArgs>(args.clone()) else {
-            return failure(
-                "invalid_input",
-                "Invalid DataDome arguments; use max_attempts 1..4 and timeout_ms 5000..120000.",
-            );
-        };
         let Ok(tab) = self.require_tab() else {
             return failure(
                 "no_active_tab",
@@ -182,11 +174,14 @@ mod tests {
                 ws_url: "ws://127.0.0.1:1".into(),
             },
         );
-        let invalid = handler
-            .cmd_captcha_datadome(&serde_json::json!({"max_attempts":0}))
+        assert!(eoka_protocol::request_from_cmd(
+            "captcha_datadome",
+            serde_json::json!({"max_attempts":0})
+        )
+        .is_err());
+        let missing = handler
+            .cmd_captcha_datadome(serde_json::from_value(serde_json::json!({})).unwrap())
             .await;
-        assert_eq!(invalid.error_detail.unwrap().code, "invalid_input");
-        let missing = handler.cmd_captcha_datadome(&serde_json::json!({})).await;
         assert_eq!(missing.error_detail.unwrap().code, "no_active_tab");
         assert!(handler.state.is_none());
     }

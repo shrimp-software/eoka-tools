@@ -1,4 +1,5 @@
 use eoka::cdp::Session as CdpSession;
+use eoka_protocol::{FrameEvalArgs, ScriptArgs};
 use serde_json::{json, Value};
 
 use super::target::json_str;
@@ -6,12 +7,49 @@ use super::Engine;
 use super::EngineError;
 use eoka_protocol::Response;
 
+pub(super) enum Script {
+    Eval(eoka_protocol::ScriptArgs),
+    Exec(eoka_protocol::ScriptArgs),
+    FrameEval(eoka_protocol::FrameEvalArgs),
+}
+
 impl Engine {
-    pub(super) async fn cmd_eval(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let code = resolve_js(args)?;
-        let max_size = args["max_size"].as_u64().map(|v| v as usize);
-        if !args["raw"].as_bool().unwrap_or(false) {
-            if args["no_await"].as_bool().unwrap_or(false) {
+    pub(super) async fn script(
+        &mut self,
+        command: &str,
+        script: Script,
+    ) -> Result<Response, EngineError> {
+        let drain = self.start_fetch_drain();
+        let page = self.current_page();
+        let session = self.session_name.clone();
+        let remedies = super::blockers::Remedies::new(Some(&session));
+        let name = self.named(&remedies, command, &Value::Null);
+        let result = super::blockers::guard(
+            page.as_ref(),
+            remedies,
+            &name,
+            super::blockers::Policy::Script,
+            None,
+            async {
+                match script {
+                    Script::Eval(args) => self.cmd_eval(&args).await,
+                    Script::Exec(args) => self.cmd_exec(&args).await,
+                    Script::FrameEval(args) => self.cmd_frame_eval(&args).await,
+                }
+            },
+        )
+        .await;
+        if !self.stop_fetch_drain(drain).await {
+            return Err("Request interception cleanup failed".into());
+        }
+        result
+    }
+
+    async fn cmd_eval(&mut self, args: &ScriptArgs) -> Result<Response, EngineError> {
+        let code = resolve_js(args.file.as_deref(), args.code.as_deref())?;
+        let max_size = args.max_size;
+        if !args.raw {
+            if args.no_await {
                 return Err(
                     "Function evaluation awaits completion; --no-await requires --raw".into(),
                 );
@@ -19,7 +57,7 @@ impl Engine {
             let value: Value = self
                 .require_tab()?
                 .page
-                .evaluate_function(&code, &function_arguments(args)?)
+                .evaluate_function(&code, &args.arguments)
                 .await
                 .map_err(|e| e.to_string())?;
             let size = serde_json::to_vec(&value).map_err(|e| e.to_string())?.len();
@@ -28,7 +66,7 @@ impl Engine {
             }
             return Ok(Response::ok(value));
         }
-        let await_promise = !args["no_await"].as_bool().unwrap_or(false);
+        let await_promise = !args.no_await;
         let session = self.require_tab()?.page.session().clone();
 
         if let Some(max) = max_size {
@@ -62,11 +100,11 @@ impl Engine {
         ))
     }
 
-    pub(super) async fn cmd_exec(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let code = resolve_js(args)?;
+    async fn cmd_exec(&mut self, args: &ScriptArgs) -> Result<Response, EngineError> {
+        let code = resolve_js(args.file.as_deref(), args.code.as_deref())?;
         let tab = self.require_tab()?;
-        if args["no_await"].as_bool().unwrap_or(false) {
-            if !args["raw"].as_bool().unwrap_or(false) {
+        if args.no_await {
+            if !args.raw {
                 return Err(
                     "Function execution awaits completion; --no-await requires --raw".into(),
                 );
@@ -76,14 +114,14 @@ impl Engine {
                 .await
                 .map_err(|error| error.to_string())?;
             return Ok(Response::err_detail(eoka_protocol::ErrorDetail::new("outcome_unknown", "Raw execution dispatched; asynchronous completion was not awaited. Inspect the page before further input.")));
-        } else if args["raw"].as_bool().unwrap_or(false) {
+        } else if args.raw {
             tab.page
                 .execute(&code)
                 .await
                 .map_err(|error| error.to_string())?;
         } else {
             tab.page
-                .execute_function(&code, &function_arguments(args)?)
+                .execute_function(&code, &args.arguments)
                 .await
                 .map_err(|error| error.to_string())?;
         }
@@ -99,11 +137,9 @@ impl Engine {
             .collect::<Vec<_>>())))
     }
 
-    pub(super) async fn cmd_frame_eval(&mut self, args: &Value) -> Result<Response, EngineError> {
-        let code = resolve_js(args)?;
-        let frame = args["frame"]
-            .as_str()
-            .ok_or_else(|| "Missing frame selector or id:<frame-id>".to_string())?;
+    async fn cmd_frame_eval(&mut self, args: &FrameEvalArgs) -> Result<Response, EngineError> {
+        let code = resolve_js(args.file.as_deref(), args.code.as_deref())?;
+        let frame = args.frame.as_str();
         if frame.is_empty()
             || frame.bytes().all(|byte| byte.is_ascii_digit())
             || frame.starts_with("http://")
@@ -280,16 +316,11 @@ fn build_limited_eval_js(code: &str, max_size: usize) -> String {
     )
 }
 
-fn function_arguments(args: &Value) -> Result<Vec<Value>, String> {
-    serde_json::from_value(args.get("arguments").cloned().unwrap_or_else(|| json!([])))
-        .map_err(|error| error.to_string())
-}
-
-fn resolve_js(args: &Value) -> Result<String, String> {
-    if let Some(path) = args["file"].as_str() {
+fn resolve_js(file: Option<&str>, code: Option<&str>) -> Result<String, String> {
+    if let Some(path) = file {
         std::fs::read_to_string(path)
             .map_err(|e| format!("Failed to read JS file '{}': {}", path, e))
-    } else if let Some(code) = args["code"].as_str() {
+    } else if let Some(code) = code {
         Ok(code.to_string())
     } else {
         Err("Either 'code' or '--file' must be provided".into())

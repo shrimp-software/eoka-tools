@@ -22,6 +22,22 @@ go vet ./...
 go test ./... -race
 ```
 
+## Public surface locks
+
+Three files pin what clients see: the MCP tool list
+(`crates/eoka-mcp/tests/locks/tools.jsonl`), what engine-backed MCP tools reply
+(`crates/eoka-mcp/tests/locks/replies.jsonl`, checked by an ignored test that
+needs Chrome) and the CLI tool manifest
+(`crates/eoka-cli/tests/locks/manifest.jsonl`). A test fails when one of them
+changes. If the change is intended, regenerate the file and list the change in
+the pull request:
+
+```bash
+EOKA_UPDATE_LOCKS=1 cargo test -p eoka-mcp the_tool_list_a_client_sees_is_locked
+EOKA_UPDATE_LOCKS=1 cargo test -p eoka-mcp every_mcp_tool_answers -- --ignored
+EOKA_UPDATE_LOCKS=1 cargo test -p eoka-cli the_tool_manifest_agents_read_is_locked
+```
+
 ## Pull requests
 
 Keep changes focused and update the relevant crate README when user-facing

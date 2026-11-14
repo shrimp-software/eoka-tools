@@ -43,9 +43,10 @@ pub async fn dispatch_shared(
     match addressed {
         Some(page) => {
             let call = blocked::Call::new(method, &params);
-            blocked::guarded(&state.operations, &page, call, route(state, method, params)).await
+            let routed = Box::pin(route(state, method, params));
+            blocked::guarded(&state.operations, &page, call, routed).await
         }
-        None => route(state, method, params).await,
+        None => Box::pin(route(state, method, params)).await,
     }
 }
 
@@ -128,7 +129,7 @@ async fn route(state: &AppState, method: &str, params: Value) -> Result<Value, S
     }
     if let Some(operation) = catalog_operation(method) {
         let (page_id, request) = catalog_request(operation, &params)?;
-        return state.catalog(&page_id, operation, &request).await;
+        return state.catalog(&page_id, request, None).await;
     }
     if matches!(method, "browser.tabs" | "browser.close") {
         validate_params(method, &params)?;
@@ -260,5 +261,19 @@ fn agent_error(error: anyhow::Error, method: &str, page: &eoka::Page) -> ServerE
                 None => ServerError::internal(message),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod stack_tests {
+    use super::*;
+
+    #[test]
+    fn a_call_is_small_enough_to_run_on_a_worker_thread_stack() {
+        let state = AppState::new();
+        let sidecar = dispatch_shared(&state, "page.text", Value::Null);
+        assert!(std::mem::size_of_val(&sidecar) < 16 * 1024);
+        let catalog = state.catalog("page", eoka_protocol::Request::Info, None);
+        assert!(std::mem::size_of_val(&catalog) < 16 * 1024);
     }
 }

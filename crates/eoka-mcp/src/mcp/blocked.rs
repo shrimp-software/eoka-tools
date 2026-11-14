@@ -25,6 +25,9 @@ pub(super) fn command_for_tool(tool: &str) -> &str {
 }
 
 pub(super) fn policy_for_tool(tool: &str, arguments: &Value) -> Policy {
+    if tool == "screenshot" {
+        return Policy::Gate;
+    }
     blockers::policy(command_for_tool(tool), arguments)
 }
 
@@ -32,7 +35,20 @@ fn remedies() -> Remedies<'static> {
     Remedies::for_surface(Surface::Mcp, None)
 }
 
-fn refusal(detail: eoka_protocol::ErrorDetail) -> CallToolResult {
+pub(super) fn stopped(tool: &str, policy: Policy, stop: &blockers::Stop) -> CallToolResult {
+    refusal(stop.detail(&remedies(), tool, policy.interrupted()))
+}
+
+pub(super) fn blocked_detail(
+    error: &eoka_protocol::sidecar::ServerError,
+) -> Option<eoka_protocol::ErrorDetail> {
+    eoka_protocol::sidecar::ErrorCode::for_blocker_detail(
+        &error.data.as_ref()?.detail.as_ref()?.code,
+    )?;
+    error.data.as_ref()?.detail.clone()
+}
+
+pub(super) fn refusal(detail: eoka_protocol::ErrorDetail) -> CallToolResult {
     let text = serde_json::to_string(&eoka_protocol::Response::err_detail(detail))
         .unwrap_or_else(|_| "The page is blocked".into());
     CallToolResult::error(vec![ContentBlock::text(text)])
@@ -110,32 +126,12 @@ impl EokaServer {
         policy: Policy,
         page: &Page,
     ) -> Option<CallToolResult> {
-        blockers::watch(page);
-        if policy == Policy::Free {
-            return None;
-        }
-        let grace = if policy == Policy::Navigate {
-            Duration::ZERO
-        } else {
-            blockers::NAVIGATION_GRACE
-        };
-        match blockers::confirmed(page, grace).await? {
-            blockers::Blocker::Navigation(_) if policy == Policy::Navigate => {
-                blockers::supersede_navigation(&self.operations, page).await;
-                None
-            }
-            blockers::Blocker::Navigation(_) if policy == Policy::Wait => None,
-            blocker => Some(refusal(blocker.detail(
-                &remedies(),
-                tool,
-                Stage::NotStarted,
-            ))),
-        }
-    }
-
-    pub(super) async fn interrupted(tool: &str, policy: Policy, page: &Page) -> CallToolResult {
-        let blocker = blockers::interrupted(page, policy != Policy::Wait).await;
-        refusal(blocker.detail(&remedies(), tool, policy.interrupted()))
+        let blocker = blockers::admit(&self.operations, page, policy).await?;
+        Some(refusal(blocker.detail(
+            &remedies(),
+            tool,
+            Stage::NotStarted,
+        )))
     }
 
     pub(super) async fn explain_blocked(
@@ -165,10 +161,8 @@ impl EokaServer {
         if !timed_out {
             return result;
         }
-        match blockers::confirmed(&page, Duration::ZERO).await {
-            Some(blocker) => {
-                Ok(refusal(blocker.detail(&remedies(), tool, policy.interrupted())).into())
-            }
+        match blockers::after_timeout(&page, false).await {
+            Some(stop) => Ok(stopped(tool, policy, &stop).into()),
             None => result,
         }
     }
@@ -216,6 +210,7 @@ mod tests {
         }
         assert_eq!(policy_for_tool("extract", &none), Policy::Script);
         assert_eq!(policy_for_tool("agent_observe", &none), Policy::Observe);
+        assert_eq!(policy_for_tool("screenshot", &none), Policy::Gate);
         for action in ["click", "fill", "type_key", "batch", "agent_step"] {
             assert_eq!(policy_for_tool(action, &none), Policy::Gate, "{action}");
         }
@@ -283,11 +278,18 @@ mod tests {
             .is_none());
         let interrupted = tokio::time::timeout(
             Duration::from_secs(5),
-            EokaServer::interrupted("extract", Policy::Script, &page),
+            blockers::race(
+                &page,
+                Policy::Script,
+                None,
+                true,
+                std::future::pending::<()>(),
+            ),
         )
         .await
-        .expect("a read in flight must be interrupted by the dialog");
-        assert!(text(&interrupted).contains("dialog_open"));
+        .expect("a read in flight must be interrupted by the dialog")
+        .expect_err("the dialog stops the read");
+        assert!(text(&stopped("extract", Policy::Script, &interrupted)).contains("dialog_open"));
         server.dismiss_dialog().await.unwrap();
         assert!(server
             .refuse_blocked("page_info", Policy::Read, &page)

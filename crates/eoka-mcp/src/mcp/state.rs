@@ -24,7 +24,6 @@ fn reconcile_closed_tab<T>(
 pub(crate) struct TabState {
     pub page: Page,
     pub elements: Vec<InteractiveElement>,
-    pub console_injected: bool,
 }
 
 impl TabState {
@@ -32,7 +31,6 @@ impl TabState {
         Self {
             page,
             elements: Vec::new(),
-            console_injected: false,
         }
     }
 
@@ -54,6 +52,7 @@ impl BrowserState {
     pub async fn new(
         headless: bool,
         agent: eoka_server::agent::SharedAgentSession,
+        operations: eoka_server::operations::OperationManager,
     ) -> eoka_server::eoka::Result<Self> {
         let proxy = parse_proxy_env()?
             .map(|value| {
@@ -81,9 +80,8 @@ impl BrowserState {
             proxy.is_some()
         );
         let mut server = AppState::new();
-        // Catalog tools resolve targets through the same session as the
-        // hand-written agent tools.
         server.agent = agent;
+        server.operations = operations;
         let mut params = json!({
             "headless": headless,
             "proxy": proxy.map(|server| json!({

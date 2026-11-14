@@ -1,18 +1,13 @@
 use super::Engine;
 use crate::downloads::{failure, rejected, start_response, DownloadManager};
 use eoka_protocol::{DownloadStartArgs, Response};
-use serde_json::Value;
 
 impl Engine {
     pub fn download_manager(&self) -> DownloadManager {
         self.downloads.clone()
     }
 
-    pub(super) async fn cmd_download_start(&mut self, value: &Value) -> Response {
-        let args: DownloadStartArgs = match serde_json::from_value(value.clone()) {
-            Ok(args) => args,
-            Err(error) => return rejected(failure("invalid_input", error.to_string())),
-        };
+    pub(super) async fn cmd_download_start(&mut self, args: DownloadStartArgs) -> Response {
         if let Err(error) = args.validate() {
             return rejected(failure("invalid_input", error));
         }

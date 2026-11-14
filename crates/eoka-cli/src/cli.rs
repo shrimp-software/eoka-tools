@@ -1202,7 +1202,7 @@ pub enum SkillAction {
     Install {
         #[arg(
             value_name = "DIR",
-            help = "Skill directory to write, such as ~/.claude/skills/eoka [default: ~/.agents/skills/eoka]"
+            help = "Skill directory to write [default: ~/.agents/skills/eoka, and ~/.claude/skills/eoka when ~/.claude exists]"
         )]
         dir: Option<PathBuf>,
     },
