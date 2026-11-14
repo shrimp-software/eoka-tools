@@ -12,6 +12,7 @@ struct Waiting<T> {
     lane: Lane,
     operation: Option<String>,
     after: Option<u64>,
+    overtakes: bool,
     item: T,
 }
 
@@ -39,17 +40,28 @@ impl<T> Default for Lanes<T> {
 
 impl<T> Lanes<T> {
     pub(super) fn admit(&mut self, lane: Lane, operation: Option<String>, item: T) {
-        self.enqueue(lane, operation, None, item);
+        self.enqueue(lane, operation, None, false, item);
+    }
+
+    pub(super) fn admit_overtaking(&mut self, lane: Lane, operation: Option<String>, item: T) {
+        self.enqueue(lane, operation, None, true, item);
     }
 
     pub(super) fn admit_after_operation(&mut self, operation: Option<String>, item: T) {
         let after = operation
             .as_deref()
             .and_then(|operation| self.latest_for_operation(operation));
-        self.enqueue(Lane::Independent, operation, after, item);
+        self.enqueue(Lane::Independent, operation, after, false, item);
     }
 
-    fn enqueue(&mut self, lane: Lane, operation: Option<String>, after: Option<u64>, item: T) {
+    fn enqueue(
+        &mut self,
+        lane: Lane,
+        operation: Option<String>,
+        after: Option<u64>,
+        overtakes: bool,
+        item: T,
+    ) {
         let ticket = self.next_ticket;
         self.next_ticket += 1;
         self.waiting.push_back(Waiting {
@@ -57,6 +69,7 @@ impl<T> Lanes<T> {
             lane,
             operation,
             after,
+            overtakes,
             item,
         });
     }
@@ -98,7 +111,7 @@ impl<T> Lanes<T> {
             let startable = if barrier {
                 index == 0 && self.running.is_empty()
             } else {
-                !occupied.contains(&entry.lane)
+                (entry.overtakes || !occupied.contains(&entry.lane))
                     && !entry.after.is_some_and(|ticket| self.outstanding(ticket))
             };
             if !startable {
@@ -193,6 +206,42 @@ mod tests {
         lanes.admit(Lane::Independent, None, "tabs");
         assert_eq!(names(lanes.ready()), ["read", "new page", "tabs"]);
         assert_eq!(lanes.drain(), ["queued behind"]);
+    }
+
+    #[test]
+    fn overtaking_work_starts_past_a_stuck_page_and_later_work_waits_for_it() {
+        let mut lanes = Lanes::default();
+        lanes.admit(page("a"), None, "stuck behind a dialog");
+        let stuck = lanes.ready();
+        assert_eq!(names(stuck.clone()), ["stuck behind a dialog"]);
+        lanes.admit(page("a"), None, "queued read");
+        lanes.admit_overtaking(page("a"), None, "accept the dialog");
+        lanes.admit(page("a"), None, "read after accepting");
+        let accept = lanes.ready();
+        assert_eq!(names(accept.clone()), ["accept the dialog"]);
+        lanes.finish(ticket(&stuck, "stuck behind a dialog"));
+        assert!(lanes.ready().is_empty());
+        lanes.finish(ticket(&accept, "accept the dialog"));
+        let queued = lanes.ready();
+        assert_eq!(names(queued.clone()), ["queued read"]);
+        lanes.finish(ticket(&queued, "queued read"));
+        assert_eq!(names(lanes.ready()), ["read after accepting"]);
+    }
+
+    #[test]
+    fn overtaking_work_still_respects_a_barrier() {
+        let mut lanes = Lanes::default();
+        lanes.admit(page("a"), None, "stuck");
+        let stuck = lanes.ready();
+        lanes.admit(Lane::Barrier, None, "close the browser");
+        lanes.admit_overtaking(page("a"), None, "accept the dialog");
+        assert!(lanes.ready().is_empty());
+        lanes.finish(ticket(&stuck, "stuck"));
+        let barrier = lanes.ready();
+        assert_eq!(names(barrier.clone()), ["close the browser"]);
+        assert!(lanes.ready().is_empty());
+        lanes.finish(ticket(&barrier, "close the browser"));
+        assert_eq!(names(lanes.ready()), ["accept the dialog"]);
     }
 
     #[test]

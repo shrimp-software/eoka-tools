@@ -1,10 +1,17 @@
 mod lanes;
 
-use std::{future::Future, sync::Arc, time::Duration};
+use std::{
+    future::Future,
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
 use eoka_protocol::sidecar::{
-    validate_params, validate_safe_numbers, ErrorCode, ErrorData, RecordingStartParams, Request,
-    Response, ServerError, MAX_IN_FLIGHT,
+    validate_params, validate_safe_numbers, ErrorCode, ErrorData, ProtocolVersion,
+    RecordingStartParams, Request, Response, ServerError, MAX_IN_FLIGHT, PROTOCOL_VERSION,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -30,6 +37,7 @@ trait Backend: Clone + Send + Sync + 'static {
         method: &str,
         params: Value,
     ) -> impl Future<Output = Result<Value, ServerError>> + Send;
+    fn overtakes(&self, request: &Request) -> bool;
     fn should_shutdown(&self) -> bool;
     fn shutdown(&self) -> impl Future<Output = Result<(), ServerError>> + Send;
 }
@@ -43,12 +51,38 @@ impl Backend for AppState {
         dispatch::dispatch_shared(self, method, params)
     }
 
+    fn overtakes(&self, request: &Request) -> bool {
+        dispatch::clears_a_blocked_page(self, &request.method, &request.params)
+    }
+
     fn should_shutdown(&self) -> bool {
         AppState::should_shutdown(self)
     }
 
     fn shutdown(&self) -> impl Future<Output = Result<(), ServerError>> + Send {
         AppState::shutdown(self)
+    }
+}
+
+#[derive(Clone)]
+struct Spoken(Arc<AtomicU32>);
+
+impl Default for Spoken {
+    fn default() -> Self {
+        Self(Arc::new(AtomicU32::new(ProtocolVersion::BASELINE.minor)))
+    }
+}
+
+impl Spoken {
+    fn negotiated(&self, spoken: ProtocolVersion) {
+        self.0.store(spoken.minor, Ordering::Release);
+    }
+
+    fn version(&self) -> ProtocolVersion {
+        ProtocolVersion {
+            major: PROTOCOL_VERSION.major,
+            minor: self.0.load(Ordering::Acquire),
+        }
     }
 }
 
@@ -147,10 +181,12 @@ fn lane(request: &Request) -> Lane {
         .map_or(Lane::Independent, |page| Lane::Page(page.to_owned()))
 }
 
-fn admit(lanes: &mut Lanes<Job>, job: Job) {
+fn admit<B: Backend>(backend: &B, lanes: &mut Lanes<Job>, job: Job) {
     let operation = job.operation_id.clone();
     if sidecar::supports_control(&job.request.method) {
         lanes.admit_after_operation(operation, job);
+    } else if backend.overtakes(&job.request) {
+        lanes.admit_overtaking(lane(&job.request), operation, job);
     } else {
         lanes.admit(lane(&job.request), operation, job);
     }
@@ -233,7 +269,7 @@ async fn worker<B: Backend>(
                 }
             },
             job = jobs.recv() => match job {
-                Some(job) => admit(&mut lanes, job),
+                Some(job) => admit(&backend, &mut lanes, job),
                 None => break,
             },
         }
@@ -258,6 +294,7 @@ async fn worker<B: Backend>(
 async fn writer<W: AsyncWrite + Unpin>(
     mut output: W,
     mut responses: mpsc::Receiver<Outgoing>,
+    spoken: Spoken,
 ) -> anyhow::Result<()> {
     while let Some(outgoing) = responses.recv().await {
         let Outgoing {
@@ -267,6 +304,13 @@ async fn writer<W: AsyncWrite + Unpin>(
             permit,
         } = outgoing;
         drop(permit);
+        let response = match response {
+            Response::Failure { id, error } => Response::Failure {
+                id,
+                error: error.spoken_to(spoken.version()),
+            },
+            answered => answered,
+        };
         let bytes = transport::encode(&response, &id, operation_id.as_deref())?;
         tokio::time::timeout(Duration::from_secs(2), async {
             output.write_all(&bytes).await?;
@@ -286,6 +330,8 @@ where
     W: AsyncWrite + Unpin + Send + 'static,
 {
     let mut input = FrameReader::new(input);
+    crate::engine::blockers::set_surface(crate::engine::blockers::Surface::Sidecar);
+    state.operations.halt_on_dialog();
     let operations = state.operations.clone();
     let recordings = state.recordings.clone();
     let pending = Arc::new(Semaphore::new(MAX_IN_FLIGHT));
@@ -300,7 +346,8 @@ where
         shutdown.clone(),
         stop.clone(),
     ));
-    let mut writer = tokio::spawn(writer(output, response_receiver));
+    let spoken = Spoken::default();
+    let mut writer = tokio::spawn(writer(output, response_receiver, spoken.clone()));
     let mut waiters = JoinSet::new();
     let mut shutdown_id = None;
     let mut worker_result = None;
@@ -386,7 +433,11 @@ where
                     }
                 }
                 if job.request.method == "server.hello" {
-                    let result = dispatch::hello(std::mem::take(&mut job.request.params));
+                    let result = dispatch::negotiate(std::mem::take(&mut job.request.params))
+                        .map(|(version, greeting)| {
+                            spoken.negotiated(version);
+                            greeting
+                        });
                     if let Err(error) = emit(&responses, Outgoing::result(job, result)) {
                         intake_error = Some(error);
                         break;
@@ -553,6 +604,10 @@ mod tests {
             Ok(json!({ "label": label }))
         }
 
+        fn overtakes(&self, request: &Request) -> bool {
+            request.params["overtakes"] == true
+        }
+
         fn should_shutdown(&self) -> bool {
             self.closed.load(Ordering::Acquire)
         }
@@ -687,6 +742,24 @@ mod tests {
         assert_eq!(replies[1]["error"]["code"], "ShuttingDown");
         let fake = harness.finish().await;
         assert_eq!(fake.shutdowns.load(Ordering::Acquire), 1);
+    }
+
+    #[tokio::test]
+    async fn a_request_that_clears_a_blocked_page_runs_while_that_page_is_stuck() {
+        let mut harness = Harness::start();
+        harness.send(1, "page.solve_turnstile", page("a", "stuck", "never"));
+        harness.send(2, "page.title", page("a", "queued", "answer"));
+        harness.send(
+            3,
+            "dialog.accept",
+            json!({ "pageId": "a", "label": "accept", "overtakes": true }),
+        );
+        let accepted = harness.reply().await;
+        assert_eq!(accepted["id"], 3);
+        assert_eq!(accepted["result"]["label"], "accept");
+        harness.quiet().await;
+        assert_eq!(harness.fake.started(), ["stuck", "accept"]);
+        harness.finish().await;
     }
 
     #[tokio::test]
@@ -857,10 +930,97 @@ mod tests {
                 free_when_written: free_when_written.clone(),
             },
             receiver,
+            Spoken::default(),
         )
         .await
         .unwrap();
         assert_eq!(*free_when_written.lock(), [1, 2]);
+    }
+
+    #[derive(Clone, Default)]
+    struct Written(Arc<parking_lot::Mutex<Vec<u8>>>);
+
+    impl AsyncWrite for Written {
+        fn poll_write(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+            bytes: &[u8],
+        ) -> std::task::Poll<std::io::Result<usize>> {
+            self.0.lock().extend_from_slice(bytes);
+            std::task::Poll::Ready(Ok(bytes.len()))
+        }
+
+        fn poll_flush(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+
+        fn poll_shutdown(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+    }
+
+    async fn written_as(spoken: Spoken, error: ServerError) -> Value {
+        let (responses, receiver) = mpsc::channel(1);
+        assert!(responses
+            .try_send(Outgoing::new(json!(7), Err(error), None, None))
+            .is_ok());
+        drop(responses);
+        let written = Written::default();
+        writer(written.clone(), receiver, spoken).await.unwrap();
+        let line = written.0.lock().clone();
+        serde_json::from_slice(&line).unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_blocked_page_error_is_written_in_the_protocol_the_client_speaks() {
+        let blocked = || {
+            ServerError::blocked(
+                eoka_protocol::ErrorDetail::new("dialog_open", "A JavaScript alert dialog is open"),
+                Some(eoka_protocol::sidecar::PageBlocker::Dialog {
+                    dialog_type: "alert".into(),
+                    message: "are you sure?".into(),
+                    url: "https://example.test/".into(),
+                    elapsed_ms: 10,
+                }),
+            )
+        };
+        let unnegotiated = written_as(Spoken::default(), blocked()).await;
+        assert_eq!(unnegotiated["id"], 7);
+        assert_eq!(unnegotiated["error"]["code"], "Operation");
+        assert_eq!(
+            unnegotiated["error"]["data"]["detail"]["code"],
+            "dialog_open"
+        );
+        assert!(unnegotiated["error"]["data"].get("blocker").is_none());
+
+        let older = Spoken::default();
+        older.negotiated(ProtocolVersion { major: 2, minor: 1 });
+        assert_eq!(
+            written_as(older, blocked()).await["error"]["code"],
+            "Operation"
+        );
+
+        let current = Spoken::default();
+        current.negotiated(PROTOCOL_VERSION);
+        let spoken = written_as(current.clone(), blocked()).await;
+        assert_eq!(spoken["error"]["code"], "DialogOpen");
+        assert_eq!(spoken["error"]["data"]["detail"]["code"], "dialog_open");
+        assert_eq!(spoken["error"]["data"]["blocker"]["kind"], "dialog");
+        assert_eq!(
+            spoken["error"]["data"]["blocker"]["message"],
+            "are you sure?"
+        );
+
+        let ordinary = written_as(Spoken::default(), ServerError::invalid_page("gone")).await;
+        assert_eq!(ordinary["error"]["code"], "InvalidPage");
+        assert_eq!(current.version(), PROTOCOL_VERSION);
+        assert_eq!(Spoken::default().version(), ProtocolVersion::BASELINE);
     }
 
     #[test]
