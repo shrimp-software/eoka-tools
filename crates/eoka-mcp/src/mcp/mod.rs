@@ -798,8 +798,7 @@ impl EokaServer {
         let tab = state
             .current_tab()
             .ok_or_else(|| ErrorData::from(AgentError::NoTab))?;
-        tab.page
-            .mouse_move(req.0.x, req.0.y)
+        eoka_server::capture::painting(&tab.page, tab.page.mouse_move(req.0.x, req.0.y))
             .await
             .map_err(internal)?;
         text_ok("Mouse moved".to_string())

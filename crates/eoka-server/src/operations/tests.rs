@@ -524,3 +524,60 @@ fn interrupted_targets_are_remembered_until_their_input_is_released() {
         .halts_on_dialog
         .load(Ordering::Acquire));
 }
+
+#[test]
+fn only_a_frame_waiting_action_that_timed_out_preparing_is_checked_for_frames() {
+    for kind in ["click", "double_click", "hover", "drag", "scroll_into_view"] {
+        assert!(awaited_frames(kind, &deadline("preparation")), "{kind}");
+        assert!(
+            awaited_frames(kind, &deadline("preparation: target not found")),
+            "{kind}"
+        );
+        assert!(!awaited_frames(kind, &deadline("input dispatch")), "{kind}");
+        assert!(!awaited_frames(kind, &deadline("verification")), "{kind}");
+    }
+    for kind in ["fill", "type", "press_key", "select", "focus", "navigate"] {
+        assert!(!awaited_frames(kind, &deadline("preparation")), "{kind}");
+    }
+    assert!(!awaited_frames(
+        "click",
+        &Error::ElementNotFound("Action target".into())
+    ));
+}
+
+#[test]
+fn a_preparation_timeout_without_frames_says_whether_the_tab_was_hidden() {
+    let stored = diagnostic(&deadline("preparation"), &[], "operation");
+    let unchanged = without_frames(stored.clone(), "click", None);
+    assert_eq!(unchanged.message, stored.message);
+    assert!(unchanged.hint.is_none());
+
+    let hidden = without_frames(stored.clone(), "double_click", Some(Unpainted::Hidden));
+    assert_eq!(
+        hidden.message,
+        "Timeout: Action deadline exceeded during preparation: the tab is hidden \
+         (document.visibilityState is hidden) and ran no animation frame, and a double click \
+         waits two frames to confirm its target has stopped moving"
+    );
+    assert!(hidden
+        .hint
+        .as_deref()
+        .unwrap()
+        .starts_with("Bring this tab to the front"));
+    assert_eq!(hidden.code, stored.code);
+    assert_eq!(
+        hidden.context.as_ref().unwrap().phase.as_deref(),
+        Some("preparation")
+    );
+
+    let visible = without_frames(stored, "scroll_into_view", Some(Unpainted::Visible));
+    assert!(
+        visible.message.ends_with(
+            "the page ran no animation frame, and a scroll into view waits two frames to confirm \
+             its target has stopped moving"
+        ),
+        "{}",
+        visible.message
+    );
+    assert!(!visible.message.contains("hidden"));
+}

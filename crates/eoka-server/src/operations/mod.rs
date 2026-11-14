@@ -272,6 +272,7 @@ impl OperationManager {
             let sensitive = action_values(&action);
             let navigation = navigates(&action);
             let kind = action.kind();
+            let frames = crate::capture::Frames::hold(&page);
             let mut dialog = None;
             let result = tokio::select! {
                 biased;
@@ -285,6 +286,11 @@ impl OperationManager {
                     else { page.act(action, options).await }
                 } => Some(result),
             };
+            let unpainted = match &result {
+                Some(Err(error)) if awaited_frames(kind, error) => frames_stalled(&page).await,
+                _ => None,
+            };
+            drop(frames);
             if dialog.is_some() {
                 manager.note_interrupted(page.target_id(), true);
             } else if navigation
@@ -297,7 +303,8 @@ impl OperationManager {
             let diagnostic = result
                 .as_ref()
                 .and_then(|result| result.as_ref().err())
-                .map(|error| diagnostic(error, &sensitive, &id));
+                .map(|error| diagnostic(error, &sensitive, &id))
+                .map(|detail| without_frames(detail, kind, unpainted));
             let finish = store
                 .update(id.clone(), move |record| {
                     record.state = OperationState::Finished;
@@ -502,6 +509,70 @@ fn diagnostic(
 }
 
 const INTERRUPTED_INPUT_RELEASE: Duration = Duration::from_secs(5);
+const FRAME_PROBE: Duration = Duration::from_millis(1500);
+const FRAME_PROBE_SCRIPT: &str = "(()=>Promise.race([new Promise(resolve=>requestAnimationFrame(()=>resolve(true))),new Promise(resolve=>setTimeout(()=>resolve(false),500))]).then(frame=>({frame,hidden:document.visibilityState==='hidden'})))()";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Unpainted {
+    Hidden,
+    Visible,
+}
+
+fn awaited_frames(action: &str, error: &Error) -> bool {
+    let source = match error {
+        Error::Action { source, .. } => source.as_ref(),
+        error => error,
+    };
+    matches!(
+        action,
+        "click" | "double_click" | "hover" | "drag" | "scroll_into_view"
+    ) && matches!(source, Error::Timeout(description) if description.starts_with("Action deadline exceeded during preparation"))
+}
+
+async fn frames_stalled(page: &Page) -> Option<Unpainted> {
+    let probed = tokio::time::timeout(
+        FRAME_PROBE,
+        page.evaluate::<serde_json::Value>(FRAME_PROBE_SCRIPT),
+    )
+    .await
+    .ok()?
+    .ok()?;
+    if probed["frame"] != false {
+        return None;
+    }
+    Some(if probed["hidden"] == true {
+        Unpainted::Hidden
+    } else {
+        Unpainted::Visible
+    })
+}
+
+fn without_frames(
+    mut detail: eoka_protocol::ErrorDetail,
+    action: &str,
+    unpainted: Option<Unpainted>,
+) -> eoka_protocol::ErrorDetail {
+    let Some(unpainted) = unpainted else {
+        return detail;
+    };
+    let (page, hint) = match unpainted {
+        Unpainted::Hidden => (
+            "the tab is hidden (document.visibilityState is hidden) and ran no animation frame",
+            "Bring this tab to the front, or act on the tab that is in front, then repeat the action.",
+        ),
+        Unpainted::Visible => (
+            "the page ran no animation frame",
+            "The page is not rendering; check that it is not frozen or replacing requestAnimationFrame, then repeat the action.",
+        ),
+    };
+    detail.message = format!(
+        "{}: {page}, and a {} waits two frames to confirm its target has stopped moving",
+        detail.message,
+        action.replace('_', " ")
+    );
+    detail.hint = Some(hint.to_owned());
+    detail
+}
 
 fn interruption(
     dialog: &Blocker,

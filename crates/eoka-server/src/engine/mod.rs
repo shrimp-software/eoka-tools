@@ -1164,15 +1164,16 @@ impl Engine {
 
     async fn cmd_click_shadow(&mut self, args: &Value) -> Result<Response, EngineError> {
         let args: eoka_protocol::ClickShadowArgs = serde_json::from_value(args.clone())?;
-        let receipt = self
-            .require_tab()?
-            .page
-            .click_shadow_with_timeout(
+        let page = &self.require_tab()?.page;
+        let receipt = crate::capture::painting(
+            page,
+            page.click_shadow_with_timeout(
                 args.frame_id.as_deref(),
                 &args.selector,
                 std::time::Duration::from_millis(args.timeout_ms),
-            )
-            .await?;
+            ),
+        )
+        .await?;
         self.require_tab_mut()?.invalidate();
         Ok(Response::ok(json!({
             "frame_id": receipt.frame_id,
@@ -1222,7 +1223,8 @@ impl Engine {
     async fn cmd_mouse_move(&mut self, args: &Value) -> Result<Response, EngineError> {
         let x = self.arg_f64(args, "x")?;
         let y = self.arg_f64(args, "y")?;
-        self.require_tab()?.page.mouse_move(x, y).await?;
+        let page = &self.require_tab()?.page;
+        crate::capture::painting(page, page.mouse_move(x, y)).await?;
         Ok(Response::ok_text("Mouse moved"))
     }
 
@@ -2328,6 +2330,7 @@ impl Engine {
             eprintln!("[eoka] recording cleanup failed: {}", error.message);
         }
         if let Some(state) = self.state.take() {
+            crate::capture::quiet().await;
             state.close().await?;
         }
         Ok(Response::ok_text("Browser closed"))
