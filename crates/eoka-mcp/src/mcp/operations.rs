@@ -43,7 +43,14 @@ impl EokaServer {
             }
         };
         let record = if matches!(record.state, eoka_protocol::OperationState::Running) {
-            match self.operations.wait(&record.id, budget).await {
+            match eoka_server::engine::blockers::wait_unless_dialog(
+                &self.operations,
+                &page,
+                &record.id,
+                budget,
+            )
+            .await
+            {
                 Ok(record) => record,
                 Err(error) => {
                     return protocol_tool_response(commands::failure(

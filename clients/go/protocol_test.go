@@ -19,9 +19,10 @@ func TestHelloAcceptsCompatibleMinorAndNegotiatesLimits(t *testing.T) {
 			return nil, &rpcError{Code: ErrCodeUnknownMethod, Message: method}
 		}
 		var request struct {
-			Protocol ProtocolVersion `json:"protocol"`
+			Protocol    ProtocolVersion `json:"protocol"`
+			Understands ProtocolVersion `json:"understands"`
 		}
-		if err := json.Unmarshal(params, &request); err != nil || request.Protocol != (ProtocolVersion{Major: 2, Minor: 0}) {
+		if err := json.Unmarshal(params, &request); err != nil || request.Protocol != (ProtocolVersion{Major: 2, Minor: 0}) || request.Understands != (ProtocolVersion{Major: 2, Minor: 2}) {
 			t.Errorf("hello params = %s, error = %v", params, err)
 		}
 		return info, nil
@@ -304,5 +305,66 @@ func TestConvenienceTerminalFailureExposesReceipt(t *testing.T) {
 	var operationErr *OperationError
 	if !errors.As(err, &operationErr) || operationErr.Uncertain || string(operationErr.Receipt) != string(receipt) {
 		t.Fatalf("terminal failure lost dispatch evidence: %+v", operationErr)
+	}
+}
+
+func TestBlockedPageErrorsKeepTheirCodeAndBlockerData(t *testing.T) {
+	info := fakeServerInfo()
+	info.Protocol.Minor = 2
+	info.Capabilities = append(info.Capabilities, "pageBlockers")
+	blockers := map[string]json.RawMessage{
+		ErrCodeDialogOpen:        json.RawMessage(`{"detail":{"code":"dialog_open","message":"A JavaScript alert dialog is open","hint":"Run dialog.accept"},"blocker":{"kind":"dialog","dialogType":"alert","message":"are you sure?","url":"https://example.test/","elapsedMs":1200}}`),
+		ErrCodeNavigationPending: json.RawMessage(`{"detail":{"code":"navigation_pending","message":"waiting"},"blocker":{"kind":"navigation","url":"https://slow.test/hang","elapsedMs":6500}}`),
+		ErrCodePageUnresponsive:  json.RawMessage(`{"detail":{"code":"page_unresponsive","message":"frozen"}}`),
+	}
+	codes := map[string]string{"page.title": ErrCodeDialogOpen, "page.url": ErrCodeNavigationPending, "page.text": ErrCodePageUnresponsive}
+	tr := newFakeTransport(t, func(id int64, method string, params json.RawMessage) (any, *rpcError) {
+		if method == "server.hello" {
+			var request struct {
+				Understands ProtocolVersion `json:"understands"`
+			}
+			if err := json.Unmarshal(params, &request); err != nil || request.Understands != (ProtocolVersion{Major: 2, Minor: 2}) {
+				t.Errorf("hello params = %s, error = %v", params, err)
+			}
+			return info, nil
+		}
+		code, known := codes[method]
+		if !known {
+			return nil, &rpcError{Code: ErrCodeUnknownMethod, Message: method}
+		}
+		return nil, &rpcError{Code: code, Message: "blocked", Data: blockers[code]}
+	})
+	b := &Browser{t: tr}
+	if err := b.hello(callContext(t)); err != nil {
+		t.Fatal(err)
+	}
+	if ErrCodeDialogOpen != "DialogOpen" || ErrCodeNavigationPending != "NavigationPending" || ErrCodePageUnresponsive != "PageUnresponsive" {
+		t.Fatal("blocked-page codes do not match the wire protocol")
+	}
+	for method, code := range codes {
+		err := tr.call(callContext(t), method, map[string]any{"pageId": "p"}, nil)
+		var typed *Error
+		if !errors.As(err, &typed) || !HasCode(err, code) || typed.Message != "blocked" || string(typed.Data) != string(blockers[code]) {
+			t.Fatalf("%s: error = %#v", method, err)
+		}
+		var data struct {
+			Detail struct {
+				Code string `json:"code"`
+			} `json:"detail"`
+			Blocker *struct {
+				Kind      string `json:"kind"`
+				URL       string `json:"url"`
+				ElapsedMs uint64 `json:"elapsedMs"`
+			} `json:"blocker"`
+		}
+		if err := json.Unmarshal(typed.Data, &data); err != nil || data.Detail.Code == "" {
+			t.Fatalf("%s: data = %s, error = %v", method, typed.Data, err)
+		}
+		if (code == ErrCodePageUnresponsive) != (data.Blocker == nil) {
+			t.Fatalf("%s: blocker = %+v", method, data.Blocker)
+		}
+		if data.Blocker != nil && (data.Blocker.Kind == "" || data.Blocker.URL == "" || data.Blocker.ElapsedMs == 0) {
+			t.Fatalf("%s: blocker = %+v", method, data.Blocker)
+		}
 	}
 }

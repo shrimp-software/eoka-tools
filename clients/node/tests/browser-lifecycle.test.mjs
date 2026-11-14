@@ -59,6 +59,8 @@ test('invalid launch and connect inputs fail before sidecar spawn', { skip: !sup
     { sandbox: 'false' },
     { timeoutMs: 0 },
     { shutdownTimeoutMs: -1 },
+    { defaultTimeoutMs: 0 },
+    { defaultTimeoutMs: Number.NaN },
     { executablePath: '' },
     { executablePath: join(tmpdir(), 'eoka-nonexistent-chrome-lifecycle') },
     { proxy: { server: 'socks5://user:private@localhost:1080' } },
@@ -195,6 +197,39 @@ test('one startup deadline spans hello and launch while timeout still awaits cle
   const events = await f.events();
   assert.equal(events.some(event => event.method === 'browser.launch'), true);
   assert.equal(events.some(event => event.event === 'cleanup'), true);
+});
+
+test('defaultTimeoutMs bounds later calls against a silent sidecar and null disables it', { skip: !supported }, async t => {
+  const f = await fixture(t, 'pending-tabs');
+  const browser = await Browser.launch({ ...f.options, defaultTimeoutMs: 60 });
+  f.track(browser);
+  const started = performance.now();
+  await assert.rejects(browser.tabs(), error => {
+    assert.equal(error.code, 'DeadlineExceeded');
+    assert.equal(error.requestState, 'may_have_been_sent');
+    assert.match(error.message, /browser\.tabs exceeded the 60 ms default deadline \(defaultTimeoutMs\)/);
+    assert.ok(error.stack.includes(import.meta.filename));
+    return true;
+  });
+  assert.ok(performance.now() - started >= 45);
+  await assert.rejects(browser.tabs({ timeoutMs: 20 }), error => /browser\.tabs exceeded its 20 ms local deadline/.test(error.message));
+  const unbounded = await Browser.launch({ ...f.options, defaultTimeoutMs: null });
+  f.track(unbounded);
+  let settled = false;
+  const pending = unbounded.tabs().finally(() => { settled = true; });
+  const rejected = assert.rejects(pending, error => error.code === 'Closed');
+  await delay(200);
+  assert.equal(settled, false);
+  await unbounded.close();
+  await rejected;
+});
+
+test('a short defaultTimeoutMs does not shorten session startup', { skip: !supported }, async t => {
+  const f = await fixture(t, 'shared-deadline');
+  const browser = await Browser.launch({ ...f.options, defaultTimeoutMs: 50 });
+  f.track(browser);
+  assert.equal(browser.ownership, 'owned');
+  assert.equal((await browser.tabs({ timeoutMs: 5000 }))[0].id, 'existing-tab');
 });
 
 test('launch isolates child temporary state and close preserves caller runtime root, cache and profile', { skip: !supported }, async t => {

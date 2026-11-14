@@ -456,6 +456,29 @@ fn store_lock_does_not_block_independent_hello() {
     server.shutdown(3);
 }
 
+#[test]
+fn a_client_that_refills_each_answered_slot_is_never_refused() {
+    let (_root, state, scratch) = directories();
+    let mut server = Sidecar::start(&state, &scratch);
+    let total = 6_000_u64;
+    let hello =
+        |id: u64| json!({"id":id,"method":"server.hello","params":{"protocol":PROTOCOL_VERSION}});
+    let mut next = 1;
+    while next <= MAX_IN_FLIGHT as u64 {
+        server.send(hello(next));
+        next += 1;
+    }
+    for _ in 0..total {
+        let reply = server.reply();
+        assert!(reply.get("result").is_some(), "{reply}");
+        if next <= total {
+            server.send(hello(next));
+            next += 1;
+        }
+    }
+    server.shutdown(total + 1);
+}
+
 fn launch(server: &mut Sidecar, profile: &Path) -> String {
     let mut params = json!({"headless":true,"userDataDir":profile});
     if let Ok(executable) = std::env::var("EOKA_TEST_CHROME_PATH") {
@@ -933,8 +956,6 @@ fn catalog_operations_run_on_the_addressed_page_and_report_structured_errors() {
         .as_str()
         .unwrap_or_else(|| panic!("no control in {observed}"))
         .to_owned();
-    // The shadow page is the foreground tab; background tabs do not run the
-    // animation frames that actionability checks wait for.
     let scrolled = server.request(105, "scroll", json!({"pageId":shadow,"target":reference}));
     assert!(scrolled.get("result").is_some(), "{scrolled}");
     let stale = server.request(106, "scroll", json!({"pageId":shadow,"target":"@e999"}));
@@ -1744,4 +1765,1478 @@ fn connected_external_browser_keeps_tabs_profile_and_releases_held_input() {
         std::fs::read(profile.join("caller-sentinel")).unwrap(),
         b"keep"
     );
+}
+
+fn stalling_server() -> std::net::SocketAddr {
+    const PAGE: &str = "<!doctype html><title>fixture</title><input id=name>\
+        <button id=go>Go</button><p id=status></p>";
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            std::thread::spawn(move || {
+                let mut request = [0u8; 4096];
+                let read = std::io::Read::read(&mut stream, &mut request).unwrap_or(0);
+                if String::from_utf8_lossy(&request[..read]).starts_with("GET /hang") {
+                    std::thread::sleep(Duration::from_secs(600));
+                    return;
+                }
+                let _ = stream.write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: text/html\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{PAGE}",
+                        PAGE.len()
+                    )
+                    .as_bytes(),
+                );
+            });
+        }
+    });
+    address
+}
+
+#[derive(Default)]
+struct Inbox {
+    held: std::collections::HashMap<u64, Value>,
+}
+
+impl Inbox {
+    fn take(&mut self, server: &Sidecar, id: u64, within: Duration) -> Option<Value> {
+        let deadline = Instant::now() + within;
+        loop {
+            if let Some(reply) = self.held.remove(&id) {
+                return Some(reply);
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            let reply = server.replies.recv_timeout(remaining).ok()?;
+            self.held.insert(reply["id"].as_u64().unwrap(), reply);
+        }
+    }
+
+    fn timed(
+        &mut self,
+        server: &mut Sidecar,
+        id: u64,
+        method: &str,
+        params: Value,
+    ) -> (Value, Duration) {
+        let started = Instant::now();
+        server.send(json!({"id":id,"method":method,"params":params}));
+        let reply = self
+            .take(server, id, Duration::from_secs(45))
+            .unwrap_or_else(|| panic!("{method} did not answer"));
+        (reply, started.elapsed())
+    }
+}
+
+fn two_fixture_pages(server: &mut Sidecar, profile: &Path, origin: &str) -> (String, String) {
+    launch(server, profile);
+    let mut open = |id: u64| {
+        let response = server.request(id, "browser.new_page", json!({"url":format!("{origin}/")}));
+        response["result"]["pageId"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{response}"))
+            .to_owned()
+    };
+    (open(3), open(4))
+}
+
+#[test]
+#[ignore = "requires Chrome"]
+fn pages_run_requests_concurrently_and_each_page_keeps_its_order() {
+    let (root, state, scratch) = directories();
+    let origin = format!("http://{}", stalling_server());
+    let mut server = Sidecar::start(&state, &scratch);
+    let (first, second) = two_fixture_pages(&mut server, &root.path().join("profile"), &origin);
+    let mut inbox = Inbox::default();
+    let pause = "()=>new Promise(resolve=>setTimeout(()=>resolve(1),1000))";
+    let started = Instant::now();
+    server
+        .send(json!({"id":10,"method":"page.evaluate","params":{"pageId":first,"function":pause}}));
+    server.send(
+        json!({"id":11,"method":"page.evaluate","params":{"pageId":second,"function":pause}}),
+    );
+    for id in [10, 11] {
+        let reply = inbox.take(&server, id, Duration::from_secs(20)).unwrap();
+        assert_eq!(reply["result"]["result"], 1, "{reply}");
+    }
+    let elapsed = started.elapsed();
+    assert!(elapsed >= Duration::from_millis(1000), "{elapsed:?}");
+    assert!(elapsed < Duration::from_millis(1600), "{elapsed:?}");
+    server.send(json!({"id":12,"method":"page.evaluate","params":{"pageId":first,
+        "function":"()=>new Promise(resolve=>setTimeout(()=>{window.seen=['slow'];resolve(1)},300))"}}));
+    server.send(
+        json!({"id":13,"method":"page.evaluate","params":{"pageId":first,
+        "function":"()=>{(window.seen??=[]).push('fast');return window.seen}"}}),
+    );
+    server.send(json!({"id":14,"method":"page.title","params":{"pageId":first}}));
+    assert!(inbox.take(&server, 12, Duration::from_secs(20)).is_some());
+    let ordered = inbox.take(&server, 13, Duration::from_secs(20)).unwrap();
+    assert_eq!(
+        ordered["result"]["result"],
+        json!(["slow", "fast"]),
+        "{ordered}"
+    );
+    let title = inbox.take(&server, 14, Duration::from_secs(20)).unwrap();
+    assert_eq!(title["result"]["title"], "fixture");
+    server.shutdown(15);
+}
+
+#[test]
+#[ignore = "requires Chrome"]
+fn a_page_stuck_in_a_script_does_not_delay_other_pages_or_new_pages() {
+    let (root, state, scratch) = directories();
+    let origin = format!("http://{}", stalling_server());
+    let mut server = Sidecar::start(&state, &scratch);
+    let (stuck, other) = two_fixture_pages(&mut server, &root.path().join("profile"), &origin);
+    let mut inbox = Inbox::default();
+    server.send(json!({"id":10,"method":"page.evaluate","params":{"pageId":stuck,"function":"()=>new Promise(()=>{})"}}));
+    std::thread::sleep(Duration::from_millis(200));
+    let (title, elapsed) = inbox.timed(&mut server, 11, "page.title", json!({"pageId":other}));
+    assert_eq!(title["result"]["title"], "fixture", "{title}");
+    assert!(elapsed < Duration::from_millis(1000), "{elapsed:?}");
+    let (created, elapsed) = inbox.timed(&mut server, 12, "browser.new_page", json!({}));
+    assert!(created["result"]["pageId"].is_string(), "{created}");
+    assert!(elapsed < Duration::from_millis(3000), "{elapsed:?}");
+    let (tabs, elapsed) = inbox.timed(&mut server, 13, "browser.tabs", json!({}));
+    for page in [
+        json!(stuck),
+        json!(other),
+        created["result"]["pageId"].clone(),
+    ] {
+        assert!(
+            tabs["result"]["tabs"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|tab| tab["id"] == page),
+            "{tabs}"
+        );
+    }
+    assert!(elapsed < Duration::from_millis(3000), "{elapsed:?}");
+    let (closed, elapsed) = inbox.timed(
+        &mut server,
+        14,
+        "browser.close_tab",
+        json!({"pageId":created["result"]["pageId"]}),
+    );
+    assert!(closed.get("result").is_some(), "{closed}");
+    assert!(elapsed < Duration::from_millis(3000), "{elapsed:?}");
+    server.send(json!({"id":15,"method":"page.title","params":{"pageId":stuck}}));
+    assert!(
+        inbox
+            .take(&server, 15, Duration::from_millis(500))
+            .is_none(),
+        "a request behind the stuck script on the same page must keep its place"
+    );
+    assert!(inbox.take(&server, 10, Duration::from_millis(1)).is_none());
+    let started = Instant::now();
+    server.send(json!({"id":16,"method":"server.shutdown","params":{}}));
+    let interrupted = inbox.take(&server, 10, Duration::from_secs(20)).unwrap();
+    assert_eq!(interrupted["error"]["code"], "Cancelled", "{interrupted}");
+    let queued = inbox.take(&server, 15, Duration::from_secs(20)).unwrap();
+    assert_eq!(queued["error"]["code"], "ShuttingDown", "{queued}");
+    let shutdown = inbox.take(&server, 16, Duration::from_secs(20)).unwrap();
+    assert_eq!(shutdown["result"], json!({}), "{shutdown}");
+    assert!(started.elapsed() < Duration::from_secs(10));
+    server.exit();
+}
+
+#[test]
+#[ignore = "requires Chrome"]
+fn an_unanswered_navigation_is_isolated_then_abandoned_so_the_page_answers_again() {
+    let (root, state, scratch) = directories();
+    let origin = format!("http://{}", stalling_server());
+    let mut server = Sidecar::start(&state, &scratch);
+    let (stuck, other) = two_fixture_pages(&mut server, &root.path().join("profile"), &origin);
+    let mut inbox = Inbox::default();
+    let navigate = eoka_server::eoka::Action::Navigate {
+        url: format!("{origin}/hang"),
+        referrer: None,
+    };
+    let timed_out = uuid::Uuid::new_v4().to_string();
+    let record = server.request(
+        10,
+        "actions.perform",
+        json!({"pageId":stuck,"operation_id":timed_out,"action":navigate,"options":{"timeout_ms":4000}}),
+    );
+    assert_eq!(record["result"]["id"], timed_out, "{record}");
+    std::thread::sleep(Duration::from_millis(500));
+    let (title, elapsed) = inbox.timed(&mut server, 11, "page.title", json!({"pageId":other}));
+    assert_eq!(title["result"]["title"], "fixture", "{title}");
+    assert!(elapsed < Duration::from_millis(1000), "{elapsed:?}");
+    let (created, elapsed) = inbox.timed(&mut server, 12, "browser.new_page", json!({}));
+    assert!(created["result"]["pageId"].is_string(), "{created}");
+    assert!(elapsed < Duration::from_millis(3000), "{elapsed:?}");
+    let asked = Instant::now();
+    server.send(json!({"id":13,"method":"page.title","params":{"pageId":stuck}}));
+    let (title, elapsed) = inbox.timed(&mut server, 14, "page.title", json!({"pageId":other}));
+    assert_eq!(title["result"]["title"], "fixture", "{title}");
+    assert!(elapsed < Duration::from_millis(1000), "{elapsed:?}");
+    let finished = server_wait(&mut inbox, &mut server, 15, &timed_out);
+    assert_eq!(finished["result"]["state"], "finished", "{finished}");
+    assert_eq!(
+        finished["result"]["outcome"], "outcome_unknown",
+        "{finished}"
+    );
+    assert_eq!(
+        finished["result"]["error_code"], "action_timeout",
+        "{finished}"
+    );
+    let title = inbox
+        .take(&server, 13, Duration::from_secs(5))
+        .expect("the read must answer once the unanswered navigation is abandoned");
+    assert_eq!(title["result"]["title"], "fixture", "{title}");
+    assert!(asked.elapsed() < Duration::from_secs(35));
+    let (url, elapsed) = inbox.timed(&mut server, 16, "page.url", json!({"pageId":stuck}));
+    assert_eq!(url["result"]["url"], format!("{origin}/"), "{url}");
+    assert!(elapsed < Duration::from_millis(1000), "{elapsed:?}");
+
+    let cancelled = uuid::Uuid::new_v4().to_string();
+    let record = server.request(
+        20,
+        "actions.perform",
+        json!({"pageId":stuck,"operation_id":cancelled,"action":navigate,"options":{"timeout_ms":120_000}}),
+    );
+    assert_eq!(record["result"]["id"], cancelled, "{record}");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut id = 21;
+    loop {
+        let record = server.request(id, "operations.get", json!({"id":cancelled}));
+        id += 1;
+        if record["result"]["dispatch_intent"] == true {
+            break;
+        }
+        assert!(Instant::now() < deadline, "navigation never dispatched");
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    std::thread::sleep(Duration::from_millis(300));
+    let record = server.request(100, "operations.cancel", json!({"id":cancelled}));
+    assert_eq!(record["result"]["id"], cancelled, "{record}");
+    let finished = server_wait(&mut inbox, &mut server, 101, &cancelled);
+    assert_eq!(
+        finished["result"]["error_code"], "operation_canceled",
+        "{finished}"
+    );
+    let (title, elapsed) = inbox.timed(&mut server, 102, "page.title", json!({"pageId":stuck}));
+    assert_eq!(title["result"]["title"], "fixture", "{title}");
+    assert!(elapsed < Duration::from_millis(1000), "{elapsed:?}");
+    server.shutdown(103);
+}
+
+fn server_wait(inbox: &mut Inbox, server: &mut Sidecar, id: u64, operation: &str) -> Value {
+    inbox
+        .timed(
+            server,
+            id,
+            "operations.wait",
+            json!({"id":operation,"timeout_ms":30_000}),
+        )
+        .0
+}
+
+#[test]
+#[ignore = "requires Chrome"]
+fn closing_one_tab_leaves_an_operation_on_another_tab_running() {
+    let (root, state, scratch) = directories();
+    let origin = format!("http://{}", stalling_server());
+    let mut server = Sidecar::start(&state, &scratch);
+    let (acting, closing) = two_fixture_pages(&mut server, &root.path().join("profile"), &origin);
+    let operation = uuid::Uuid::new_v4().to_string();
+    let target = eoka_server::eoka::LocatorSpec::css("#go");
+    let action = eoka_server::eoka::Action::Click {
+        target: target.clone(),
+        human: false,
+        double: false,
+    };
+    let expect = eoka_server::eoka::Expectation::Text {
+        target,
+        value: "never appears".into(),
+        contains: false,
+    };
+    let record = server.request(
+        10,
+        "actions.perform",
+        json!({"pageId":acting,"operation_id":operation,"action":action,"options":{"expect":expect,"timeout_ms":60_000}}),
+    );
+    assert_eq!(record["result"]["id"], operation, "{record}");
+    let closed = server.request(11, "browser.close_tab", json!({"pageId":closing}));
+    assert!(closed.get("result").is_some(), "{closed}");
+    let record = server.request(12, "operations.get", json!({"id":operation}));
+    assert_eq!(record["result"]["state"], "running", "{record}");
+    let closed = server.request(13, "page.close", json!({"pageId":acting}));
+    assert!(closed.get("result").is_some(), "{closed}");
+    let record = server.request(14, "operations.get", json!({"id":operation}));
+    assert_eq!(record["result"]["state"], "finished", "{record}");
+    assert_eq!(
+        record["result"]["error_code"], "operation_canceled",
+        "{record}"
+    );
+    server.shutdown(15);
+}
+
+#[test]
+#[ignore = "requires Chrome"]
+fn diagnostics_keep_their_wording_and_file_output_names_the_occupied_path() {
+    let (root, state, scratch) = directories();
+    let origin = format!("http://{}", stalling_server());
+    let mut server = Sidecar::start(&state, &scratch);
+    let (page, _) = two_fixture_pages(&mut server, &root.path().join("profile"), &origin);
+    for (id, value) in [(20, "x"), (30, "o"), (40, "e"), (50, "t")] {
+        let operation = uuid::Uuid::new_v4().to_string();
+        let record = server.request(
+            id,
+            "page.fill",
+            json!({"pageId":page,"operation_id":operation,"selector":"#missing","value":value,"options":{"timeout_ms":500}}),
+        );
+        assert_eq!(record["result"]["id"], operation, "{record}");
+        let finished = server.request(
+            id + 1,
+            "operations.wait",
+            json!({"id":operation,"timeout_ms":30_000}),
+        );
+        let stored = server.request(id + 2, "operations.get", json!({"id":operation}));
+        for record in [&finished, &stored] {
+            let error = &record["result"]["error"];
+            assert_eq!(
+                error["message"],
+                "Timeout: Action deadline exceeded during preparation: target not found",
+                "{value:?}: {record}"
+            );
+            assert_eq!(error["code"], "action_timeout", "{record}");
+            assert_eq!(error["context"]["phase"], "preparation", "{record}");
+            assert!(!record.to_string().contains("[redacted]"), "{record}");
+        }
+    }
+
+    let directory = std::fs::canonicalize(root.path()).unwrap();
+    let occupied = directory.join("occupied.png");
+    std::fs::write(&occupied, b"keep").unwrap();
+    let refused = server.request(
+        12,
+        "page.screenshot_to_file",
+        json!({"pageId":page,"path":occupied}),
+    );
+    assert_eq!(refused["error"]["code"], "FileOutput", "{refused}");
+    let message = refused["error"]["message"].as_str().unwrap();
+    assert!(message.contains(occupied.to_str().unwrap()), "{message}");
+    assert!(message.contains("never overwrites"), "{message}");
+    assert_eq!(std::fs::read(&occupied).unwrap(), b"keep");
+
+    let recording = uuid::Uuid::new_v4().to_string();
+    let refused = server.request(
+        13,
+        "recording.start",
+        json!({"recordingId":recording,"pageId":page,"path":occupied}),
+    );
+    let failure = if refused.get("error").is_some() {
+        refused["error"]["message"].clone()
+    } else {
+        refused["result"]["failure"]["message"].clone()
+    };
+    let message = failure.as_str().unwrap_or_else(|| panic!("{refused}"));
+    assert!(message.contains(occupied.to_str().unwrap()), "{message}");
+    assert!(message.contains("never overwrites"), "{message}");
+    assert_eq!(std::fs::read(&occupied).unwrap(), b"keep");
+    server.shutdown(14);
+}
+
+const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
+
+fn png(reply: &Value) -> Vec<u8> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(
+            reply["result"]["dataBase64"]
+                .as_str()
+                .unwrap_or_else(|| panic!("{reply}")),
+        )
+        .unwrap();
+    assert_eq!(&bytes[..8], PNG_SIGNATURE);
+    bytes
+}
+
+fn visibility(server: &mut Sidecar, id: u64, page: &str) -> Value {
+    let seen = server.request(
+        id,
+        "page.evaluate",
+        json!({"pageId":page,"function":"()=>({now:document.visibilityState,changes:window.visibilityChanges})"}),
+    );
+    seen["result"]["result"].clone()
+}
+
+#[test]
+#[ignore = "requires Chrome"]
+fn a_tab_behind_another_is_captured_promptly_and_stays_behind() {
+    let prompt = Duration::from_secs(5);
+    let (root, state, scratch) = directories();
+    let mut server = Sidecar::start(&state, &scratch);
+    launch(&mut server, &root.path().join("profile"));
+    let mut open = |id: u64| {
+        let response = server.request(
+            id,
+            "browser.new_page",
+            json!({"url":"data:text/html,<title>t</title><h1>hello</h1>"}),
+        );
+        response["result"]["pageId"].as_str().unwrap().to_owned()
+    };
+    let (behind, front) = (open(3), open(4));
+    for (id, page) in [(5, &behind), (6, &front)] {
+        let watched = server.request(
+            id,
+            "page.execute",
+            json!({"pageId":page,"function":"()=>{window.visibilityChanges=[];document.addEventListener('visibilitychange',()=>window.visibilityChanges.push(document.visibilityState))}"}),
+        );
+        assert!(watched.get("result").is_some(), "{watched}");
+    }
+    std::thread::sleep(Duration::from_secs(3));
+    let mut inbox = Inbox::default();
+
+    let (first, elapsed) =
+        inbox.timed(&mut server, 10, "page.screenshot", json!({"pageId":behind}));
+    assert!(elapsed < prompt, "{elapsed:?}");
+    let before = png(&first);
+    let output = std::fs::canonicalize(root.path())
+        .unwrap()
+        .join("behind.png");
+    let (saved, elapsed) = inbox.timed(
+        &mut server,
+        11,
+        "page.screenshot_to_file",
+        json!({"pageId":behind,"path":output}),
+    );
+    assert!(elapsed < prompt, "{elapsed:?}");
+    assert!(saved["result"]["bytes"].as_u64().unwrap() > 0, "{saved}");
+    assert_eq!(&std::fs::read(&output).unwrap()[..8], PNG_SIGNATURE);
+    let (ahead, elapsed) = inbox.timed(&mut server, 12, "page.screenshot", json!({"pageId":front}));
+    assert!(elapsed < prompt, "{elapsed:?}");
+    png(&ahead);
+
+    let started = Instant::now();
+    server.send(json!({"id":13,"method":"page.screenshot","params":{"pageId":behind}}));
+    server.send(json!({"id":14,"method":"page.screenshot","params":{"pageId":front}}));
+    for id in [13, 14] {
+        png(&inbox.take(&server, id, Duration::from_secs(40)).unwrap());
+    }
+    assert!(started.elapsed() < Duration::from_secs(10));
+
+    let painted = server.request(
+        15,
+        "page.execute",
+        json!({"pageId":behind,"function":"()=>{document.body.style.background='rgb(200,0,0)'}"}),
+    );
+    assert!(painted.get("result").is_some(), "{painted}");
+    std::thread::sleep(Duration::from_secs(3));
+    let (repainted, elapsed) =
+        inbox.timed(&mut server, 16, "page.screenshot", json!({"pageId":behind}));
+    assert!(elapsed < prompt, "{elapsed:?}");
+    assert_ne!(png(&repainted), before, "a stale frame was captured");
+    let (whole, elapsed) = inbox.timed(
+        &mut server,
+        17,
+        "page.screenshot",
+        json!({"pageId":behind,"fullPage":true,"format":"jpeg","quality":40}),
+    );
+    assert!(elapsed < prompt, "{elapsed:?}");
+    assert!(
+        whole["result"]["dataBase64"]
+            .as_str()
+            .is_some_and(|data| !data.is_empty()),
+        "{whole}"
+    );
+    let catalogued = std::fs::canonicalize(root.path())
+        .unwrap()
+        .join("catalog.png");
+    let (catalog, elapsed) = inbox.timed(
+        &mut server,
+        18,
+        "screenshot",
+        json!({"pageId":behind,"output":catalogued}),
+    );
+    assert!(elapsed < prompt, "{elapsed:?}");
+    assert!(catalog["result"]["size"].as_u64().unwrap() > 0, "{catalog}");
+    assert_eq!(&std::fs::read(&catalogued).unwrap()[..8], PNG_SIGNATURE);
+
+    assert_eq!(
+        visibility(&mut server, 19, &behind),
+        json!({"now":"hidden","changes":[]})
+    );
+    assert_eq!(
+        visibility(&mut server, 20, &front),
+        json!({"now":"visible","changes":[]})
+    );
+
+    let recording = uuid::Uuid::new_v4().to_string();
+    let video = std::fs::canonicalize(root.path())
+        .unwrap()
+        .join("behind.mp4");
+    let record = server.request(
+        30,
+        "recording.start",
+        json!({"recordingId":recording,"pageId":behind,"path":video}),
+    );
+    assert_eq!(record["result"]["state"], "running", "{record}");
+    let animated = server.request(
+        31,
+        "page.execute",
+        json!({"pageId":behind,"function":"()=>{let n=0;setInterval(()=>{document.body.style.background=++n%2?'rgb(0,0,200)':'rgb(0,200,0)'},100)}"}),
+    );
+    assert!(animated.get("result").is_some(), "{animated}");
+    std::thread::sleep(Duration::from_millis(1500));
+    let (during, elapsed) =
+        inbox.timed(&mut server, 32, "page.screenshot", json!({"pageId":behind}));
+    assert!(elapsed < prompt, "{elapsed:?}");
+    png(&during);
+    std::thread::sleep(Duration::from_millis(1000));
+    let stopped = server.request(33, "recording.stop", json!({"recordingId":recording}));
+    assert_eq!(stopped["result"]["state"], "completed", "{stopped}");
+    assert!(
+        stopped["result"]["artifact"]["bytes"].as_u64().unwrap() > 4096,
+        "{stopped}"
+    );
+    assert_eq!(
+        std::fs::metadata(&video).unwrap().len(),
+        stopped["result"]["artifact"]["bytes"].as_u64().unwrap()
+    );
+    server.shutdown(34);
+}
+
+const QUICK: Duration = Duration::from_millis(2000);
+const UNAFFECTED: Duration = Duration::from_millis(1000);
+
+fn blocked_fixture() -> std::net::SocketAddr {
+    const PAGE: &str = "<!doctype html><title>fixture</title><h1>Blocked tabs</h1>\
+        <button id=danger onclick=\"window.clicks=(window.clicks||0)+1;alert('are you sure?');\
+        document.getElementById('s').textContent='Deleted'\">Delete</button>\
+        <button id=plain onclick=\"document.getElementById('s').textContent='Plain'\">Plain</button>\
+        <p id=s></p>";
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            std::thread::spawn(move || {
+                let mut request = [0u8; 4096];
+                let read = std::io::Read::read(&mut stream, &mut request).unwrap_or(0);
+                if String::from_utf8_lossy(&request[..read]).starts_with("GET /hang") {
+                    std::thread::sleep(Duration::from_secs(600));
+                    return;
+                }
+                let _ = stream.write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: text/html\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{PAGE}",
+                        PAGE.len()
+                    )
+                    .as_bytes(),
+                );
+            });
+        }
+    });
+    address
+}
+
+struct Blocked {
+    server: Sidecar,
+    inbox: Inbox,
+    origin: String,
+    next: u64,
+    _root: TempDir,
+}
+
+impl Blocked {
+    fn start(hello: Option<Value>) -> Self {
+        let (root, state, scratch) = directories();
+        let mut server = Sidecar::start(&state, &scratch);
+        if let Some(hello) = hello {
+            let greeting = server.request(900, "server.hello", hello);
+            assert_eq!(
+                greeting["result"]["protocol"],
+                json!(PROTOCOL_VERSION),
+                "{greeting}"
+            );
+            assert!(greeting["result"]["capabilities"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("pageBlockers")));
+        }
+        launch(&mut server, &root.path().join("profile"));
+        Self {
+            server,
+            inbox: Inbox::default(),
+            origin: format!("http://{}", blocked_fixture()),
+            next: 1000,
+            _root: root,
+        }
+    }
+
+    fn current() -> Self {
+        Self::start(Some(json!({"protocol":PROTOCOL_VERSION})))
+    }
+
+    fn serving(fixture: std::net::SocketAddr) -> Self {
+        let mut tabs = Self::current();
+        tabs.origin = format!("http://{fixture}");
+        tabs
+    }
+
+    fn page_at(&mut self, path: &str) -> String {
+        let url = format!("{}{path}", self.origin);
+        self.ok("browser.new_page", json!({"url":url}))["pageId"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    fn admit(&mut self, page: &str, action: Value, expect: Option<Value>, limit: u64) -> String {
+        let operation = uuid::Uuid::new_v4().to_string();
+        let mut options = json!({"timeout_ms":limit});
+        if let Some(expect) = expect {
+            options["expect"] = expect;
+        }
+        let record = self.ok(
+            "actions.perform",
+            json!({"pageId":page,"operation_id":operation,"action":action,"options":options}),
+        );
+        assert_eq!(record["id"], operation, "{record}");
+        operation
+    }
+
+    fn act(
+        &mut self,
+        page: &str,
+        action: Value,
+        expect: Option<Value>,
+        limit: u64,
+    ) -> (Value, Duration) {
+        let started = Instant::now();
+        let operation = self.admit(page, action, expect, limit);
+        let record = self.ok(
+            "operations.wait",
+            json!({"id":operation,"timeout_ms":limit + 5000}),
+        );
+        (record, started.elapsed())
+    }
+
+    fn evaluate(&mut self, page: &str, function: &str) -> Value {
+        self.ok("page.evaluate", json!({"pageId":page,"function":function}))["result"].clone()
+    }
+
+    fn painted(&mut self, page: &str) -> u64 {
+        self.evaluate(page, "()=>window.painted").as_u64().unwrap()
+    }
+
+    fn painting(&mut self, page: &str) -> bool {
+        let before = self.painted(page);
+        std::thread::sleep(Duration::from_millis(500));
+        self.painted(page) > before + 5
+    }
+
+    fn stops_painting(&mut self, page: &str) {
+        let deadline = Instant::now() + Duration::from_secs(4);
+        while self.painting(page) {
+            assert!(
+                Instant::now() < deadline,
+                "the hidden tab kept running animation frames"
+            );
+        }
+    }
+
+    fn seen(&mut self, page: &str) -> Value {
+        self.evaluate(
+            page,
+            "()=>({now:document.visibilityState,changes:window.changes})",
+        )
+    }
+
+    fn clear(&mut self, pages: &[&str]) {
+        for page in pages {
+            self.ok(
+                "page.execute",
+                json!({"pageId":page,"function":"()=>{for(const id of ['outcome','twice','dragged'])document.getElementById(id).textContent='';window.scrollTo(0,0)}"}),
+            );
+        }
+    }
+
+    fn id(&mut self) -> u64 {
+        self.next += 1;
+        self.next
+    }
+
+    fn call(&mut self, method: &str, params: Value) -> (Value, Duration) {
+        let id = self.id();
+        self.inbox.timed(&mut self.server, id, method, params)
+    }
+
+    fn ok(&mut self, method: &str, params: Value) -> Value {
+        let (reply, _) = self.call(method, params);
+        assert!(reply.get("result").is_some(), "{method}: {reply}");
+        reply["result"].clone()
+    }
+
+    fn send(&mut self, method: &str, params: Value) -> u64 {
+        let id = self.id();
+        self.server
+            .send(json!({"id":id,"method":method,"params":params}));
+        id
+    }
+
+    fn page(&mut self) -> String {
+        let url = format!("{}/", self.origin);
+        self.ok("browser.new_page", json!({"url":url}))["pageId"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    fn open_alert(&mut self, page: &str) {
+        self.ok(
+            "page.execute",
+            json!({"pageId":page,"function":"()=>{setTimeout(()=>alert('are you sure?'),0)}"}),
+        );
+        std::thread::sleep(Duration::from_millis(300));
+    }
+
+    fn stall_navigation(&mut self, page: &str) {
+        self.ok(
+            "page.execute",
+            json!({"pageId":page,"function":"()=>{setTimeout(()=>{location.href='/hang'},0)}"}),
+        );
+    }
+
+    fn title(&mut self, page: &str, within: Duration) {
+        let (reply, elapsed) = self.call("page.title", json!({"pageId":page}));
+        assert_eq!(reply["result"]["title"], "fixture", "{reply}");
+        assert!(elapsed < within, "{elapsed:?}");
+    }
+
+    fn finish(mut self) {
+        let id = self.id();
+        self.server.shutdown(id);
+    }
+}
+
+fn assert_dialog_open(reply: &Value, method: &str) {
+    let error = &reply["error"];
+    assert_eq!(error["code"], "DialogOpen", "{method}: {reply}");
+    let message = error["message"].as_str().unwrap();
+    assert!(message.contains("dialog is open"), "{message}");
+    assert!(message.contains("are you sure?"), "{message}");
+    assert_eq!(error["data"]["detail"]["code"], "dialog_open", "{reply}");
+    assert!(
+        error["data"]["detail"]["hint"]
+            .as_str()
+            .is_some_and(|hint| hint.contains("dialog.accept") && hint.contains("dialog.dismiss")),
+        "{reply}"
+    );
+    let blocker = &error["data"]["blocker"];
+    assert_eq!(blocker["kind"], "dialog", "{reply}");
+    assert_eq!(blocker["dialogType"], "alert", "{reply}");
+    assert_eq!(blocker["message"], "are you sure?", "{reply}");
+    assert!(blocker["elapsedMs"].is_u64(), "{reply}");
+}
+
+#[test]
+#[ignore = "requires Chrome"]
+fn an_open_dialog_is_reported_at_once_and_clearing_it_frees_the_tab() {
+    let mut blocked = Blocked::current();
+    let other = blocked.page();
+    let page = blocked.page();
+    blocked.open_alert(&page);
+    for (method, params) in [
+        ("page.title", json!({"pageId":page})),
+        ("page.evaluate", json!({"pageId":page,"function":"()=>1"})),
+        ("page.get_text", json!({"pageId":page,"selector":"h1"})),
+        ("page.exists", json!({"pageId":page,"selector":"h1"})),
+        ("page.screenshot", json!({"pageId":page})),
+        ("agent.observe", json!({"pageId":page})),
+        ("text", json!({"pageId":page})),
+        ("eval", json!({"pageId":page,"code":"1"})),
+    ] {
+        let (reply, elapsed) = blocked.call(method, params);
+        assert_dialog_open(&reply, method);
+        assert!(elapsed < QUICK, "{method}: {elapsed:?}");
+    }
+    let operation = uuid::Uuid::new_v4().to_string();
+    let (refused, elapsed) = blocked.call(
+        "actions.perform",
+        json!({"pageId":page,"operation_id":operation,
+            "action":{"kind":"hover","target":{"query":{"kind":"css","selector":"#plain"}}}}),
+    );
+    assert_dialog_open(&refused, "actions.perform");
+    assert_eq!(
+        refused["error"]["data"]["operation_id"], operation,
+        "{refused}"
+    );
+    assert!(elapsed < QUICK, "{elapsed:?}");
+    let (unknown, _) = blocked.call("operations.get", json!({"id":operation}));
+    assert!(unknown.get("error").is_some(), "{unknown}");
+    blocked.title(&other, UNAFFECTED);
+
+    let (accepted, elapsed) = blocked.call("dialog.accept", json!({"pageId":page}));
+    assert_eq!(accepted["result"], "Dialog accepted", "{accepted}");
+    assert!(elapsed < QUICK, "{elapsed:?}");
+    blocked.title(&page, QUICK);
+
+    blocked.open_alert(&page);
+    let (dismissed, elapsed) = blocked.call("dialog.dismiss", json!({"pageId":page}));
+    assert_eq!(dismissed["result"], "Dialog dismissed", "{dismissed}");
+    assert!(elapsed < QUICK, "{elapsed:?}");
+    blocked.title(&page, QUICK);
+
+    let (confirm, elapsed) = blocked.call(
+        "page.evaluate",
+        json!({"pageId":page,"function":"()=>confirm('are you sure?')"}),
+    );
+    assert_eq!(confirm["error"]["code"], "DialogOpen", "{confirm}");
+    assert_eq!(
+        confirm["error"]["data"]["blocker"]["dialogType"], "confirm",
+        "{confirm}"
+    );
+    assert!(
+        confirm["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("`page.evaluate` returned without a result"),
+        "{confirm}"
+    );
+    assert!(elapsed < QUICK, "{elapsed:?}");
+    blocked.ok("dialog.dismiss", json!({"pageId":page}));
+    blocked.title(&page, QUICK);
+    let (none, _) = blocked.call("dialog.accept", json!({"pageId":page}));
+    assert_eq!(none["error"]["code"], "Cdp", "{none}");
+    blocked.finish();
+}
+
+#[test]
+#[ignore = "requires Chrome"]
+fn a_click_that_opens_a_dialog_ends_its_operation_and_is_sent_once() {
+    let mut blocked = Blocked::current();
+    let page = blocked.page();
+    let status = json!({"query":{"kind":"css","selector":"#s"}});
+    let operation = uuid::Uuid::new_v4().to_string();
+    let started = Instant::now();
+    let record = blocked.ok(
+        "actions.perform",
+        json!({"pageId":page,"operation_id":operation,
+            "action":{"kind":"click","target":{"query":{"kind":"css","selector":"#danger"}}},
+            "options":{"expect":{"kind":"text","target":status,"value":"Deleted"},"timeout_ms":8000}}),
+    );
+    assert_eq!(record["id"], operation, "{record}");
+    let record = blocked.ok("operations.wait", json!({"id":operation,"timeout_ms":8000}));
+    assert!(
+        started.elapsed() < Duration::from_millis(3000),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(record["state"], "finished", "{record}");
+    assert_eq!(record["error_code"], "dialog_open", "{record}");
+    assert_eq!(record["outcome"], "outcome_unknown", "{record}");
+    assert_eq!(record["dispatch_intent"], true, "{record}");
+    assert_eq!(
+        record["receipt"]["dispatch"], "may_have_been_sent",
+        "{record}"
+    );
+    assert_eq!(record["receipt"]["target_id"], page, "{record}");
+    assert_eq!(record["receipt"]["outcome"], "outcome_unknown", "{record}");
+    assert_eq!(record["error"]["code"], "dialog_open", "{record}");
+    let message = record["error"]["message"].as_str().unwrap();
+    assert!(message.contains("dialog is open"), "{message}");
+    assert!(message.contains("are you sure?"), "{message}");
+    assert!(message.contains("was dispatched"), "{message}");
+    assert!(message.contains("was sent to the page once"), "{message}");
+    assert!(
+        record["error"]["hint"]
+            .as_str()
+            .unwrap()
+            .contains("dialog.accept"),
+        "{record}"
+    );
+    assert_eq!(
+        record["error"]["context"]["action_status"], "may_have_executed",
+        "{record}"
+    );
+    std::thread::sleep(Duration::from_secs(6));
+    let (accepted, elapsed) = blocked.call("dialog.accept", json!({"pageId":page}));
+    assert_eq!(accepted["result"], "Dialog accepted", "{accepted}");
+    assert!(elapsed < QUICK, "{elapsed:?}");
+    let text = blocked.ok("page.get_text", json!({"pageId":page,"selector":"#s"}));
+    assert_eq!(text["text"], "Deleted", "{text}");
+    let next = uuid::Uuid::new_v4().to_string();
+    blocked.ok(
+        "actions.perform",
+        json!({"pageId":page,"operation_id":next,
+            "action":{"kind":"click","target":{"query":{"kind":"css","selector":"#plain"}}},
+            "options":{"expect":{"kind":"text","target":status,"value":"Plain"},"timeout_ms":8000}}),
+    );
+    let record = blocked.ok("operations.wait", json!({"id":next,"timeout_ms":9000}));
+    assert_eq!(record["outcome"], "verified_complete", "{record}");
+    let clicks = blocked.ok(
+        "page.evaluate",
+        json!({"pageId":page,"function":"()=>window.clicks"}),
+    );
+    assert_eq!(clicks["result"], 1, "{clicks}");
+    let stored = blocked.ok("operations.get", json!({"id":operation}));
+    assert_eq!(stored["error_code"], "dialog_open", "{stored}");
+    blocked.finish();
+}
+
+fn assert_navigation_pending(reply: &Value) {
+    let error = &reply["error"];
+    assert_eq!(error["code"], "NavigationPending", "{reply}");
+    assert!(
+        error["message"].as_str().unwrap().contains("/hang"),
+        "{reply}"
+    );
+    assert_eq!(
+        error["data"]["detail"]["code"], "navigation_pending",
+        "{reply}"
+    );
+    assert_eq!(error["data"]["blocker"]["kind"], "navigation", "{reply}");
+    assert!(
+        error["data"]["blocker"]["url"]
+            .as_str()
+            .is_some_and(|url| url.ends_with("/hang")),
+        "{reply}"
+    );
+    assert!(error["data"]["blocker"]["elapsedMs"].is_u64(), "{reply}");
+}
+
+#[test]
+#[ignore = "requires Chrome"]
+fn a_navigation_the_page_started_is_named_when_it_stalls_and_a_new_one_recovers_the_tab() {
+    let mut blocked = Blocked::current();
+    let other = blocked.page();
+    let page = blocked.page();
+    blocked.stall_navigation(&page);
+    std::thread::sleep(Duration::from_millis(500));
+    let (early, elapsed) = blocked.call("page.title", json!({"pageId":page}));
+    assert_navigation_pending(&early);
+    assert!(elapsed < Duration::from_millis(8000), "{elapsed:?}");
+    assert!(elapsed > Duration::from_millis(3000), "{elapsed:?}");
+    for (method, params) in [
+        ("page.url", json!({"pageId":page})),
+        ("page.evaluate", json!({"pageId":page,"function":"()=>1"})),
+        ("page.exists", json!({"pageId":page,"selector":"h1"})),
+        ("text", json!({"pageId":page})),
+    ] {
+        let (reply, elapsed) = blocked.call(method, params);
+        assert_navigation_pending(&reply);
+        assert!(elapsed < QUICK, "{method}: {elapsed:?}");
+    }
+    blocked.title(&other, UNAFFECTED);
+    let navigate = |blocked: &mut Blocked, page: &str| {
+        let operation = uuid::Uuid::new_v4().to_string();
+        let url = format!("{}/", blocked.origin);
+        let started = Instant::now();
+        blocked.ok(
+            "actions.perform",
+            json!({"pageId":page,"operation_id":operation,
+                "action":{"kind":"navigate","url":url},"options":{"timeout_ms":8000}}),
+        );
+        let record = blocked.ok("operations.wait", json!({"id":operation,"timeout_ms":8000}));
+        assert_eq!(record["outcome"], "verified_complete", "{record}");
+        assert!(started.elapsed() < Duration::from_millis(8000));
+    };
+    navigate(&mut blocked, &page);
+    blocked.title(&page, QUICK);
+
+    let unread = blocked.page();
+    blocked.stall_navigation(&unread);
+    std::thread::sleep(Duration::from_millis(1000));
+    navigate(&mut blocked, &unread);
+    blocked.title(&unread, QUICK);
+    blocked.finish();
+}
+
+#[test]
+#[ignore = "requires Chrome"]
+fn clearing_a_dialog_and_closing_the_tab_overtake_a_request_stuck_on_that_page() {
+    let mut blocked = Blocked::current();
+    let other = blocked.page();
+    let page = blocked.page();
+    blocked.open_alert(&page);
+    let stuck = blocked.send(
+        "page.solve_turnstile",
+        json!({"pageId":page,"timeoutMs":20_000}),
+    );
+    let queued = blocked.send("page.reset_viewport", json!({"pageId":page}));
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(blocked
+        .inbox
+        .take(&blocked.server, stuck, Duration::from_millis(1))
+        .is_none());
+    let (dismissed, elapsed) = blocked.call("dialog.dismiss", json!({"pageId":page}));
+    assert_eq!(dismissed["result"], "Dialog dismissed", "{dismissed}");
+    assert!(elapsed < QUICK, "{elapsed:?}");
+    for id in [stuck, queued] {
+        let reply = blocked
+            .inbox
+            .take(&blocked.server, id, Duration::from_secs(5))
+            .expect("the request behind the dialog must finish once it is cleared");
+        assert!(reply.get("result").is_some(), "{reply}");
+    }
+    blocked.title(&page, QUICK);
+
+    blocked.open_alert(&page);
+    let stuck = blocked.send(
+        "page.solve_turnstile",
+        json!({"pageId":page,"timeoutMs":20_000}),
+    );
+    std::thread::sleep(Duration::from_millis(300));
+    let (closed, elapsed) = blocked.call("page.close", json!({"pageId":page}));
+    assert!(closed.get("result").is_some(), "{closed}");
+    assert!(elapsed < Duration::from_millis(3000), "{elapsed:?}");
+    blocked.title(&other, UNAFFECTED);
+    let tabs = blocked.ok("browser.tabs", json!({}));
+    assert!(
+        !tabs["tabs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|tab| tab["id"] == json!(page)),
+        "{tabs}"
+    );
+    let ended = blocked
+        .inbox
+        .take(&blocked.server, stuck, Duration::from_secs(40))
+        .expect("the request on the closed tab must end");
+    assert!(ended.get("error").is_some(), "{ended}");
+    let (gone, _) = blocked.call("page.title", json!({"pageId":page}));
+    assert_eq!(gone["error"]["code"], "InvalidPage", "{gone}");
+    blocked.finish();
+}
+
+#[test]
+#[ignore = "requires Chrome"]
+fn a_client_that_did_not_ask_for_the_blocker_codes_receives_operation_errors() {
+    for hello in [
+        None,
+        Some(json!({"protocol":{"major":2,"minor":1}})),
+        Some(json!({"protocol":{"major":2,"minor":0}})),
+    ] {
+        let mut blocked = Blocked::start(hello.clone());
+        let page = blocked.page();
+        blocked.open_alert(&page);
+        for (method, params) in [
+            ("page.title", json!({"pageId":page})),
+            ("page.exists", json!({"pageId":page,"selector":"h1"})),
+            ("text", json!({"pageId":page})),
+        ] {
+            let (reply, elapsed) = blocked.call(method, params);
+            assert_eq!(
+                reply["error"]["code"], "Operation",
+                "{hello:?} {method}: {reply}"
+            );
+            assert_eq!(
+                reply["error"]["data"]["detail"]["code"], "dialog_open",
+                "{reply}"
+            );
+            assert!(reply["error"]["data"].get("blocker").is_none(), "{reply}");
+            assert!(reply["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("are you sure?"));
+            assert!(elapsed < QUICK, "{elapsed:?}");
+        }
+        blocked.ok("dialog.dismiss", json!({"pageId":page}));
+        blocked.title(&page, QUICK);
+        blocked.finish();
+    }
+    let mut understands = Blocked::start(Some(
+        json!({"protocol":{"major":2,"minor":0},"understands":{"major":2,"minor":2}}),
+    ));
+    let page = understands.page();
+    understands.open_alert(&page);
+    let (reply, _) = understands.call("page.title", json!({"pageId":page}));
+    assert_dialog_open(&reply, "page.title");
+    understands.ok("dialog.dismiss", json!({"pageId":page}));
+    understands.finish();
+}
+
+#[test]
+#[ignore = "requires Chrome; waits for the 15 second read limit"]
+fn a_page_whose_main_thread_is_busy_is_reported_as_unresponsive() {
+    let mut blocked = Blocked::current();
+    let other = blocked.page();
+    let page = blocked.page();
+    blocked.ok(
+        "page.execute",
+        json!({"pageId":page,"function":"()=>{setTimeout(()=>{while(true){}},0)}"}),
+    );
+    std::thread::sleep(Duration::from_millis(300));
+    let (reply, elapsed) = blocked.call("page.title", json!({"pageId":page}));
+    assert_eq!(reply["error"]["code"], "PageUnresponsive", "{reply}");
+    assert_eq!(
+        reply["error"]["data"]["detail"]["code"], "page_unresponsive",
+        "{reply}"
+    );
+    assert!(reply["error"]["data"].get("blocker").is_none(), "{reply}");
+    assert!(
+        reply["error"]["data"]["detail"]["hint"]
+            .as_str()
+            .unwrap()
+            .contains("browser.new_page"),
+        "{reply}"
+    );
+    assert!(elapsed < Duration::from_secs(18), "{elapsed:?}");
+    assert!(elapsed >= Duration::from_secs(14), "{elapsed:?}");
+    blocked.title(&other, UNAFFECTED);
+    let (closed, _) = blocked.call("page.close", json!({"pageId":page}));
+    assert!(closed.get("result").is_some(), "{closed}");
+    blocked.finish();
+}
+
+fn pointer_fixture() -> std::net::SocketAddr {
+    const PAGE: &str = r#"<!doctype html><title>fixture</title>
+<button id=go onclick="outcome.textContent='clicked'" ondblclick="twice.textContent='twice'">Go</button>
+<button id=ask onclick="setTimeout(()=>confirm('Proceed?'),0)">Ask</button>
+<div id=handle style="width:80px;height:40px;background:#888;user-select:none">drag</div>
+<div id=late style="height:30px"></div>
+<p id=outcome></p><p id=twice></p><p id=dragged></p>
+<div style="height:3000px"></div><button id=far onclick="outcome.textContent='far'">Far</button>
+<script>STILL
+window.changes=[];document.addEventListener('visibilitychange',()=>window.changes.push(document.visibilityState));
+window.painted=0;(function paint(){window.painted++;requestAnimationFrame(paint)})();
+let from=null;handle.addEventListener('mousedown',event=>{from=event.clientX});
+document.addEventListener('mouseup',event=>{if(from!==null&&Math.abs(event.clientX-from)>20)dragged.textContent='dragged';from=null});
+window.later=after=>setTimeout(()=>{late.innerHTML='<button id=arrived onclick="outcome.textContent=`arrived`">Arrived</button>'},after);
+</script>"#;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            std::thread::spawn(move || {
+                let mut request = [0u8; 4096];
+                let read = std::io::Read::read(&mut stream, &mut request).unwrap_or(0);
+                let still = String::from_utf8_lossy(&request[..read]).starts_with("GET /still");
+                let body = PAGE.replace(
+                    "STILL",
+                    if still {
+                        "window.requestAnimationFrame=()=>0;"
+                    } else {
+                        ""
+                    },
+                );
+                let _ = stream.write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: text/html\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                        body.len()
+                    )
+                    .as_bytes(),
+                );
+            });
+        }
+    });
+    address
+}
+
+fn css(selector: &str) -> Value {
+    json!({"query":{"kind":"css","selector":selector}})
+}
+
+fn shows(selector: &str, value: &str) -> Value {
+    json!({"kind":"text","target":css(selector),"value":value})
+}
+
+fn behind_and_front(tabs: &mut Blocked, path: &str) -> (String, String) {
+    let (behind, front) = (tabs.page_at(path), tabs.page_at(path));
+    std::thread::sleep(Duration::from_secs(3));
+    for page in [&behind, &front] {
+        tabs.ok(
+            "page.execute",
+            json!({"pageId":page,"function":"()=>{window.changes=[]}"}),
+        );
+    }
+    assert_eq!(tabs.seen(&behind)["now"], "hidden");
+    assert_eq!(tabs.seen(&front)["now"], "visible");
+    (behind, front)
+}
+
+fn assert_stayed_behind(tabs: &mut Blocked, behind: &str, front: &str) {
+    assert_eq!(tabs.seen(behind), json!({"now":"hidden","changes":[]}));
+    assert_eq!(tabs.seen(front), json!({"now":"visible","changes":[]}));
+}
+
+#[test]
+#[ignore = "requires Chrome"]
+fn pointer_actions_reach_a_tab_behind_another_promptly_and_it_stays_behind() {
+    let prompt = Duration::from_millis(3000);
+    let mut tabs = Blocked::serving(pointer_fixture());
+    let (behind, front) = behind_and_front(&mut tabs, "/");
+    let click = json!({"kind":"click","target":css("#go")});
+    let clicked = shows("#outcome", "clicked");
+
+    let (record, elapsed) = tabs.act(&behind, click.clone(), Some(clicked.clone()), 8000);
+    assert_eq!(record["outcome"], "verified_complete", "{record}");
+    assert_eq!(record["receipt"]["dispatch"], "acknowledged", "{record}");
+    assert!(elapsed < prompt, "click behind took {elapsed:?}");
+    let (record, elapsed) = tabs.act(
+        &behind,
+        json!({"kind":"hover","target":css("#handle")}),
+        None,
+        8000,
+    );
+    assert_eq!(record["outcome"], "verified_complete", "{record}");
+    assert!(elapsed < prompt, "hover behind took {elapsed:?}");
+    let (record, elapsed) = tabs.act(&front, click.clone(), Some(clicked.clone()), 8000);
+    assert_eq!(record["outcome"], "verified_complete", "{record}");
+    assert!(elapsed < prompt, "click in front took {elapsed:?}");
+
+    tabs.clear(&[&behind, &front]);
+    let started = Instant::now();
+    let together =
+        [&behind, &front].map(|page| tabs.admit(page, click.clone(), Some(clicked.clone()), 8000));
+    for operation in together {
+        let record = tabs.ok(
+            "operations.wait",
+            json!({"id":operation,"timeout_ms":10_000}),
+        );
+        assert_eq!(record["outcome"], "verified_complete", "{record}");
+    }
+    assert!(
+        started.elapsed() < Duration::from_millis(5000),
+        "{:?}",
+        started.elapsed()
+    );
+
+    tabs.clear(&[&behind]);
+    for (name, action, expect) in [
+        (
+            "human click",
+            json!({"kind":"click","target":css("#go"),"human":true}),
+            Some(clicked.clone()),
+        ),
+        (
+            "double click",
+            json!({"kind":"click","target":css("#go"),"double":true}),
+            Some(shows("#twice", "twice")),
+        ),
+        (
+            "human hover",
+            json!({"kind":"hover","target":css("#go"),"human":true}),
+            None,
+        ),
+        (
+            "drag",
+            json!({"kind":"drag","target":css("#handle"),"dx":60,"dy":0}),
+            Some(shows("#dragged", "dragged")),
+        ),
+        (
+            "scroll into view",
+            json!({"kind":"scroll_into_view","target":css("#far")}),
+            None,
+        ),
+        (
+            "click after scrolling",
+            json!({"kind":"click","target":css("#far")}),
+            Some(shows("#outcome", "far")),
+        ),
+    ] {
+        let (record, elapsed) = tabs.act(&behind, action, expect, 8000);
+        assert_eq!(record["outcome"], "verified_complete", "{name}: {record}");
+        assert!(elapsed < prompt, "{name} behind took {elapsed:?}");
+    }
+
+    tabs.clear(&[&behind]);
+    let typed = uuid::Uuid::new_v4().to_string();
+    let started = Instant::now();
+    tabs.ok(
+        "page.human_click",
+        json!({"pageId":behind,"operation_id":typed,"selector":"#go",
+            "options":{"expect":clicked,"timeout_ms":8000}}),
+    );
+    let record = tabs.ok("operations.wait", json!({"id":typed,"timeout_ms":9000}));
+    assert_eq!(record["outcome"], "verified_complete", "{record}");
+    assert!(started.elapsed() < prompt, "{:?}", started.elapsed());
+
+    tabs.clear(&[&behind]);
+    for (method, params) in [
+        (
+            "agent.step",
+            json!({"pageId":behind,"operation_id":uuid::Uuid::new_v4().to_string(),
+                "action":{"kind":"click","target":"css:#go"},"expect":shows("#outcome", "clicked"),
+                "action_timeout_ms":8000,"timeout_ms":8000}),
+        ),
+        (
+            "agent.step",
+            json!({"pageId":behind,"operation_id":uuid::Uuid::new_v4().to_string(),
+                "action":{"kind":"hover","target":"css:#handle"},
+                "action_timeout_ms":8000,"timeout_ms":8000}),
+        ),
+    ] {
+        let (reply, elapsed) = tabs.call(method, params);
+        assert_eq!(
+            reply["result"]["status"], "verified_complete",
+            "{method}: {reply}"
+        );
+        assert!(elapsed < prompt, "{method} behind took {elapsed:?}");
+    }
+    for (operation, params) in [
+        (
+            "click",
+            json!({"pageId":behind,"target":"css:#far","expect":shows("#outcome", "far"),"timeout_ms":8000}),
+        ),
+        (
+            "hover",
+            json!({"pageId":behind,"target":"css:#far","timeout_ms":8000}),
+        ),
+        ("scroll", json!({"pageId":behind,"target":"css:#go"})),
+    ] {
+        let (reply, elapsed) = tabs.call(operation, params);
+        assert_eq!(
+            reply["result"]["outcome"], "verified_complete",
+            "catalog {operation}: {reply}"
+        );
+        assert!(
+            elapsed < prompt,
+            "catalog {operation} behind took {elapsed:?}"
+        );
+    }
+    for (method, params) in [
+        ("page.mouse_move", json!({"pageId":behind,"x":40,"y":40})),
+        ("mouse.move", json!({"pageId":behind,"x":60,"y":60})),
+        (
+            "page.click_shadow",
+            json!({"pageId":behind,"selector":"#go","timeoutMs":8000}),
+        ),
+        ("click_shadow", json!({"pageId":behind,"selector":"#go"})),
+    ] {
+        let (reply, elapsed) = tabs.call(method, params);
+        assert!(reply.get("result").is_some(), "{method}: {reply}");
+        assert!(elapsed < prompt, "{method} behind took {elapsed:?}");
+    }
+
+    tabs.stops_painting(&behind);
+    assert_stayed_behind(&mut tabs, &behind, &front);
+    tabs.finish();
+}
+
+#[test]
+#[ignore = "requires Chrome"]
+fn a_hidden_tab_is_given_frames_only_while_its_action_runs() {
+    let mut tabs = Blocked::serving(pointer_fixture());
+    let (behind, front) = behind_and_front(&mut tabs, "/");
+    let missing = json!({"kind":"click","target":css("#missing")});
+    let never = shows("#outcome", "never");
+    assert!(!tabs.painting(&behind));
+
+    let waiting = tabs.admit(&behind, missing.clone(), Some(never.clone()), 30_000);
+    std::thread::sleep(Duration::from_millis(500));
+    assert!(tabs.painting(&behind));
+    let (shot, elapsed) = tabs.call("page.screenshot", json!({"pageId":behind}));
+    png(&shot);
+    assert!(elapsed < Duration::from_secs(5), "{elapsed:?}");
+    assert!(tabs.painting(&behind));
+    tabs.ok("operations.cancel", json!({"id":waiting}));
+    let record = tabs.ok("operations.wait", json!({"id":waiting,"timeout_ms":5000}));
+    assert_eq!(record["error_code"], "operation_canceled", "{record}");
+    tabs.stops_painting(&behind);
+
+    tabs.evaluate(&behind, "()=>{window.later(12000);return 0}");
+    let (record, elapsed) = tabs.act(
+        &behind,
+        json!({"kind":"click","target":css("#arrived")}),
+        Some(shows("#outcome", "arrived")),
+        25_000,
+    );
+    assert_eq!(record["outcome"], "verified_complete", "{record}");
+    assert!(elapsed > Duration::from_secs(10), "{elapsed:?}");
+    tabs.stops_painting(&behind);
+
+    let (record, elapsed) = tabs.act(
+        &behind,
+        json!({"kind":"click","target":css("#ask")}),
+        Some(never.clone()),
+        8000,
+    );
+    assert_eq!(record["error_code"], "dialog_open", "{record}");
+    assert!(elapsed < Duration::from_millis(3000), "{elapsed:?}");
+    tabs.ok("dialog.accept", json!({"pageId":behind}));
+    tabs.stops_painting(&behind);
+    assert_stayed_behind(&mut tabs, &behind, &front);
+
+    tabs.evaluate(&front, "()=>{window.later(1500);return 0}");
+    let covered = tabs.admit(
+        &front,
+        json!({"kind":"click","target":css("#arrived")}),
+        Some(shows("#outcome", "arrived")),
+        15_000,
+    );
+    let cover = tabs.page_at("/");
+    assert_eq!(tabs.seen(&front)["now"], "hidden");
+    let record = tabs.ok("operations.wait", json!({"id":covered,"timeout_ms":20_000}));
+    assert_eq!(record["outcome"], "verified_complete", "{record}");
+
+    let waiting = tabs.admit(&behind, missing, Some(never), 30_000);
+    std::thread::sleep(Duration::from_millis(500));
+    let (closed, elapsed) = tabs.call("page.close", json!({"pageId":behind}));
+    assert!(closed.get("result").is_some(), "{closed}");
+    assert!(elapsed < QUICK, "{elapsed:?}");
+    let record = tabs.ok("operations.get", json!({"id":waiting}));
+    assert_eq!(record["error_code"], "operation_canceled", "{record}");
+    assert_eq!(tabs.seen(&cover)["now"], "visible");
+    let (record, _) = tabs.act(
+        &cover,
+        json!({"kind":"click","target":css("#go")}),
+        Some(shows("#outcome", "clicked")),
+        8000,
+    );
+    assert_eq!(record["outcome"], "verified_complete", "{record}");
+    tabs.finish();
+}
+
+#[test]
+#[ignore = "requires Chrome"]
+fn a_pointer_action_on_a_page_that_runs_no_frames_says_so() {
+    let mut tabs = Blocked::serving(pointer_fixture());
+    let (behind, front) = behind_and_front(&mut tabs, "/still");
+    let click = json!({"kind":"click","target":css("#go")});
+    let clicked = shows("#outcome", "clicked");
+
+    let (record, _) = tabs.act(&behind, click.clone(), Some(clicked.clone()), 2000);
+    assert_eq!(record["outcome"], "not_dispatched", "{record}");
+    assert_eq!(record["error_code"], "action_timeout", "{record}");
+    assert_eq!(record["receipt"]["dispatch"], "not_sent", "{record}");
+    assert_eq!(
+        record["error"]["context"]["phase"], "preparation",
+        "{record}"
+    );
+    let message = record["error"]["message"].as_str().unwrap();
+    assert!(
+        message.starts_with("Timeout: Action deadline exceeded during preparation"),
+        "{message}"
+    );
+    assert!(message.contains("the tab is hidden"), "{message}");
+    assert!(message.contains("ran no animation frame"), "{message}");
+    assert!(message.contains("a click waits two frames"), "{message}");
+    assert!(
+        record["error"]["hint"]
+            .as_str()
+            .unwrap()
+            .contains("Bring this tab to the front"),
+        "{record}"
+    );
+
+    let (record, _) = tabs.act(&front, click, Some(clicked), 2000);
+    assert_eq!(record["outcome"], "not_dispatched", "{record}");
+    let message = record["error"]["message"].as_str().unwrap();
+    assert!(
+        message.contains("the page ran no animation frame"),
+        "{message}"
+    );
+    assert!(!message.contains("hidden"), "{message}");
+
+    let (record, _) = tabs.act(
+        &behind,
+        json!({"kind":"fill","target":css("#missing"),"value":"text"}),
+        None,
+        1500,
+    );
+    assert_eq!(record["outcome"], "not_dispatched", "{record}");
+    let message = record["error"]["message"].as_str().unwrap();
+    assert!(!message.contains("animation frame"), "{message}");
+    assert!(record["error"].get("hint").is_none(), "{record}");
+    assert_stayed_behind(&mut tabs, &behind, &front);
+    tabs.finish();
 }

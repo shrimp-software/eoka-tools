@@ -71,16 +71,12 @@ fn encode<T: Serialize>(value: T) -> Result<Value, ServerError> {
     serde_json::to_value(value).map_err(|error| ServerError::internal(error.to_string()))
 }
 
-pub async fn dispatch(
-    state: &mut AppState,
-    method: &str,
-    params: Value,
-) -> Result<Value, ServerError> {
+pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<Value, ServerError> {
     if supports_control(method) {
         return control(&state.operations, method, params).await;
     }
     let (page_id, id, action, options) = admission(method, params)?;
-    let page = state.page(&page_id)?.clone();
+    let page = state.page(&page_id)?;
     let record = state
         .operations
         .submit(page, id.clone(), action, options)

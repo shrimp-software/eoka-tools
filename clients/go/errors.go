@@ -33,6 +33,9 @@ const (
 	ErrCodeRecordingAlreadyActive = "RecordingAlreadyActive"
 	ErrCodeRecordingInvalidState  = "RecordingInvalidState"
 	ErrCodeRecordingFailed        = "RecordingFailed"
+	ErrCodeDialogOpen             = "DialogOpen"
+	ErrCodeNavigationPending      = "NavigationPending"
+	ErrCodePageUnresponsive       = "PageUnresponsive"
 )
 
 type Error struct {

@@ -42,6 +42,11 @@ pub async fn run(session_name: &str, spec: LaunchSpec) -> anyhow::Result<()> {
     eprintln!("[eoka] socket: {}", sock_path.display());
 
     eoka_server::engine::set_host_version(env!("CARGO_PKG_VERSION"));
+    eoka_server::engine::blockers::set_surface(eoka_server::engine::blockers::Surface::Cli);
+    let command_limit_ms: u64 = match &spec {
+        LaunchSpec::Launch { proxy: Some(_), .. } => 90_000,
+        _ => 30_000,
+    };
     let mut handler = Engine::new(session_name, spec);
     let mut last_activity = Instant::now();
     let mut waiters = tokio::task::JoinSet::new();
@@ -60,22 +65,21 @@ pub async fn run(session_name: &str, spec: LaunchSpec) -> anyhow::Result<()> {
         let _ = shutdown_tx.send(()).await;
     });
 
-    let hello = handler
+    let mut hello = handler
         .handle("session_hello", &serde_json::Value::Null)
         .await
         .data
         .unwrap_or_default();
-    let (accepted, mut incoming) = mpsc::channel(64);
-    let (activity_tx, activity_rx) = tokio::sync::watch::channel(frontdoor::Activity {
-        last_request: Instant::now(),
-        waiting: false,
-    });
+    if hello.is_object() {
+        hello["command_limit_ms"] = serde_json::json!(command_limit_ms);
+    }
+    let (accepted, mut incoming) = mpsc::channel(1);
+    let board = frontdoor::Board::new(session_name, hello);
     let frontdoor = tokio::spawn(frontdoor::serve(
         listener,
-        hello,
+        board.clone(),
         handler.operation_manager(),
         accepted,
-        activity_tx,
     ));
 
     let mut maintenance = tokio::time::interval(Duration::from_millis(25));
@@ -83,43 +87,59 @@ pub async fn run(session_name: &str, spec: LaunchSpec) -> anyhow::Result<()> {
     loop {
         tokio::select! {
             request = incoming.recv() => {
-                if let Some((mut reader, mut writer, req, raw)) = request {
-                        last_activity = Instant::now();
-                        if matches!(req, Request::Shutdown) {
-                            let _ = handler.handle("close", &serde_json::Value::Null).await;
-                            let resp = Response::ok_text("Daemon shutting down");
-                            let _ = write_msg(&mut writer, &resp).await;
-                            break;
-                        }
+                let Some(frontdoor::Admitted { mut reader, mut writer, request: req, raw, turn }) = request else { break };
+                last_activity = Instant::now();
+                if matches!(req, Request::Shutdown) {
+                    let _ = handler.handle("close", &serde_json::Value::Null).await;
+                    let resp = Response::ok_text("Daemon shutting down");
+                    let _ = write_msg(&mut writer, &resp).await;
+                    break;
+                }
 
-                        if let Request::DownloadWait(args) = req {
-                            let manager = handler.download_manager();
-                            waiters.spawn(async move {
-                                let mut disconnected = [0u8; 1];
-                                tokio::select! {
-                                    response = manager.wait(&args.id, args.timeout_ms) => {
-                                        let _ = write_msg(&mut writer, &response).await;
-                                    },
-                                    _ = reader.read(&mut disconnected) => {},
-                                }
-                            });
-                            continue;
+                if let Request::DownloadWait(args) = req {
+                    let manager = handler.download_manager();
+                    waiters.spawn(async move {
+                        let mut disconnected = [0u8; 1];
+                        tokio::select! {
+                            response = manager.wait(&args.id, args.timeout_ms) => {
+                                let _ = write_msg(&mut writer, &response).await;
+                            },
+                            _ = reader.read(&mut disconnected) => {},
                         }
-                        let mut args=raw.get("args").cloned().unwrap_or_else(||serde_json::json!({}));
-                        if args.is_null() { args=serde_json::json!({}); }
-                        if let Some(id)=raw.get("operation_id") { args["operation_id"]=id.clone(); }
-                        let resp = handler.handle(req.cmd(),&args).await;
-                        last_activity = Instant::now();
-                        if let Err(e) = write_msg(&mut writer, &resp).await {
-                            eprintln!("[eoka] write error: {}", e);
-                        }
-                } else { break; }
+                    });
+                    continue;
+                }
+                let mut args = raw.get("args").cloned().unwrap_or_else(|| serde_json::json!({}));
+                if args.is_null() {
+                    args = serde_json::json!({});
+                }
+                if let Some(id) = raw.get("operation_id") {
+                    args["operation_id"] = id.clone();
+                }
+                let (caller_left, left) = tokio::sync::watch::channel(false);
+                let watchdog = tokio::spawn(async move {
+                    let mut disconnected = [0u8; 1];
+                    let _ = reader.read(&mut disconnected).await;
+                    let _ = caller_left.send(true);
+                });
+                board.started(req.cmd(), &args);
+                let resp = eoka_server::engine::blockers::abandonable(
+                    left,
+                    handler.handle(req.cmd(), &args),
+                )
+                .await;
+                watchdog.abort();
+                board.finished(handler.current_page());
+                last_activity = Instant::now();
+                if let Err(e) = write_msg(&mut writer, &resp).await {
+                    eprintln!("[eoka] caller left before `{}` answered: {}", req.cmd(), e);
+                }
+                drop(turn);
             }
             _ = maintenance.tick() => {
                 handler.service_idle_fetch();
-                let activity = *activity_rx.borrow();
-                last_activity = last_activity.max(activity.last_request);
-                if activity.waiting || !waiters.is_empty() || handler.download_manager().is_active() || handler.operation_manager().is_active() || handler.is_recording() { last_activity = Instant::now(); }
+                last_activity = last_activity.max(board.last_request());
+                if board.has_waiters() || !waiters.is_empty() || handler.download_manager().is_active() || handler.operation_manager().is_active() || handler.is_recording() { last_activity = Instant::now(); }
                 if last_activity.elapsed() > timeout && !handler.is_network_recording().await {
                     eprintln!("[eoka] idle timeout ({}s), shutting down", timeout.as_secs());
                     let _ = handler.handle("close", &serde_json::Value::Null).await;
@@ -134,9 +154,12 @@ pub async fn run(session_name: &str, spec: LaunchSpec) -> anyhow::Result<()> {
         }
     }
 
+    board.finished(None);
     frontdoor.abort();
     let _ = frontdoor.await;
     waiters.shutdown().await;
+    drop(board);
+    drop(handler);
     let _ = std::fs::remove_file(&sock_path);
     let _ = std::fs::remove_file(&pid_path);
     eprintln!("[eoka] daemon stopped");

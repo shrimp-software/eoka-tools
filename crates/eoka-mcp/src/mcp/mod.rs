@@ -1,4 +1,5 @@
 mod agent;
+mod blocked;
 mod error;
 mod helpers;
 mod operations;
@@ -138,6 +139,7 @@ fn apply_protocol_tool_metadata(router: &mut ToolRouter<EokaServer>) {
 pub struct EokaServer {
     agent: Arc<Mutex<eoka_server::agent::AgentSession>>,
     state: Arc<Mutex<Option<BrowserState>>>,
+    running: Arc<std::sync::Mutex<Option<(String, std::time::Instant)>>>,
     headless: bool,
     tool_router: ToolRouter<EokaServer>,
     downloads: eoka_server::downloads::DownloadManager,
@@ -221,6 +223,10 @@ impl EokaServer {
 
     async fn check_transport_err<E: std::fmt::Display>(&self, e: E) -> ErrorData {
         let msg = e.to_string();
+        let command_timeout = msg.to_ascii_lowercase().contains("timed out");
+        if command_timeout && self.transport_alive().await {
+            return internal(msg);
+        }
         if is_transport_error_msg(&msg) {
             eprintln!("[eoka-mcp] connection lost, marking unhealthy: {}", msg);
             let mut guard = self.state.lock().await;
@@ -250,9 +256,11 @@ impl EokaServer {
         let mut tool_router = Self::tool_router();
         apply_protocol_tool_metadata(&mut tool_router);
         add_catalog_tools(&mut tool_router, include_opt_in);
+        eoka_server::engine::blockers::set_surface(eoka_server::engine::blockers::Surface::Mcp);
         Self {
             agent: Default::default(),
             state: Arc::new(Mutex::new(None)),
+            running: Default::default(),
             headless,
             tool_router,
             downloads: Default::default(),
@@ -593,9 +601,10 @@ impl EokaServer {
             ..Default::default()
         };
         let budget = options.timeout_ms.min(60_000);
+        eoka_server::engine::blockers::watch(&page);
         let record = self
             .operations
-            .submit(page, id.clone(), action, options)
+            .submit(page.clone(), id.clone(), action, options)
             .await;
         let record = match record {
             Ok(record) => record,
@@ -607,7 +616,14 @@ impl EokaServer {
             }
         };
         let record = if matches!(record.state, eoka_protocol::OperationState::Running) {
-            match self.operations.wait(&id, budget).await {
+            match eoka_server::engine::blockers::wait_unless_dialog(
+                &self.operations,
+                &page,
+                &id,
+                budget,
+            )
+            .await
+            {
                 Ok(record) => record,
                 Err(error) => {
                     return protocol_tool_response(eoka_server::operations::commands::failure(
@@ -782,8 +798,7 @@ impl EokaServer {
         let tab = state
             .current_tab()
             .ok_or_else(|| ErrorData::from(AgentError::NoTab))?;
-        tab.page
-            .mouse_move(req.0.x, req.0.y)
+        eoka_server::capture::painting(&tab.page, tab.page.mouse_move(req.0.x, req.0.y))
             .await
             .map_err(internal)?;
         text_ok("Mouse moved".to_string())
@@ -1857,6 +1872,50 @@ impl EokaServer {
 
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for EokaServer {
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        context: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> Result<CallToolResponse, ErrorData> {
+        let tool = request.name.to_string();
+        let arguments = request
+            .arguments
+            .clone()
+            .map(Value::Object)
+            .unwrap_or(Value::Null);
+        let policy = blocked::policy_for_tool(&tool, &arguments);
+        let page = match self.gate_page(&tool).await {
+            Ok(page) => page,
+            Err(busy) => return Ok(busy.into()),
+        };
+        if let Some(page) = &page {
+            if let Some(refusal) = self.refuse_blocked(&tool, policy, page).await {
+                return Ok(refusal.into());
+            }
+        }
+        self.started(&tool);
+        let context = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
+        let call = self.tool_router.call(context);
+        use eoka_server::engine::blockers::Policy;
+        let result = match &page {
+            Some(page)
+                if matches!(
+                    policy,
+                    Policy::Read | Policy::Script | Policy::Wait | Policy::Observe
+                ) =>
+            {
+                tokio::select! {
+                    biased;
+                    result = call => result,
+                    interrupted = Self::interrupted(&tool, policy, page) => Ok(interrupted.into()),
+                }
+            }
+            _ => call.await,
+        };
+        self.finished();
+        self.explain_blocked(&tool, policy, result).await
+    }
+
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_protocol_version(ProtocolVersion::V_2026_07_28)

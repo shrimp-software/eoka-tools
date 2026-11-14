@@ -580,7 +580,7 @@ impl Session {
     }
 
     pub async fn mouse_move(&self, x: f64, y: f64) -> Result<()> {
-        self.page.mouse_move(x, y).await
+        crate::capture::painting(&self.page, self.page.mouse_move(x, y)).await
     }
 
     pub async fn mouse_up(&self, x: f64, y: f64, button: MouseButton) -> Result<()> {

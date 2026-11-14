@@ -18,18 +18,36 @@ consume those contracts. The Go client implements the same wire protocol.
 - A serialized message is limited to 33,554,432 bytes (32 MiB), excluding its
   line terminator. Input is bounded while reading. Oversized output becomes a
   structured error rather than an unlimited JSON message.
-- At most 128 requests may remain in flight. Respect advertised limits and
+- At most 128 requests may remain in flight. A request stops counting before its
+  response is written, so a client that keeps at most `maxInFlight` unanswered
+  requests is never refused with `ServerBusy`. Respect advertised limits and
   stdout backpressure; an unread pipe is not permission to buffer indefinitely.
 - Request IDs are positive integers through 9,007,199,254,740,991, unique among
   in-flight requests. Responses echo the ID. A malformed message without a
   recoverable valid ID may receive an error with `id: null`.
-- Ordinary page requests and action admission retain serialized dispatch.
-  Operation waiters and list snapshots run independently. Get/cancel for an
-  already-admitted operation also bypass a blocked ordinary request; unknown IDs
-  fall back behind earlier queued admissions. List returns the current admitted
-  snapshot, not a barrier for queued mutations. Controls still consume the
-  advertised in-flight budget; shutdown retains its separate admission.
-  Responses can arrive out of order. Always correlate by ID.
+- Requests are dispatched per page. Requests that name the same `pageId`,
+  including action admission, catalog operations and `browser.close_tab`, run
+  one at a time in the order received. Requests for different pages run
+  concurrently, so a page whose request is slow or never answers delays only
+  its own later requests. `browser.new_page` and `browser.tabs` belong to no
+  page and are never queued behind one. `browser.launch`, `browser.connect` and
+  `browser.close` are barriers: each waits for every request received before it
+  and holds back every request received after it until it finishes.
+- Requests that clear a blocked page do not wait for that page's queue:
+  `dialog.accept` and `dialog.dismiss` always start at once, and `page.close`
+  and `browser.close_tab` start at once while the page has an open dialog or a
+  pending navigation. Requests received after them for the same page still
+  wait for them.
+- Catalog operations share one engine and run one at a time across pages; a slow
+  catalog operation delays catalog operations on other pages, not their
+  registered `page.*` methods. `agent.observe` and `agent.step` likewise share
+  one agent session.
+- Operation waiters and list snapshots run independently. Get/cancel for an
+  already-admitted operation also bypass a blocked page; an unknown ID waits
+  only for an earlier queued request carrying the same operation ID. List
+  returns the current admitted snapshot, not a barrier for queued mutations.
+  Controls still consume the advertised in-flight budget; shutdown retains its
+  separate admission. Responses can arrive out of order. Always correlate by ID.
 - Local request timeout or connection loss does not prove a browser action was
   cancelled. Durable operation IDs remain the recovery mechanism.
 
@@ -53,9 +71,22 @@ The result contains:
 | `limits.maxMessageBytes` | Maximum serialized message size |
 | `limits.maxInFlight` | Maximum in-flight requests |
 
-Protocol major 2 through minor 1 is supported; minor 1 adds catalog operations. Version 1 clients must migrate. A
-different major or a requested minor newer than the server supports returns
-`ProtocolMismatch` without launching a browser. Existing low-level clients can
+Protocol major 2 through minor 2 is supported; minor 1 adds catalog operations
+and minor 2 adds the blocked-page error codes below. Version 1 clients must
+migrate. A different major or a requested minor newer than the server supports
+returns `ProtocolMismatch` without launching a browser.
+
+`protocol` is the oldest version the client can work with. A client that also
+understands a newer minor says so with the optional `understands` field:
+
+```json
+{"id":1,"method":"server.hello","params":{"protocol":{"major":2,"minor":0},"understands":{"major":2,"minor":2}}}
+```
+
+The server then speaks the older of its own version and the newest version the
+client named in either field, and never sends such a client an error code or
+field introduced after that version. A client that sends no `server.hello` is
+spoken to as protocol 2.0. Servers older than 2.2 ignore `understands`. Existing low-level clients can
 still call compatible methods directly; the Go client requires protocol 1.1
 before launch or attachment and fails explicitly against older servers.
 The Node SDK requires protocol 2.0, including bounded browser fetch and capture contracts.
@@ -101,6 +132,62 @@ Errors retain stable `code` and human-readable `message`. Optional `data`
 contains structured evidence such as an operation ID, action receipt, original
 protocol error or canonical error detail. Branch on codes and fields, not text.
 An absent receipt is not proof that nothing was dispatched.
+
+### Blocked pages (protocol 2.2)
+
+Chrome answers no page command while a JavaScript dialog is open on the page,
+while the page's main frame waits for a navigation response, or while the
+page's main thread is busy. The `pageBlockers` capability says the server
+detects these states and fails the request promptly instead of at the 30-second
+command deadline. A client spoken to as protocol 2.2 receives:
+
+| Code | State | `data.blocker` |
+| --- | --- | --- |
+| `DialogOpen` | An `alert`, `confirm`, `prompt` or `beforeunload` dialog is open | `{kind:"dialog", dialogType, message, url, elapsedMs}` |
+| `NavigationPending` | The main frame has waited for a navigation response | `{kind:"navigation", url?, elapsedMs}` |
+| `PageUnresponsive` | The page answers nothing and neither state above is known | absent |
+
+`data.detail` carries the catalog `ErrorDetail` with code `dialog_open`,
+`navigation_pending` or `page_unresponsive`, the same message, a `hint` naming
+the remedy and, for a request that was not started, `context.action_status`.
+`elapsedMs` is how long the dialog has been open or the navigation has waited.
+
+A client spoken to as protocol 2.0 or 2.1 receives the same failure as an
+`Operation` error: the same message and `data.detail`, without `data.blocker`.
+Its `data.detail.code` still names the state.
+
+Registered page methods and catalog operations report these states the same
+way:
+
+- A request for a page with an open dialog is refused before it starts. So is
+  a request for a page whose navigation has waited five seconds, except waits
+  and captures, which run, and navigations, which first stop the pending load
+  and then proceed; that is how a fresh `page.goto` or navigate action recovers
+  a stalled tab.
+- A request already in flight ends as soon as a dialog opens, or once a
+  navigation that started under it has waited five seconds. Its message says it
+  returned without a result; a script or input may already have taken effect.
+  `agent.observe`, `agent.step` and action admission stop by themselves and
+  return their own evidence: `agent.observe` fails with the same code, and
+  `agent.step` and the operation record carry `dialog_open`.
+- Reads (`page.title`, `page.url`, `page.text`, `page.content`,
+  `page.get_text`, `page.get_attribute`, `page.exists`, `page.frames`,
+  `page.capture_state`) that get no answer within 15 seconds end as
+  `PageUnresponsive`. Other methods that reach the command deadline are checked
+  the same way before their timeout is reported.
+- `dialog.accept` and `dialog.dismiss` answer the dialog directly and work
+  while any other request is blocked. `page.release_all_inputs`,
+  `page.set_viewport`, `page.reset_viewport`, `page.restore_state`,
+  `page.solve_turnstile`, `recording.*` and tab close are never refused.
+- An operation that is running when a dialog opens on its page ends: its record
+  is `finished` with `error_code` `dialog_open`, `outcome` `outcome_unknown`
+  when input had been dispatched (`not_dispatched` otherwise) and a receipt
+  whose `dispatch` is `may_have_been_sent` or `not_sent`. Nothing is replayed.
+  Input the interrupted action still held is released before the next action
+  on that page.
+- A dialog that was already open before the server attached to the page is not
+  known to it; such a page reports `PageUnresponsive`, and `dialog.dismiss`
+  clears it.
 
 Invalid request envelopes/parameters, unknown methods, incompatible protocols,
 message-size violations, overload and shutdown are explicit protocol errors.
@@ -151,9 +238,9 @@ daemon. The schema bundle lists them under `catalogMethods`.
 Some catalog state belongs to the browser session rather than one page: the
 network recorder and its log, the download slot, and the JavaScript policy
 (`js.*`, which applies to navigations made through catalog `open`). Interception
-rules are re-applied to whichever page a catalog call addresses. Actions that
-check actionability wait on animation frames, which a background tab does not
-run; act on the foreground page.
+rules are re-applied to whichever page a catalog call addresses. Catalog actions
+reach a page behind another tab the same way `actions.perform` does (see
+[Durable actions](#durable-actions-and-operation-queries)).
 
 The catalog includes operations that read or write local files chosen by the
 caller (`save_state`, `load_state`, `network.export`, `intercept.add` with
@@ -295,6 +382,11 @@ Element handles do not cross this wire.
   and must fit the negotiated JSON message limit. `ScreenshotTooLarge` directs
   callers to `page.screenshot_to_file`, which accepts the same capture fields
   plus an absolute `path` and returns artifact metadata without base64.
+  A page behind another tab is captured in place: Chrome paints no frames for a
+  hidden tab, so the server holds a throwaway screencast on a second session of
+  that page for the duration of the capture. The page is not brought to the
+  front, no page's `visibilityState` changes, and pages can be captured
+  concurrently. The catalog `screenshot` operation behaves the same.
 - Viewport: `page.set_viewport` takes `{pageId, width, height, deviceScaleFactor?}`
   with positive CSS dimensions up to 2,147,483,647 and finite positive DPR
   (default 1), returning `{}`. `page.reset_viewport` takes `{pageId}` and returns
@@ -317,7 +409,7 @@ Element handles do not cross this wire.
 - Cloudflare: `page.solve_turnstile` (`{pageId, timeoutMs?}`, default 30000, at
   most 120000) clicks the Turnstile checkbox through its closed shadow root until
   the page leaves the challenge and returns `{clicks, elapsedMs}`; a normal page
-  returns zero clicks. It holds the request queue for up to `timeoutMs`.
+  returns zero clicks. It holds that page's request queue for up to `timeoutMs`.
 - Other implemented methods include `page.solve_captcha` and `page.close`.
 
 JSON results are dynamic data, not statically known application types. Type
@@ -448,6 +540,39 @@ as complete. A record can instead report `not_dispatched` or `outcome_unknown`.
 No uncertain action is automatically replayed. Local waiter cancellation,
 transport loss and shutdown remain separate from the site's business outcome.
 See [OPERATIONS.md](OPERATIONS.md) for deduplication and durable recovery.
+
+Chrome answers no page-level request (`page.title`, `page.url`, evaluation,
+element reads) for a page whose main-frame navigation is still waiting for the
+site's response; such a request waits until the navigation commits, fails or is
+stopped, or until its own command deadline (30 seconds, 90 behind a proxy). To keep that from
+outliving the operation, a navigation operation that ends while its navigation
+command is still unanswered (its deadline passes, or it is cancelled after
+dispatch) stops the pending load. The page stays on its current document, the
+record keeps `outcome_unknown`, and requests queued for the page then answer.
+A navigation that committed before its deadline is left to finish loading.
+`browser.new_page` with a `url` creates the page, then navigates it; when that
+navigation command gets no answer the load is stopped the same way and the
+error is returned.
+
+`page.close` and `browser.close_tab` cancel the running operations of that page
+only. Operations on other pages keep running.
+
+An action on a page behind another tab runs in place. Chrome produces no frames
+for a hidden tab, while a click, hover, drag or scroll into view waits two
+animation frames to confirm its target has stopped moving, and Chrome delivers
+pointer movement with a frame. For as long as an action is in flight on a hidden
+page, the server therefore keeps one screenshot request open on a second session
+of that page, which makes Chrome produce frames for it, and completes that
+request when the action ends. The page is not brought to the front, and no
+page's `visibilityState` changes or receives `visibilitychange`. The hidden
+page's animation frames, and whatever its scripts and styles drive from them,
+run for the duration of the action and stop within about a second of its end; a
+page can observe that. A visible page is only asked for its visibility. The
+typed action methods, `agent.step`, catalog actions, `page.mouse_move`,
+`page.click_shadow` and `page.solve_turnstile` behave the same, and a page that
+becomes hidden while its action waits is covered from then on. When a click,
+hover, drag or scroll into view times out in preparation on a page that ran no
+animation frame, `error.message` says so and says whether the tab was hidden.
 
 ### Agent operations
 

@@ -1,17 +1,25 @@
 use serde_json::Value;
 
-use crate::methods::{browser, page};
+use crate::methods::{blocked, browser, page};
 use crate::state::AppState;
 use eoka_protocol::sidecar::{
     catalog_operation, catalog_request, method_names, validate_params, validate_safe_numbers,
-    AgentObserveParams, AgentStepParams, ErrorCode, HelloParams, HelloResult, ServerError,
-    TransportLimits, CAPABILITY_CLOUDFLARE_AUTO_SOLVE, CAPABILITY_NATIVE_RECORDING,
-    CAPABILITY_OPERATION_CATALOG, CAPABILITY_SCREENSHOT_FILE, CAPABILITY_SCREENSHOT_OPTIONS,
-    MAX_IN_FLIGHT, MAX_MESSAGE_BYTES, PROTOCOL_VERSION,
+    AgentObserveParams, AgentStepParams, ErrorCode, HelloParams, HelloResult, ProtocolVersion,
+    ServerError, TransportLimits, CAPABILITY_CLOUDFLARE_AUTO_SOLVE, CAPABILITY_NATIVE_RECORDING,
+    CAPABILITY_OPERATION_CATALOG, CAPABILITY_PAGE_BLOCKERS, CAPABILITY_SCREENSHOT_FILE,
+    CAPABILITY_SCREENSHOT_OPTIONS, MAX_IN_FLIGHT, MAX_MESSAGE_BYTES, PROTOCOL_VERSION,
 };
 
 pub async fn dispatch(
     state: &mut AppState,
+    method: &str,
+    params: Value,
+) -> Result<Value, ServerError> {
+    dispatch_shared(state, method, params).await
+}
+
+pub async fn dispatch_shared(
+    state: &AppState,
     method: &str,
     params: Value,
 ) -> Result<Value, ServerError> {
@@ -24,42 +32,89 @@ pub async fn dispatch(
         state.shutdown().await?;
         return Ok(serde_json::json!({}));
     }
+    let addressed = if catalog_operation(method).is_some() {
+        None
+    } else {
+        params
+            .get("pageId")
+            .and_then(Value::as_str)
+            .and_then(|id| state.page(id).ok())
+    };
+    match addressed {
+        Some(page) => {
+            let call = blocked::Call::new(method, &params);
+            blocked::guarded(&state.operations, &page, call, route(state, method, params)).await
+        }
+        None => route(state, method, params).await,
+    }
+}
+
+pub fn clears_a_blocked_page(state: &AppState, method: &str, params: &Value) -> bool {
+    match method {
+        "dialog.accept" | "dialog.dismiss" => true,
+        "page.close" | "browser.close_tab" => params
+            .get("pageId")
+            .and_then(Value::as_str)
+            .and_then(|id| state.page(id).ok())
+            .is_some_and(|page| crate::engine::blockers::current(&page).is_some()),
+        _ => false,
+    }
+}
+
+async fn answer_dialog(
+    state: &AppState,
+    method: &str,
+    params: &Value,
+) -> Result<Value, ServerError> {
+    let operation = catalog_operation(method).ok_or_else(|| ServerError::unknown_method(method))?;
+    let (page_id, request) = catalog_request(operation, params)?;
+    let page = state.page(&page_id)?;
+    if method == "dialog.accept" {
+        page.accept_dialog(request.args_json()["prompt_text"].as_str())
+            .await?;
+        Ok(Value::String("Dialog accepted".into()))
+    } else {
+        page.dismiss_dialog().await?;
+        Ok(Value::String("Dialog dismissed".into()))
+    }
+}
+
+async fn route(state: &AppState, method: &str, params: Value) -> Result<Value, ServerError> {
+    if matches!(method, "dialog.accept" | "dialog.dismiss") {
+        return answer_dialog(state, method, &params).await;
+    }
     if method == "agent.observe" {
         let args: AgentObserveParams = serde_json::from_value(params)
             .map_err(|error| ServerError::invalid_params(error.to_string()))?;
-        let browser = state.browser()?.clone();
-        let page = state.page(&args.page_id)?.clone();
+        let browser = state.browser()?;
+        let page = state.page(&args.page_id)?;
         let agent = state.agent.clone();
         let result = agent
             .lock()
             .await
             .observe(&browser, &page, args.args)
             .await
-            .map_err(agent_error)?;
+            .map_err(|error| agent_error(error, method, &page))?;
         return serde_json::to_value(result)
             .map_err(|error| ServerError::internal(error.to_string()));
     }
     if method == "agent.step" {
         let args: AgentStepParams = serde_json::from_value(params)
             .map_err(|error| ServerError::invalid_params(error.to_string()))?;
-        let browser = state.browser()?.clone();
-        let page = state.page(&args.page_id)?.clone();
+        let browser = state.browser()?;
+        let page = state.page(&args.page_id)?;
         let agent = state.agent.clone();
         let mut result = agent
             .lock()
             .await
             .step(&browser, &page, &state.operations, args.args)
             .await
-            .map_err(agent_error)?;
+            .map_err(|error| agent_error(error, method, &page))?;
+        drop(browser);
         if let Some(observation) = &result.observation {
-            if state.page(&observation.tab_id).is_err() {
-                match browser.attach_page(&observation.tab_id).await {
-                    Ok(page) => state.insert_page(observation.tab_id.clone(), page),
-                    Err(error) => {
-                        result.observation_error =
-                            Some(format!("Destination attachment failed: {error}"));
-                    }
-                }
+            if let Err(error) = state.attach_page(&observation.tab_id).await {
+                result.observation_error =
+                    Some(format!("Destination attachment failed: {}", error.message));
             }
         }
         return serde_json::to_value(result)
@@ -79,7 +134,9 @@ pub async fn dispatch(
         validate_params(method, &params)?;
     }
     if matches!(method, "browser.close_tab" | "page.close") {
-        state.operations.stop().await;
+        if let Some(page_id) = params.get("pageId").and_then(Value::as_str) {
+            state.operations.stop_target(page_id).await;
+        }
     }
     match method {
         "browser.launch" => browser::launch(state, params).await,
@@ -117,7 +174,7 @@ pub async fn dispatch(
             let params: eoka_protocol::sidecar::RecordingStartParams =
                 serde_json::from_value(params)
                     .map_err(|error| ServerError::invalid_params(error.to_string()))?;
-            let page = state.page(&params.page_id).cloned();
+            let page = state.page(&params.page_id);
             let record = state.recordings.start(params, page).await?;
             serde_json::to_value(record).map_err(|error| ServerError::internal(error.to_string()))
         }
@@ -137,9 +194,14 @@ pub async fn dispatch(
 }
 
 pub fn hello(params: Value) -> Result<Value, ServerError> {
+    negotiate(params).map(|(_, greeting)| greeting)
+}
+
+pub fn negotiate(params: Value) -> Result<(ProtocolVersion, Value), ServerError> {
     validate_safe_numbers(&params)?;
     let params: HelloParams = serde_json::from_value(params)
         .map_err(|error| ServerError::invalid_params(error.to_string()))?;
+    let spoken = params.spoken();
     if params.protocol.major != PROTOCOL_VERSION.major
         || params.protocol.minor > PROTOCOL_VERSION.minor
     {
@@ -174,18 +236,29 @@ pub fn hello(params: Value) -> Result<Value, ServerError> {
             CAPABILITY_NATIVE_RECORDING.to_owned(),
             CAPABILITY_CLOUDFLARE_AUTO_SOLVE.to_owned(),
             CAPABILITY_OPERATION_CATALOG.to_owned(),
+            CAPABILITY_PAGE_BLOCKERS.to_owned(),
         ],
         limits: TransportLimits {
             max_message_bytes: MAX_MESSAGE_BYTES,
             max_in_flight: MAX_IN_FLIGHT,
         },
     })
+    .map(|greeting| (spoken, greeting))
     .map_err(|error| ServerError::internal(error.to_string()))
 }
 
-fn agent_error(error: anyhow::Error) -> ServerError {
+fn agent_error(error: anyhow::Error, method: &str, page: &eoka::Page) -> ServerError {
     match error.downcast::<eoka::Error>() {
         Ok(error) => error.into(),
-        Err(error) => ServerError::internal(format!("{error:#}")),
+        Err(error) => {
+            let message = format!("{error:#}");
+            let named = message
+                .split_once(": ")
+                .filter(|(code, _)| ErrorCode::for_blocker_detail(code).is_some());
+            match named {
+                Some((code, description)) => blocked::named(code, description, method, page),
+                None => ServerError::internal(message),
+            }
+        }
     }
 }

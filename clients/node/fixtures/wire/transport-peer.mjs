@@ -7,17 +7,25 @@ import { methodNames, protocolVersion } from '../../dist/generated/protocol.js';
 const mode = process.env.EOKA_TRANSPORT_TEST_MODE ?? 'normal';
 const maxInFlight = Number(process.env.EOKA_TRANSPORT_TEST_IN_FLIGHT ?? 128);
 const maxMessageBytes = Number(process.env.EOKA_TRANSPORT_TEST_MESSAGE_BYTES ?? 33554432);
+const capacity = Number(process.env.EOKA_TRANSPORT_TEST_CAPACITY ?? Infinity);
+const replyDelayMs = Number(process.env.EOKA_TRANSPORT_TEST_REPLY_DELAY_MS ?? 2);
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
 let evaluations = 0;
+let outstanding = 0;
+let peak = 0;
 let pair = [];
 let terminalReaderClosed = false;
 let recording;
 let finalization;
 const ownsDescendant = mode === 'owned-descendant' || mode === 'owned-descendant-exiting';
+const leavesHelper = mode === 'lingering-helper' || mode === 'stuck-helper';
 let ownedDescendantPid;
 let ownedReady = Promise.resolve();
-if (ownsDescendant) {
-  const descendant = spawn(process.execPath, [fileURLToPath(new URL('./transport-descendant.mjs', import.meta.url))], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+if (ownsDescendant || leavesHelper) {
+  const descendant = spawn(process.execPath, [fileURLToPath(new URL('./transport-descendant.mjs', import.meta.url))], {
+    stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+    env: { ...process.env, ...(mode === 'lingering-helper' ? { EOKA_TRANSPORT_TEST_LINGER_MS: '200' } : {}) },
+  });
   ownedReady = new Promise((resolve, reject) => {
     descendant.once('message', message => {
       ownedDescendantPid = message.pid;
@@ -115,6 +123,24 @@ input.on('line', async line => {
       await finalization;
       reply(request.id, recording);
     }
+    return;
+  }
+  if (mode === 'silent') return;
+  if (mode === 'echo-error') {
+    process.stdout.write(`${JSON.stringify({ id: request.id, error: JSON.parse(request.params.function) })}\n`);
+    return;
+  }
+  if (mode === 'concurrency') {
+    if (outstanding >= capacity) {
+      process.stdout.write(`${JSON.stringify({ id: request.id, error: { code: 'ServerBusy', message: 'maxInFlight pending requests exceeded' } })}\n`);
+      return;
+    }
+    outstanding++;
+    peak = Math.max(peak, outstanding);
+    setTimeout(() => {
+      outstanding--;
+      reply(request.id, { result: { peak, received: ++evaluations } });
+    }, replyDelayMs);
     return;
   }
   evaluations++;

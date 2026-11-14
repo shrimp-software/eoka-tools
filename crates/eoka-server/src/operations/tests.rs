@@ -137,3 +137,447 @@ async fn abrupt_process_exit_preserves_admission_intent_and_completion() {
         assert!(!matches!(record.state, OperationState::Running));
     }
 }
+
+fn sensitive(value: &str) -> Vec<String> {
+    vec![value.to_owned()]
+}
+
+fn fuses_with_a_word(message: &str) -> bool {
+    message.match_indices(REDACTED).any(|(start, marker)| {
+        message[..start]
+            .chars()
+            .next_back()
+            .is_some_and(word_character)
+            || message[start + marker.len()..]
+                .chars()
+                .next()
+                .is_some_and(word_character)
+    })
+}
+
+#[test]
+fn redaction_never_rewrites_the_inside_of_a_word() {
+    let prose = "Timeout: Action deadline exceeded during preparation: target not found";
+    for value in ["x", "e", "ex", "ded", "prep", "o", " ", ": ", "t n"] {
+        let message = redact(prose, &sensitive(value));
+        assert!(message.contains("exceeded"), "{value:?}: {message}");
+        assert!(!fuses_with_a_word(&message), "{value:?}: {message}");
+    }
+    assert_eq!(redact(prose, &sensitive("x")), prose);
+    assert_eq!(redact(prose, &sensitive("")), prose);
+    assert_eq!(redact(prose, &[]), prose);
+    assert_eq!(
+        redact(
+            "CDP command 'Runtime.evaluate' timed out after 30s (id=48)",
+            &sensitive("30")
+        ),
+        "CDP command 'Runtime.evaluate' timed out after 30s (id=48)"
+    );
+}
+
+#[test]
+fn redaction_still_removes_an_echoed_value() {
+    for (value, message, expected) in [
+        (
+            "hunter2-Secret!",
+            "Evaluation failed: rejected value \"hunter2-Secret!\" for #password",
+            "Evaluation failed: rejected value \"[redacted]\" for #password",
+        ),
+        (
+            "correct horse battery",
+            "TypeError: cannot store correct horse battery, correct horse battery.",
+            "TypeError: cannot store [redacted], [redacted].",
+        ),
+        ("x", "unexpected value: x", "unexpected value: [redacted]"),
+        (
+            "123",
+            "invalid cvv=123; retry",
+            "invalid cvv=[redacted]; retry",
+        ),
+        (
+            "4111 1111",
+            "card '4111 1111' declined",
+            "card '[redacted]' declined",
+        ),
+        ("pässwörd", "wrong: pässwörd", "wrong: [redacted]"),
+        (
+            "a\"b\\c",
+            r#"SyntaxError: bad literal "a\"b\\c" near a"b\c"#,
+            r#"SyntaxError: bad literal "[redacted]" near [redacted]"#,
+        ),
+        ("secret", "secret", "[redacted]"),
+    ] {
+        let redacted = redact(message, &sensitive(value));
+        assert_eq!(redacted, expected, "{value:?}");
+        assert!(!fuses_with_a_word(&redacted), "{value:?}: {redacted}");
+    }
+}
+
+fn deadline(context: &str) -> Error {
+    Error::Action {
+        code: "action_timeout".into(),
+        receipt: Box::new(receipt(DispatchState::NotSent)),
+        source: Box::new(Error::Timeout(format!(
+            "Action deadline exceeded during {context}"
+        ))),
+    }
+}
+
+#[test]
+fn a_stored_diagnostic_keeps_its_wording_for_every_single_character_value() {
+    let id = "6e8b0670-a457-4ce1-8d21-f1e4cf8c8e9b";
+    let expected = "Timeout: Action deadline exceeded during preparation: target not found";
+    let error = deadline("preparation: target not found");
+    for value in ('a'..='z')
+        .chain('A'..='Z')
+        .chain('0'..='9')
+        .chain(" :.-_".chars())
+    {
+        let stored = diagnostic(&error, &sensitive(&value.to_string()), id);
+        assert_eq!(stored.message, expected, "{value:?}");
+        assert_eq!(stored.code, "action_timeout");
+        let context = stored.context.unwrap();
+        assert_eq!(context.phase.as_deref(), Some("preparation"), "{value:?}");
+        assert_eq!(context.operation_id.as_deref(), Some(id));
+    }
+    let record = serde_json::to_string(&diagnostic(&error, &sensitive("o"), id)).unwrap();
+    assert!(record.contains(expected), "{record}");
+    assert!(!record.contains(REDACTED), "{record}");
+}
+
+#[test]
+fn the_failure_phase_is_read_before_the_value_is_removed() {
+    let id = "6e8b0670-a457-4ce1-8d21-f1e4cf8c8e9b";
+    for (context, phase) in [
+        ("preparation", "preparation"),
+        ("queue admission", "queue"),
+        ("input dispatch", "dispatch"),
+        ("verification", "verification"),
+    ] {
+        let stored = diagnostic(&deadline(context), &sensitive(context), id);
+        assert_eq!(
+            stored.message,
+            "Timeout: Action deadline exceeded during [redacted]"
+        );
+        assert_eq!(stored.context.unwrap().phase.as_deref(), Some(phase));
+    }
+    let echoed = Error::cdp_msg("JavaScript error: rejected hunter2 during verification");
+    let stored = diagnostic(&echoed, &sensitive("hunter2"), id);
+    assert_eq!(stored.code, "action_failed");
+    assert!(!stored.message.contains("hunter2"), "{}", stored.message);
+    assert!(stored
+        .message
+        .contains("rejected [redacted] during verification"));
+    assert_eq!(
+        stored.context.unwrap().phase.as_deref(),
+        Some("verification")
+    );
+}
+
+#[test]
+fn redaction_leaves_a_value_embedded_in_a_longer_word_alone() {
+    assert_eq!(
+        redact("unexpected token in maxed_out", &sensitive("x")),
+        "unexpected token in maxed_out"
+    );
+    assert_eq!(
+        redact("id=sessionid42 rejected 42", &sensitive("42")),
+        "id=sessionid42 rejected [redacted]"
+    );
+}
+
+fn receipt(dispatch: DispatchState) -> ActionReceipt {
+    ActionReceipt {
+        destination_target_id: None,
+        started_at_ms: 0,
+        finished_at_ms: 0,
+        download_guid: None,
+        action: "navigate".into(),
+        target_id: "target".into(),
+        outcome: ActionOutcome::OutcomeUnknown,
+        dispatch,
+        preparation_may_have_executed: false,
+        verification: None,
+        elapsed_ms: 0,
+        already_satisfied: false,
+        cleanup_pending: false,
+    }
+}
+
+fn failed(dispatch: DispatchState) -> Option<eoka::Result<ActionReceipt>> {
+    Some(Err(Error::Action {
+        code: "action_timeout".into(),
+        receipt: Box::new(receipt(dispatch)),
+        source: Box::new(Error::Timeout(
+            "Action deadline exceeded during preparation".into(),
+        )),
+    }))
+}
+
+#[test]
+fn only_a_navigation_whose_command_never_returned_is_abandoned() {
+    assert!(navigation_unanswered(
+        &failed(DispatchState::MayHaveBeenSent),
+        true
+    ));
+    assert!(!navigation_unanswered(
+        &failed(DispatchState::Acknowledged),
+        true
+    ));
+    assert!(!navigation_unanswered(
+        &failed(DispatchState::NotSent),
+        false
+    ));
+    assert!(!navigation_unanswered(
+        &Some(Ok(receipt(DispatchState::Acknowledged))),
+        true
+    ));
+    assert!(!navigation_unanswered(
+        &Some(Err(Error::Timeout("unrelated".into()))),
+        true
+    ));
+    assert!(navigation_unanswered(&None, true));
+    assert!(!navigation_unanswered(&None, false));
+}
+
+#[test]
+fn navigation_actions_are_the_only_ones_that_can_be_abandoned() {
+    let target = eoka::LocatorSpec::css("#field");
+    for action in [
+        Action::Navigate {
+            url: "https://example.test/".into(),
+            referrer: None,
+        },
+        Action::NavigateWithHeaders {
+            url: "https://example.test/".into(),
+            headers: Default::default(),
+        },
+        Action::Reload,
+        Action::Back,
+        Action::Forward,
+        Action::History { delta: -2 },
+    ] {
+        assert!(navigates(&action), "{}", action.kind());
+    }
+    for action in [
+        Action::Click {
+            target: target.clone(),
+            human: false,
+            double: false,
+        },
+        Action::Fill {
+            target,
+            value: "value".into(),
+            input_mode: Default::default(),
+        },
+        Action::PressKey {
+            key: "Enter".into(),
+        },
+    ] {
+        assert!(!navigates(&action), "{}", action.kind());
+    }
+}
+
+#[tokio::test]
+async fn stopping_one_target_leaves_other_targets_running() {
+    let manager = OperationManager::default();
+    let mut receivers = Vec::new();
+    for (id, target) in [("first", "a"), ("second", "b"), ("third", "a")] {
+        let (cancel, canceled) = watch::channel(false);
+        manager.inner.jobs.lock().unwrap().insert(
+            id.into(),
+            ActiveOperation {
+                target_id: target.into(),
+                cancel,
+            },
+        );
+        receivers.push((id, canceled));
+    }
+    let signalled = |receivers: &[(&str, watch::Receiver<bool>)]| -> Vec<String> {
+        receivers
+            .iter()
+            .filter(|(_, canceled)| *canceled.borrow())
+            .map(|(id, _)| (*id).to_owned())
+            .collect()
+    };
+    let selected = manager.signal(|target| target == "a");
+    assert_eq!(
+        selected
+            .iter()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>(),
+        ["first", "third"].into_iter().collect()
+    );
+    assert_eq!(signalled(&receivers), ["first", "third"]);
+    manager.signal(|_| true);
+    assert_eq!(signalled(&receivers), ["first", "second", "third"]);
+}
+
+fn open_dialog() -> Blocker {
+    Blocker::Dialog(blockers::Dialog {
+        kind: "alert".into(),
+        message: "are you sure?".into(),
+        url: "https://example.test/".into(),
+        since: std::time::Instant::now(),
+    })
+}
+
+#[test]
+fn an_operation_a_dialog_interrupts_says_whether_its_input_was_sent() {
+    let id = "6e8b0670-a457-4ce1-8d21-f1e4cf8c8e9b";
+    let sent = interruption(&open_dialog(), "click", id, true);
+    assert_eq!(sent.code, "dialog_open");
+    assert!(sent.message.contains("dialog is open"), "{}", sent.message);
+    assert!(sent.message.contains("are you sure?"), "{}", sent.message);
+    assert!(
+        sent.message.contains("click input was dispatched"),
+        "{}",
+        sent.message
+    );
+    assert!(
+        sent.message.contains("was sent to the page once"),
+        "{}",
+        sent.message
+    );
+    assert!(sent.message.contains("is not repeated"), "{}", sent.message);
+    let hint = sent.hint.unwrap();
+    assert!(
+        hint.contains("dialog.accept") && hint.contains("dialog.dismiss"),
+        "{hint}"
+    );
+    assert!(hint.contains("Do not repeat the click blindly"), "{hint}");
+    let context = sent.context.unwrap();
+    assert_eq!(context.operation_id.as_deref(), Some(id));
+    assert_eq!(context.phase.as_deref(), Some("execution"));
+    assert!(matches!(
+        context.action_status,
+        Some(eoka_protocol::ActionStatus::MayHaveExecuted)
+    ));
+    assert_eq!(sent.retryable, Some(false));
+
+    let unsent = interruption(&open_dialog(), "fill", id, false);
+    assert!(
+        unsent
+            .message
+            .contains("before the fill input was dispatched"),
+        "{}",
+        unsent.message
+    );
+    assert!(
+        unsent.message.contains("nothing was sent"),
+        "{}",
+        unsent.message
+    );
+    assert!(!unsent.hint.unwrap().contains("Do not repeat"));
+    assert!(matches!(
+        unsent.context.unwrap().action_status,
+        Some(eoka_protocol::ActionStatus::NotAttempted)
+    ));
+}
+
+#[tokio::test]
+async fn an_interrupted_operation_keeps_a_receipt_of_what_was_dispatched() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = Store::open(directory.path().into()).await.unwrap();
+    let mut stored = record(&store, "6e8b0670-a457-4ce1-8d21-f1e4cf8c8e9b");
+    stored.started_at_ms = 1_000;
+    stored.finished_at_ms = Some(1_480);
+    stored.preparation_intent = true;
+    stored.dispatch_intent = true;
+    stored.outcome = ActionOutcome::OutcomeUnknown;
+    let receipt = interrupted_receipt(&stored);
+    assert_eq!(receipt.dispatch, DispatchState::MayHaveBeenSent);
+    assert!(matches!(receipt.outcome, ActionOutcome::OutcomeUnknown));
+    assert_eq!(receipt.target_id, stored.target_id);
+    assert_eq!(receipt.action, stored.action);
+    assert_eq!(
+        (receipt.started_at_ms, receipt.finished_at_ms),
+        (1_000, 1_480)
+    );
+    assert_eq!(receipt.elapsed_ms, 480);
+    assert!(receipt.preparation_may_have_executed);
+    assert!(receipt.cleanup_pending);
+    assert!(receipt.verification.is_none());
+
+    stored.dispatch_intent = false;
+    stored.preparation_intent = false;
+    stored.outcome = ActionOutcome::NotDispatched;
+    let receipt = interrupted_receipt(&stored);
+    assert_eq!(receipt.dispatch, DispatchState::NotSent);
+    assert!(matches!(receipt.outcome, ActionOutcome::NotDispatched));
+    assert!(!receipt.preparation_may_have_executed);
+    assert!(!receipt.cleanup_pending);
+}
+
+#[test]
+fn interrupted_targets_are_remembered_until_their_input_is_released() {
+    let manager = OperationManager::default();
+    assert!(manager.note_interrupted("a", true));
+    assert!(!manager.note_interrupted("a", true));
+    assert!(manager.note_interrupted("a", false));
+    assert!(!manager.note_interrupted("a", false));
+    assert!(!manager.inner.halts_on_dialog.load(Ordering::Acquire));
+    manager.halt_on_dialog();
+    assert!(manager.inner.halts_on_dialog.load(Ordering::Acquire));
+    assert!(!OperationManager::default()
+        .inner
+        .halts_on_dialog
+        .load(Ordering::Acquire));
+}
+
+#[test]
+fn only_a_frame_waiting_action_that_timed_out_preparing_is_checked_for_frames() {
+    for kind in ["click", "double_click", "hover", "drag", "scroll_into_view"] {
+        assert!(awaited_frames(kind, &deadline("preparation")), "{kind}");
+        assert!(
+            awaited_frames(kind, &deadline("preparation: target not found")),
+            "{kind}"
+        );
+        assert!(!awaited_frames(kind, &deadline("input dispatch")), "{kind}");
+        assert!(!awaited_frames(kind, &deadline("verification")), "{kind}");
+    }
+    for kind in ["fill", "type", "press_key", "select", "focus", "navigate"] {
+        assert!(!awaited_frames(kind, &deadline("preparation")), "{kind}");
+    }
+    assert!(!awaited_frames(
+        "click",
+        &Error::ElementNotFound("Action target".into())
+    ));
+}
+
+#[test]
+fn a_preparation_timeout_without_frames_says_whether_the_tab_was_hidden() {
+    let stored = diagnostic(&deadline("preparation"), &[], "operation");
+    let unchanged = without_frames(stored.clone(), "click", None);
+    assert_eq!(unchanged.message, stored.message);
+    assert!(unchanged.hint.is_none());
+
+    let hidden = without_frames(stored.clone(), "double_click", Some(Unpainted::Hidden));
+    assert_eq!(
+        hidden.message,
+        "Timeout: Action deadline exceeded during preparation: the tab is hidden \
+         (document.visibilityState is hidden) and ran no animation frame, and a double click \
+         waits two frames to confirm its target has stopped moving"
+    );
+    assert!(hidden
+        .hint
+        .as_deref()
+        .unwrap()
+        .starts_with("Bring this tab to the front"));
+    assert_eq!(hidden.code, stored.code);
+    assert_eq!(
+        hidden.context.as_ref().unwrap().phase.as_deref(),
+        Some("preparation")
+    );
+
+    let visible = without_frames(stored, "scroll_into_view", Some(Unpainted::Visible));
+    assert!(
+        visible.message.ends_with(
+            "the page ran no animation frame, and a scroll into view waits two frames to confirm \
+             its target has stopped moving"
+        ),
+        "{}",
+        visible.message
+    );
+    assert!(!visible.message.contains("hidden"));
+}

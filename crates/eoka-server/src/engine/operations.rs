@@ -7,8 +7,6 @@ impl Engine {
     }
 
     pub(super) async fn handle_action(&mut self, cmd: &str, args: &Value) -> Response {
-        // Every action is a durable operation. A caller that did not name one
-        // gets a fresh ID, returned in the record.
         let mut args = args.clone();
         if !args.is_object() {
             args = serde_json::json!({});
@@ -27,8 +25,7 @@ impl Engine {
                 .command(&self.operations, page, cmd, args.clone())
                 .await?;
             if matches!(record.state, eoka_protocol::OperationState::Running) {
-                self.operations
-                    .wait(&record.id, budget)
+                blockers::wait_unless_dialog(&self.operations, page, &record.id, budget)
                     .await
                     .map_err(commands::uncertain)
             } else {

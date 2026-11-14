@@ -5,7 +5,9 @@ import { Ajv2020 } from 'ajv/dist/2020.js';
 import type { ValidateFunction } from 'ajv';
 import bundle from './generated/schema-bundle.json' with { type: 'json' };
 import { protocolVersion, type ActionReceipt, type MethodName, type MethodParams, type MethodResults, type OperationRecord, type ServerError } from './generated/protocol.js';
+import { traced } from './call-site.js';
 import type { CallOptions, InvokeClient } from './client.js';
+import { duration, maximumTimer, serverGraceMs } from './duration.js';
 import { ConfigurationError, EokaError, ProtocolError, ServerOperationError, TransportError, type ErrorDetails } from './errors.js';
 
 export interface SidecarStartOptions {
@@ -13,6 +15,7 @@ export interface SidecarStartOptions {
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
   shutdownTimeoutMs?: number;
+  defaultTimeoutMs?: number | null;
   signal?: AbortSignal;
   redactionValues?: readonly string[];
   onTransport?: (transport: SidecarTransport) => void;
@@ -31,6 +34,7 @@ type Pending = {
   operationId: string | undefined;
   sent: boolean;
   frame: Buffer | undefined;
+  resend?: Buffer | undefined;
   resolve: ((value: unknown) => void) | undefined;
   reject: ((error: EokaError) => void) | undefined;
   completion?: Completion | undefined;
@@ -39,21 +43,48 @@ type Pending = {
   timer: NodeJS.Timeout | undefined;
 };
 
-type Contract = { params: object; result: { title?: string } };
+type Schema = { $ref?: string; $defs?: Record<string, Schema>; anyOf?: Schema[]; properties?: Record<string, Schema | boolean>; default?: unknown };
+type Contract = { params: Schema; result: { title?: string } };
+type WaitField = { path: readonly string[]; fallback: number };
 const contracts = bundle.methods as Record<MethodName, Contract>;
 let ajv: Ajv2020 | undefined;
 const validators = new Map<string, ValidateFunction>();
+const waitFields = new Map<MethodName, WaitField[]>();
+const waitName = /^(?:ms|timeout|settle_ms|\w*timeout_?ms)$/i;
 const localMessageLimit = 32 * 1024 * 1024;
 const localPendingLimit = 128;
+const responseWriteReserve = 1;
+const resendFrameLimit = 1024 * 1024;
+const intakeBusyMessage = 'maxInFlight pending requests exceeded';
 const stderrLimit = 16 * 1024;
-const maximumTimer = 2_147_483_647;
+const groupExitGraceMs = 5_000;
+const groupExitPollMs = 10;
+export const defaultCallTimeoutMs = 120_000;
 
-function duration(value: number | undefined, fallback: number, name: string): number {
-  const result = value ?? fallback;
-  if (!Number.isFinite(result) || result < 0 || result > maximumTimer) {
-    throw new ConfigurationError(`${name} must be finite and between 0 and ${maximumTimer}`, { requestState: 'not_sent' });
+function collectWaitFields(root: Schema, schema: Schema, path: readonly string[], fields: WaitField[]): void {
+  const candidate = schema.anyOf?.find(item => item.$ref !== undefined || item.properties !== undefined) ?? schema;
+  const definition = candidate.$ref === undefined ? candidate : root.$defs?.[candidate.$ref.replace('#/$defs/', '')] ?? candidate;
+  for (const [name, property] of Object.entries(definition.properties ?? {})) {
+    if (typeof property === 'boolean') continue;
+    if (waitName.test(name)) fields.push({ path: [...path, name], fallback: typeof property.default === 'number' ? property.default : 0 });
+    else if (path.length === 0) collectWaitFields(root, property, [name], fields);
   }
-  return result;
+}
+
+function requestedServerWait(method: MethodName, params: unknown): number {
+  let fields = waitFields.get(method);
+  if (!fields) {
+    fields = [];
+    if (Object.hasOwn(contracts, method)) collectWaitFields(contracts[method].params, contracts[method].params, [], fields);
+    waitFields.set(method, fields);
+  }
+  let total = 0;
+  for (const field of fields) {
+    let value: unknown = params;
+    for (const key of field.path) value = object(value) ? value[key] : undefined;
+    total += typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : field.fallback;
+  }
+  return total;
 }
 
 function secretMatcher(values: readonly string[]): RegExp | undefined {
@@ -118,6 +149,7 @@ function operationEvidence(record: OperationRecord, expectedId?: string): void {
 export class SidecarTransport implements InvokeClient {
   private readonly child: ChildProcessWithoutNullStreams;
   private readonly shutdownTimeoutMs: number;
+  private readonly defaultTimeoutMs: number | undefined;
   private readonly pending = new Map<number, Pending>();
   private readonly decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
   private greeting: MethodResults['server.hello'] | undefined;
@@ -125,6 +157,7 @@ export class SidecarTransport implements InvokeClient {
   private nextId = 1;
   private messageLimit = localMessageLimit;
   private pendingLimit = localPendingLimit;
+  private inFlight = 0;
   private frame = Buffer.alloc(0);
   private frameLength = 0;
   private queuedBytes = 0;
@@ -142,6 +175,7 @@ export class SidecarTransport implements InvokeClient {
   private cleanupError: EokaError | undefined;
   private closeCompletion: PromiseWithResolvers<void> | undefined;
   private teardownTimer: NodeJS.Timeout | undefined;
+  private closeDeadline = Number.POSITIVE_INFINITY;
   private shutdownId: number | undefined;
   private readonly closed = Promise.withResolvers<void>();
   private terminationConfirmed = false;
@@ -149,10 +183,11 @@ export class SidecarTransport implements InvokeClient {
   private childClosed = false;
   private windowsTreeTerminated = false;
 
-  private constructor(child: ChildProcessWithoutNullStreams, shutdownTimeoutMs: number, secrets: RegExp | undefined) {
+  private constructor(child: ChildProcessWithoutNullStreams, shutdownTimeoutMs: number, defaultTimeoutMs: number | undefined, secrets: RegExp | undefined) {
     void this.closed.promise.catch(() => {});
     this.child = child;
     this.shutdownTimeoutMs = shutdownTimeoutMs;
+    this.defaultTimeoutMs = defaultTimeoutMs;
     this.secrets = secrets;
     child.stdout.on('data', this.onData);
     child.stdout.on('end', this.onEnd);
@@ -169,6 +204,8 @@ export class SidecarTransport implements InvokeClient {
   static async start(options: SidecarStartOptions): Promise<SidecarTransport> {
     const timeoutMs = duration(options.timeoutMs, 30_000, 'timeoutMs');
     const shutdownTimeoutMs = duration(options.shutdownTimeoutMs, 45_000, 'shutdownTimeoutMs');
+    const defaultTimeoutMs = options.defaultTimeoutMs === null ? undefined : duration(options.defaultTimeoutMs, defaultCallTimeoutMs, 'defaultTimeoutMs');
+    if (defaultTimeoutMs === 0) throw new ConfigurationError('defaultTimeoutMs must be positive; pass null to disable it', { requestState: 'not_sent' });
     const secrets = secretMatcher(options.redactionValues ?? []);
     if (!options.serverPath) throw new ConfigurationError('An explicit serverPath is required', { requestState: 'not_sent' });
     if (options.signal?.aborted) throw new TransportError('Aborted', 'Sidecar startup was aborted before spawning', { requestState: 'not_sent', cause: options.signal.reason });
@@ -178,7 +215,7 @@ export class SidecarTransport implements InvokeClient {
     } catch (cause) {
       throw new TransportError('Spawn', 'Could not spawn the sidecar', { cause, requestState: 'not_sent' });
     }
-    const transport = new SidecarTransport(child, shutdownTimeoutMs, secrets);
+    const transport = new SidecarTransport(child, shutdownTimeoutMs, defaultTimeoutMs, secrets);
     try {
       options.onTransport?.(transport);
       const hello = await transport.request('server.hello', { protocol: protocolVersion }, { timeoutMs, ...(options.signal === undefined ? {} : { signal: options.signal }) });
@@ -194,7 +231,7 @@ export class SidecarTransport implements InvokeClient {
       transport.greeting = hello;
       transport.supported = new Set(hello.methods);
       transport.messageLimit = Math.min(localMessageLimit, hello.limits.maxMessageBytes);
-      transport.pendingLimit = Math.min(localPendingLimit, hello.limits.maxInFlight);
+      transport.pendingLimit = Math.max(1, Math.min(localPendingLimit, hello.limits.maxInFlight) - responseWriteReserve);
       if (transport.frameLength > transport.messageLimit) throw new ProtocolError('Buffered peer frame exceeds negotiated limit');
       return transport;
     } catch (error) {
@@ -280,14 +317,13 @@ export class SidecarTransport implements InvokeClient {
     try {
       const data: unknown = params;
       operationId = options.operationId ?? (object(data) && typeof data.operation_id === 'string' ? data.operation_id : typeof method === 'string' && method.startsWith('operations.') && object(data) && typeof data.id === 'string' ? data.id : undefined);
-      const timeoutMs = options.timeoutMs === undefined ? undefined : duration(options.timeoutMs, 0, 'timeoutMs');
+      const timeoutMs = options.timeoutMs === undefined ? this.fallbackTimeout(method, params, cleanup) : duration(options.timeoutMs, 0, 'timeoutMs');
       const deadline = timeoutMs === undefined ? undefined : performance.now() + timeoutMs;
       const details: ErrorDetails = { operationId, requestState: 'not_sent' };
       if (this.closing || this.failure || (this.quiescing && !cleanup)) throw new TransportError('Closed', 'Sidecar transport is closed', { ...details, cause: this.failure });
       if (options.signal?.aborted) throw new TransportError('Aborted', 'Request aborted before dispatch', { ...details, cause: options.signal.reason });
       if (timeoutMs === 0) throw new TransportError('DeadlineExceeded', 'Request deadline expired before dispatch', details);
       if (!Object.hasOwn(contracts, method) || (this.greeting && !this.supported.has(method))) throw new TransportError('UnsupportedMethod', `Sidecar does not support ${method}`, details);
-      if (method !== 'server.shutdown' && this.pending.size >= this.pendingLimit) throw new TransportError('PendingLimit', 'Sidecar in-flight request limit reached', details);
       if (this.nextId > Number.MAX_SAFE_INTEGER) throw new TransportError('RequestIdExhausted', 'Safe request IDs have been exhausted', details);
       try {
         this.validate(`${method} params`, contracts[method].params, params);
@@ -311,13 +347,15 @@ export class SidecarTransport implements InvokeClient {
       this.pending.set(id, current);
       this.queuedBytes += frame.length;
       if (options.signal) {
-        current.abort = () => this.cancel(current, 'Aborted', options.signal?.reason);
+        current.abort = () => this.cancel(current, 'Aborted', `${method} was aborted locally`, options.signal?.reason);
         options.signal.addEventListener('abort', current.abort, { once: true });
       }
       if (deadline !== undefined) {
+        const origin = options.timeoutMs !== undefined ? 'local deadline' : timeoutMs === this.defaultTimeoutMs ? 'default deadline (defaultTimeoutMs)' : `default deadline (its server-side wait plus ${serverGraceMs} ms)`;
+        const expired = `${method} exceeded ${options.timeoutMs === undefined ? 'the' : 'its'} ${timeoutMs} ms ${origin}`;
         const remaining = deadline - performance.now();
-        if (remaining <= 0) this.cancel(current, 'DeadlineExceeded');
-        else current.timer = setTimeout(() => this.cancel(current, 'DeadlineExceeded'), remaining);
+        if (remaining <= 0) this.cancel(current, 'DeadlineExceeded', expired);
+        else current.timer = setTimeout(() => this.cancel(current, 'DeadlineExceeded', expired), remaining);
       }
       if (this.pending.has(current.id) && (method === 'server.shutdown' || method === 'browser.close')) void this.beginClose(current).catch(() => {});
       else this.flush();
@@ -332,6 +370,12 @@ export class SidecarTransport implements InvokeClient {
       completion?.reject(error);
       return Promise.reject(error);
     }
+  }
+
+  private fallbackTimeout(method: MethodName, params: unknown, cleanup: boolean): number | undefined {
+    if (this.defaultTimeoutMs === undefined || cleanup || method === 'server.shutdown' || method === 'browser.close') return undefined;
+    const serverWait = requestedServerWait(method, params);
+    return serverWait === 0 ? this.defaultTimeoutMs : Math.min(maximumTimer, Math.max(this.defaultTimeoutMs, serverWait + serverGraceMs));
   }
 
   private details(entry: Pending, stderr = this.stderr): ErrorDetails {
@@ -350,16 +394,18 @@ export class SidecarTransport implements InvokeClient {
     this.detach(entry);
     if (entry.frame) this.queuedBytes -= entry.frame.length;
     entry.frame = undefined;
-    this.pending.delete(entry.id);
+    entry.resend = undefined;
+    if (this.pending.delete(entry.id) && entry.sent) this.inFlight--;
   }
 
-  private cancel(entry: Pending, code: string, cause?: unknown): void {
+  private cancel(entry: Pending, code: string, reason: string, cause?: unknown): void {
     if (!entry.reject) return;
     const reject = entry.reject;
     this.detach(entry);
     entry.reject = undefined;
     entry.resolve = undefined;
-    const error = new TransportError(code, entry.sent ? 'Local request cancelled after possible dispatch; the action was not rolled back' : 'Local request cancelled before dispatch', { ...this.details(entry), cause });
+    entry.resend = undefined;
+    const error = new TransportError(code, entry.sent ? `${reason} after possible dispatch; the action was not rolled back` : `${reason} before dispatch`, { ...this.details(entry), cause });
     reject(error);
     if (!entry.sent) {
       entry.completion?.reject(error);
@@ -371,10 +417,13 @@ export class SidecarTransport implements InvokeClient {
     if (this.blocked || this.closing) return;
     for (const entry of this.pending.values()) {
       if (!entry.frame) continue;
+      if (this.inFlight >= this.pendingLimit) break;
       const frame = entry.frame;
       this.queuedBytes -= frame.length;
       entry.frame = undefined;
+      entry.resend = frame.length <= resendFrameLimit ? frame : undefined;
       entry.sent = true;
+      this.inFlight++;
       try {
         if (!this.child.stdin.write(frame)) {
           this.blocked = true;
@@ -458,6 +507,14 @@ export class SidecarTransport implements InvokeClient {
       const wireError = value.error as ServerError;
       if (wireError.data?.receipt) receiptEvidence(wireError.data.receipt);
       if (entry.operationId && wireError.data?.operation_id && entry.operationId !== wireError.data.operation_id) throw new ProtocolError('Server error has a different operation ID');
+      if (wireError.code === 'ServerBusy' && wireError.message === intakeBusyMessage && entry.resend && entry.reject && this.inFlight > 1 && !this.closing) {
+        this.inFlight--;
+        this.pendingLimit = this.inFlight;
+        this.queuedBytes += entry.resend.length;
+        entry.frame = entry.resend;
+        entry.sent = false;
+        return;
+      }
       const error = new ServerOperationError(wireError, details);
       if (entry.id === this.shutdownId) this.cleanupError = error;
       entry.reject?.(error);
@@ -478,6 +535,7 @@ export class SidecarTransport implements InvokeClient {
     }
     this.remove(entry);
     if (entry.id === this.shutdownId && entry.method === 'browser.close') this.child.stdin.end();
+    else this.flush();
   }
 
   private rejectPending(error: EokaError): void {
@@ -493,6 +551,7 @@ export class SidecarTransport implements InvokeClient {
       }
       entry.reject = undefined;
       entry.resolve = undefined;
+      entry.resend = undefined;
       this.detach(entry);
       if (!entry.sent) this.remove(entry);
     }
@@ -540,9 +599,18 @@ export class SidecarTransport implements InvokeClient {
     if (!this.closing) this.fail(new TransportError('ProcessExit', 'Sidecar process closed before disposal', { stderr: this.stderr }));
     if (this.escalating) {
       if (process.platform !== 'win32' && !this.ownedGroupAlive()) this.finishClose();
-    } else if (process.platform !== 'win32' && this.ownedGroupAlive()) void this.terminate();
+    } else if (process.platform !== 'win32' && this.ownedGroupAlive()) this.awaitGroupExit(Math.min(this.closeDeadline, performance.now() + groupExitGraceMs));
     else this.finishClose();
   };
+
+  private awaitGroupExit(deadline: number): void {
+    if (this.finished || this.escalating) return;
+    clearTimeout(this.teardownTimer);
+    this.teardownTimer = undefined;
+    if (!this.ownedGroupAlive()) this.finishClose();
+    else if (performance.now() >= deadline) void this.terminate();
+    else this.teardownTimer = setTimeout(() => this.awaitGroupExit(deadline), groupExitPollMs);
+  }
 
   close(): Promise<void> {
     return this.beginClose();
@@ -569,17 +637,20 @@ export class SidecarTransport implements InvokeClient {
         this.queuedBytes -= frame.length;
         terminal.frame = undefined;
         terminal.sent = true;
+        this.inFlight++;
         if (terminal.method === 'browser.close') this.child.stdin.write(frame);
         else this.child.stdin.end(frame);
       } else if (!this.failure && !this.exited && !this.child.stdin.destroyed && this.nextId <= Number.MAX_SAFE_INTEGER) {
         const id = this.nextId++;
         this.shutdownId = id;
         this.pending.set(id, { id, method: 'server.shutdown', operationId: undefined, sent: true, frame: undefined, resolve: undefined, reject: undefined, signal: undefined, abort: undefined, timer: undefined });
+        this.inFlight++;
         this.child.stdin.end(`${JSON.stringify({ id, method: 'server.shutdown', params: {} })}\n`);
       } else this.child.stdin.end();
     } catch (cause) {
       this.cleanupError ??= new TransportError('ShutdownWrite', 'Could not send sidecar shutdown; cleanup may be incomplete', { cause, stderr: this.stderr });
     }
+    this.closeDeadline = performance.now() + this.shutdownTimeoutMs;
     this.teardownTimer = setTimeout(() => { void this.terminate(); }, this.shutdownTimeoutMs);
     return this.closeCompletion.promise;
   }
@@ -705,3 +776,6 @@ export class SidecarTransport implements InvokeClient {
     }
   }
 }
+
+SidecarTransport.start = traced(SidecarTransport.start);
+SidecarTransport.prototype.invoke = traced(SidecarTransport.prototype.invoke);

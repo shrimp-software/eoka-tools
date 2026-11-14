@@ -1,3 +1,4 @@
+import { traceCallSites } from './call-site.js';
 import type { CallOptions, InvokeClient } from './client.js';
 import { EokaError, type ErrorDetails } from './errors.js';
 import type { MethodParams, OperationRecord } from './generated/protocol.js';
@@ -95,3 +96,5 @@ export class Operation {
     }
   }
 }
+
+traceCallSites(Operation.prototype);

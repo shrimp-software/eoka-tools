@@ -93,6 +93,18 @@ response retains the known job ID without claiming a current state. Wait timeout
 leave jobs running; inspect or wait for the same job instead of starting again.
 Old daemons need an explicit restart to provide the new evidence.
 
+## Blocked and busy sessions
+
+No CLI command blocks indefinitely. A tab with an open JavaScript dialog, or one
+waiting for a server that never answers, is reported within about half a second
+as `dialog_open` or `navigation_pending` with the command that clears it, instead
+of a 30-second protocol timeout per command. A navigation that gets no response
+before its deadline is stopped and reported as `navigation_timeout`, leaving the
+tab on its previous page. While one command runs, another waits at most 5 s and
+is then refused with `daemon_busy`, naming the running command. `eoka status`
+reports what a session is running and what blocks its tab. MCP tools and Tack
+receive the same codes. See [agent browsing](AGENT-BROWSING.md#blocked-and-busy-sessions).
+
 ## Browser downloads and bounded fetch
 
 Use an existing Eoka-owned session to save files with Chrome's cookies, proxy and
@@ -254,8 +266,10 @@ compiled ESM/declarations for Node 24 LTS (`^24.21.0`), one private sidecar per 
 owned launch or borrowed attachment, verified actions, durable operation recovery,
 page reads, bounded text fetch, PNG/JPEG/WebP screenshots and native MP4 recording.
 
-The current release, `0.1.0-beta.3`, bundles server `0.6.1` built against eoka
-`0.7.2`. Merging a version bump to `main` starts the npm release automatically.
+Each release bundles the server version recorded in
+`clients/node/release-manifest.json`, built against the eoka version in the
+workspace `Cargo.toml`. Merging a version bump to `main` starts the npm release
+automatically.
 
 `Browser.launch()` resolves an exact optional server package and installs pinned
 full Chrome for Testing (the build pinned in
@@ -307,10 +321,9 @@ These apply to the CLI and MCP server:
 
 ## Development
 
-Builds use published eoka `0.7.2` from crates.io. The workspace lockfile pins its
-registry source and checksum
-`bb088753bbef0585bcbaa1e868e4e59b5ee99db40844ba9cb3ec4822ca95e019`;
-no sibling core checkout or Cargo patch is required.
+Builds use the published eoka crate from crates.io at the version in the workspace
+`Cargo.toml`. `Cargo.lock` pins its registry source and checksum; no sibling core
+checkout or Cargo patch is required.
 
 ```sh
 mise run drift

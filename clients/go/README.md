@@ -1,6 +1,6 @@
 # eoka Go client
 
-A Go client for [`eoka`](https://github.com/cbxss/eoka), a Rust stealth
+A Go client for [`eoka`](https://github.com/shrimp-software/eoka), a Rust stealth
 Chrome-automation library, via its `eoka-server` sidecar process. This
 package spawns `eoka-server` as a child process and drives it over
 newline-delimited JSON on stdin/stdout, per the contract in
@@ -27,7 +27,7 @@ sidecar protocol **2.0** or a newer compatible 2.x minor. The client locates the
 2. The `EOKA_SERVER_BIN` environment variable, if set.
 3. `eoka-server` on `PATH`.
 4. A prebuilt binary downloaded from this repo's GitHub Releases, pinned to
-   [`eoka-server-v0.9.5`](https://github.com/shrimp-software/eoka-tools/releases/tag/eoka-server-v0.9.5).
+   [`eoka-server-v0.10.0`](https://github.com/shrimp-software/eoka-tools/releases/tag/eoka-server-v0.10.0).
    Assets are available for linux/amd64, linux/arm64, darwin/amd64, darwin/arm64
    and windows/amd64. The binary is cached under `os.UserCacheDir()/eoka/` and
    verified against the release's published SHA-256 checksums before installation.
@@ -46,7 +46,7 @@ the resulting server.
 ## Action migration
 
 `Launch` and `Connect` send `server.hello` with protocol 2.0 before creating
-a browser session. The client requires major 1 and minor >= 1; server/core
+a browser session. The client requires major 2 and accepts any 2.x minor; server/core
 package versions are diagnostic information, not substitutes for protocol
 compatibility. `Browser.ServerInfo()` returns the negotiated versions, supported
 methods, capabilities and server limits. Missing required launch or connect support,
@@ -238,6 +238,17 @@ if errors.As(err, &eErr) {
     fmt.Println(eErr.Code, eErr.Message, string(eErr.Data))
 }
 ```
+
+A page that cannot answer is reported promptly by servers advertising the
+`pageBlockers` capability, with its own code: `DialogOpen`
+(`ErrCodeDialogOpen`) while a JavaScript dialog is open, `NavigationPending`
+(`ErrCodeNavigationPending`) while the main frame waits for a navigation
+response, and `PageUnresponsive` (`ErrCodePageUnresponsive`) when the page
+answers nothing and neither is known. For the first two, `Data` carries
+`blocker`: `{"kind":"dialog","dialogType","message","url","elapsedMs"}` or
+`{"kind":"navigation","url","elapsedMs"}`, next to the `detail` that names the
+remedy. The client asks for these codes by sending `understands` 2.2 in
+`server.hello`; an older server ignores it and keeps its own behaviour.
 
 Transport-level failures (the server process died, its pipes closed, an invalid
 response, unknown/duplicate response ID or mid-message EOF) fail the transport and

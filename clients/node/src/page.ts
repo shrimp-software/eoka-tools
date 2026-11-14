@@ -1,10 +1,15 @@
 import { catalogOperations, type CatalogOperations } from './generated/catalog.js';
+import bundle from './generated/schema-bundle.json' with { type: 'json' };
 import { Buffer } from 'node:buffer';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
+import { actionFailureMessage } from './action-failure.js';
+import { traceCallSites } from './call-site.js';
 import type { CallOptions, InvokeClient } from './client.js';
+import { duration, maximumTimer, serverGraceMs } from './duration.js';
+import { ConfigurationError, EokaError, type ErrorDetails } from './errors.js';
 import type {
-  Action, ActionOptions, ActionReceipt, AgentAction, AgentMode, AgentObservation,
+  Action, ActionOptions as WireActionOptions, ActionReceipt, AgentAction, AgentMode, AgentObservation,
   AgentStepResult, BrowserState, Expectation, LocatorSpec, MethodName,
   MethodParams, MethodResults, OperationRecord, InputMode, Destination,
 } from './generated/protocol.js';
@@ -12,6 +17,10 @@ import { Operation, OperationError, operationFailure, validateOperationRecord, t
 import { Recording, RecordingError, recordingFailure, requireCaptureCapability, validateRecordingRecord } from './recording.js';
 
 export type LocatorInput = string | LocatorSpec;
+
+type Declared<T> = { [K in keyof T as string extends K ? never : number extends K ? never : K]: T[K] };
+export type ActionOptions = Declared<WireActionOptions>;
+export type PageFunction<R = unknown> = (...args: any[]) => R;
 
 export interface PerformOptions {
   operationId?: string;
@@ -47,9 +56,47 @@ export type ScreenshotFileOptions = ScreenshotOptions & Pick<MethodParams['page.
 export type RecordOptions = Pick<MethodParams['recording.start'], 'path' | 'fps' | 'maxWidth' | 'maxHeight'> & CallOptions & { recordingId?: string };
 
 const recordingIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const actionOptionKeys = Object.keys(bundle.types.ActionOptions.properties);
+const defaultActionTimeoutMs = bundle.types.ActionOptions.properties.timeout_ms.default;
+const maximumWaitMs = bundle.methods['operations.wait'].params.properties.timeout_ms.maximum;
 
 function locator(target: LocatorInput): LocatorSpec {
   return typeof target === 'string' ? { query: { kind: 'css', selector: target } } : target;
+}
+
+function comparable(name: string): string {
+  return name.replace(/[^a-z0-9]/gi, '').toLowerCase();
+}
+
+function rejectUnknownActionOptions(options: object, operationId: string): void {
+  for (const key of Object.keys(options)) {
+    if (actionOptionKeys.includes(key)) continue;
+    const intended = actionOptionKeys.find(name => comparable(name) === comparable(key));
+    throw new ConfigurationError(
+      `Unknown actionOptions key "${key}"${intended === undefined ? '.' : `; did you mean "${intended}"?`} Valid keys: ${actionOptionKeys.join(', ')}.`,
+      { operationId, requestState: 'not_sent' },
+    );
+  }
+}
+
+function actionBudget(options: PerformOptions): { actionMs: number | undefined; localMs: number; settleMs: number } {
+  const localMs = options.timeoutMs === undefined ? undefined : duration(options.timeoutMs, 0, 'timeoutMs');
+  const requested = options.actionOptions?.timeout_ms;
+  if (requested !== undefined && (typeof requested !== 'number' || !Number.isFinite(requested) || requested < 0)) {
+    return { actionMs: undefined, localMs: localMs ?? defaultActionTimeoutMs + serverGraceMs, settleMs: 0 };
+  }
+  if (requested !== undefined && localMs !== undefined) return { actionMs: requested, localMs, settleMs: 0 };
+  const actionMs = requested ?? (localMs === undefined ? defaultActionTimeoutMs : Math.ceil(localMs));
+  return { actionMs, localMs: actionMs === 0 ? 0 : Math.min(maximumTimer, actionMs + serverGraceMs), settleMs: serverGraceMs / 2 };
+}
+
+function functionSource(fn: string | PageFunction, method: string): string {
+  if (typeof fn !== 'function') return fn;
+  const source = fn.toString();
+  if (/\{\s*\[native code\]\s*\}$/.test(source)) {
+    throw new ConfigurationError(`${method} needs a function with source text; native and bound functions cannot be sent to the page`, { requestState: 'not_sent' });
+  }
+  return source;
 }
 
 export class Page implements InvokeClient {
@@ -86,6 +133,7 @@ export class Page implements InvokeClient {
 
   async perform(action: Action, options: PerformOptions = {}): Promise<Operation> {
     const id = options.operationId ?? randomUUID();
+    if (options.actionOptions != null && typeof options.actionOptions === 'object') rejectUnknownActionOptions(options.actionOptions, id);
     if ((action.kind === 'click' || action.kind === 'type' || action.kind === 'press_key' || action.kind === 'submit' || action.kind === 'drag' || action.kind === 'insert_text') && options.actionOptions?.expect == null) {
       throw new OperationError('expectation_required', 'This action requires actionOptions.expect before dispatch.', id, undefined, { requestState: 'not_sent' });
     }
@@ -104,16 +152,17 @@ export class Page implements InvokeClient {
   }
 
   private async verified(action: Action, options: PerformOptions = {}): Promise<ActionReceipt> {
-    const timeoutMs = options.timeoutMs ?? 30_000;
-    const deadline = performance.now() + timeoutMs;
-    const operation = await this.perform(action, { ...options, timeoutMs });
+    const budget = actionBudget(options);
+    const deadline = performance.now() + budget.localMs;
+    const actionOptions = budget.actionMs === undefined ? options.actionOptions : { ...options.actionOptions, timeout_ms: budget.actionMs };
+    const operation = await this.perform(action, { ...options, ...(actionOptions === undefined ? {} : { actionOptions }), timeoutMs: budget.localMs });
     let record = operation.record;
     const remaining = deadline - performance.now();
     if (remaining <= 0) {
       throw new OperationError('DeadlineExceeded', 'The local action deadline elapsed; recover the operation by ID to learn its outcome.', operation.id, record, { requestState: 'acknowledged' });
     }
     if (record?.state === 'running' || record === undefined) {
-      const waitOptions: WaitOptions = { timeoutMs: remaining, waitTimeoutMs: Math.floor(remaining) };
+      const waitOptions: WaitOptions = { timeoutMs: remaining, waitTimeoutMs: Math.min(maximumWaitMs, Math.floor(Math.max(0, remaining - budget.settleMs))) };
       if (options.signal !== undefined) waitOptions.signal = options.signal;
       record = await operation.wait(waitOptions);
     }
@@ -122,9 +171,10 @@ export class Page implements InvokeClient {
       throw new OperationError('DeadlineExceeded', 'The local action deadline elapsed; recover the operation by ID to learn its outcome.', operation.id, record, { requestState: 'acknowledged' });
     }
     if (record.state !== 'finished' || record.outcome !== 'verified_complete' || record.receipt?.outcome !== 'verified_complete' || record.error_code != null) {
+      const details: ErrorDetails = { requestState: 'acknowledged' };
+      if (record.error != null) details.cause = new EokaError(record.error.code, record.error.message, { operationId: operation.id, data: record.error });
       throw new OperationError(record.error_code ?? (record.state === 'running' ? 'OperationRunning' : record.outcome),
-        record.error?.message ?? `Operation ${operation.id} is ${record.state} with outcome ${record.outcome}; verified completion was not established.`,
-        operation.id, record, { requestState: 'acknowledged' });
+        actionFailureMessage(action, actionOptions?.expect, budget.actionMs, record), operation.id, record, details);
     }
     return record.receipt;
   }
@@ -208,16 +258,18 @@ export class Page implements InvokeClient {
     await this.invoke('page.wait_for_text', { pageId: this.id, text, timeoutMs: waitTimeoutMs }, localOptions);
   }
 
-  async evaluate(fn: string, args: unknown[] = [], options?: CallOptions): Promise<unknown> {
-    return (await this.invoke('page.evaluate', { pageId: this.id, function: fn, arguments: args }, options)).result;
+  evaluate<R>(fn: PageFunction<R>, args?: unknown[], options?: CallOptions): Promise<Awaited<R>>;
+  evaluate(fn: string, args?: unknown[], options?: CallOptions): Promise<unknown>;
+  async evaluate(fn: string | PageFunction, args: unknown[] = [], options?: CallOptions): Promise<unknown> {
+    return (await this.invoke('page.evaluate', { pageId: this.id, function: functionSource(fn, 'page.evaluate'), arguments: args }, options)).result;
   }
 
   async evaluateRaw(js: string, options?: CallOptions): Promise<unknown> {
     return (await this.invoke('page.evaluate_raw', { pageId: this.id, js }, options)).result;
   }
 
-  async execute(fn: string, args: unknown[] = [], options?: CallOptions): Promise<void> {
-    await this.invoke('page.execute', { pageId: this.id, function: fn, arguments: args }, options);
+  async execute(fn: string | PageFunction, args: unknown[] = [], options?: CallOptions): Promise<void> {
+    await this.invoke('page.execute', { pageId: this.id, function: functionSource(fn, 'page.execute'), arguments: args }, options);
   }
 
   async executeRaw(js: string, options?: CallOptions): Promise<void> {
@@ -244,7 +296,7 @@ export class Page implements InvokeClient {
     // server-side resolution deadline. Derive an RPC deadline that cannot
     // outlive a long resolution when the caller did not set one explicitly.
     if (callOptions.timeoutMs === undefined && resolveTimeoutMs !== undefined) {
-      callOptions.timeoutMs = resolveTimeoutMs + 10_000;
+      callOptions.timeoutMs = resolveTimeoutMs + serverGraceMs;
     }
     return this.invoke('page.click_shadow', {
       pageId: this.id,
@@ -262,7 +314,7 @@ export class Page implements InvokeClient {
   solveTurnstile(options: { timeoutMs?: number } & CallOptions = {}): Promise<MethodResults['page.solve_turnstile']> {
     const { timeoutMs = 30_000, ...callOptions } = options;
     // The local deadline outlasts the server's solve deadline so its error wins.
-    return this.invoke('page.solve_turnstile', { pageId: this.id, timeoutMs }, { ...callOptions, timeoutMs: timeoutMs + 10_000 });
+    return this.invoke('page.solve_turnstile', { pageId: this.id, timeoutMs }, { ...callOptions, timeoutMs: timeoutMs + serverGraceMs });
   }
 
   async captureState(options?: CallOptions): Promise<BrowserState> {
@@ -372,3 +424,5 @@ export class Page implements InvokeClient {
     await this.invoke('page.close', { pageId: this.id }, options);
   }
 }
+
+traceCallSites(Page.prototype);

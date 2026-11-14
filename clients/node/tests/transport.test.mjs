@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { SidecarTransport } from '../dist/transport.js';
-import { EokaError, ProtocolError, ServerOperationError, TransportError } from '../dist/errors.js';
+import { ConfigurationError, EokaError, ProtocolError, ServerOperationError, TransportError } from '../dist/errors.js';
 import { protocolVersion } from '../dist/generated/protocol.js';
 
 const serverPath = fileURLToPath(new URL('../fixtures/wire/transport-peer.mjs', import.meta.url));
@@ -157,11 +157,202 @@ test('deadline after dispatch retains its slot until a correlated late response'
   });
   assert.equal(getEventListeners(controller.signal, 'abort').length, 0);
   assert.equal(transport.pending.size, 1);
-  await assert.rejects(evaluate(transport), error => error.code === 'PendingLimit' && error.requestState === 'not_sent');
-  await once(transport.child.stdout, 'data');
+  const queued = evaluate(transport);
+  assert.equal(transport.pending.size, 2);
+  assert.equal(transport.inFlight, 1);
+  assert.deepEqual(await queued, { result: null });
   assert.equal(transport.pending.size, 0);
+  assert.equal(transport.inFlight, 0);
   assert.equal(transport.failure, undefined);
   assert.deepEqual(await evaluate(transport), { result: null });
+});
+
+test('calls beyond the negotiated in-flight limit queue locally and all resolve', async t => {
+  const transport = await start(t, 'concurrency', { EOKA_TRANSPORT_TEST_IN_FLIGHT: '4' });
+  const calls = Array.from({ length: 300 }, () => evaluate(transport, 'null', { timeoutMs: 10_000 }));
+  assert.equal(transport.pending.size, 300);
+  assert.equal(transport.inFlight, 3);
+  const results = await Promise.all(calls);
+  assert.ok(Math.max(...results.map(result => result.result.peak)) <= 3);
+  assert.deepEqual(results.map(result => result.result.received), Array.from({ length: 300 }, (_, index) => index + 1));
+  assert.equal(transport.pending.size, 0);
+  assert.equal(transport.inFlight, 0);
+  assert.equal(transport.queuedBytes, 0);
+});
+
+test('queued calls that expire or abort before being sent report not_sent and never reach the peer', async t => {
+  const transport = await start(t, 'concurrency', { EOKA_TRANSPORT_TEST_IN_FLIGHT: '2', EOKA_TRANSPORT_TEST_REPLY_DELAY_MS: '250' });
+  const controller = new AbortController();
+  const first = evaluate(transport);
+  const expired = evaluate(transport, 'null', { timeoutMs: 0.01 });
+  const aborted = evaluate(transport, 'null', { signal: controller.signal });
+  const last = evaluate(transport);
+  controller.abort();
+  const [deadline, abort] = await Promise.allSettled([expired, aborted]);
+  assert.equal(deadline.reason.code, 'DeadlineExceeded');
+  assert.equal(deadline.reason.requestState, 'not_sent');
+  assert.match(deadline.reason.message, /page\.evaluate exceeded its 0\.01 ms local deadline before dispatch/);
+  assert.equal(abort.reason.code, 'Aborted');
+  assert.equal(abort.reason.requestState, 'not_sent');
+  assert.equal(getEventListeners(controller.signal, 'abort').length, 0);
+  assert.equal((await first).result.received, 1);
+  assert.equal((await last).result.received, 2);
+  assert.equal(transport.pending.size, 0);
+  assert.equal(transport.queuedBytes, 0);
+});
+
+test('a peer that refuses admission as busy has the refused calls resent at a lower limit', async t => {
+  const transport = await start(t, 'concurrency', { EOKA_TRANSPORT_TEST_IN_FLIGHT: '9', EOKA_TRANSPORT_TEST_CAPACITY: '3' });
+  assert.equal(transport.pendingLimit, 8);
+  const results = await Promise.all(Array.from({ length: 60 }, () => evaluate(transport, 'null', { timeoutMs: 10_000 })));
+  assert.ok(Math.max(...results.map(result => result.result.peak)) <= 3);
+  assert.equal(results.length, 60);
+  assert.equal(transport.pendingLimit, 3);
+  assert.equal(transport.pending.size, 0);
+  assert.equal(transport.inFlight, 0);
+  assert.equal(transport.queuedBytes, 0);
+});
+
+test('the local queue stays bounded by buffered bytes', async t => {
+  const transport = await start(t, 'late', { EOKA_TRANSPORT_TEST_IN_FLIGHT: '1' });
+  const large = 'null' + ' '.repeat(17 * 1024 * 1024);
+  const sent = evaluate(transport, large, { timeoutMs: 20_000 });
+  const queued = evaluate(transport, large, { timeoutMs: 20_000 });
+  await assert.rejects(evaluate(transport, large, { timeoutMs: 20_000 }), error => {
+    assert.equal(error.code, 'PendingLimit');
+    assert.equal(error.requestState, 'not_sent');
+    assert.match(error.message, /byte limit/);
+    return true;
+  });
+  assert.deepEqual(await sent, { result: null });
+  assert.deepEqual(await queued, { result: null });
+  assert.equal(transport.queuedBytes, 0);
+});
+
+test('rejected calls carry the frame of the code that made them', async t => {
+  const here = fileURLToPath(import.meta.url);
+  const late = await start(t, 'late');
+  const failing = await start(t, 'operation-error');
+  const controller = new AbortController();
+  const settled = call => new Promise(resolve => { call.then(resolve, resolve); });
+  const cases = [
+    ['DeadlineExceeded', () => late.invoke('page.evaluate', { pageId: 'page', function: 'null' }, { timeoutMs: 5 })],
+    ['Aborted', () => {
+      const call = late.invoke('page.evaluate', { pageId: 'page', function: 'null' }, { signal: controller.signal });
+      setImmediate(() => controller.abort());
+      return call;
+    }],
+    ['Configuration', () => late.invoke('page.evaluate', { pageId: 'page' })],
+    ['Action', () => failing.invoke('page.title', { pageId: 'page' })],
+  ];
+  for (const [code, call] of cases) {
+    const error = await settled(call());
+    assert.equal(error.code, code);
+    assert.ok(error.stack.split('\n').slice(1).some(frame => frame.includes(here)), `${code} stack has no caller frame:\n${error.stack}`);
+    assert.doesNotMatch(error.stack, /eokaTracedCall/);
+  }
+});
+
+test('blocked-page replies reject at once with the blocker, the server text and a Node next step', async t => {
+  const here = fileURLToPath(import.meta.url);
+  const transport = await start(t, 'echo-error');
+  const limit = transport.pendingLimit;
+  const settled = call => new Promise(resolve => { call.then(resolve, resolve); });
+  const dialogText = 'A JavaScript confirm dialog is open on this tab ("Delete it?"). Chrome answers no page commands until the dialog is accepted or dismissed, so `page.title` was not started.';
+  const pendingText = 'This tab has been waiting 6.5 s for a response from http://127.0.0.1:4000/hang. Chrome answers no page commands until that navigation commits or is abandoned, so `page.title` was not started.';
+  const frozenText = '`page.title` got no answer from the page within 5 s. No dialog or pending navigation is known, so the page\'s main thread is busy or frozen.';
+  const stoppedText = 'No response from http://127.0.0.1:4000/hang after 30 s. The pending load was stopped, so the tab still shows the page it had before and accepts commands.';
+  const dialog = (dialogType, context) => ({ kind: 'dialog', dialogType, message: 'Delete it?', url: 'http://127.0.0.1:4000/', elapsedMs: 1234, ...context });
+  const detail = (code, message, status) => ({ code, message, retryable: false, hint: 'Run `dialog.accept` or `dialog.dismiss`, then `agent.observe`.', ...(status === undefined ? {} : { context: { action_status: status } }) });
+  const dialogStep = 'Call page.ops.dialogAccept() or page.ops.dialogDismiss() on this page to close the dialog.';
+  const navigationStep = 'Keep waiting, for example with page.ops.wait({ url, timeout }), or abandon the load: page.goto(url) navigates again and page.ops.reload() returns to the page that is still displayed.';
+  for (const [wire, step] of [
+    [{ code: 'DialogOpen', message: dialogText, data: { detail: detail('dialog_open', dialogText, 'not_attempted'), blocker: dialog('confirm') } }, dialogStep],
+    [{ code: 'DialogOpen', message: dialogText, data: { detail: detail('dialog_open', dialogText, 'not_attempted'), blocker: dialog('prompt') } }, 'Call page.ops.dialogAccept({ prompt_text }) to answer the prompt or page.ops.dialogDismiss() to cancel it.'],
+    [{ code: 'DialogOpen', message: dialogText, data: { detail: detail('dialog_open', dialogText, 'not_attempted'), blocker: dialog('beforeunload') } }, 'Call page.ops.dialogAccept() to leave the page or page.ops.dialogDismiss() to stay.'],
+    [{ code: 'DialogOpen', message: dialogText, data: { detail: detail('dialog_open', dialogText, 'may_have_executed'), blocker: dialog('alert') } }, `${dialogStep} The interrupted call may already have changed the page; inspect the page before deciding what to do next.`],
+    [{ code: 'DialogOpen', message: 'maxInFlight pending requests exceeded' }, dialogStep],
+    [{ code: 'NavigationPending', message: pendingText, data: { detail: detail('navigation_pending', pendingText, 'not_attempted'), blocker: { kind: 'navigation', url: 'http://127.0.0.1:4000/hang', elapsedMs: 6500 } } }, navigationStep],
+    [{ code: 'NavigationPending', message: pendingText, data: { detail: detail('navigation_pending', pendingText), blocker: { kind: 'navigation', elapsedMs: 6500 } } }, navigationStep],
+    [{ code: 'PageUnresponsive', message: frozenText, data: { detail: detail('page_unresponsive', frozenText) } }, 'Give the page time to settle; if it stays frozen, continue in a new tab with browser.newPage(url). After Browser.connect, page.ops.dialogDismiss() clears a dialog that was already open when the browser was attached.'],
+    [{ code: 'Operation', message: stoppedText, data: { detail: detail('navigation_timeout', stoppedText) } }, 'Allow more time if the site is slow (timeoutMs on page.goto), or check the URL, network and proxy.'],
+    [{ code: 'ElementNotFound', message: 'Element not found: #missing' }, undefined],
+    [{ code: 'ServerBusy', message: 'Recording capacity is exhausted' }, undefined],
+  ]) {
+    const error = await settled(evaluate(transport, JSON.stringify(wire)));
+    assert.ok(error instanceof ServerOperationError, `${wire.code} did not reject as a server error`);
+    assert.equal(error.code, wire.code);
+    assert.equal(error.requestState, 'acknowledged');
+    assert.equal(error.message, step === undefined ? wire.message : `${wire.message.replace(/\.?$/, '.')} ${step}`);
+    assert.equal(error.wireError.message, wire.message);
+    assert.deepEqual(error.data, wire.data);
+    assert.deepEqual(error.blocker, wire.data?.blocker);
+    assert.ok(error.stack.split('\n').slice(1).some(frame => frame.includes(here)), `${wire.code} stack has no caller frame`);
+    assert.equal(transport.pending.size, 0);
+    assert.equal(transport.inFlight, 0);
+    assert.equal(transport.queuedBytes, 0);
+    assert.equal(transport.pendingLimit, limit);
+  }
+  assert.equal(transport.failure, undefined);
+});
+
+test('a call without timeoutMs gets the configured default deadline against a silent peer', async t => {
+  const transport = await start(t, 'silent', {}, { defaultTimeoutMs: 40 });
+  const started = performance.now();
+  await assert.rejects(transport.invoke('page.evaluate', { pageId: 'page', function: 'null' }, { operationId }), error => {
+    assert.ok(error instanceof TransportError);
+    assert.equal(error.code, 'DeadlineExceeded');
+    assert.equal(error.requestState, 'may_have_been_sent');
+    assert.equal(error.operationId, operationId);
+    assert.match(error.message, /page\.evaluate exceeded the 40 ms default deadline \(defaultTimeoutMs\)/);
+    return true;
+  });
+  assert.ok(performance.now() - started >= 25);
+  await assert.rejects(transport.invoke('page.evaluate', { pageId: 'page', function: 'null' }, { timeoutMs: 5 }), error => /its 5 ms local deadline/.test(error.message));
+});
+
+test('the default deadline never undercuts a requested server-side wait and skips terminal calls', async t => {
+  const transport = await start(t, 'silent', {}, { defaultTimeoutMs: 40 });
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const outcomes = new Map();
+  const watch = (name, call) => { call.then(() => outcomes.set(name, { code: 'resolved' }), error => outcomes.set(name, error)); };
+  const turn = () => new Promise(resolve => setImmediate(resolve));
+  watch('explicit wait', transport.invoke('operations.wait', { id: operationId, timeout_ms: 500 }));
+  watch('schema default wait', transport.invoke('operations.wait', { id: operationId }));
+  watch('nested action wait', transport.invoke('actions.perform', { pageId: 'page', operation_id: operationId, action: { kind: 'reload' }, options: { timeout_ms: 6_000 } }));
+  watch('page wait', transport.invoke('page.wait_for', { pageId: 'page', selector: '#late', timeoutMs: 3_000 }));
+  watch('no wait', transport.invoke('page.title', { pageId: 'page' }));
+  let elapsed = 0;
+  const settledAt = async time => {
+    t.mock.timers.tick(time - elapsed);
+    elapsed = time;
+    await turn();
+    return [...outcomes.keys()];
+  };
+  assert.deepEqual(await settledAt(9_000), ['no wait']);
+  assert.deepEqual(await settledAt(10_510), ['no wait', 'explicit wait']);
+  assert.deepEqual(await settledAt(12_000), ['no wait', 'explicit wait']);
+  assert.deepEqual(await settledAt(13_010), ['no wait', 'explicit wait', 'page wait']);
+  assert.deepEqual(await settledAt(15_000), ['no wait', 'explicit wait', 'page wait']);
+  assert.deepEqual(await settledAt(16_010), ['no wait', 'explicit wait', 'page wait', 'nested action wait']);
+  assert.deepEqual(await settledAt(39_000), ['no wait', 'explicit wait', 'page wait', 'nested action wait']);
+  assert.deepEqual(await settledAt(40_010), ['no wait', 'explicit wait', 'page wait', 'nested action wait', 'schema default wait']);
+  assert.deepEqual([...new Set([...outcomes.values()].map(error => error.code))], ['DeadlineExceeded']);
+  assert.match(outcomes.get('no wait').message, /page\.title exceeded the 40 ms default deadline \(defaultTimeoutMs\)/);
+  assert.match(outcomes.get('explicit wait').message, /operations\.wait exceeded the 10500 ms default deadline \(its server-side wait plus 10000 ms\)/);
+  void transport.invoke('browser.close', {}).catch(() => {});
+  const terminal = [...transport.pending.values()].find(entry => entry.method === 'browser.close');
+  assert.equal(terminal.timer, undefined);
+  t.mock.timers.reset();
+});
+
+test('the default deadline can be disabled and rejects unusable values', async t => {
+  const transport = await start(t, 'silent', {}, { defaultTimeoutMs: null });
+  void transport.invoke('page.title', { pageId: 'page' }).catch(() => {});
+  assert.equal([...transport.pending.values()][0].timer, undefined);
+  for (const defaultTimeoutMs of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+    await assert.rejects(SidecarTransport.start({ serverPath, defaultTimeoutMs }), error => error instanceof ConfigurationError && error.requestState === 'not_sent' && /defaultTimeoutMs/.test(error.message));
+  }
 });
 
 test('backpressure cancellation differentiates queued and dispatched work without replay', async t => {
@@ -394,6 +585,43 @@ for (const mode of ['owned-descendant', 'owned-descendant-exiting']) {
     await assert.rejects(transport.close(), error => error.code === 'ForcedKill' && /cleanup is uncertain/.test(error.message));
     assert.equal(await running(ownedPid), false);
     assert.equal(await running(external.pid), true);
+    clean(transport);
+  });
+}
+
+test('a helper that briefly outlives a cleanly closed sidecar is awaited, not escalated', { timeout: 8000, skip: process.platform === 'win32' }, async t => {
+  const transport = await start(t, 'lingering-helper', {}, { shutdownTimeoutMs: 4000 });
+  const helper = transport.hello.ownedDescendantPid;
+  assert.equal(await running(helper), true);
+  const started = performance.now();
+  await transport.close();
+  const elapsed = performance.now() - started;
+  assert.ok(elapsed >= 150 && elapsed < 3000, `close took ${elapsed} ms`);
+  assert.equal(transport.ownedProcessesTerminated, true);
+  assert.equal(transport.cleanupError, undefined);
+  assert.equal(transport.escalating, false);
+  assert.equal(await running(helper), false);
+  await transport.whenClosed();
+  clean(transport);
+});
+
+for (const [bound, shutdownTimeoutMs, earliest, latest] of [['the remaining shutdown budget', 300, 2200, 4500], ['the drain cap', 30_000, 6900, 9500]]) {
+  test(`a helper that never exits after a clean sidecar close is terminated and reported once ${bound} runs out`, { timeout: 15_000, skip: process.platform === 'win32' }, async t => {
+    const transport = await start(t, 'stuck-helper', {}, { shutdownTimeoutMs });
+    const helper = transport.hello.ownedDescendantPid;
+    assert.equal(await running(helper), true);
+    const started = performance.now();
+    await assert.rejects(transport.close(), error => {
+      assert.equal(error.code, 'ForcedKill');
+      assert.match(error.message, /cleanup is uncertain/);
+      assert.equal(error.cause.code, 'ShutdownTimeout');
+      return true;
+    });
+    const elapsed = performance.now() - started;
+    assert.ok(elapsed >= earliest && elapsed < latest, `close took ${elapsed} ms`);
+    assert.equal(transport.child.exitCode, 0);
+    assert.equal(transport.ownedProcessesTerminated, true);
+    assert.equal(await running(helper), false);
     clean(transport);
   });
 }

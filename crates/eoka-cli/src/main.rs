@@ -90,23 +90,13 @@ async fn main() {
             return;
         }
         Command::Status => {
-            let running = client::is_daemon_running(&effective_session);
+            let status = sessions::status(&effective_session).await;
             if json_mode {
-                let response = protocol::Response::ok(json!({
-                    "running": running,
-                    "session": effective_session,
-                    "socket": session::socket_path(&effective_session).to_string_lossy(),
-                }))
-                .with_meta(response_meta(&effective_session, "status"));
+                let response = protocol::Response::ok(status)
+                    .with_meta(response_meta(&effective_session, "status"));
                 output::print_response(&response, true);
-            } else if running {
-                println!("Daemon running (session={})", effective_session);
-                println!(
-                    "Socket: {}",
-                    session::socket_path(&effective_session).display()
-                );
             } else {
-                println!("No daemon running (session={})", effective_session);
+                print!("{}", sessions::status_text(&status));
             }
             return;
         }
@@ -314,14 +304,10 @@ async fn main() {
     }
     let request_cmd = request.cmd();
 
-    let response = match client::send_command(&effective_session, request, spec.clone()).await {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("Error: {}", e);
-            std::process::exit(1);
-        }
-    }
-    .with_meta(response_meta(&effective_session, request_cmd));
+    let response = client::send_command(&effective_session, request, spec.clone())
+        .await
+        .unwrap_or_else(|error| protocol::Response::err(error.to_string()))
+        .with_meta(response_meta(&effective_session, request_cmd));
 
     output::print_response(&response, json_mode);
 

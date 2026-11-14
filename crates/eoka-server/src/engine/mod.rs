@@ -1,4 +1,5 @@
 mod agent;
+pub mod blockers;
 mod captcha;
 mod downloads;
 mod eval;
@@ -434,7 +435,16 @@ impl Engine {
     }
 
     pub async fn handle(&mut self, cmd: &str, args: &Value) -> Response {
-        let response = self.handle_command(cmd, args).await;
+        let policy = blockers::policy(cmd, args);
+        let response = match self.refuse_blocked(cmd, args, policy).await {
+            Some(refusal) => refusal,
+            None => {
+                let mut response = self.handle_command(cmd, args).await;
+                self.diagnose_blocked(cmd, args, policy, &mut response)
+                    .await;
+                response
+            }
+        };
         self.publish_cloudflare_pages();
         response
     }
@@ -499,7 +509,7 @@ impl Engine {
         let idle = self.idle_fetch_drain.take();
         self.stop_fetch_drain(idle).await;
         self.drain_fetch_events().await;
-        let response = match self.dispatch(cmd, args).await {
+        let response = match self.dispatch_guarded(cmd, args).await {
             Ok(resp) => resp,
             Err(e) => e.into_response(),
         };
@@ -569,11 +579,25 @@ impl Engine {
             "scroll" => self.cmd_scroll(args).await,
             "eval" | "exec" | "frame_eval" => {
                 let drain = self.start_fetch_drain();
-                let result = match cmd {
-                    "eval" => self.cmd_eval(args).await,
-                    "exec" => self.cmd_exec(args).await,
-                    _ => self.cmd_frame_eval(args).await,
-                };
+                let page = self.current_page();
+                let session = self.session_name.clone();
+                let remedies = blockers::Remedies::new(Some(&session));
+                let name = remedies.name(cmd, args);
+                let result = blockers::guard(
+                    page.as_ref(),
+                    remedies,
+                    &name,
+                    blockers::Policy::Script,
+                    None,
+                    async {
+                        match cmd {
+                            "eval" => self.cmd_eval(args).await,
+                            "exec" => self.cmd_exec(args).await,
+                            _ => self.cmd_frame_eval(args).await,
+                        }
+                    },
+                )
+                .await;
                 if !self.stop_fetch_drain(drain).await {
                     return Err("Request interception cleanup failed".into());
                 }
@@ -737,6 +761,7 @@ impl Engine {
                 } else {
                     state.ensure_blank_tab().await.map_err(|e| e.to_string())?
                 };
+                blockers::watch(&tab.page);
                 if let Some(saved) = open_state.as_ref() {
                     restore_cookies(&tab.page, saved).await?;
                 }
@@ -811,7 +836,8 @@ impl Engine {
                     .await
                     .map_err(|e| e.to_string())?;
                 let nav_result = if matches!(record.state, eoka_protocol::OperationState::Running) {
-                    operations.wait(&operation_id, budget).await
+                    blockers::wait_unless_dialog(&operations, &tab.page, &operation_id, budget)
+                        .await
                 } else {
                     Ok(record)
                 };
@@ -950,10 +976,8 @@ impl Engine {
                 tab.elements = observe::observe(&tab.page, viewport_only).await?;
             }
             annotate::annotated_screenshot(&tab.page, &tab.elements).await?
-        } else if plain {
-            tab.page.screenshot().await?
         } else {
-            tab.page.screenshot_with_options(&params.options()).await?
+            crate::capture::screenshot(&tab.page, &params.options()).await?
         };
 
         let path = match output {
@@ -1140,15 +1164,16 @@ impl Engine {
 
     async fn cmd_click_shadow(&mut self, args: &Value) -> Result<Response, EngineError> {
         let args: eoka_protocol::ClickShadowArgs = serde_json::from_value(args.clone())?;
-        let receipt = self
-            .require_tab()?
-            .page
-            .click_shadow_with_timeout(
+        let page = &self.require_tab()?.page;
+        let receipt = crate::capture::painting(
+            page,
+            page.click_shadow_with_timeout(
                 args.frame_id.as_deref(),
                 &args.selector,
                 std::time::Duration::from_millis(args.timeout_ms),
-            )
-            .await?;
+            ),
+        )
+        .await?;
         self.require_tab_mut()?.invalidate();
         Ok(Response::ok(json!({
             "frame_id": receipt.frame_id,
@@ -1198,7 +1223,8 @@ impl Engine {
     async fn cmd_mouse_move(&mut self, args: &Value) -> Result<Response, EngineError> {
         let x = self.arg_f64(args, "x")?;
         let y = self.arg_f64(args, "y")?;
-        self.require_tab()?.page.mouse_move(x, y).await?;
+        let page = &self.require_tab()?.page;
+        crate::capture::painting(page, page.mouse_move(x, y)).await?;
         Ok(Response::ok_text("Mouse moved"))
     }
 
@@ -1306,12 +1332,18 @@ impl Engine {
     async fn cmd_fetch(&mut self, args: &Value) -> Result<Response, EngineError> {
         let args = serde_json::from_value(args.clone()).map_err(|error| error.to_string())?;
         let page = self.require_tab()?.page.clone();
-        // The request this makes is paused like any other when interception
-        // is on, so it needs a drain running while it is awaited.
         let drain = self.start_fetch_drain();
-        let response = crate::browser_fetch::fetch(&page, args).await;
+        let response = blockers::guard(
+            Some(&page),
+            blockers::Remedies::new(Some(&self.session_name)),
+            "fetch",
+            blockers::Policy::Script,
+            None,
+            async { Ok::<_, EngineError>(crate::browser_fetch::fetch(&page, args).await) },
+        )
+        .await;
         self.stop_fetch_drain(drain).await;
-        Ok(response)
+        response
     }
 
     async fn cmd_cookies(&mut self) -> Result<Response, EngineError> {
@@ -2298,6 +2330,7 @@ impl Engine {
             eprintln!("[eoka] recording cleanup failed: {}", error.message);
         }
         if let Some(state) = self.state.take() {
+            crate::capture::quiet().await;
             state.close().await?;
         }
         Ok(Response::ok_text("Browser closed"))

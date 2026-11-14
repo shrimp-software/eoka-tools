@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Page } from '../dist/page.js';
 import { Operation, OperationError } from '../dist/operations.js';
-import { ProtocolError, ServerOperationError, TransportError } from '../dist/errors.js';
+import { ConfigurationError, EokaError, ProtocolError, ServerOperationError, TransportError } from '../dist/errors.js';
 
 const id = 'bb4bb8d9-5e7b-4f21-8c3e-50d0722272b1';
 const target = { query: { kind: 'css', selector: '#button' } };
@@ -225,13 +225,36 @@ test('a lost wait response preserves the admission record and supports later rec
   assert.equal(waits, 1);
 });
 
-test('strict actions share one deadline across admission and wait', async (t) => {
+test('a lone timeoutMs becomes the server action deadline and the local deadline adds a grace margin', async (t) => {
   let now = 100;
   t.mock.method(performance, 'now', () => now);
   const calls = [];
   const page = new Page({ invoke: async (method, params, options) => {
     calls.push({ method, params, options });
     if (method === 'actions.perform') {
+      assert.equal(params.options.timeout_ms, 100);
+      assert.deepEqual(params.options.expect, expect);
+      assert.equal(options.timeoutMs, 10_100);
+      now = 160;
+      return record();
+    }
+    assert.equal(options.timeoutMs, 10_040);
+    assert.equal(params.timeout_ms, 5_040);
+    now = 180;
+    return completed();
+  } }, 'tab');
+  assert.equal((await page.click('#button', { operationId: id, timeoutMs: 100, actionOptions: { expect } })).outcome, 'verified_complete');
+  assert.equal(calls.length, 2);
+});
+
+test('timeoutMs and actionOptions.timeout_ms given together are both respected as written', async (t) => {
+  let now = 100;
+  t.mock.method(performance, 'now', () => now);
+  const calls = [];
+  const page = new Page({ invoke: async (method, params, options) => {
+    calls.push(method);
+    if (method === 'actions.perform') {
+      assert.equal(params.options.timeout_ms, 50);
       assert.equal(options.timeoutMs, 100);
       now = 160;
       return record();
@@ -241,8 +264,42 @@ test('strict actions share one deadline across admission and wait', async (t) =>
     now = 180;
     return completed();
   } }, 'tab');
-  assert.equal((await page.click('#button', { operationId: id, timeoutMs: 100, actionOptions: { expect } })).outcome, 'verified_complete');
-  assert.equal(calls.length, 2);
+  assert.equal((await page.click('#button', { operationId: id, timeoutMs: 100, actionOptions: { expect, timeout_ms: 50 } })).outcome, 'verified_complete');
+  assert.deepEqual(calls, ['actions.perform', 'operations.wait']);
+});
+
+for (const [name, options, actionMs, localMs] of [
+  ['no timeout options use the schema default action deadline', {}, 30_000, 40_000],
+  ['a lone actionOptions.timeout_ms stretches the local deadline past it', { actionOptions: { timeout_ms: 90_000 } }, 90_000, 100_000],
+  ['a fractional timeoutMs rounds the action deadline up', { timeoutMs: 10.5 }, 11, 10_011],
+]) {
+  test(name, async () => {
+    const observed = [];
+    const page = new Page({ invoke: async (method, params, callOptions) => {
+      observed.push({ method, timeoutMs: callOptions.timeoutMs, wait: params.timeout_ms, action: params.options?.timeout_ms });
+      return method === 'actions.perform' ? record() : completed();
+    } }, 'tab');
+    await page.fill('#input', 'value', { operationId: id, ...options });
+    assert.equal(observed[0].action, actionMs);
+    assert.equal(observed[0].timeoutMs, localMs);
+    assert.ok(observed[1].timeoutMs <= localMs && observed[1].timeoutMs > localMs - 1_000);
+    assert.ok(observed[1].wait <= localMs - 5_000 && observed[1].wait > localMs - 6_000);
+  });
+}
+
+test('a zero or invalid timeoutMs never reaches the sidecar', async () => {
+  let sent = 0;
+  const page = new Page({ invoke: async (method, params, options) => {
+    sent++;
+    assert.equal(options.timeoutMs, 0);
+    throw new TransportError('DeadlineExceeded', 'expired before dispatch', { requestState: 'not_sent' });
+  } }, 'tab');
+  await assert.rejects(page.fill('#input', 'value', { timeoutMs: 0 }), error => error.code === 'DeadlineExceeded' && error.requestState === 'not_sent');
+  assert.equal(sent, 1);
+  for (const timeoutMs of [-1, Number.NaN, Number.POSITIVE_INFINITY]) {
+    await assert.rejects(page.fill('#input', 'value', { timeoutMs }), error => error instanceof ConfigurationError && error.requestState === 'not_sent' && /timeoutMs/.test(error.message));
+  }
+  assert.equal(sent, 1);
 });
 
 test('an exhausted admission deadline does not start a fresh wait deadline', async (t) => {
@@ -250,7 +307,7 @@ test('an exhausted admission deadline does not start a fresh wait deadline', asy
   t.mock.method(performance, 'now', () => now);
   let calls = 0;
   const admitted = record();
-  const page = new Page({ invoke: async () => { calls++; now = 201; return admitted; } }, 'tab');
+  const page = new Page({ invoke: async () => { calls++; now = 10_201; return admitted; } }, 'tab');
   await assert.rejects(page.fill('#input', 'value', { operationId: id, timeoutMs: 100 }), (error) => {
     assert.equal(error.code, 'DeadlineExceeded');
     assert.equal(error.operationId, id);
@@ -267,7 +324,7 @@ test('a verified record arriving past the local deadline is recoverable, not loc
   const latest = completed();
   const page = new Page({ invoke: async (method) => {
     if (method === 'actions.perform') return record();
-    now = 201;
+    now = 10_201;
     return latest;
   } }, 'tab');
   await assert.rejects(page.fill('#input', 'value', { operationId: id, timeoutMs: 100 }), (error) => {
@@ -277,6 +334,328 @@ test('a verified record arriving past the local deadline is recoverable, not loc
     assert.equal(error.receipt, latest.receipt);
     return true;
   });
+});
+
+function timedOut(action, message, dispatch = 'not_sent') {
+  const outcome = dispatch === 'not_sent' ? 'not_dispatched' : 'outcome_unknown';
+  return record({
+    action, state: 'finished', outcome, finished_at_ms: 30, error_code: 'action_timeout',
+    error: { code: 'action_timeout', message, retryable: false, context: { operation_id: id, phase: 'execution' } },
+    receipt: receipt({ action, outcome, dispatch, verification: null }),
+  });
+}
+
+function failingPage(latest) {
+  return new Page({ invoke: async (method) => method === 'actions.perform' ? record({ action: latest.action }) : latest }, 'tab');
+}
+
+for (const [name, run, serverMessage, expected] of [
+  ['a missing fill target', page => page.fill('#missing', 'x', { operationId: id, timeoutMs: 2_000 }),
+    'Timeout: Action deadline e[redacted]ceeded during preparation: target not found',
+    'fill "#missing" timed out after 2000 ms: target not found. The page received no input.'],
+  ['a missing fill target whose value shreds the server text', page => page.fill('#missing', 'o', { operationId: id, timeoutMs: 2_000 }),
+    'Time[redacted]ut: Acti[redacted]n deadline exceeded during preparati[redacted]n: target n[redacted]t f[redacted]und',
+    'fill "#missing" timed out after 2000 ms: target not found. The page received no input.'],
+  ['a missing click target', page => page.click('#missing', { operationId: id, timeoutMs: 2_000, actionOptions: { expect } }),
+    'Timeout: Action deadline exceeded during preparation: target not found',
+    'click "#missing" timed out after 2000 ms: target not found. The page received no input.'],
+  ['a disabled click target', page => page.click('#off', { operationId: id, actionOptions: { expect, timeout_ms: 1_500 } }),
+    'Timeout: Action deadline exceeded during preparation: target disabled',
+    'click "#off" timed out after 1500 ms: target disabled. The page received no input.'],
+  ['a readonly fill target', page => page.fill('#ro', 'y', { operationId: id, timeoutMs: 2_000 }),
+    'Timeout: Action deadline exceeded during preparation: target readonl[redacted] or not editable',
+    'fill "#ro" timed out after 2000 ms: target readonly or not editable. The page received no input.'],
+  ['a text locator behind earlier actions', page => page.hover({ query: { kind: 'text', text: 'Menu' } }, { operationId: id }),
+    'Timeout: Action deadline exceeded during queue admission',
+    'hover text "Menu" timed out after 30000 ms while waiting for earlier actions on this page. The page received no input.'],
+]) {
+  test(`${name} names the action, the target and the server reason`, async () => {
+    const latest = timedOut(name.includes('click') ? 'click' : name.includes('hover') ? 'hover' : 'fill', serverMessage);
+    await assert.rejects(run(failingPage(latest)), (error) => {
+      assert.ok(error instanceof OperationError);
+      assert.equal(error.code, 'action_timeout');
+      assert.equal(error.message, expected);
+      assert.doesNotMatch(error.message, /dispatched|was sent/i);
+      assert.equal(error.record, latest);
+      assert.equal(error.receipt, latest.receipt);
+      assert.equal(error.requestState, 'acknowledged');
+      assert.ok(error.cause instanceof EokaError);
+      assert.equal(error.cause.code, 'action_timeout');
+      assert.equal(error.cause.message, serverMessage);
+      assert.equal(error.cause.data, latest.error);
+      return true;
+    });
+  });
+}
+
+for (const [dispatch, wording] of [['acknowledged', 'was dispatched'], ['may_have_been_sent', 'may have been dispatched']]) {
+  test(`an unmet expectation after ${dispatch} input names what was expected and never suggests a blind repeat`, async () => {
+    const latest = timedOut('click', 'Timeout: Action deadline exceeded during verification', dispatch);
+    const unmet = { kind: 'url', value: '/never', contains: true };
+    await assert.rejects(failingPage(latest).click('#real', { operationId: id, timeoutMs: 2_000, actionOptions: { expect: unmet } }), (error) => {
+      assert.equal(error.code, 'action_timeout');
+      assert.equal(error.message, `click "#real" ${wording}, but its expectation (url contains "/never") was not met within 2000 ms. The action was not rolled back; inspect the page before deciding what to do next.`);
+      assert.doesNotMatch(error.message, /retry|try again|repeat/i);
+      assert.equal(error.record, latest);
+      assert.equal(error.receipt.dispatch, dispatch);
+      assert.equal(error.cause.message, 'Timeout: Action deadline exceeded during verification');
+      return true;
+    });
+  });
+}
+
+test('expectation and failure descriptions cover every kind without leaking submitted values', async () => {
+  const input = { query: { kind: 'css', selector: '#secret' } };
+  const cases = [
+    [{ kind: 'text', target, value: 'Saved' }, 'text of "#button" equals "Saved"'],
+    [{ kind: 'visible', target }, '"#button" is visible'],
+    [{ kind: 'enabled', target, enabled: false }, '"#button" is disabled'],
+    [{ kind: 'checked', target, checked: true }, '"#button" is checked'],
+    [{ kind: 'value', target: input, value: 'hunter2' }, '"#secret" has the expected value'],
+    [{ kind: 'selected', target: input, values: ['hunter2'] }, '"#secret" has the expected selection'],
+    [{ kind: 'all', conditions: [{ kind: 'document_ready' }, { kind: 'url', value: 'https://example.test/done' }] }, 'the document is ready and url equals "https://example.test/done"'],
+  ];
+  for (const [unmet, description] of cases) {
+    const latest = timedOut('type', 'Timeout: Action deadline exceeded during verification', 'acknowledged');
+    await assert.rejects(failingPage(latest).type('#secret', 'hunter2', { operationId: id, actionOptions: { expect: unmet } }), (error) => {
+      assert.equal(error.message, `type "#secret" was dispatched, but its expectation (${description}) was not met within 30000 ms. The action was not rolled back; inspect the page before deciding what to do next.`);
+      assert.doesNotMatch(error.message, /hunter2/);
+      return true;
+    });
+  }
+  const refused = record({
+    action: 'navigate', state: 'finished', outcome: 'outcome_unknown', finished_at_ms: 30, error_code: 'action_failed',
+    error: { code: 'action_failed', message: 'Navigation error: net::ERR_CONNECTION_REFUSED', retryable: false },
+    receipt: receipt({ action: 'navigate', outcome: 'outcome_unknown', verification: null }),
+  });
+  await assert.rejects(failingPage(refused).goto('https://user:pw@example.test/login?token=hunter2#frag', { operationId: id }), (error) => {
+    assert.equal(error.code, 'action_failed');
+    assert.equal(error.message, 'navigate "https://example.test/login" was dispatched and failed: Navigation error: net::ERR_CONNECTION_REFUSED. The action was not rolled back; inspect the page before deciding what to do next.');
+    return true;
+  });
+  const unsupported = record({
+    action: 'type', state: 'finished', outcome: 'not_dispatched', finished_at_ms: 30, error_code: 'unsupported_input',
+    error: { code: 'unsupported_input', message: 'unsupported_input: target does not support this input action', retryable: false },
+    receipt: receipt({ action: 'type', outcome: 'not_dispatched', dispatch: 'not_sent', verification: null }),
+  });
+  await assert.rejects(failingPage(unsupported).type('#date', 'x', { operationId: id, actionOptions: { expect } }), (error) => {
+    assert.equal(error.message, 'type "#date" failed: unsupported_input: target does not support this input action. The page received no input.');
+    return true;
+  });
+});
+
+test('unknown actionOptions keys are refused before any request and name the valid keys', async () => {
+  let sent = 0;
+  const page = new Page({ invoke: async () => { sent++; return completed(); } }, 'tab');
+  for (const [run, pattern] of [
+    [() => page.fill('#input', 'value', { operationId: id, actionOptions: { timeoutMs: 2_000 } }), /Unknown actionOptions key "timeoutMs"; did you mean "timeout_ms"\? Valid keys: destination, expect, timeout_ms, wait_for_target\./],
+    [() => page.click('#button', { operationId: id, actionOptions: { expct: expect } }), /Unknown actionOptions key "expct"\. Valid keys: destination, expect, timeout_ms, wait_for_target\./],
+    [() => page.perform({ kind: 'reload' }, { operationId: id, actionOptions: { waitForTarget: false } }), /Unknown actionOptions key "waitForTarget"; did you mean "wait_for_target"\?/],
+  ]) {
+    await assert.rejects(run(), (error) => {
+      assert.ok(error instanceof ConfigurationError);
+      assert.equal(error.code, 'Configuration');
+      assert.equal(error.requestState, 'not_sent');
+      assert.equal(error.operationId, id);
+      assert.match(error.message, pattern);
+      return true;
+    });
+  }
+  assert.equal(sent, 0);
+  await page.fill('#input', 'value', { operationId: id, actionOptions: { destination: 'current', expect: null, timeout_ms: 5, wait_for_target: true } });
+  assert.equal(sent, 1);
+});
+
+test('evaluate and execute send a function as its source and keep strings and arguments unchanged', async () => {
+  const calls = [];
+  const page = new Page({ invoke: async (method, params, options) => {
+    calls.push({ method, params, options });
+    return { result: 5 };
+  } }, 'tab');
+  const add = (a, b) => a + b;
+  async function named(value) { return value; }
+  assert.equal(await page.evaluate(add, [2, 3], { timeoutMs: 9 }), 5);
+  await page.evaluate(named, ['x']);
+  await page.evaluate('()=>1');
+  await page.execute(() => { globalThis.touched = true; });
+  await page.execute('()=>{}', [1]);
+  assert.deepEqual(calls.map(call => call.method), ['page.evaluate', 'page.evaluate', 'page.evaluate', 'page.execute', 'page.execute']);
+  assert.deepEqual(calls[0].params, { pageId: 'tab', function: '(a, b) => a + b', arguments: [2, 3] });
+  assert.deepEqual(calls[0].options, { timeoutMs: 9 });
+  assert.equal(calls[1].params.function, 'async function named(value) { return value; }');
+  assert.deepEqual(calls[2].params, { pageId: 'tab', function: '()=>1', arguments: [] });
+  assert.equal(calls[3].params.function, '() => { globalThis.touched = true; }');
+  assert.deepEqual(calls[4].params, { pageId: 'tab', function: '()=>{}', arguments: [1] });
+  for (const run of [() => page.evaluate(Math.max), () => page.execute(add.bind(null, 1))]) {
+    await assert.rejects(run(), error => error instanceof ConfigurationError && error.requestState === 'not_sent' && /native and bound functions/.test(error.message));
+  }
+  assert.equal(calls.length, 5);
+});
+
+test('rejections from every layer carry the frame of the code that made the call', async () => {
+  const here = import.meta.filename;
+  const later = error => new Promise((resolve, reject) => { setTimeout(() => reject(error()), 1); });
+  const failing = new Page({ invoke: (method) => later(() => method === 'operations.wait'
+    ? new TransportError('DeadlineExceeded', 'late wait', { requestState: 'may_have_been_sent' })
+    : new ServerOperationError({ code: 'ElementNotFound', message: 'Element not found: #missing' }, { requestState: 'acknowledged' })) }, 'tab');
+  const waiting = new Page({ invoke: (method) => method === 'actions.perform'
+    ? Promise.resolve(record())
+    : later(() => new TransportError('DeadlineExceeded', 'late wait', { requestState: 'may_have_been_sent' })) }, 'tab');
+  const settled = call => new Promise(resolve => { call.then(resolve, resolve); });
+  for (const [code, call] of [
+    ['ElementNotFound', () => failing.getText('#missing')],
+    ['ElementNotFound', () => failing.ops.getText({ selector: '#missing' })],
+    ['ElementNotFound', () => failing.fill('#missing', 'x')],
+    ['ElementNotFound', () => failing.operation(id).get()],
+    ['DeadlineExceeded', () => waiting.click('#button', { operationId: id, actionOptions: { expect } })],
+    ['action_timeout', () => failingPage(timedOut('fill', 'Timeout: Action deadline exceeded during preparation: target not found')).fill('#missing', 'x', { operationId: id })],
+    ['Configuration', () => failing.fill('#input', 'x', { actionOptions: { timeoutMs: 1 } })],
+    ['expectation_required', () => failing.click('#button')],
+  ]) {
+    const error = await settled(call());
+    assert.equal(error.code, code);
+    assert.ok(error.stack.split('\n').slice(1).some(frame => frame.includes(here)), `${code} stack has no caller frame:\n${error.stack}`);
+    assert.doesNotMatch(error.stack, /eokaTracedCall/);
+  }
+});
+
+const dialogStep = 'Call page.ops.dialogAccept() or page.ops.dialogDismiss() on this page to close the dialog.';
+const navigationStep = 'Keep waiting, for example with page.ops.wait({ url, timeout }), or abandon the load: page.goto(url) navigates again and page.ops.reload() returns to the page that is still displayed.';
+const frozenStep = 'Give the page time to settle; if it stays frozen, continue in a new tab with browser.newPage(url). After Browser.connect, page.ops.dialogDismiss() clears a dialog that was already open when the browser was attached.';
+const inspect = 'The action was not rolled back; inspect the page before deciding what to do next.';
+
+function blockedWire(code, detailCode, message, blocker) {
+  return { code, message, data: { detail: { code: detailCode, message, retryable: false, hint: 'Run `dialog.accept` or `dialog.dismiss`, then `agent.observe`.', context: { action_status: 'not_attempted' } }, ...(blocker === undefined ? {} : { blocker }) } };
+}
+
+function blockedRecord(action, code, message, dispatch = 'acknowledged') {
+  const outcome = dispatch === 'not_sent' ? 'not_dispatched' : 'outcome_unknown';
+  return record({
+    action, state: 'finished', outcome, finished_at_ms: 30, error_code: code,
+    error: { code, message, retryable: false, hint: 'Run `dialog.accept` or `dialog.dismiss`, then `agent.observe`. Do not repeat the interrupted command blindly: its page effects may already have happened.', context: { operation_id: id, action_status: dispatch === 'not_sent' ? 'not_attempted' : 'may_have_executed' } },
+    receipt: receipt({ action, outcome, dispatch, verification: null }),
+  });
+}
+
+test('reads on a blocked tab keep the server text, add the Node next step and expose the blocker', async () => {
+  const here = import.meta.filename;
+  const later = error => new Promise((resolve, reject) => { setTimeout(() => reject(error()), 1); });
+  const settled = call => new Promise(resolve => { call.then(resolve, resolve); });
+  const dialog = blockedWire('DialogOpen', 'dialog_open',
+    'A JavaScript confirm dialog is open on this tab ("Delete it?"). Chrome answers no page commands until the dialog is accepted or dismissed, so `title` was not started.',
+    { kind: 'dialog', dialogType: 'confirm', message: 'Delete it?', url: 'https://example.test/list', elapsedMs: 1234 });
+  const pending = blockedWire('NavigationPending', 'navigation_pending',
+    'This tab has been waiting 6.5 s for a response from https://example.test/slow. Chrome answers no page commands until that navigation commits or is abandoned, so `title` was not started.',
+    { kind: 'navigation', url: 'https://example.test/slow', elapsedMs: 6500 });
+  const frozen = blockedWire('PageUnresponsive', 'page_unresponsive',
+    "`title` got no answer from the page within 5 s. No dialog or pending navigation is known, so the page's main thread is busy or frozen.");
+  for (const [wire, step] of [[dialog, dialogStep], [pending, navigationStep], [frozen, frozenStep]]) {
+    const page = new Page({ invoke: () => later(() => new ServerOperationError(wire, { requestId: 4, requestState: 'acknowledged' })) }, 'tab');
+    for (const read of [() => page.title(), () => page.evaluate(() => 1), () => page.getText('h1'), () => page.exists('h1'), () => page.ops.text()]) {
+      const error = await settled(read());
+      assert.ok(error instanceof EokaError);
+      assert.ok(error instanceof ServerOperationError);
+      assert.equal(error.code, wire.code);
+      assert.equal(error.message, `${wire.message} ${step}`);
+      assert.equal(error.wireError.message, wire.message);
+      assert.equal(error.data, wire.data);
+      assert.deepEqual(error.blocker, wire.data.blocker);
+      assert.equal(error.requestState, 'acknowledged');
+      assert.ok(error.stack.split('\n').slice(1).some(frame => frame.includes(here)), `${wire.code} stack has no caller frame:\n${error.stack}`);
+    }
+  }
+  const error = await settled(new Page({ invoke: () => later(() => new ServerOperationError(dialog)) }, 'tab').title());
+  assert.match(error.message, /dialog/i);
+  assert.match(error.message, /Delete it\?/);
+  assert.match(error.message, /dialogAccept|dialogDismiss/);
+  assert.equal(error.blocker.kind, 'dialog');
+  assert.equal(error.blocker.dialogType, 'confirm');
+  const stalled = await settled(new Page({ invoke: () => later(() => new ServerOperationError(pending)) }, 'tab').title());
+  assert.match(stalled.message, /https:\/\/example\.test\/slow/);
+  assert.match(stalled.message, /page\.goto/);
+  assert.equal(stalled.blocker.url, 'https://example.test/slow');
+});
+
+test('an action whose input opened a dialog says it was dispatched and how to clear the dialog', async () => {
+  const serverText = 'A JavaScript confirm dialog is open on this tab ("Delete it?"). Chrome answers no page commands until the dialog is accepted or dismissed, so `click` returned without a result.';
+  for (const [dispatch, wording] of [['acknowledged', 'was dispatched'], ['may_have_been_sent', 'may have been dispatched']]) {
+    const latest = blockedRecord('click', 'dialog_open', serverText, dispatch);
+    await assert.rejects(failingPage(latest).click('#delete', { operationId: id, actionOptions: { expect } }), (error) => {
+      assert.ok(error instanceof OperationError);
+      assert.equal(error.code, 'dialog_open');
+      assert.equal(error.message, `click "#delete" ${wording}, then a dialog blocked the page before the result could be verified. ${serverText} ${dialogStep} ${inspect}`);
+      assert.match(error.message, /dialog/i);
+      assert.match(error.message, /dispatched|was sent/i);
+      assert.match(error.message, /dialogAccept|dialogDismiss/);
+      assert.doesNotMatch(error.message, /retry|try again|repeat/i);
+      assert.equal(error.record, latest);
+      assert.equal(error.receipt, latest.receipt);
+      assert.equal(error.requestState, 'acknowledged');
+      assert.equal(error.cause.code, 'dialog_open');
+      assert.equal(error.cause.message, serverText);
+      assert.equal(error.cause.data, latest.error);
+      assert.equal(error.blocker, undefined);
+      return true;
+    });
+  }
+});
+
+test('an action refused because a dialog is already open carries the wire code, the blocker and the next step', async () => {
+  const wire = blockedWire('DialogOpen', 'dialog_open',
+    'A JavaScript alert dialog is open on this tab ("Saved"). Chrome answers no page commands until the dialog is accepted or dismissed, so `actions.perform` was not started.',
+    { kind: 'dialog', dialogType: 'alert', message: 'Saved', url: 'https://example.test/', elapsedMs: 40 });
+  const source = new ServerOperationError(wire, { requestId: 9, requestState: 'acknowledged' });
+  let sent = 0;
+  const page = new Page({ invoke: async () => { sent++; throw source; } }, 'tab');
+  await assert.rejects(page.fill('#name', 'Ada', { operationId: id }), (error) => {
+    assert.ok(error instanceof OperationError);
+    assert.equal(error.code, 'DialogOpen');
+    assert.equal(error.message, `${wire.message} ${dialogStep}`);
+    assert.deepEqual(error.blocker, wire.data.blocker);
+    assert.equal(error.data, wire.data);
+    assert.equal(error.cause, source);
+    assert.equal(error.operationId, id);
+    return true;
+  });
+  assert.equal(sent, 1);
+});
+
+for (const [name, run, latest, expected] of [
+  ['a navigation that got no response', page => page.goto('https://example.test/slow?token=hunter2', { operationId: id, timeoutMs: 3_000 }),
+    blockedRecord('navigate', 'navigation_timeout', 'No response from https://example.test/slow after 3.0 s. The pending load was stopped, so the tab still shows the page it had before and accepts commands.'),
+    'navigate "https://example.test/slow" was dispatched, but the navigation got no response. No response from https://example.test/slow after 3.0 s. The pending load was stopped, so the tab still shows the page it had before and accepts commands. Allow more time if the site is slow (timeoutMs on page.goto), or check the URL, network and proxy.'],
+  ['an action interrupted by a pending navigation', page => page.click('#next', { operationId: id, actionOptions: { expect } }),
+    blockedRecord('click', 'navigation_pending', 'This tab has been waiting 6.5 s for a response from https://example.test/slow. Chrome answers no page commands until that navigation commits or is abandoned, so `click` returned without a result.'),
+    `click "#next" was dispatched, then a pending navigation blocked the page before the result could be verified. This tab has been waiting 6.5 s for a response from https://example.test/slow. Chrome answers no page commands until that navigation commits or is abandoned, so \`click\` returned without a result. ${navigationStep} ${inspect}`],
+  ['an action refused by a pending navigation', page => page.fill('#name', 'Ada', { operationId: id }),
+    blockedRecord('fill', 'navigation_pending', 'This tab has been waiting 6.5 s for a response from https://example.test/slow. Chrome answers no page commands until that navigation commits or is abandoned, so `fill` was not started', 'not_sent'),
+    `fill "#name" could not start because the page is waiting on a navigation. This tab has been waiting 6.5 s for a response from https://example.test/slow. Chrome answers no page commands until that navigation commits or is abandoned, so \`fill\` was not started. ${navigationStep} The page received no input.`],
+  ['an action on a page that stopped answering', page => page.click('#busy', { operationId: id, actionOptions: { expect } }),
+    blockedRecord('click', 'page_unresponsive', "`click` timed out and the page does not answer a liveness probe. No dialog or pending navigation is known, so the page's main thread is busy or frozen."),
+    `click "#busy" was dispatched, then the page stopped answering before the result could be verified. \`click\` timed out and the page does not answer a liveness probe. No dialog or pending navigation is known, so the page's main thread is busy or frozen. ${frozenStep} ${inspect}`],
+  ['an action refused because a dialog is open', page => page.hover('#menu', { operationId: id }),
+    blockedRecord('hover', 'dialog_open', 'A JavaScript alert dialog is open on this tab ("Saved"). Chrome answers no page commands until the dialog is accepted or dismissed, so `hover` was not started.', 'not_sent'),
+    `hover "#menu" could not start because a dialog is open on the page. A JavaScript alert dialog is open on this tab ("Saved"). Chrome answers no page commands until the dialog is accepted or dismissed, so \`hover\` was not started. ${dialogStep} The page received no input.`],
+]) {
+  test(`${name} gets its own sentence, the server text and a Node next step`, async () => {
+    await assert.rejects(run(failingPage(latest)), (error) => {
+      assert.ok(error instanceof OperationError);
+      assert.equal(error.code, latest.error_code);
+      assert.equal(error.message, expected);
+      assert.doesNotMatch(error.message, /retry|try again|hunter2/i);
+      assert.equal(error.record, latest);
+      assert.equal(error.receipt, latest.receipt);
+      assert.equal(error.cause.message, latest.error.message);
+      return true;
+    });
+  });
+}
+
+test('a blocker passed in error details wins over one found in the data', () => {
+  const blocker = { kind: 'navigation', elapsedMs: 10 };
+  assert.equal(new EokaError('NavigationPending', 'pending', { blocker, data: { blocker: { kind: 'dialog', dialogType: 'alert', message: 'x', url: 'about:blank', elapsedMs: 1 } } }).blocker, blocker);
+  assert.equal(new EokaError('Internal', 'no blocker', { data: { blocker: { kind: 'other' } } }).blocker, undefined);
+  assert.equal(new EokaError('Internal', 'no data').blocker, undefined);
 });
 
 test('canonical locator identity and intrinsic conveniences remain unchanged', async () => {

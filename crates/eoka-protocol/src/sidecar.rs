@@ -8,7 +8,8 @@ pub use crate::{OperationIdArgs, OperationListArgs, OperationWaitArgs};
 pub const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 pub const MAX_MESSAGE_BYTES: usize = 32 * 1024 * 1024;
 pub const MAX_IN_FLIGHT: usize = 128;
-pub const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion { major: 2, minor: 1 };
+pub const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion { major: 2, minor: 2 };
+pub const BLOCKER_ERRORS_SINCE: ProtocolVersion = ProtocolVersion { major: 2, minor: 2 };
 pub const MAX_BOUNDED_FETCH_BYTES: usize = 1024 * 1024;
 pub const MAX_SCREENSHOT_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_RECORDING_FPS: u32 = 120;
@@ -19,6 +20,7 @@ pub const CAPABILITY_CLOUDFLARE_AUTO_SOLVE: &str = "cloudflareAutoSolve";
 /// Catalog operations are callable as sidecar methods named by their catalog
 /// path, with a `pageId` added to the operation's input.
 pub const CAPABILITY_OPERATION_CATALOG: &str = "operationCatalog";
+pub const CAPABILITY_PAGE_BLOCKERS: &str = "pageBlockers";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProtocolVersion {
@@ -29,6 +31,34 @@ pub struct ProtocolVersion {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct HelloParams {
     pub protocol: ProtocolVersion,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub understands: Option<ProtocolVersion>,
+}
+
+impl HelloParams {
+    pub fn spoken(&self) -> ProtocolVersion {
+        let understood = self
+            .understands
+            .filter(|understood| understood.major == self.protocol.major)
+            .map_or(self.protocol.minor, |understood| {
+                understood.minor.max(self.protocol.minor)
+            });
+        ProtocolVersion {
+            major: PROTOCOL_VERSION.major,
+            minor: understood.min(PROTOCOL_VERSION.minor),
+        }
+    }
+}
+
+impl ProtocolVersion {
+    pub const BASELINE: ProtocolVersion = ProtocolVersion {
+        major: PROTOCOL_VERSION.major,
+        minor: 0,
+    };
+
+    pub fn at_least(self, other: ProtocolVersion) -> bool {
+        self.major == other.major && self.minor >= other.minor
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -180,6 +210,49 @@ pub enum ErrorCode {
     RecordingAlreadyActive,
     RecordingInvalidState,
     RecordingFailed,
+    DialogOpen,
+    NavigationPending,
+    PageUnresponsive,
+}
+
+impl ErrorCode {
+    pub fn blocker_detail_code(self) -> Option<&'static str> {
+        BLOCKER_ERROR_DETAIL_CODES
+            .iter()
+            .find(|(code, _)| *code == self)
+            .map(|(_, detail)| *detail)
+    }
+
+    pub fn for_blocker_detail(detail_code: &str) -> Option<Self> {
+        BLOCKER_ERROR_DETAIL_CODES
+            .iter()
+            .find(|(_, detail)| *detail == detail_code)
+            .map(|(code, _)| *code)
+    }
+}
+
+const BLOCKER_ERROR_DETAIL_CODES: &[(ErrorCode, &str)] = &[
+    (ErrorCode::DialogOpen, "dialog_open"),
+    (ErrorCode::NavigationPending, "navigation_pending"),
+    (ErrorCode::PageUnresponsive, "page_unresponsive"),
+];
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PageBlocker {
+    #[serde(rename_all = "camelCase")]
+    Dialog {
+        dialog_type: String,
+        message: String,
+        url: String,
+        elapsed_ms: u64,
+    },
+    #[serde(rename_all = "camelCase")]
+    Navigation {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        url: Option<String>,
+        elapsed_ms: u64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -209,6 +282,8 @@ pub struct ErrorData {
     pub path: Option<String>,
     #[serde(rename = "partialPath", skip_serializing_if = "Option::is_none")]
     pub partial_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocker: Option<PageBlocker>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -254,6 +329,53 @@ impl ServerError {
     }
     pub fn internal(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::Internal, message)
+    }
+
+    pub fn blocked(detail: crate::ErrorDetail, blocker: Option<PageBlocker>) -> Self {
+        let code = ErrorCode::for_blocker_detail(&detail.code).unwrap_or(ErrorCode::Operation);
+        Self::new(code, detail.message.clone()).with_data(ErrorData {
+            detail: Some(detail),
+            blocker,
+            ..Default::default()
+        })
+    }
+
+    pub fn spoken_to(mut self, spoken: ProtocolVersion) -> Self {
+        if spoken.at_least(BLOCKER_ERRORS_SINCE) {
+            return self;
+        }
+        if let Some(detail_code) = self.code.blocker_detail_code() {
+            self.code = ErrorCode::Operation;
+            let data = self.data.get_or_insert_with(Default::default);
+            data.blocker = None;
+            if data.detail.is_none() {
+                data.detail = Some(crate::ErrorDetail::new(detail_code, self.message.clone()));
+            }
+        }
+        if let Some(data) = self.data.as_mut() {
+            data.blocker = None;
+            if let Some(source) = data.source.take() {
+                data.source = Some(Box::new(source.spoken_to(spoken)));
+            }
+            if let Some(failure) = data
+                .recording
+                .as_mut()
+                .and_then(|recording| recording.failure.as_mut())
+            {
+                failure.code = failure.code.spoken_to(spoken);
+            }
+        }
+        self
+    }
+}
+
+impl ErrorCode {
+    pub fn spoken_to(self, spoken: ProtocolVersion) -> Self {
+        if self.blocker_detail_code().is_some() && !spoken.at_least(BLOCKER_ERRORS_SINCE) {
+            ErrorCode::Operation
+        } else {
+            self
+        }
     }
 }
 
@@ -1568,6 +1690,7 @@ pub fn schema_bundle() -> Value {
     bundle["types"]["InputMode"] = schema::<crate::InputMode>();
     bundle["types"]["Destination"] = schema::<crate::Destination>();
     bundle["types"]["CloudflareAutoSolve"] = schema::<CloudflareAutoSolve>();
+    bundle["types"]["PageBlocker"] = schema::<PageBlocker>();
     bundle
 }
 
@@ -1838,6 +1961,229 @@ mod tests {
                 ErrorCode::InvalidParams
             );
         }
+    }
+
+    #[test]
+    fn blocked_page_errors_carry_their_own_codes_and_what_blocks_the_page() {
+        for (code, wire, detail) in [
+            (ErrorCode::DialogOpen, "DialogOpen", "dialog_open"),
+            (
+                ErrorCode::NavigationPending,
+                "NavigationPending",
+                "navigation_pending",
+            ),
+            (
+                ErrorCode::PageUnresponsive,
+                "PageUnresponsive",
+                "page_unresponsive",
+            ),
+        ] {
+            assert_eq!(serde_json::to_value(code).unwrap(), json!(wire));
+            assert_eq!(code.blocker_detail_code(), Some(detail));
+            assert_eq!(ErrorCode::for_blocker_detail(detail), Some(code));
+        }
+        assert_eq!(ErrorCode::Timeout.blocker_detail_code(), None);
+        assert_eq!(ErrorCode::for_blocker_detail("timeout"), None);
+        assert!(schema::<ErrorCode>().to_string().contains("\"DialogOpen\""));
+
+        let dialog = ServerError::blocked(
+            crate::ErrorDetail::new("dialog_open", "A JavaScript alert dialog is open"),
+            Some(PageBlocker::Dialog {
+                dialog_type: "alert".into(),
+                message: "are you sure?".into(),
+                url: "https://example.test/".into(),
+                elapsed_ms: 1200,
+            }),
+        );
+        assert_eq!(
+            serde_json::to_value(&dialog).unwrap(),
+            json!({
+                "code": "DialogOpen",
+                "message": "A JavaScript alert dialog is open",
+                "data": {
+                    "detail": {"code": "dialog_open", "message": "A JavaScript alert dialog is open"},
+                    "blocker": {
+                        "kind": "dialog", "dialogType": "alert", "message": "are you sure?",
+                        "url": "https://example.test/", "elapsedMs": 1200
+                    }
+                }
+            })
+        );
+        let navigation = serde_json::to_value(PageBlocker::Navigation {
+            url: Some("https://slow.test/".into()),
+            elapsed_ms: 6500,
+        })
+        .unwrap();
+        assert_eq!(
+            navigation,
+            json!({"kind": "navigation", "url": "https://slow.test/", "elapsedMs": 6500})
+        );
+        assert_eq!(
+            serde_json::to_value(PageBlocker::Navigation {
+                url: None,
+                elapsed_ms: 1
+            })
+            .unwrap(),
+            json!({"kind": "navigation", "elapsedMs": 1})
+        );
+        let round_trip: ServerError =
+            serde_json::from_value(serde_json::to_value(&dialog).unwrap()).unwrap();
+        assert_eq!(round_trip.code, ErrorCode::DialogOpen);
+        assert_eq!(
+            round_trip.data.unwrap().blocker,
+            dialog.data.unwrap().blocker
+        );
+        let other = ServerError::blocked(crate::ErrorDetail::new("stale_ref", "gone"), None);
+        assert_eq!(other.code, ErrorCode::Operation);
+    }
+
+    #[test]
+    fn a_client_older_than_the_blocker_codes_receives_an_operation_error() {
+        let current = PROTOCOL_VERSION;
+        let older = [
+            ProtocolVersion::BASELINE,
+            ProtocolVersion { major: 2, minor: 1 },
+        ];
+        let blocker = PageBlocker::Navigation {
+            url: Some("https://slow.test/".into()),
+            elapsed_ms: 7000,
+        };
+        for (code, detail) in [
+            (ErrorCode::DialogOpen, "dialog_open"),
+            (ErrorCode::NavigationPending, "navigation_pending"),
+            (ErrorCode::PageUnresponsive, "page_unresponsive"),
+        ] {
+            let error = ServerError::blocked(
+                crate::ErrorDetail::new(detail, "blocked").hint("do something"),
+                Some(blocker.clone()),
+            );
+            assert_eq!(error.code, code);
+            let kept = error.clone().spoken_to(current);
+            assert_eq!(kept.code, code);
+            assert_eq!(kept.data.unwrap().blocker, Some(blocker.clone()));
+            for spoken in older {
+                let lowered = error.clone().spoken_to(spoken);
+                assert_eq!(lowered.code, ErrorCode::Operation);
+                assert_eq!(lowered.message, "blocked");
+                let data = lowered.data.unwrap();
+                assert!(data.blocker.is_none());
+                let kept = data.detail.unwrap();
+                assert_eq!(kept.code, detail);
+                assert_eq!(kept.hint.as_deref(), Some("do something"));
+                assert_eq!(code.spoken_to(spoken), ErrorCode::Operation);
+            }
+            let bare = ServerError::new(code, "bare").spoken_to(ProtocolVersion::BASELINE);
+            assert_eq!(bare.code, ErrorCode::Operation);
+            assert_eq!(bare.data.unwrap().detail.unwrap().code, detail);
+            assert_eq!(code.spoken_to(current), code);
+        }
+        let nested = ServerError::new(ErrorCode::Action, "outer").with_data(ErrorData {
+            source: Some(Box::new(ServerError::new(ErrorCode::DialogOpen, "inner"))),
+            ..Default::default()
+        });
+        let lowered = nested.spoken_to(ProtocolVersion::BASELINE);
+        assert_eq!(lowered.code, ErrorCode::Action);
+        assert_eq!(
+            lowered.data.unwrap().source.unwrap().code,
+            ErrorCode::Operation
+        );
+        let untouched =
+            ServerError::new(ErrorCode::Timeout, "slow").spoken_to(ProtocolVersion::BASELINE);
+        assert_eq!(untouched.code, ErrorCode::Timeout);
+        assert!(untouched.data.is_none());
+        let old_enum: Vec<Value> = serde_json::from_value(json!([
+            "ElementNotFound",
+            "ElementNotVisible",
+            "Timeout",
+            "RetryExhausted",
+            "Cdp",
+            "InvalidPage",
+            "InvalidParams",
+            "UnknownMethod",
+            "Internal",
+            "ProtocolMismatch",
+            "MessageTooLarge",
+            "ServerBusy",
+            "ShuttingDown",
+            "Cancelled",
+            "Action",
+            "Operation",
+            "ScreenshotTooLarge",
+            "FileOutput",
+            "RecordingUnsupported",
+            "RecordingNotFound",
+            "RecordingConflict",
+            "RecordingAlreadyActive",
+            "RecordingInvalidState",
+            "RecordingFailed"
+        ]))
+        .unwrap();
+        for code in [
+            ErrorCode::DialogOpen,
+            ErrorCode::NavigationPending,
+            ErrorCode::PageUnresponsive,
+            ErrorCode::Timeout,
+            ErrorCode::Operation,
+        ] {
+            let lowered = serde_json::to_value(code.spoken_to(ProtocolVersion::BASELINE)).unwrap();
+            assert!(old_enum.contains(&lowered), "{lowered}");
+        }
+    }
+
+    #[test]
+    fn hello_speaks_the_older_of_the_server_and_what_the_client_understands() {
+        let hello = |value: Value| serde_json::from_value::<HelloParams>(value).unwrap();
+        let spoken = |value: Value| hello(value).spoken();
+        assert_eq!(PROTOCOL_VERSION, ProtocolVersion { major: 2, minor: 2 });
+        assert_eq!(
+            spoken(json!({"protocol": {"major": 2, "minor": 0}})),
+            ProtocolVersion { major: 2, minor: 0 }
+        );
+        assert_eq!(
+            spoken(json!({"protocol": {"major": 2, "minor": 1}})),
+            ProtocolVersion { major: 2, minor: 1 }
+        );
+        assert_eq!(
+            spoken(json!({"protocol": PROTOCOL_VERSION})),
+            PROTOCOL_VERSION
+        );
+        assert_eq!(
+            spoken(
+                json!({"protocol": {"major": 2, "minor": 0}, "understands": {"major": 2, "minor": 2}})
+            ),
+            PROTOCOL_VERSION
+        );
+        assert_eq!(
+            spoken(
+                json!({"protocol": {"major": 2, "minor": 0}, "understands": {"major": 2, "minor": 9}})
+            ),
+            PROTOCOL_VERSION
+        );
+        assert_eq!(
+            spoken(
+                json!({"protocol": {"major": 2, "minor": 1}, "understands": {"major": 2, "minor": 0}})
+            ),
+            ProtocolVersion { major: 2, minor: 1 }
+        );
+        assert_eq!(
+            spoken(
+                json!({"protocol": {"major": 2, "minor": 0}, "understands": {"major": 3, "minor": 5}})
+            ),
+            ProtocolVersion { major: 2, minor: 0 }
+        );
+        assert!(
+            !spoken(json!({"protocol": {"major": 2, "minor": 1}})).at_least(BLOCKER_ERRORS_SINCE)
+        );
+        assert!(PROTOCOL_VERSION.at_least(BLOCKER_ERRORS_SINCE));
+        assert_eq!(
+            serde_json::to_value(hello(json!({"protocol": {"major": 2, "minor": 0}}))).unwrap(),
+            json!({"protocol": {"major": 2, "minor": 0}})
+        );
+        assert!(validate_params(
+            "server.hello",
+            &json!({"protocol": {"major": 2, "minor": 0}, "understands": {"major": 2, "minor": 2}})
+        )
+        .is_ok());
     }
 
     #[test]

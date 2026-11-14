@@ -506,7 +506,28 @@ async fn accepted_request_finishes_after_cli_disconnect_without_replay() {
         .unwrap();
     child.kill().await.unwrap();
     child.wait().await.unwrap();
-    cli.ok(&["snapshot"]).await;
+    let waited = std::time::Instant::now();
+    loop {
+        let response = cli.run(&["snapshot"]).await;
+        if response["ok"] == true {
+            break;
+        }
+        assert_eq!(
+            response["error_detail"]["code"], "daemon_busy",
+            "{response}"
+        );
+        assert!(
+            response["error"]
+                .as_str()
+                .unwrap()
+                .contains("`captcha datadome` has been running"),
+            "{response}"
+        );
+        assert!(
+            waited.elapsed() < Duration::from_secs(30),
+            "the accepted request never finished: {response}"
+        );
+    }
     assert_eq!(
         cli.eval("document.body.dataset.restored==='true'").await,
         true
