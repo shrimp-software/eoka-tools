@@ -12,6 +12,20 @@ use crate::protocol::{write_msg, Request, Response};
 use crate::session;
 use eoka_server::engine::Engine;
 
+fn engine_arguments(raw: &serde_json::Value) -> serde_json::Value {
+    let mut args = raw
+        .get("args")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    if args.is_null() {
+        args = serde_json::json!({});
+    }
+    if let Some(id) = raw.get("operation_id") {
+        args["operation_id"] = id.clone();
+    }
+    args
+}
+
 fn idle_timeout() -> Duration {
     let ms = std::env::var("EOKA_IDLE_TIMEOUT")
         .ok()
@@ -109,13 +123,7 @@ pub async fn run(session_name: &str, spec: LaunchSpec) -> anyhow::Result<()> {
                     });
                     continue;
                 }
-                let mut args = raw.get("args").cloned().unwrap_or_else(|| serde_json::json!({}));
-                if args.is_null() {
-                    args = serde_json::json!({});
-                }
-                if let Some(id) = raw.get("operation_id") {
-                    args["operation_id"] = id.clone();
-                }
+                let args = engine_arguments(&raw);
                 let (caller_left, left) = tokio::sync::watch::channel(false);
                 let watchdog = tokio::spawn(async move {
                     let mut disconnected = [0u8; 1];
@@ -164,6 +172,102 @@ pub async fn run(session_name: &str, spec: LaunchSpec) -> anyhow::Result<()> {
     let _ = std::fs::remove_file(&pid_path);
     eprintln!("[eoka] daemon stopped");
     Ok(())
+}
+
+#[cfg(test)]
+mod wire_tests {
+    use super::*;
+    use serde_json::json;
+
+    const ID: &str = "11111111-1111-4111-8111-111111111111";
+
+    fn sent_by_the_cli(cmd: &str, args: serde_json::Value) -> serde_json::Value {
+        json!({"cmd": cmd, "args": args, "operation_id": ID, "protocol_major": 2})
+    }
+
+    fn action(command: &str, arguments: serde_json::Value) -> serde_json::Value {
+        sent_by_the_cli(
+            "action_command",
+            json!({"operation_id": ID, "command": command, "arguments": arguments}),
+        )
+    }
+
+    #[test]
+    fn requests_from_an_older_cli_reach_the_engine_unchanged() {
+        let expect = json!({"kind": "url", "value": "/next", "contains": true});
+        let envelopes = [
+            (
+                "click",
+                json!({"operation_id": ID, "expect": expect, "target": "css:#save"}),
+            ),
+            (
+                "dblclick",
+                json!({"operation_id": ID, "target": "text:Open"}),
+            ),
+            (
+                "fill",
+                json!({"operation_id": ID, "target": "placeholder:Name", "text": "Ada", "input_mode": "sequential"}),
+            ),
+            (
+                "select",
+                json!({"operation_id": ID, "target": "css:select", "value": "b"}),
+            ),
+            (
+                "hover",
+                json!({"operation_id": ID, "target": "role:button"}),
+            ),
+            (
+                "key",
+                json!({"operation_id": ID, "timeout_ms": 5000, "key": "Enter"}),
+            ),
+            ("back", json!({"expect": expect, "timeout_ms": 5000})),
+            ("forward", json!({"expect": null, "timeout_ms": null})),
+            ("reload", json!(null)),
+        ];
+        for (command, arguments) in envelopes {
+            let raw = action(command, arguments.clone());
+            let request: Request = serde_json::from_value(raw.clone())
+                .unwrap_or_else(|error| panic!("{command} envelope is rejected: {error}"));
+            assert_eq!(request.cmd(), "action_command", "{command}");
+            assert_eq!(
+                engine_arguments(&raw),
+                json!({"operation_id": ID, "command": command, "arguments": arguments}),
+                "{command}"
+            );
+        }
+        let direct = [
+            (
+                "open",
+                json!({"url": "https://example.com/", "operation_id": ID}),
+                json!({"url": "https://example.com/", "operation_id": ID}),
+            ),
+            (
+                "agent_step",
+                json!({"action": {"kind": "back"}, "operation_id": ID}),
+                json!({"action": {"kind": "back"}, "operation_id": ID}),
+            ),
+            (
+                "action_perform",
+                json!({"operation_id": ID, "action": {"kind": "back"}, "options": {"timeout_ms": 900}}),
+                json!({"operation_id": ID, "action": {"kind": "back"}, "options": {"timeout_ms": 900}}),
+            ),
+            (
+                "snapshot",
+                json!({"interactive": true}),
+                json!({"interactive": true, "operation_id": ID}),
+            ),
+            ("info", json!(null), json!({"operation_id": ID})),
+        ];
+        for (cmd, args, reaches_engine) in direct {
+            let raw = sent_by_the_cli(cmd, args);
+            let request: Request = serde_json::from_value(raw.clone())
+                .unwrap_or_else(|error| panic!("{cmd} is rejected: {error}"));
+            assert_eq!(request.cmd(), cmd);
+            assert_eq!(engine_arguments(&raw), reaches_engine, "{cmd}");
+        }
+        let bare = json!({"cmd": "text", "protocol_major": 2});
+        assert_eq!(engine_arguments(&bare), json!({}));
+    }
 }
 
 #[cfg(test)]

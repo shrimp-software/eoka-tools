@@ -325,9 +325,7 @@ impl AgentSession {
                 .cloned()
                 .unwrap_or_else(|| serde_json::json!("sequential")),
         )?;
-        let canonical = serde_json::to_vec(
-            &serde_json::json!({"command":command,"target_id":page.target_id(),"target":arguments["target"],"text":arguments["text"],"value":arguments["value"],"key":arguments["key"],"input_mode":input_mode,"options":options}),
-        )?;
+        let canonical = command_key(command, page.target_id(), &arguments, input_mode, &options)?;
         let store = operations
             .store()
             .await
@@ -695,6 +693,145 @@ fn paginate(
         .truncated
         .then(|| format!("{}:{end}", observation.observation_id));
     Ok(page)
+}
+
+fn command_key(
+    command: &str,
+    target_id: &str,
+    arguments: &serde_json::Value,
+    input_mode: eoka::InputMode,
+    options: &eoka::ActionOptions,
+) -> Result<Vec<u8>> {
+    Ok(serde_json::to_vec(
+        &serde_json::json!({"command":command,"target_id":target_id,"target":arguments["target"],"text":arguments["text"],"value":arguments["value"],"key":arguments["key"],"input_mode":input_mode,"options":options}),
+    )?)
+}
+
+#[cfg(test)]
+mod command_key_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn key(command: &str, arguments: serde_json::Value) -> String {
+        let options = crate::operations::commands::options(&arguments).unwrap();
+        let input_mode = serde_json::from_value(
+            arguments
+                .get("input_mode")
+                .cloned()
+                .unwrap_or_else(|| json!("sequential")),
+        )
+        .unwrap();
+        String::from_utf8(command_key(command, "TAB", &arguments, input_mode, &options).unwrap())
+            .unwrap()
+    }
+
+    fn options(expect: &str, timeout_ms: u64) -> String {
+        format!(
+            r#""options":{{"destination":"current_or_new","expect":{expect},"timeout_ms":{timeout_ms},"wait_for_target":true}}"#
+        )
+    }
+
+    #[test]
+    fn the_idempotency_key_of_every_action_command_is_stable() {
+        let id = "11111111-1111-4111-8111-111111111111";
+        let plain = options("null", 30000);
+        let cases = [
+            (
+                "click",
+                json!({"operation_id":id,"target":"css:#save"}),
+                format!(
+                    r##"{{"command":"click","input_mode":"sequential","key":null,{plain},"target":"css:#save","target_id":"TAB","text":null,"value":null}}"##
+                ),
+            ),
+            (
+                "click",
+                json!({"operation_id":id,"target":"css:#save","expect":{"kind":"url","value":"/next","contains":true},"timeout_ms":5000}),
+                format!(
+                    r##"{{"command":"click","input_mode":"sequential","key":null,{},"target":"css:#save","target_id":"TAB","text":null,"value":null}}"##,
+                    options(r#"{"contains":true,"kind":"url","value":"/next"}"#, 5000)
+                ),
+            ),
+            (
+                "click",
+                json!({"operation_id":id,"target":"css:#save","options":{"timeout_ms":900},"exploratory":true}),
+                format!(
+                    r##"{{"command":"click","input_mode":"sequential","key":null,{},"target":"css:#save","target_id":"TAB","text":null,"value":null}}"##,
+                    options("null", 900)
+                ),
+            ),
+            (
+                "dblclick",
+                json!({"operation_id":id,"target":"text:Open"}),
+                format!(
+                    r#"{{"command":"dblclick","input_mode":"sequential","key":null,{plain},"target":"text:Open","target_id":"TAB","text":null,"value":null}}"#
+                ),
+            ),
+            (
+                "fill",
+                json!({"operation_id":id,"target":"placeholder:Name","text":"Ada"}),
+                format!(
+                    r#"{{"command":"fill","input_mode":"sequential","key":null,{plain},"target":"placeholder:Name","target_id":"TAB","text":"Ada","value":null}}"#
+                ),
+            ),
+            (
+                "fill",
+                json!({"operation_id":id,"target":"placeholder:Name","text":"Ada","input_mode":"bulk"}),
+                format!(
+                    r#"{{"command":"fill","input_mode":"bulk","key":null,{plain},"target":"placeholder:Name","target_id":"TAB","text":"Ada","value":null}}"#
+                ),
+            ),
+            (
+                "select",
+                json!({"operation_id":id,"target":"css:select","value":"b"}),
+                format!(
+                    r#"{{"command":"select","input_mode":"sequential","key":null,{plain},"target":"css:select","target_id":"TAB","text":null,"value":"b"}}"#
+                ),
+            ),
+            (
+                "hover",
+                json!({"operation_id":id,"target":"role:button"}),
+                format!(
+                    r#"{{"command":"hover","input_mode":"sequential","key":null,{plain},"target":"role:button","target_id":"TAB","text":null,"value":null}}"#
+                ),
+            ),
+            (
+                "key",
+                json!({"operation_id":id,"key":"Enter"}),
+                format!(
+                    r#"{{"command":"key","input_mode":"sequential","key":"Enter",{plain},"target":null,"target_id":"TAB","text":null,"value":null}}"#
+                ),
+            ),
+            (
+                "back",
+                json!({"operation_id":id}),
+                format!(
+                    r#"{{"command":"back","input_mode":"sequential","key":null,{plain},"target":null,"target_id":"TAB","text":null,"value":null}}"#
+                ),
+            ),
+            (
+                "forward",
+                json!({"operation_id":id,"expect":null,"timeout_ms":null}),
+                format!(
+                    r#"{{"command":"forward","input_mode":"sequential","key":null,{plain},"target":null,"target_id":"TAB","text":null,"value":null}}"#
+                ),
+            ),
+            (
+                "reload",
+                json!({"operation_id":id,"timeout_ms":1500}),
+                format!(
+                    r#"{{"command":"reload","input_mode":"sequential","key":null,{},"target":null,"target_id":"TAB","text":null,"value":null}}"#,
+                    options("null", 1500)
+                ),
+            ),
+        ];
+        for (command, arguments, expected) in cases {
+            assert_eq!(
+                key(command, arguments),
+                expected,
+                "a retried `{command}` must hash to the record an older version stored"
+            );
+        }
+    }
 }
 
 #[cfg(test)]

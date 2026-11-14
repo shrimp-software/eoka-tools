@@ -30,3 +30,6 @@ anyhow = "1"
 base64 = "0.23"
 dirs = "7"
 uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+rmcp = { version = "3.0.1", features = ["client"] }

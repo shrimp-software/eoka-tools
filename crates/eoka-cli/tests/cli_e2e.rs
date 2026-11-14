@@ -48,6 +48,44 @@ fn tools_manifest_matches_protocol_catalog() {
 }
 
 #[test]
+fn the_tool_manifest_agents_read_is_locked() {
+    let session = format!("eoka-manifest-lock-{}", std::process::id());
+    let output = run(&session, &["tools", "manifest", "--all", "--json"]);
+    assert_success(&output, "tools manifest --all");
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("manifest output should be JSON");
+    let actual: String = manifest["tools"]
+        .as_array()
+        .expect("the manifest lists tools")
+        .iter()
+        .map(|tool| tool.to_string() + "\n")
+        .collect();
+    let lock = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/locks/manifest.jsonl");
+    if std::env::var_os("EOKA_UPDATE_LOCKS").is_some() {
+        std::fs::create_dir_all(lock.parent().unwrap()).unwrap();
+        std::fs::write(&lock, &actual).unwrap();
+        return;
+    }
+    let expected = std::fs::read_to_string(&lock).unwrap_or_default();
+    let changed: Vec<String> = expected
+        .lines()
+        .filter(|line| !actual.lines().any(|other| other == *line))
+        .map(|line| format!("- {}", line.chars().take(240).collect::<String>()))
+        .chain(
+            actual
+                .lines()
+                .filter(|line| !expected.lines().any(|other| other == *line))
+                .map(|line| format!("+ {}", line.chars().take(240).collect::<String>())),
+        )
+        .collect();
+    assert!(
+        expected == actual,
+        "The tool manifest changed. If that is intended, rerun with EOKA_UPDATE_LOCKS=1 and list it in the pull request.\n{}",
+        changed.join("\n")
+    );
+}
+
+#[test]
 fn tack_executes_without_browser_tools() {
     let session = format!("eoka-tack-test-{}", std::process::id());
     let output = run(&session, &["tack", "--raw-json", "return 5"]);

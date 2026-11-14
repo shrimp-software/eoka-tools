@@ -4,6 +4,8 @@ mod error;
 mod helpers;
 mod operations;
 mod state;
+#[cfg(test)]
+mod surface;
 mod types;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
@@ -246,13 +248,16 @@ impl EokaServer {
 #[tool_router]
 impl EokaServer {
     pub fn new() -> Self {
-        let headless = std::env::var("EOKA_HEADLESS")
-            .map(|v| v != "false" && v != "0")
-            .unwrap_or(true);
-
         let include_opt_in = std::env::var("EOKA_MCP_ALL_TOOLS")
             .map(|v| v != "false" && v != "0")
             .unwrap_or(false);
+        Self::listing(include_opt_in)
+    }
+
+    fn listing(include_opt_in: bool) -> Self {
+        let headless = std::env::var("EOKA_HEADLESS")
+            .map(|v| v != "false" && v != "0")
+            .unwrap_or(true);
         let mut tool_router = Self::tool_router();
         apply_protocol_tool_metadata(&mut tool_router);
         add_catalog_tools(&mut tool_router, include_opt_in);
