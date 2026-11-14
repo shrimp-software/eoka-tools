@@ -362,12 +362,21 @@ curl -fsSL https://raw.githubusercontent.com/shrimp-software/eoka-tools/main/cra
 
 Update an installed CLI to the latest GitHub release (Linux and macOS, x86_64
 and aarch64). The download is verified against the release `SHA256SUMS` before
-the running binary is replaced:
+the running binary is replaced. Installed copies of the agent skill are then
+rewritten to match the installed binary:
 
 ```sh
-eoka update --check   # report installed and latest versions
+eoka update --check   # report installed and latest versions, and a stale skill
 eoka update           # install; add --kill-daemons to stop old session daemons
+eoka upgrade          # the same command
 ```
+
+The binary carries its own agent skill. `eoka skill refresh` rewrites the
+installed copies on its own, for example after `cargo install`; it looks under
+`~/.agents/skills`, `~/.claude/skills`, `~/.codex/skills`, `~/.pi/agent/skills`,
+`~/.config/opencode/skills`, `~/.cursor/skills` and `~/.gemini/skills`, and
+under `$CODEX_HOME/skills` and `$CLAUDE_CONFIG_DIR/skills`. Only the skill's
+own files are rewritten. `eoka update --keep-skill` leaves the copies alone.
 
 Inspect the generated protocol-backed tool catalog:
 
@@ -389,11 +398,23 @@ eoka tack 'return await tools.invoke({ path: "eoka.info", input: {} });'
 - [Go client](clients/go/README.md)
 - [server protocol](PROTOCOL.md)
 
-Install the Codex skill with the open skills CLI:
+Install the skill from the binary, without Node. The default directory is
+`~/.agents/skills/eoka`, which Codex and other agents that read
+`~/.agents/skills` use; name the directory for any other agent or for a
+project-local copy:
+
+```sh
+eoka skill install
+eoka skill install ~/.claude/skills/eoka
+```
+
+Or install the Codex skill with the open skills CLI:
 
 ```sh
 npx skills add https://github.com/shrimp-software/eoka-tools/tree/main/crates/eoka-cli/skill --skill eoka --global -a codex -y
 ```
+
+Either way, `eoka update` keeps the installed copies current afterwards.
 
 ## License
 

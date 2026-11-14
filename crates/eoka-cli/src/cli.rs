@@ -725,10 +725,15 @@ pub enum Command {
     Kill,
     #[command(
         visible_alias = "upgrade",
-        about = "Update this eoka binary from the latest GitHub release",
-        long_about = "Update this eoka binary from the latest GitHub release.\n\nDownloads the release archive for this platform, verifies it against the release SHA256SUMS and replaces the running executable. Session daemons keep running their old version until restarted; they are listed, and stopped only with --kill-daemons."
+        about = "Update this eoka binary and the installed agent skill from the latest GitHub release",
+        long_about = "Update this eoka binary and the installed agent skill from the latest GitHub release.\n\nDownloads the release archive for this platform, verifies it against the release SHA256SUMS and replaces the running executable. Installed copies of the agent skill are then rewritten to match the installed binary, also when the binary was already current; --keep-skill leaves them alone. Session daemons keep running their old version until restarted; they are listed, and stopped only with --kill-daemons."
     )]
     Update(UpdateArgs),
+    #[command(about = "Install or refresh the agent skill this binary ships")]
+    Skill {
+        #[command(subcommand)]
+        action: SkillAction,
+    },
     #[command(about = "Close browser and daemon")]
     Close,
     #[command(
@@ -1184,4 +1189,26 @@ pub struct UpdateArgs {
         help = "Stop session daemons still running another version (closes their browsers)"
     )]
     pub kill_daemons: bool,
+    #[arg(long, help = "Leave installed copies of the agent skill as they are")]
+    pub keep_skill: bool,
+}
+
+#[derive(Subcommand)]
+pub enum SkillAction {
+    #[command(
+        about = "Write this binary's agent skill into a skill directory",
+        long_about = "Write this binary's agent skill into a skill directory.\n\nWrites SKILL.md and its references, creating the directory when needed. Other files there are left alone. A directory that holds a different skill is refused."
+    )]
+    Install {
+        #[arg(
+            value_name = "DIR",
+            help = "Skill directory to write, such as ~/.claude/skills/eoka [default: ~/.agents/skills/eoka]"
+        )]
+        dir: Option<PathBuf>,
+    },
+    #[command(
+        about = "Rewrite installed copies of the agent skill to match this binary",
+        long_about = "Rewrite installed copies of the agent skill to match this binary.\n\nLooks for an eoka skill under ~/.agents/skills, ~/.claude/skills, ~/.codex/skills, ~/.pi/agent/skills, ~/.config/opencode/skills, ~/.cursor/skills and ~/.gemini/skills, and under $CODEX_HOME/skills and $CLAUDE_CONFIG_DIR/skills when those are set. Only files that differ are rewritten; other files in the directory are left alone. Project-local copies are not searched: name one with `eoka skill install DIR`. `eoka update` runs this after installing a release."
+    )]
+    Refresh,
 }
