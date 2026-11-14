@@ -41,9 +41,10 @@ Rows that share a call (for example K4, K9 and K11 on `fill('#missing')`) share 
 | K14 | the Node process is killed with `SIGKILL` | the sidecar and every Chrome process are gone within 5 s |
 | K14 | the script throws an uncaught exception | exit code is non-zero within 10 s and no child process is left 5 s later |
 | K15 | tab A has been behind tab B for 3 s | `a.screenshot()` returns a non-empty PNG within 5 s; `a.screenshotToFile()` writes a non-empty file within 5 s; `b.screenshot()` still works within 5 s afterwards; both together resolve within 10 s |
+| K16 | tab A has been behind tab B for 3 s | `a.click()` with an expectation resolves within 3 s as `verified_complete`; `a.hover()` resolves within 3 s; a click on B still resolves within 3 s; clicks on A and B together both resolve within 5 s; `a.fill()` resolves and the field holds the text (pinned); after every row that acts on A, A is still `hidden`, B still `visible`, and neither page saw a `visibilitychange` event |
 | close race | eight browsers in one process, a `data:` page in each, all closed at once, three rounds | no `close()` rejects |
 
-K14 spawns `tests/fixtures/eval-process-child.mjs` and follows its process tree with `ps`; it is skipped on Windows. Each K15 row has its own browser and pair of tabs, so a capture that is still running cannot leak into another row. The close-race row holds eight Chrome copies in the temporary directory at once (about 2.3 GB), so point `TMPDIR` at a disk with room; a long `TMPDIR` path stops Chrome from starting.
+K14 spawns `tests/fixtures/eval-process-child.mjs` and follows its process tree with `ps`; it is skipped on Windows. Each K15 and K16 row has its own browser and pair of tabs, so a capture or an action that is still running cannot leak into another row; the K16 visibility rows read a counter installed in both pages before the three-second wait. The close-race row holds eight Chrome copies in the temporary directory at once (about 2.3 GB), so point `TMPDIR` at a disk with room; a long `TMPDIR` path stops Chrome from starting.
 
 ### `blocked-tabs.test.mjs`
 
