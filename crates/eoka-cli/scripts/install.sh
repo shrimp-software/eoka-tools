@@ -5,7 +5,8 @@
 #   EOKA_INSTALL_DIR  destination directory (default: ~/.local/bin)
 #   GITHUB_TOKEN      optional, raises the GitHub API rate limit
 #
-# An installed CLI updates itself with `eoka update`.
+# An installed CLI updates itself with `eoka update`. Installed copies of the
+# agent skill are rewritten to match the binary this script installs.
 set -eu
 repo="shrimp-software/eoka-tools"
 fetch() { curl --fail --location --silent --show-error "$@"; }
@@ -67,4 +68,5 @@ mkdir -p "$install_dir"
 install -m 755 "$scratch/eoka" "$install_dir/.eoka-new"
 mv -f "$install_dir/.eoka-new" "$install_dir/eoka"
 echo "Installed eoka $version to $install_dir/eoka"
+"$install_dir/eoka" skill refresh 2>/dev/null || true
 case ":$PATH:" in *":$install_dir:"*) ;; *) echo "Add $install_dir to PATH to run it" ;; esac

@@ -1,6 +1,6 @@
 # Actions and recovery
 
-These examples use CLI 0.10.0 in an already-open `work` session. Observe first and
+These examples run in an already-open `work` session. Observe first and
 substitute actual page targets, expected results and fresh operation UUIDs.
 `step` takes an `action` whose target is a scoped string from `view` or a live
 locator such as `css:#save` or `text:Save`. Expectations instead use typed

@@ -14,6 +14,7 @@ mod output;
 mod protocol;
 mod session;
 mod sessions;
+mod skill;
 #[cfg(test)]
 mod skill_examples;
 mod update;
@@ -109,6 +110,14 @@ async fn main() {
             let response = update::run(args)
                 .await
                 .with_meta(response_meta(&effective_session, "update"));
+            output::print_response(&response, json_mode);
+            if !response.ok {
+                std::process::exit(1);
+            }
+            return;
+        }
+        Command::Skill { action } => {
+            let response = skill::run(action).with_meta(response_meta(&effective_session, "skill"));
             output::print_response(&response, json_mode);
             if !response.ok {
                 std::process::exit(1);

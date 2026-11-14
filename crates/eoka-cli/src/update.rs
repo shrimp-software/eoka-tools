@@ -1,6 +1,6 @@
 //! `eoka update`: replace this executable with a published release binary.
 
-use crate::{cli::UpdateArgs, client, launch_spec::LaunchSpec, protocol, session};
+use crate::{cli::UpdateArgs, client, launch_spec::LaunchSpec, protocol, session, skill};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::io::Read;
@@ -13,7 +13,7 @@ const DOWNLOAD_BASE: &str = "https://github.com/shrimp-software/eoka-tools/relea
 const TAG_PREFIX: &str = "eoka-cli-v";
 const MAX_ARCHIVE_BYTES: usize = 256 * 1024 * 1024;
 const MAX_METADATA_BYTES: usize = 4 * 1024 * 1024;
-const SKILL_HINT: &str = "npx skills add https://github.com/shrimp-software/eoka-tools/tree/main/crates/eoka-cli/skill --skill eoka --global";
+const WRITER_STILL_OPEN_RETRIES: u32 = 20;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct Version(u64, u64, u64);
@@ -169,20 +169,45 @@ fn extract_binary(archive: &[u8]) -> Result<Vec<u8>, String> {
     binary.ok_or_else(|| "Release archive does not contain eoka".to_string())
 }
 
-fn probe_version(path: &Path) -> Result<String, String> {
-    let mut attempts = 0;
+fn run_binary(path: &Path, arguments: &[&str]) -> std::io::Result<std::process::Output> {
+    let mut retries = 0;
     loop {
-        match std::process::Command::new(path).arg("--version").output() {
-            Ok(output) => return Ok(String::from_utf8_lossy(&output.stdout).trim().to_string()),
-            // A concurrent fork can briefly inherit the just-written file open
-            // for writing, which makes exec fail with ETXTBSY.
-            Err(error) if error.raw_os_error() == Some(libc::ETXTBSY) && attempts < 20 => {
-                attempts += 1;
-                std::thread::sleep(Duration::from_millis(25));
-            }
-            Err(error) => return Err(format!("Downloaded binary did not run: {error}")),
+        let outcome = std::process::Command::new(path).args(arguments).output();
+        let a_concurrent_fork_still_holds_it_open_for_writing = outcome
+            .as_ref()
+            .is_err_and(|error| error.raw_os_error() == Some(libc::ETXTBSY));
+        if !a_concurrent_fork_still_holds_it_open_for_writing
+            || retries == WRITER_STILL_OPEN_RETRIES
+        {
+            return outcome;
         }
+        retries += 1;
+        std::thread::sleep(Duration::from_millis(25));
     }
+}
+
+fn probe_version(path: &Path) -> Result<String, String> {
+    run_binary(path, &["--version"])
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .map_err(|error| format!("Downloaded binary did not run: {error}"))
+}
+
+fn refresh_skill_with(binary: &Path) -> Value {
+    run_binary(binary, &["--json", "skill", "refresh"])
+        .ok()
+        .and_then(|output| serde_json::from_slice::<Value>(&output.stdout).ok())
+        .and_then(|response| match response["ok"].as_bool()? {
+            true => Some(response["data"].clone()).filter(|data| data["text"].is_string()),
+            false => Some(json!({"text": response["error"].as_str()?})),
+        })
+        .unwrap_or_else(|| {
+            json!({
+                "text": format!(
+                    "The installed binary could not refresh the agent skill. Refresh it with: {}",
+                    skill::FIRST_INSTALL_HINT
+                )
+            })
+        })
 }
 
 /// Write beside `dest`, confirm the new binary reports `version`, then rename
@@ -286,8 +311,8 @@ fn summary(data: &Value) -> String {
     if let Some(shadow) = data["path_shadowed_by"].as_str() {
         let _ = write!(text, "\nWarning: {shadow} comes first on PATH");
     }
-    if updated {
-        let _ = write!(text, "\nRefresh the agent skill with: {SKILL_HINT}");
+    if let Some(skill) = data["skill"]["text"].as_str() {
+        let _ = write!(text, "\n{skill}");
     }
     text
 }
@@ -315,6 +340,13 @@ async fn update(args: &UpdateArgs) -> Result<Value, String> {
         install(&extract_binary(&archive)?, &dest, latest)?;
     }
     let installed = if updated { latest } else { current };
+    let skill = if args.keep_skill {
+        Value::Null
+    } else if updated {
+        refresh_skill_with(&dest)
+    } else {
+        skill::installed_copies(&skill::Search::from_environment(), !args.check)
+    };
     let stale = stale_daemons(&installed.to_string(), args.kill_daemons).await;
     let shadow = path_shadow(&dest, std::env::var_os("PATH").as_deref());
     let mut data = json!({
@@ -326,6 +358,7 @@ async fn update(args: &UpdateArgs) -> Result<Value, String> {
         "target": target,
         "stale_daemons": stale,
         "path_shadowed_by": shadow.map(|path| path.to_string_lossy().to_string()),
+        "skill": skill,
     });
     data["text"] = json!(summary(&data));
     Ok(data)
@@ -546,5 +579,67 @@ mod tests {
         let text = summary(&data);
         assert!(text.contains("Updated eoka 0.9.0 -> 0.10.3"), "{text}");
         assert!(text.contains("eoka --session 'work' kill"), "{text}");
+        assert!(!text.contains("skill"), "{text}");
+        data["skill"] = json!({"text": "Updated the agent skill at /home/me/.agents/skills/eoka"});
+        let text = summary(&data);
+        assert!(
+            text.ends_with("\nUpdated the agent skill at /home/me/.agents/skills/eoka"),
+            "{text}"
+        );
+    }
+
+    fn installed_binary(directory: &Path, body: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let path = directory.join("eoka");
+        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    }
+
+    #[test]
+    fn the_installed_binary_refreshes_the_skill_and_its_words_are_reported() {
+        let directory = tempfile::tempdir().unwrap();
+        let arguments = directory.path().join("arguments");
+        let binary = installed_binary(
+            directory.path(),
+            &format!(
+                "echo \"$@\" > '{}'\necho '{{\"ok\":true,\"data\":{{\"text\":\"Updated the agent skill at /skills/eoka\",\"copies\":[{{\"status\":\"updated\"}}]}}}}'",
+                arguments.display()
+            ),
+        );
+        let skill = refresh_skill_with(&binary);
+        assert_eq!(skill["text"], "Updated the agent skill at /skills/eoka");
+        assert_eq!(skill["copies"][0]["status"], "updated");
+        assert_eq!(
+            std::fs::read_to_string(&arguments).unwrap().trim(),
+            "--json skill refresh"
+        );
+    }
+
+    #[test]
+    fn a_failed_or_unsupported_skill_refresh_does_not_fail_the_update() {
+        let directory = tempfile::tempdir().unwrap();
+        let failing = installed_binary(
+            directory.path(),
+            "echo '{\"ok\":false,\"error\":\"Could not update the agent skill at /skills/eoka: read-only\"}'\nexit 1",
+        );
+        assert_eq!(
+            refresh_skill_with(&failing)["text"],
+            "Could not update the agent skill at /skills/eoka: read-only"
+        );
+
+        for unsupported in [
+            "echo \"error: unrecognized subcommand 'skill'\" >&2\nexit 2",
+            "echo '{\"ok\":true,\"data\":{}}'",
+        ] {
+            let binary = installed_binary(directory.path(), unsupported);
+            let text = refresh_skill_with(&binary)["text"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            assert!(text.contains("npx skills add"), "{text}");
+        }
+        let missing = refresh_skill_with(&directory.path().join("absent"));
+        assert!(missing["text"].as_str().unwrap().contains("npx skills add"));
     }
 }
