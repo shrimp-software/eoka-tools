@@ -2302,3 +2302,504 @@ fn a_tab_behind_another_is_captured_promptly_and_stays_behind() {
     );
     server.shutdown(34);
 }
+
+const QUICK: Duration = Duration::from_millis(2000);
+const UNAFFECTED: Duration = Duration::from_millis(1000);
+
+fn blocked_fixture() -> std::net::SocketAddr {
+    const PAGE: &str = "<!doctype html><title>fixture</title><h1>Blocked tabs</h1>\
+        <button id=danger onclick=\"window.clicks=(window.clicks||0)+1;alert('are you sure?');\
+        document.getElementById('s').textContent='Deleted'\">Delete</button>\
+        <button id=plain onclick=\"document.getElementById('s').textContent='Plain'\">Plain</button>\
+        <p id=s></p>";
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            std::thread::spawn(move || {
+                let mut request = [0u8; 4096];
+                let read = std::io::Read::read(&mut stream, &mut request).unwrap_or(0);
+                if String::from_utf8_lossy(&request[..read]).starts_with("GET /hang") {
+                    std::thread::sleep(Duration::from_secs(600));
+                    return;
+                }
+                let _ = stream.write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: text/html\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{PAGE}",
+                        PAGE.len()
+                    )
+                    .as_bytes(),
+                );
+            });
+        }
+    });
+    address
+}
+
+struct Blocked {
+    server: Sidecar,
+    inbox: Inbox,
+    origin: String,
+    next: u64,
+    _root: TempDir,
+}
+
+impl Blocked {
+    fn start(hello: Option<Value>) -> Self {
+        let (root, state, scratch) = directories();
+        let mut server = Sidecar::start(&state, &scratch);
+        if let Some(hello) = hello {
+            let greeting = server.request(900, "server.hello", hello);
+            assert_eq!(
+                greeting["result"]["protocol"],
+                json!(PROTOCOL_VERSION),
+                "{greeting}"
+            );
+            assert!(greeting["result"]["capabilities"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("pageBlockers")));
+        }
+        launch(&mut server, &root.path().join("profile"));
+        Self {
+            server,
+            inbox: Inbox::default(),
+            origin: format!("http://{}", blocked_fixture()),
+            next: 1000,
+            _root: root,
+        }
+    }
+
+    fn current() -> Self {
+        Self::start(Some(json!({"protocol":PROTOCOL_VERSION})))
+    }
+
+    fn id(&mut self) -> u64 {
+        self.next += 1;
+        self.next
+    }
+
+    fn call(&mut self, method: &str, params: Value) -> (Value, Duration) {
+        let id = self.id();
+        self.inbox.timed(&mut self.server, id, method, params)
+    }
+
+    fn ok(&mut self, method: &str, params: Value) -> Value {
+        let (reply, _) = self.call(method, params);
+        assert!(reply.get("result").is_some(), "{method}: {reply}");
+        reply["result"].clone()
+    }
+
+    fn send(&mut self, method: &str, params: Value) -> u64 {
+        let id = self.id();
+        self.server
+            .send(json!({"id":id,"method":method,"params":params}));
+        id
+    }
+
+    fn page(&mut self) -> String {
+        let url = format!("{}/", self.origin);
+        self.ok("browser.new_page", json!({"url":url}))["pageId"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    fn open_alert(&mut self, page: &str) {
+        self.ok(
+            "page.execute",
+            json!({"pageId":page,"function":"()=>{setTimeout(()=>alert('are you sure?'),0)}"}),
+        );
+        std::thread::sleep(Duration::from_millis(300));
+    }
+
+    fn stall_navigation(&mut self, page: &str) {
+        self.ok(
+            "page.execute",
+            json!({"pageId":page,"function":"()=>{setTimeout(()=>{location.href='/hang'},0)}"}),
+        );
+    }
+
+    fn title(&mut self, page: &str, within: Duration) {
+        let (reply, elapsed) = self.call("page.title", json!({"pageId":page}));
+        assert_eq!(reply["result"]["title"], "fixture", "{reply}");
+        assert!(elapsed < within, "{elapsed:?}");
+    }
+
+    fn finish(mut self) {
+        let id = self.id();
+        self.server.shutdown(id);
+    }
+}
+
+fn assert_dialog_open(reply: &Value, method: &str) {
+    let error = &reply["error"];
+    assert_eq!(error["code"], "DialogOpen", "{method}: {reply}");
+    let message = error["message"].as_str().unwrap();
+    assert!(message.contains("dialog is open"), "{message}");
+    assert!(message.contains("are you sure?"), "{message}");
+    assert_eq!(error["data"]["detail"]["code"], "dialog_open", "{reply}");
+    assert!(
+        error["data"]["detail"]["hint"]
+            .as_str()
+            .is_some_and(|hint| hint.contains("dialog.accept") && hint.contains("dialog.dismiss")),
+        "{reply}"
+    );
+    let blocker = &error["data"]["blocker"];
+    assert_eq!(blocker["kind"], "dialog", "{reply}");
+    assert_eq!(blocker["dialogType"], "alert", "{reply}");
+    assert_eq!(blocker["message"], "are you sure?", "{reply}");
+    assert!(blocker["elapsedMs"].is_u64(), "{reply}");
+}
+
+#[test]
+#[ignore = "requires Chrome"]
+fn an_open_dialog_is_reported_at_once_and_clearing_it_frees_the_tab() {
+    let mut blocked = Blocked::current();
+    let other = blocked.page();
+    let page = blocked.page();
+    blocked.open_alert(&page);
+    for (method, params) in [
+        ("page.title", json!({"pageId":page})),
+        ("page.evaluate", json!({"pageId":page,"function":"()=>1"})),
+        ("page.get_text", json!({"pageId":page,"selector":"h1"})),
+        ("page.exists", json!({"pageId":page,"selector":"h1"})),
+        ("page.screenshot", json!({"pageId":page})),
+        ("agent.observe", json!({"pageId":page})),
+        ("text", json!({"pageId":page})),
+        ("eval", json!({"pageId":page,"code":"1"})),
+    ] {
+        let (reply, elapsed) = blocked.call(method, params);
+        assert_dialog_open(&reply, method);
+        assert!(elapsed < QUICK, "{method}: {elapsed:?}");
+    }
+    let operation = uuid::Uuid::new_v4().to_string();
+    let (refused, elapsed) = blocked.call(
+        "actions.perform",
+        json!({"pageId":page,"operation_id":operation,
+            "action":{"kind":"hover","target":{"query":{"kind":"css","selector":"#plain"}}}}),
+    );
+    assert_dialog_open(&refused, "actions.perform");
+    assert_eq!(
+        refused["error"]["data"]["operation_id"], operation,
+        "{refused}"
+    );
+    assert!(elapsed < QUICK, "{elapsed:?}");
+    let (unknown, _) = blocked.call("operations.get", json!({"id":operation}));
+    assert!(unknown.get("error").is_some(), "{unknown}");
+    blocked.title(&other, UNAFFECTED);
+
+    let (accepted, elapsed) = blocked.call("dialog.accept", json!({"pageId":page}));
+    assert_eq!(accepted["result"], "Dialog accepted", "{accepted}");
+    assert!(elapsed < QUICK, "{elapsed:?}");
+    blocked.title(&page, QUICK);
+
+    blocked.open_alert(&page);
+    let (dismissed, elapsed) = blocked.call("dialog.dismiss", json!({"pageId":page}));
+    assert_eq!(dismissed["result"], "Dialog dismissed", "{dismissed}");
+    assert!(elapsed < QUICK, "{elapsed:?}");
+    blocked.title(&page, QUICK);
+
+    let (confirm, elapsed) = blocked.call(
+        "page.evaluate",
+        json!({"pageId":page,"function":"()=>confirm('are you sure?')"}),
+    );
+    assert_eq!(confirm["error"]["code"], "DialogOpen", "{confirm}");
+    assert_eq!(
+        confirm["error"]["data"]["blocker"]["dialogType"], "confirm",
+        "{confirm}"
+    );
+    assert!(
+        confirm["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("`page.evaluate` returned without a result"),
+        "{confirm}"
+    );
+    assert!(elapsed < QUICK, "{elapsed:?}");
+    blocked.ok("dialog.dismiss", json!({"pageId":page}));
+    blocked.title(&page, QUICK);
+    let (none, _) = blocked.call("dialog.accept", json!({"pageId":page}));
+    assert_eq!(none["error"]["code"], "Cdp", "{none}");
+    blocked.finish();
+}
+
+#[test]
+#[ignore = "requires Chrome"]
+fn a_click_that_opens_a_dialog_ends_its_operation_and_is_sent_once() {
+    let mut blocked = Blocked::current();
+    let page = blocked.page();
+    let status = json!({"query":{"kind":"css","selector":"#s"}});
+    let operation = uuid::Uuid::new_v4().to_string();
+    let started = Instant::now();
+    let record = blocked.ok(
+        "actions.perform",
+        json!({"pageId":page,"operation_id":operation,
+            "action":{"kind":"click","target":{"query":{"kind":"css","selector":"#danger"}}},
+            "options":{"expect":{"kind":"text","target":status,"value":"Deleted"},"timeout_ms":8000}}),
+    );
+    assert_eq!(record["id"], operation, "{record}");
+    let record = blocked.ok("operations.wait", json!({"id":operation,"timeout_ms":8000}));
+    assert!(
+        started.elapsed() < Duration::from_millis(3000),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(record["state"], "finished", "{record}");
+    assert_eq!(record["error_code"], "dialog_open", "{record}");
+    assert_eq!(record["outcome"], "outcome_unknown", "{record}");
+    assert_eq!(record["dispatch_intent"], true, "{record}");
+    assert_eq!(
+        record["receipt"]["dispatch"], "may_have_been_sent",
+        "{record}"
+    );
+    assert_eq!(record["receipt"]["target_id"], page, "{record}");
+    assert_eq!(record["receipt"]["outcome"], "outcome_unknown", "{record}");
+    assert_eq!(record["error"]["code"], "dialog_open", "{record}");
+    let message = record["error"]["message"].as_str().unwrap();
+    assert!(message.contains("dialog is open"), "{message}");
+    assert!(message.contains("are you sure?"), "{message}");
+    assert!(message.contains("was dispatched"), "{message}");
+    assert!(message.contains("was sent to the page once"), "{message}");
+    assert!(
+        record["error"]["hint"]
+            .as_str()
+            .unwrap()
+            .contains("dialog.accept"),
+        "{record}"
+    );
+    assert_eq!(
+        record["error"]["context"]["action_status"], "may_have_executed",
+        "{record}"
+    );
+    std::thread::sleep(Duration::from_secs(6));
+    let (accepted, elapsed) = blocked.call("dialog.accept", json!({"pageId":page}));
+    assert_eq!(accepted["result"], "Dialog accepted", "{accepted}");
+    assert!(elapsed < QUICK, "{elapsed:?}");
+    let text = blocked.ok("page.get_text", json!({"pageId":page,"selector":"#s"}));
+    assert_eq!(text["text"], "Deleted", "{text}");
+    let next = uuid::Uuid::new_v4().to_string();
+    blocked.ok(
+        "actions.perform",
+        json!({"pageId":page,"operation_id":next,
+            "action":{"kind":"click","target":{"query":{"kind":"css","selector":"#plain"}}},
+            "options":{"expect":{"kind":"text","target":status,"value":"Plain"},"timeout_ms":8000}}),
+    );
+    let record = blocked.ok("operations.wait", json!({"id":next,"timeout_ms":9000}));
+    assert_eq!(record["outcome"], "verified_complete", "{record}");
+    let clicks = blocked.ok(
+        "page.evaluate",
+        json!({"pageId":page,"function":"()=>window.clicks"}),
+    );
+    assert_eq!(clicks["result"], 1, "{clicks}");
+    let stored = blocked.ok("operations.get", json!({"id":operation}));
+    assert_eq!(stored["error_code"], "dialog_open", "{stored}");
+    blocked.finish();
+}
+
+fn assert_navigation_pending(reply: &Value) {
+    let error = &reply["error"];
+    assert_eq!(error["code"], "NavigationPending", "{reply}");
+    assert!(
+        error["message"].as_str().unwrap().contains("/hang"),
+        "{reply}"
+    );
+    assert_eq!(
+        error["data"]["detail"]["code"], "navigation_pending",
+        "{reply}"
+    );
+    assert_eq!(error["data"]["blocker"]["kind"], "navigation", "{reply}");
+    assert!(
+        error["data"]["blocker"]["url"]
+            .as_str()
+            .is_some_and(|url| url.ends_with("/hang")),
+        "{reply}"
+    );
+    assert!(error["data"]["blocker"]["elapsedMs"].is_u64(), "{reply}");
+}
+
+#[test]
+#[ignore = "requires Chrome"]
+fn a_navigation_the_page_started_is_named_when_it_stalls_and_a_new_one_recovers_the_tab() {
+    let mut blocked = Blocked::current();
+    let other = blocked.page();
+    let page = blocked.page();
+    blocked.stall_navigation(&page);
+    std::thread::sleep(Duration::from_millis(500));
+    let (early, elapsed) = blocked.call("page.title", json!({"pageId":page}));
+    assert_navigation_pending(&early);
+    assert!(elapsed < Duration::from_millis(8000), "{elapsed:?}");
+    assert!(elapsed > Duration::from_millis(3000), "{elapsed:?}");
+    for (method, params) in [
+        ("page.url", json!({"pageId":page})),
+        ("page.evaluate", json!({"pageId":page,"function":"()=>1"})),
+        ("page.exists", json!({"pageId":page,"selector":"h1"})),
+        ("text", json!({"pageId":page})),
+    ] {
+        let (reply, elapsed) = blocked.call(method, params);
+        assert_navigation_pending(&reply);
+        assert!(elapsed < QUICK, "{method}: {elapsed:?}");
+    }
+    blocked.title(&other, UNAFFECTED);
+    let navigate = |blocked: &mut Blocked, page: &str| {
+        let operation = uuid::Uuid::new_v4().to_string();
+        let url = format!("{}/", blocked.origin);
+        let started = Instant::now();
+        blocked.ok(
+            "actions.perform",
+            json!({"pageId":page,"operation_id":operation,
+                "action":{"kind":"navigate","url":url},"options":{"timeout_ms":8000}}),
+        );
+        let record = blocked.ok("operations.wait", json!({"id":operation,"timeout_ms":8000}));
+        assert_eq!(record["outcome"], "verified_complete", "{record}");
+        assert!(started.elapsed() < Duration::from_millis(8000));
+    };
+    navigate(&mut blocked, &page);
+    blocked.title(&page, QUICK);
+
+    let unread = blocked.page();
+    blocked.stall_navigation(&unread);
+    std::thread::sleep(Duration::from_millis(1000));
+    navigate(&mut blocked, &unread);
+    blocked.title(&unread, QUICK);
+    blocked.finish();
+}
+
+#[test]
+#[ignore = "requires Chrome"]
+fn clearing_a_dialog_and_closing_the_tab_overtake_a_request_stuck_on_that_page() {
+    let mut blocked = Blocked::current();
+    let other = blocked.page();
+    let page = blocked.page();
+    blocked.open_alert(&page);
+    let stuck = blocked.send(
+        "page.solve_turnstile",
+        json!({"pageId":page,"timeoutMs":20_000}),
+    );
+    let queued = blocked.send("page.reset_viewport", json!({"pageId":page}));
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(blocked
+        .inbox
+        .take(&blocked.server, stuck, Duration::from_millis(1))
+        .is_none());
+    let (dismissed, elapsed) = blocked.call("dialog.dismiss", json!({"pageId":page}));
+    assert_eq!(dismissed["result"], "Dialog dismissed", "{dismissed}");
+    assert!(elapsed < QUICK, "{elapsed:?}");
+    for id in [stuck, queued] {
+        let reply = blocked
+            .inbox
+            .take(&blocked.server, id, Duration::from_secs(5))
+            .expect("the request behind the dialog must finish once it is cleared");
+        assert!(reply.get("result").is_some(), "{reply}");
+    }
+    blocked.title(&page, QUICK);
+
+    blocked.open_alert(&page);
+    let stuck = blocked.send(
+        "page.solve_turnstile",
+        json!({"pageId":page,"timeoutMs":20_000}),
+    );
+    std::thread::sleep(Duration::from_millis(300));
+    let (closed, elapsed) = blocked.call("page.close", json!({"pageId":page}));
+    assert!(closed.get("result").is_some(), "{closed}");
+    assert!(elapsed < Duration::from_millis(3000), "{elapsed:?}");
+    blocked.title(&other, UNAFFECTED);
+    let tabs = blocked.ok("browser.tabs", json!({}));
+    assert!(
+        !tabs["tabs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|tab| tab["id"] == json!(page)),
+        "{tabs}"
+    );
+    let ended = blocked
+        .inbox
+        .take(&blocked.server, stuck, Duration::from_secs(40))
+        .expect("the request on the closed tab must end");
+    assert!(ended.get("error").is_some(), "{ended}");
+    let (gone, _) = blocked.call("page.title", json!({"pageId":page}));
+    assert_eq!(gone["error"]["code"], "InvalidPage", "{gone}");
+    blocked.finish();
+}
+
+#[test]
+#[ignore = "requires Chrome"]
+fn a_client_that_did_not_ask_for_the_blocker_codes_receives_operation_errors() {
+    for hello in [
+        None,
+        Some(json!({"protocol":{"major":2,"minor":1}})),
+        Some(json!({"protocol":{"major":2,"minor":0}})),
+    ] {
+        let mut blocked = Blocked::start(hello.clone());
+        let page = blocked.page();
+        blocked.open_alert(&page);
+        for (method, params) in [
+            ("page.title", json!({"pageId":page})),
+            ("page.exists", json!({"pageId":page,"selector":"h1"})),
+            ("text", json!({"pageId":page})),
+        ] {
+            let (reply, elapsed) = blocked.call(method, params);
+            assert_eq!(
+                reply["error"]["code"], "Operation",
+                "{hello:?} {method}: {reply}"
+            );
+            assert_eq!(
+                reply["error"]["data"]["detail"]["code"], "dialog_open",
+                "{reply}"
+            );
+            assert!(reply["error"]["data"].get("blocker").is_none(), "{reply}");
+            assert!(reply["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("are you sure?"));
+            assert!(elapsed < QUICK, "{elapsed:?}");
+        }
+        blocked.ok("dialog.dismiss", json!({"pageId":page}));
+        blocked.title(&page, QUICK);
+        blocked.finish();
+    }
+    let mut understands = Blocked::start(Some(
+        json!({"protocol":{"major":2,"minor":0},"understands":{"major":2,"minor":2}}),
+    ));
+    let page = understands.page();
+    understands.open_alert(&page);
+    let (reply, _) = understands.call("page.title", json!({"pageId":page}));
+    assert_dialog_open(&reply, "page.title");
+    understands.ok("dialog.dismiss", json!({"pageId":page}));
+    understands.finish();
+}
+
+#[test]
+#[ignore = "requires Chrome; waits for the 15 second read limit"]
+fn a_page_whose_main_thread_is_busy_is_reported_as_unresponsive() {
+    let mut blocked = Blocked::current();
+    let other = blocked.page();
+    let page = blocked.page();
+    blocked.ok(
+        "page.execute",
+        json!({"pageId":page,"function":"()=>{setTimeout(()=>{while(true){}},0)}"}),
+    );
+    std::thread::sleep(Duration::from_millis(300));
+    let (reply, elapsed) = blocked.call("page.title", json!({"pageId":page}));
+    assert_eq!(reply["error"]["code"], "PageUnresponsive", "{reply}");
+    assert_eq!(
+        reply["error"]["data"]["detail"]["code"], "page_unresponsive",
+        "{reply}"
+    );
+    assert!(reply["error"]["data"].get("blocker").is_none(), "{reply}");
+    assert!(
+        reply["error"]["data"]["detail"]["hint"]
+            .as_str()
+            .unwrap()
+            .contains("browser.new_page"),
+        "{reply}"
+    );
+    assert!(elapsed < Duration::from_secs(18), "{elapsed:?}");
+    assert!(elapsed >= Duration::from_secs(14), "{elapsed:?}");
+    blocked.title(&other, UNAFFECTED);
+    let (closed, _) = blocked.call("page.close", json!({"pageId":page}));
+    assert!(closed.get("result").is_some(), "{closed}");
+    blocked.finish();
+}

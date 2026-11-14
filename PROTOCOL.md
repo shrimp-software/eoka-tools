@@ -33,6 +33,11 @@ consume those contracts. The Go client implements the same wire protocol.
   page and are never queued behind one. `browser.launch`, `browser.connect` and
   `browser.close` are barriers: each waits for every request received before it
   and holds back every request received after it until it finishes.
+- Requests that clear a blocked page do not wait for that page's queue:
+  `dialog.accept` and `dialog.dismiss` always start at once, and `page.close`
+  and `browser.close_tab` start at once while the page has an open dialog or a
+  pending navigation. Requests received after them for the same page still
+  wait for them.
 - Catalog operations share one engine and run one at a time across pages; a slow
   catalog operation delays catalog operations on other pages, not their
   registered `page.*` methods. `agent.observe` and `agent.step` likewise share
@@ -150,6 +155,39 @@ the remedy and, for a request that was not started, `context.action_status`.
 A client spoken to as protocol 2.0 or 2.1 receives the same failure as an
 `Operation` error: the same message and `data.detail`, without `data.blocker`.
 Its `data.detail.code` still names the state.
+
+Registered page methods and catalog operations report these states the same
+way:
+
+- A request for a page with an open dialog is refused before it starts. So is
+  a request for a page whose navigation has waited five seconds, except waits
+  and captures, which run, and navigations, which first stop the pending load
+  and then proceed; that is how a fresh `page.goto` or navigate action recovers
+  a stalled tab.
+- A request already in flight ends as soon as a dialog opens, or once a
+  navigation that started under it has waited five seconds. Its message says it
+  returned without a result; a script or input may already have taken effect.
+  `agent.observe`, `agent.step` and action admission stop by themselves and
+  return their own evidence: `agent.observe` fails with the same code, and
+  `agent.step` and the operation record carry `dialog_open`.
+- Reads (`page.title`, `page.url`, `page.text`, `page.content`,
+  `page.get_text`, `page.get_attribute`, `page.exists`, `page.frames`,
+  `page.capture_state`) that get no answer within 15 seconds end as
+  `PageUnresponsive`. Other methods that reach the command deadline are checked
+  the same way before their timeout is reported.
+- `dialog.accept` and `dialog.dismiss` answer the dialog directly and work
+  while any other request is blocked. `page.release_all_inputs`,
+  `page.set_viewport`, `page.reset_viewport`, `page.restore_state`,
+  `page.solve_turnstile`, `recording.*` and tab close are never refused.
+- An operation that is running when a dialog opens on its page ends: its record
+  is `finished` with `error_code` `dialog_open`, `outcome` `outcome_unknown`
+  when input had been dispatched (`not_dispatched` otherwise) and a receipt
+  whose `dispatch` is `may_have_been_sent` or `not_sent`. Nothing is replayed.
+  Input the interrupted action still held is released before the next action
+  on that page.
+- A dialog that was already open before the server attached to the page is not
+  known to it; such a page reports `PageUnresponsive`, and `dialog.dismiss`
+  clears it.
 
 Invalid request envelopes/parameters, unknown methods, incompatible protocols,
 message-size violations, overload and shutdown are explicit protocol errors.

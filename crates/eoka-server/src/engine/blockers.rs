@@ -74,6 +74,7 @@ pub enum Surface {
     Catalog,
     Cli,
     Mcp,
+    Sidecar,
 }
 
 static SURFACE: OnceLock<Surface> = OnceLock::new();
@@ -111,7 +112,7 @@ impl<'a> Remedies<'a> {
                 None => format!("`eoka {cli}`"),
             },
             Surface::Mcp => format!("`{mcp}`"),
-            Surface::Catalog => format!("`{catalog}`"),
+            Surface::Catalog | Surface::Sidecar => format!("`{catalog}`"),
         }
     }
 
@@ -126,7 +127,7 @@ impl<'a> Remedies<'a> {
             (Surface::Cli, "agent_step") => "step".into(),
             (Surface::Cli, "action_perform") => "action".into(),
             (Surface::Cli, _) => path.replace('.', " ").replace('_', "-"),
-            (Surface::Catalog, _) => path.to_owned(),
+            (Surface::Catalog | Surface::Sidecar, _) => path.to_owned(),
             (Surface::Mcp, command) => command.to_owned(),
         }
     }
@@ -160,10 +161,16 @@ impl<'a> Remedies<'a> {
     }
 
     pub fn new_tab(&self) -> String {
+        if self.surface == Surface::Sidecar {
+            return "`browser.new_page`".into();
+        }
         self.command("tab new URL", "new_tab", "tabs.new")
     }
 
     pub fn status(&self) -> String {
+        if self.surface == Surface::Sidecar {
+            return "`browser.tabs`".into();
+        }
         self.command("status", "list_tabs", "tabs.list")
     }
 

@@ -203,16 +203,24 @@ pub async fn tabs(state: &AppState, _params: Value) -> Result<Value, ServerError
         .map_err(|error| ServerError::internal(error.to_string()))
 }
 
+const CLOSING_INPUT_RELEASE: std::time::Duration = std::time::Duration::from_secs(3);
+
 pub(crate) async fn close_tab_impl(
     state: &AppState,
     page_id: &str,
 ) -> Result<Option<ServerError>, ServerError> {
     let page = state.page(page_id)?;
     let recording_error = state.recordings.cancel_page(page_id).await.err();
-    let release_result = page.release_all_inputs().await;
+    let release_error =
+        match tokio::time::timeout(CLOSING_INPUT_RELEASE, page.release_all_inputs()).await {
+            Ok(released) => released.err().map(ServerError::from),
+            Err(_) => Some(ServerError::new(
+                eoka_protocol::sidecar::ErrorCode::Timeout,
+                "held input was not released within 3 seconds before the tab closed",
+            )),
+        };
     state.release_engine_tab(page_id).await;
     state.close_page(page_id).await?;
-    let release_error = release_result.err().map(ServerError::from);
     Ok(match (recording_error, release_error) {
         (Some(mut recording), Some(release)) => {
             recording.message.push_str("; input cleanup failed: ");

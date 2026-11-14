@@ -23,6 +23,7 @@ struct Shared {
     pages: Mutex<HashMap<String, Page>>,
     engine: tokio::sync::Mutex<Option<crate::engine::Engine>>,
     engine_pages: Mutex<HashSet<String>>,
+    retired_engine_pages: Mutex<Vec<String>>,
     cloudflare: Mutex<Option<crate::cloudflare::CloudflareWatcher>>,
     topology: tokio::sync::Mutex<()>,
     shutdown: AtomicBool,
@@ -40,6 +41,7 @@ impl AppState {
     pub async fn take_browser(&self) -> Option<Arc<Browser>> {
         *self.shared.engine.lock().await = None;
         self.shared.engine_pages.lock().clear();
+        self.shared.retired_engine_pages.lock().clear();
         self.shared.browser.lock().take()
     }
 
@@ -48,6 +50,7 @@ impl AppState {
             *engine = None;
         }
         self.shared.engine_pages.lock().clear();
+        self.shared.retired_engine_pages.lock().clear();
         self.shared.browser.lock().take();
     }
 
@@ -64,6 +67,7 @@ impl AppState {
     }
 
     pub fn insert_page(&self, id: String, page: Page) {
+        crate::engine::blockers::watch(&page);
         self.shared.pages.lock().insert(id, page);
         self.publish_pages();
     }
@@ -98,6 +102,12 @@ impl AppState {
         let browser = self.browser()?;
         let response = {
             let mut engine = self.shared.engine.lock().await;
+            let retired = std::mem::take(&mut *self.shared.retired_engine_pages.lock());
+            if let Some(engine) = engine.as_mut() {
+                for closed in retired {
+                    engine.release_tab(&closed).await;
+                }
+            }
             self.shared.engine_pages.lock().insert(page_id.to_owned());
             engine
                 .get_or_insert_with(|| {
@@ -121,6 +131,9 @@ impl AppState {
             return Ok(record.clone());
         }
         let mut error = match response.error_detail {
+            Some(detail) if ErrorCode::for_blocker_detail(&detail.code).is_some() => {
+                crate::methods::blocked::blocked_detail(detail, &page)
+            }
             Some(detail) => match eoka_protocol::sidecar::core_error_code(&detail.code) {
                 Some(code) => ServerError::new(code, detail.message),
                 None => ServerError::from_detail(detail),
@@ -147,8 +160,15 @@ impl AppState {
         if !self.shared.engine_pages.lock().remove(id) {
             return;
         }
-        if let Some(engine) = self.shared.engine.lock().await.as_mut() {
-            engine.release_tab(id).await;
+        match self.shared.engine.try_lock() {
+            Ok(mut engine) => {
+                if let Some(engine) = engine.as_mut() {
+                    engine.release_tab(id).await;
+                }
+            }
+            Err(_) => {
+                self.shared.retired_engine_pages.lock().push(id.to_owned());
+            }
         }
     }
 
@@ -201,7 +221,10 @@ impl AppState {
         for tab in &tabs {
             if !self.has_page(&tab.id) {
                 match browser.attach_page(&tab.id).await {
-                    Ok(page) => attached.push((tab.id.clone(), page)),
+                    Ok(page) => {
+                        crate::engine::blockers::watch(&page);
+                        attached.push((tab.id.clone(), page));
+                    }
                     Err(error) => {
                         if browser
                             .tabs()
