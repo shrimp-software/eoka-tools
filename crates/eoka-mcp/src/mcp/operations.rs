@@ -25,7 +25,7 @@ impl EokaServer {
                 arguments,
             })
         };
-        let (response, _) = self.respond(tool, request).await?;
+        let (response, _) = self.respond(tool, request, Needs::Page).await?;
         protocol_tool_response(if unverified {
             as_unverified_success(response)
         } else {

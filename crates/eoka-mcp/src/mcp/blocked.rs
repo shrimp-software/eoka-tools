@@ -82,11 +82,8 @@ impl EokaServer {
     }
 
     pub(super) async fn gate_page(&self, tool: &str) -> Result<Option<Page>, CallToolResult> {
-        match tokio::time::timeout(BUSY_LIMIT, self.state.lock()).await {
-            Ok(guard) => Ok(guard
-                .as_ref()
-                .and_then(|state| state.current_tab())
-                .map(|tab| tab.page.clone())),
+        match tokio::time::timeout(BUSY_LIMIT, self.engine.lock()).await {
+            Ok(engine) => Ok(engine.current_page()),
             Err(_) => {
                 let occupant = self
                     .running
@@ -168,11 +165,11 @@ impl EokaServer {
     }
 
     pub(super) async fn transport_alive(&self) -> bool {
-        let guard = self.state.lock().await;
-        guard
-            .as_ref()
-            .and_then(|state| state.current_tab())
-            .is_some_and(|tab| !tab.page.session().transport().is_closed())
+        self.engine
+            .lock()
+            .await
+            .current_page()
+            .is_some_and(|page| !page.session().transport().is_closed())
     }
 }
 

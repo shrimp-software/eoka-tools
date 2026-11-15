@@ -1,9 +1,7 @@
-mod agent;
 mod blocked;
 mod error;
 mod helpers;
 mod operations;
-mod state;
 #[cfg(test)]
 mod surface;
 #[cfg(test)]
@@ -24,8 +22,7 @@ use eoka_protocol::{input_schema_for_cmd, operation_by_cmd, Request as Operation
 use eoka_server::{annotate, observe};
 
 use error::{internal, invalid, is_transport_error_msg, AgentError};
-use helpers::{element_list, resolve_js, text_ok, title_nonblocking};
-use state::BrowserState;
+use helpers::{element_list, resolve_js, text_ok};
 use types::*;
 
 const MCP_PROTOCOL_TOOL_ROUTES: &[(&str, &str)] = &[
@@ -139,8 +136,8 @@ fn apply_protocol_tool_metadata(router: &mut ToolRouter<EokaServer>) {
 
 #[derive(Clone)]
 pub struct EokaServer {
-    agent: Arc<Mutex<eoka_server::agent::AgentSession>>,
-    state: Arc<Mutex<Option<BrowserState>>>,
+    engine: Arc<Mutex<eoka_server::engine::Engine>>,
+    unhealthy: Arc<std::sync::atomic::AtomicBool>,
     running: Arc<std::sync::Mutex<Option<(String, std::time::Instant)>>>,
     headless: bool,
     tool_router: ToolRouter<EokaServer>,
@@ -149,14 +146,14 @@ pub struct EokaServer {
 }
 
 impl EokaServer {
-    async fn lock_browser(
-        &self,
-    ) -> Result<tokio::sync::MutexGuard<'_, Option<BrowserState>>, ErrorData> {
-        let guard = self.state.lock().await;
-        if guard.is_none() {
-            return Err(ErrorData::from(AgentError::NoBrowser));
+    async fn page(&self) -> Result<eoka_server::eoka::Page, ErrorData> {
+        let engine = self.engine.lock().await;
+        if !engine.is_open() {
+            return Err(AgentError::NoBrowser.into());
         }
-        Ok(guard)
+        engine
+            .current_page()
+            .ok_or_else(|| AgentError::NoTab.into())
     }
 
     async fn catalog_tool(
@@ -165,7 +162,6 @@ impl EokaServer {
         spoken: &str,
         arguments: Option<JsonObject>,
     ) -> Result<CallToolResult, ErrorData> {
-        drop(self.lock_browser().await?);
         let request = eoka_protocol::request_from_cmd(
             operation.cmd,
             Value::Object(arguments.unwrap_or_default()),
@@ -178,42 +174,33 @@ impl EokaServer {
         &self,
         tool: &str,
         operation: Operation,
-    ) -> Result<(eoka_protocol::Response, eoka_server::eoka::Page), ErrorData> {
-        let read_only = operation.spec().read_only;
-        let mut guard = self.lock_browser().await?;
-        let state = guard
-            .as_mut()
-            .ok_or_else(|| ErrorData::from(AgentError::NoBrowser))?;
-        let page_id = state
-            .current_tab_id
-            .clone()
-            .ok_or_else(|| ErrorData::from(AgentError::NoTab))?;
-        let page = state
-            .current_tab()
-            .ok_or_else(|| ErrorData::from(AgentError::NoTab))?
-            .page
-            .clone();
-        let server = state.server.clone();
+        needs: Needs,
+    ) -> Result<(eoka_protocol::Response, Option<eoka_server::eoka::Page>), ErrorData> {
+        let engine = self.engine.clone();
         let spoken = tool.to_owned();
-        let mut response =
-            tokio::spawn(async move { server.respond(&page_id, operation, Some(&spoken)).await })
-                .await
-                .map_err(internal)?
-                .unwrap_or_else(|error| match error.data.and_then(|data| data.detail) {
-                    Some(detail) => eoka_protocol::Response::err_detail(detail),
-                    None => eoka_protocol::Response::err(error.message),
-                });
-        if !read_only {
-            if let Some(tab) = state.current_tab_mut() {
-                tab.invalidate();
+        let answered = tokio::spawn(async move {
+            let mut engine = engine.lock_owned().await;
+            if needs != Needs::Nothing && !engine.is_open() {
+                return Err(AgentError::NoBrowser);
             }
-        }
+            if needs == Needs::Page && engine.current_page().is_none() {
+                return Err(AgentError::NoTab);
+            }
+            let response = Box::pin(engine.handle_as(Some(&spoken), operation)).await;
+            Ok((response, engine.current_page()))
+        })
+        .await
+        .map_err(internal)?;
+        let (mut response, page) = answered?;
         let failure = response.error.clone().unwrap_or_default();
         let answered_late = failure.to_ascii_lowercase().contains("timed out")
-            && !page.session().transport().is_closed();
+            && page
+                .as_ref()
+                .is_some_and(|page| !page.session().transport().is_closed());
         if !response.ok && is_transport_error_msg(&failure) && !answered_late {
             eprintln!("[eoka-mcp] connection lost, marking unhealthy: {failure}");
-            state.unhealthy = true;
+            self.unhealthy
+                .store(true, std::sync::atomic::Ordering::Release);
             let lost = " (connection lost - will relaunch on next call)";
             if let Some(error) = response.error.as_mut() {
                 error.push_str(lost);
@@ -230,8 +217,17 @@ impl EokaServer {
         tool: &str,
         operation: Operation,
     ) -> Result<CallToolResult, ErrorData> {
-        let (response, page) = self.respond(tool, operation).await?;
-        let error = match eoka_server::state::catalog_result(response, Some(&page)) {
+        self.unwrapped(tool, operation, Needs::Page).await
+    }
+
+    async fn unwrapped(
+        &self,
+        tool: &str,
+        operation: Operation,
+        needs: Needs,
+    ) -> Result<CallToolResult, ErrorData> {
+        let (response, page) = self.respond(tool, operation, needs).await?;
+        let error = match eoka_server::state::catalog_result(response, page.as_ref()) {
             Ok(Value::String(text)) => return text_ok(text),
             Ok(data) => return text_ok(serde_json::to_string(&data).map_err(internal)?),
             Err(error) => error,
@@ -248,8 +244,9 @@ impl EokaServer {
         &self,
         tool: &str,
         operation: Operation,
+        needs: Needs,
     ) -> Result<CallToolResult, ErrorData> {
-        let (response, _) = self.respond(tool, operation).await?;
+        let (response, _) = self.respond(tool, operation, needs).await?;
         protocol_tool_response(response)
     }
 
@@ -290,21 +287,19 @@ impl EokaServer {
     }
 
     async fn ensure_browser(&self) -> Result<(), ErrorData> {
-        let mut guard = self.state.lock().await;
-        if guard.as_ref().map(|s| s.unhealthy).unwrap_or(false) {
+        let mut engine = self.engine.lock().await;
+        if self
+            .unhealthy
+            .swap(false, std::sync::atomic::Ordering::AcqRel)
+        {
             eprintln!("[eoka-mcp] browser unhealthy, relaunching...");
-            self.operations.stop().await;
-            self.downloads.stop().await;
-            if let Some(state) = guard.take() {
-                let _ = state.close().await;
-            }
+            let _ = Box::pin(engine.handle_as(None, Operation::Close)).await;
         }
-        if guard.is_none() {
-            let state =
-                BrowserState::new(self.headless, self.agent.clone(), self.operations.clone())
-                    .await
-                    .map_err(internal)?;
-            *guard = Some(state);
+        if !engine.is_open() {
+            let proxy = helpers::parse_proxy_env().map_err(internal)?;
+            Box::pin(engine.launch_with(launch_spec(self.headless, proxy)))
+                .await
+                .map_err(internal)?;
         }
         Ok(())
     }
@@ -317,10 +312,8 @@ impl EokaServer {
         }
         if is_transport_error_msg(&msg) {
             eprintln!("[eoka-mcp] connection lost, marking unhealthy: {}", msg);
-            let mut guard = self.state.lock().await;
-            if let Some(state) = guard.as_mut() {
-                state.unhealthy = true;
-            }
+            self.unhealthy
+                .store(true, std::sync::atomic::Ordering::Release);
             ErrorData::internal_error(
                 format!("{} (connection lost - will relaunch on next call)", msg),
                 None::<Value>,
@@ -348,14 +341,16 @@ impl EokaServer {
         apply_protocol_tool_metadata(&mut tool_router);
         add_catalog_tools(&mut tool_router, include_opt_in);
         eoka_server::engine::blockers::set_surface(eoka_server::engine::blockers::Surface::Mcp);
+        let mut engine = eoka_server::engine::Engine::new("mcp", launch_spec(headless, None));
+        engine.patch_binary(true);
         Self {
-            agent: Default::default(),
-            state: Arc::new(Mutex::new(None)),
+            operations: engine.operation_manager(),
+            downloads: engine.download_manager(),
+            engine: Arc::new(Mutex::new(engine)),
+            unhealthy: Default::default(),
             running: Default::default(),
             headless,
             tool_router,
-            downloads: Default::default(),
-            operations: Default::default(),
         }
     }
 
@@ -364,7 +359,7 @@ impl EokaServer {
         &self,
         req: Parameters<eoka_protocol::AgentObserveArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        self.agent_tool("agent_observe", Operation::AgentObserve(req.0))
+        self.envelope_tool("agent_observe", Operation::AgentObserve(req.0), Needs::Page)
             .await
     }
 
@@ -374,7 +369,7 @@ impl EokaServer {
         req: Parameters<eoka_protocol::AgentStepArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         helpers::ensure_action_urls_allowed(&serde_json::to_value(&req.0).map_err(internal)?)?;
-        self.agent_tool("agent_step", Operation::AgentStep(req.0))
+        self.envelope_tool("agent_step", Operation::AgentStep(req.0), Needs::Page)
             .await
     }
 
@@ -453,9 +448,6 @@ impl EokaServer {
         &self,
         req: Parameters<DownloadStartRequest>,
     ) -> Result<CallToolResult, ErrorData> {
-        if let Some(url) = &req.0.url {
-            helpers::ensure_url_allowed(url)?;
-        }
         match self.downloads.existing(&req.0).await {
             Ok(Some(record)) => {
                 return protocol_tool_response(eoka_server::downloads::start_response(Ok(record)))
@@ -463,48 +455,12 @@ impl EokaServer {
             Ok(None) => {}
             Err(error) => return protocol_tool_response(eoka_server::downloads::rejected(error)),
         }
-        self.downloads
-            .restore()
-            .await
-            .map_err(|e| internal(e.message))?;
-        req.0.validate().map_err(invalid)?;
-        let mut guard = self.state.lock().await;
-        let state = guard
-            .as_mut()
-            .ok_or_else(|| ErrorData::from(AgentError::NoBrowser))?;
-        if self.downloads.is_active() {
-            return protocol_tool_response(eoka_protocol::Response::err_detail(
-                eoka_server::downloads::failure("download_busy", "One download is already active"),
-            ));
-        }
-        let browser = state.browser.clone();
-        let tab = state
-            .current_tab_mut()
-            .ok_or_else(|| ErrorData::from(AgentError::NoTab))?;
-        let selector = if let Some(target) = req.0.click.as_deref() {
-            match eoka_server::downloads::resolve_click(
-                &*self.agent.lock().await,
-                &tab.page,
-                target,
-            )
-            .await
-            {
-                Ok(selector) => {
-                    tab.invalidate();
-                    Some(selector)
-                }
-                Err(error) => {
-                    return protocol_tool_response(eoka_server::downloads::rejected(error))
-                }
-            }
-        } else {
-            None
-        };
-        let result = self
-            .downloads
-            .start(&browser, &tab.page, req.0, selector)
-            .await;
-        protocol_tool_response(eoka_server::downloads::start_response(result))
+        self.envelope_tool(
+            "download_start",
+            Operation::DownloadStart(req.0),
+            Needs::Page,
+        )
+        .await
     }
 
     #[tool]
@@ -562,28 +518,8 @@ impl EokaServer {
     #[tool(description = "List all open browser tabs. Returns tab IDs, titles, and URLs.")]
     async fn list_tabs(&self) -> Result<CallToolResult, ErrorData> {
         self.ensure_browser().await?;
-        let guard = self.state.lock().await;
-        let state = guard.as_ref().unwrap();
-
-        let tabs = state.list_tabs().await.map_err(internal)?;
-        let current_id = state.current_tab_id.as_deref();
-
-        let mut out = String::new();
-        for tab in tabs {
-            let marker = if Some(tab.id.as_str()) == current_id {
-                " *"
-            } else {
-                ""
-            };
-            out.push_str(&format!(
-                "[{}]{} {}\n  {}\n",
-                tab.id, marker, tab.title, tab.url
-            ));
-        }
-        if out.is_empty() {
-            out = "No tabs open.".into();
-        }
-        text_ok(out)
+        self.unwrapped("list_tabs", Operation::TabList, Needs::Browser)
+            .await
     }
 
     #[tool(description = "Open a new browser tab. Optionally navigate to URL. Returns new tab ID.")]
@@ -592,50 +528,20 @@ impl EokaServer {
             helpers::ensure_url_allowed(url)?;
         }
         self.ensure_browser().await?;
-        let mut guard = self.state.lock().await;
-        let state = guard.as_mut().unwrap();
-
-        let (tab_id, tab) = state
-            .new_tab(req.0.url.as_deref())
+        self.unwrapped("new_tab", Operation::TabNew(req.0), Needs::Browser)
             .await
-            .map_err(internal)?;
-
-        let url = tab.page.url().await.map_err(internal)?;
-        let title = title_nonblocking(&tab.page).await;
-        text_ok(format!(
-            "Opened new tab [{}]\nURL: {}\nTitle: {}",
-            tab_id, url, title
-        ))
     }
 
     #[tool(description = "Switch to a different browser tab by ID. Get IDs from list_tabs.")]
     async fn switch_tab(&self, req: Parameters<TabIdRequest>) -> Result<CallToolResult, ErrorData> {
-        let mut guard = self.state.lock().await;
-        let state = guard
-            .as_mut()
-            .ok_or_else(|| ErrorData::from(AgentError::NoBrowser))?;
-
-        state.switch_tab(&req.0.tab_id).await.map_err(internal)?;
-
-        let tab = state.current_tab().unwrap();
-        let url = tab.page.url().await.map_err(internal)?;
-        let title = title_nonblocking(&tab.page).await;
-        text_ok(format!(
-            "Switched to tab [{}]\nURL: {}\nTitle: {}",
-            req.0.tab_id, url, title
-        ))
+        self.unwrapped("switch_tab", Operation::TabSwitch(req.0), Needs::Browser)
+            .await
     }
 
     #[tool(description = "Close a browser tab by ID. Cannot close the last remaining tab.")]
     async fn close_tab(&self, req: Parameters<TabIdRequest>) -> Result<CallToolResult, ErrorData> {
-        self.operations.stop().await;
-        let mut guard = self.state.lock().await;
-        let state = guard
-            .as_mut()
-            .ok_or_else(|| ErrorData::from(AgentError::NoBrowser))?;
-
-        state.close_tab(&req.0.tab_id).await.map_err(internal)?;
-        text_ok(format!("Closed tab [{}]", req.0.tab_id))
+        self.unwrapped("close_tab", Operation::TabClose(req.0), Needs::Browser)
+            .await
     }
 
     #[tool(
@@ -648,15 +554,6 @@ impl EokaServer {
     ) -> Result<CallToolResult, ErrorData> {
         helpers::ensure_url_allowed(&req.0.url)?;
         self.ensure_browser().await?;
-        {
-            let mut guard = self.state.lock().await;
-            let state = guard
-                .as_mut()
-                .ok_or_else(|| ErrorData::from(AgentError::NoBrowser))?;
-            if state.current_tab_id.is_none() {
-                state.new_tab(None).await.map_err(internal)?;
-            }
-        }
         let open = eoka_protocol::OpenArgs {
             operation: req.0.operation,
             url: req.0.url,
@@ -666,7 +563,8 @@ impl EokaServer {
             inject_js: None,
             load_state: None,
         };
-        self.envelope_tool("navigate", Operation::Open(open)).await
+        self.envelope_tool("navigate", Operation::Open(open), Needs::Browser)
+            .await
     }
 
     #[tool(
@@ -681,32 +579,18 @@ impl EokaServer {
         description = "Take annotated screenshot with numbered element boxes. Returns PNG image AND element list. Best way to see the page."
     )]
     async fn screenshot(&self) -> Result<CallToolResult, ErrorData> {
-        let mut guard = self.state.lock().await;
-        let state = guard
-            .as_mut()
-            .ok_or_else(|| ErrorData::from(AgentError::NoBrowser))?;
-        let config_viewport_only = state.config.viewport_only;
-        let tab = state
-            .current_tab_mut()
-            .ok_or_else(|| ErrorData::from(AgentError::NoTab))?;
-
-        if tab.elements.is_empty() {
-            tab.elements = observe::observe(&tab.page, config_viewport_only)
-                .await
-                .map_err(internal)?;
-        }
-
-        let png = match annotate::annotated_screenshot(&tab.page, &tab.elements).await {
-            Ok(p) => p,
-            Err(e) => {
-                drop(guard);
-                return Err(self.check_transport_err(e).await);
-            }
+        let page = self.page().await?;
+        let viewport_only = eoka_server::ObserveConfig::default().viewport_only;
+        let elements = observe::observe(&page, viewport_only)
+            .await
+            .map_err(internal)?;
+        let png = match annotate::annotated_screenshot(&page, &elements).await {
+            Ok(png) => png,
+            Err(error) => return Err(self.check_transport_err(error).await),
         };
-        let list = element_list(&tab.elements);
-        let b64 = BASE64.encode(&png);
+        let list = element_list(&elements);
         Ok(CallToolResult::success(vec![
-            ContentBlock::image(b64, "image/png"),
+            ContentBlock::image(BASE64.encode(&png), "image/png"),
             ContentBlock::text(if list.is_empty() {
                 "No interactive elements found.".into()
             } else {
@@ -832,16 +716,7 @@ impl EokaServer {
         description = "Execute durable actions in sequence. Each action supplies its own operation_id, action and options. Stops on an uncertain or failed outcome; completed records remain inspectable."
     )]
     async fn batch(&self, req: Parameters<BatchRequest>) -> Result<CallToolResult, ErrorData> {
-        let page = {
-            let guard = self.state.lock().await;
-            guard
-                .as_ref()
-                .ok_or_else(|| ErrorData::from(AgentError::NoBrowser))?
-                .current_tab()
-                .ok_or_else(|| ErrorData::from(AgentError::NoTab))?
-                .page
-                .clone()
-        };
+        let page = self.page().await?;
         let mut records = Vec::new();
         for request in req.0.actions {
             let mut record = self
@@ -893,7 +768,8 @@ impl EokaServer {
         description = "Invoke a JavaScript function with JSON arguments and return its awaited JSON result. Use code or file for the function; raw=true explicitly selects the raw script escape hatch."
     )]
     async fn extract(&self, req: Parameters<JsRequest>) -> Result<CallToolResult, ErrorData> {
-        self.envelope_tool("extract", Operation::Eval(req.0)).await
+        self.envelope_tool("extract", Operation::Eval(req.0), Needs::Page)
+            .await
     }
 
     #[tool(
@@ -1098,16 +974,9 @@ impl EokaServer {
         &self,
         req: Parameters<JsRequest>,
     ) -> Result<CallToolResult, ErrorData> {
-        let guard = self.state.lock().await;
-        let state = guard
-            .as_ref()
-            .ok_or_else(|| ErrorData::from(AgentError::NoBrowser))?;
-        let tab = state
-            .current_tab()
-            .ok_or_else(|| ErrorData::from(AgentError::NoTab))?;
-
+        let page = self.page().await?;
         let code = resolve_js(&req.0)?;
-        tab.page.execute_sync(&code).await.map_err(internal)?;
+        page.execute_sync(&code).await.map_err(internal)?;
 
         text_ok("Captcha token injected")
     }
@@ -1151,17 +1020,10 @@ impl EokaServer {
                 .await;
         }
         self.ensure_browser().await?;
-        let mut guard = self.state.lock().await;
-        let state = guard
-            .as_mut()
-            .ok_or_else(|| ErrorData::from(AgentError::NoBrowser))?;
-        let tab = state
-            .current_tab_mut()
-            .ok_or_else(|| ErrorData::from(AgentError::NoTab))?;
+        let page = self.page().await?;
         let allow_nav = req.0.allow_nav.unwrap_or(false);
-        tab.page
-            .execute_sync(&format!(
-                r#"(() => {{
+        page.execute_sync(&format!(
+            r#"(() => {{
             window.__eoka_nav = null;
             window.__eoka_allow_nav = {allow_nav};
             if (window.__eoka_nav_installed) return;
@@ -1174,10 +1036,9 @@ impl EokaServer {
                 }};
             }}
         }})()"#
-            ))
-            .await
-            .map_err(internal)?;
-        drop(guard);
+        ))
+        .await
+        .map_err(internal)?;
         self.action_tool("click_intercept_nav", "click", arguments)
             .await
     }
@@ -1244,17 +1105,10 @@ impl EokaServer {
         &self,
         req: Parameters<WaitNetworkIdleRequest>,
     ) -> Result<CallToolResult, ErrorData> {
-        let guard = self.state.lock().await;
-        let state = guard
-            .as_ref()
-            .ok_or_else(|| ErrorData::from(AgentError::NoBrowser))?;
-        let tab = state
-            .current_tab()
-            .ok_or_else(|| ErrorData::from(AgentError::NoTab))?;
+        let page = self.page().await?;
         let idle_ms = req.0.idle_ms.unwrap_or(500);
         let timeout_ms = req.0.timeout_ms.unwrap_or(10_000);
-        tab.page
-            .wait_for_network_idle(idle_ms, timeout_ms)
+        page.wait_for_network_idle(idle_ms, timeout_ms)
             .await
             .map_err(internal)?;
         text_ok("Network idle")
@@ -1343,64 +1197,21 @@ impl EokaServer {
         &self,
         req: Parameters<LoadStateRequest>,
     ) -> Result<CallToolResult, ErrorData> {
-        let contents = std::fs::read_to_string(&req.0.path)
-            .map_err(|e| invalid(format!("Failed to read '{}': {}", req.0.path, e)))?;
-        let saved: helpers::SavedState = serde_json::from_str(&contents)
-            .map_err(|e| invalid(format!("Invalid state JSON: {}", e)))?;
-
-        let navigate = req.0.navigate.unwrap_or(true);
-        if navigate {
-            helpers::ensure_url_allowed(&saved.url)?;
-        }
         self.ensure_browser().await?;
-        let mut guard = self.state.lock().await;
-        let state = guard
-            .as_mut()
-            .ok_or_else(|| ErrorData::from(AgentError::NoBrowser))?;
-
-        if navigate {
-            let tab = state.ensure_tab(&saved.url).await.map_err(internal)?;
-            helpers::wait_for_stable(&tab.page)
-                .await
-                .map_err(internal)?;
-        }
-
-        let tab = state
-            .current_tab()
-            .ok_or_else(|| ErrorData::from(AgentError::NoTab))?;
-
-        let restored = helpers::restore_state(&tab.page, &saved).await?;
-
-        if navigate {
-            let _: String = tab
-                .page
-                .evaluate_sync("location.reload()")
-                .await
-                .unwrap_or_default();
-            helpers::wait_for_stable(&tab.page)
-                .await
-                .map_err(internal)?;
-        }
-
-        text_ok(format!(
-            "Loaded {} cookies, {} localStorage keys, {} sessionStorage keys from {}.{}",
-            saved.cookies.len(),
-            restored.local_restored,
-            restored.session_restored,
-            req.0.path,
-            restored.notice(&saved.url)
-        ))
+        let load = eoka_protocol::LoadStateArgs {
+            path: req.0.path,
+            no_navigate: !req.0.navigate.unwrap_or(true),
+        };
+        self.unwrapped("load_state", Operation::LoadState(load), Needs::Browser)
+            .await
     }
 
     #[tool(description = "Close the browser. Call when done to free resources.")]
     async fn close(&self) -> Result<CallToolResult, ErrorData> {
-        self.operations.stop().await;
-        self.downloads.stop().await;
-        let mut guard = self.state.lock().await;
-        if let Some(state) = guard.take() {
-            state.close().await.map_err(internal)?;
-        }
-        text_ok("Browser closed.")
+        self.unhealthy
+            .store(false, std::sync::atomic::Ordering::Release);
+        self.unwrapped("close", Operation::Close, Needs::Nothing)
+            .await
     }
 }
 
@@ -1477,18 +1288,37 @@ impl ServerHandler for EokaServer {
     }
 }
 
-async fn cleanup_browser(
-    state: &Arc<Mutex<Option<BrowserState>>>,
-    downloads: &eoka_server::downloads::DownloadManager,
-    operations: &eoka_server::operations::OperationManager,
-) {
-    operations.stop().await;
-    downloads.stop().await;
-    let mut guard = state.lock().await;
-    if let Some(bs) = guard.take() {
+async fn cleanup_browser(engine: &Arc<Mutex<eoka_server::engine::Engine>>) {
+    let mut engine = engine.lock().await;
+    if engine.is_open() {
         eprintln!("[eoka-mcp] closing browser...");
-        let _ = bs.close().await;
+        let _ = Box::pin(engine.handle_as(None, Operation::Close)).await;
         eprintln!("[eoka-mcp] browser closed.");
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Needs {
+    Nothing,
+    Browser,
+    Page,
+}
+
+fn launch_spec(headless: bool, proxy: Option<String>) -> eoka_protocol::launch_spec::LaunchSpec {
+    eoka_protocol::launch_spec::LaunchSpec::Launch {
+        headless,
+        from_profile: None,
+        clone_state_from: None,
+        no_stealth: false,
+        proxy,
+        no_js: false,
+        js_allow: Vec::new(),
+        js_block: Vec::new(),
+        persist: false,
+        geo_align: false,
+        auto_solve_cloudflare: std::env::var("EOKA_AUTO_SOLVE_CLOUDFLARE")
+            .is_ok_and(|value| value == "1" || value == "true"),
+        sandbox: true,
     }
 }
 
@@ -1496,13 +1326,8 @@ pub async fn run_server() -> anyhow::Result<()> {
     use rmcp::ServiceExt;
 
     let server = EokaServer::new();
-    let state_handle = Arc::clone(&server.state);
-    let downloads = server.downloads.clone();
-    let signal_downloads = downloads.clone();
-    let operations = server.operations.clone();
-    let signal_operations = operations.clone();
-
-    let sig_state = Arc::clone(&state_handle);
+    let engine = Arc::clone(&server.engine);
+    let signal_engine = Arc::clone(&engine);
     tokio::spawn(async move {
         let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
             .expect("failed to register SIGTERM handler");
@@ -1512,7 +1337,7 @@ pub async fn run_server() -> anyhow::Result<()> {
             _ = sigterm.recv() => eprintln!("[eoka-mcp] received SIGTERM"),
             _ = sigint.recv() => eprintln!("[eoka-mcp] received SIGINT"),
         }
-        cleanup_browser(&sig_state, &signal_downloads, &signal_operations).await;
+        cleanup_browser(&signal_engine).await;
         std::process::exit(0);
     });
 
@@ -1520,7 +1345,7 @@ pub async fn run_server() -> anyhow::Result<()> {
     service.waiting().await?;
 
     eprintln!("[eoka-mcp] MCP connection closed, cleaning up.");
-    cleanup_browser(&state_handle, &downloads, &operations).await;
+    cleanup_browser(&engine).await;
     Ok(())
 }
 

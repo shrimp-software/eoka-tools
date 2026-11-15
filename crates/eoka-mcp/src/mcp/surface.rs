@@ -549,12 +549,8 @@ async fn an_operation_started_by_the_engine_can_be_cancelled_from_mcp() {
     .await
     .unwrap();
     let (page, engine_operations) = {
-        let guard = server.state.lock().await;
-        let state = guard.as_ref().unwrap();
-        (
-            state.current_tab().unwrap().page.clone(),
-            state.server.operations.clone(),
-        )
+        let engine = server.engine.lock().await;
+        (engine.current_page().unwrap(), engine.operation_manager())
     };
     let id = uuid::Uuid::new_v4().to_string();
     let mut options: ActionOptions = serde_json::from_value(json!({"timeout_ms": 20000})).unwrap();
@@ -608,21 +604,12 @@ async fn a_lost_browser_is_noticed_by_an_engine_tool_and_relaunched() {
     )
     .await
     .unwrap();
-    let page = server
-        .state
-        .lock()
-        .await
-        .as_ref()
-        .unwrap()
-        .current_tab()
-        .unwrap()
-        .page
-        .clone();
+    let page = server.engine.lock().await.current_page().unwrap();
     page.session().transport().close().await.unwrap();
     let lost = call(&client, "page_text", json!({})).await.unwrap();
     assert_eq!(lost.is_error, Some(true), "{}", text(&lost));
     assert!(text(&lost).contains("connection lost"), "{}", text(&lost));
-    assert!(server.state.lock().await.as_ref().unwrap().unhealthy);
+    assert!(server.unhealthy.load(std::sync::atomic::Ordering::Acquire));
     let relaunched = call(
         &client,
         "navigate",
