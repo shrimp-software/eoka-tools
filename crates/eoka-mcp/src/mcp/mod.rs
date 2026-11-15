@@ -244,6 +244,15 @@ impl EokaServer {
         )]))
     }
 
+    async fn envelope_tool(
+        &self,
+        tool: &str,
+        operation: Operation,
+    ) -> Result<CallToolResult, ErrorData> {
+        let (response, _) = self.respond(tool, operation).await?;
+        protocol_tool_response(response)
+    }
+
     async fn launched_tool(
         &self,
         tool: &str,
@@ -637,15 +646,9 @@ impl EokaServer {
         &self,
         req: Parameters<NavigateRequest>,
     ) -> Result<CallToolResult, ErrorData> {
-        let id = req
-            .0
-            .operation
-            .operation_id
-            .clone()
-            .unwrap_or_else(operations::new_operation_id);
         helpers::ensure_url_allowed(&req.0.url)?;
         self.ensure_browser().await?;
-        let page = {
+        {
             let mut guard = self.state.lock().await;
             let state = guard
                 .as_mut()
@@ -653,69 +656,17 @@ impl EokaServer {
             if state.current_tab_id.is_none() {
                 state.new_tab(None).await.map_err(internal)?;
             }
-            let tab = state
-                .current_tab_mut()
-                .ok_or_else(|| ErrorData::from(AgentError::NoTab))?;
-            if let Some(ua) = &req.0.user_agent {
-                tab.page.set_user_agent(ua).await.map_err(internal)?;
-            }
-            if req.0.bypass_csp.unwrap_or(false) {
-                tab.page.set_bypass_csp(true).await.map_err(internal)?;
-            }
-            tab.invalidate();
-            tab.page.clone()
+        }
+        let open = eoka_protocol::OpenArgs {
+            operation: req.0.operation,
+            url: req.0.url,
+            headers: req.0.headers.map(|headers| serde_json::json!(headers)),
+            user_agent: req.0.user_agent,
+            bypass_csp: req.0.bypass_csp.unwrap_or(false),
+            inject_js: None,
+            load_state: None,
         };
-        let action = match req.0.headers {
-            Some(headers) => eoka_server::eoka::Action::NavigateWithHeaders {
-                url: req.0.url,
-                headers,
-            },
-            None => eoka_server::eoka::Action::Navigate {
-                url: req.0.url,
-                referrer: None,
-            },
-        };
-        let options = eoka_server::eoka::ActionOptions {
-            timeout_ms: req.0.operation.timeout_ms.unwrap_or(30000),
-            expect: req.0.operation.expect,
-            ..Default::default()
-        };
-        let budget = options.timeout_ms.min(60_000);
-        eoka_server::engine::blockers::watch(&page);
-        let record = self
-            .operations
-            .submit(page.clone(), id.clone(), action, options)
-            .await;
-        let record = match record {
-            Ok(record) => record,
-            Err(error) => {
-                return protocol_tool_response(eoka_server::operations::commands::failure(
-                    error,
-                    Some(id),
-                ))
-            }
-        };
-        let record = if matches!(record.state, eoka_protocol::OperationState::Running) {
-            match eoka_server::engine::blockers::wait_unless_dialog(
-                &self.operations,
-                &page,
-                &id,
-                budget,
-            )
-            .await
-            {
-                Ok(record) => record,
-                Err(error) => {
-                    return protocol_tool_response(eoka_server::operations::commands::failure(
-                        eoka_server::operations::commands::uncertain(error),
-                        Some(id),
-                    ))
-                }
-            }
-        } else {
-            record
-        };
-        protocol_tool_response(eoka_protocol::Response::action_result(record))
+        self.envelope_tool("navigate", Operation::Open(open)).await
     }
 
     #[tool(
@@ -942,55 +893,14 @@ impl EokaServer {
         description = "Invoke a JavaScript function with JSON arguments and return its awaited JSON result. Use code or file for the function; raw=true explicitly selects the raw script escape hatch."
     )]
     async fn extract(&self, req: Parameters<JsRequest>) -> Result<CallToolResult, ErrorData> {
-        let guard = self.state.lock().await;
-        let state = guard
-            .as_ref()
-            .ok_or_else(|| ErrorData::from(AgentError::NoBrowser))?;
-        let tab = state
-            .current_tab()
-            .ok_or_else(|| ErrorData::from(AgentError::NoTab))?;
-        let code = helpers::resolve_js_source(&req.0)?;
-        let value: Value = if req.0.no_await {
-            tab.page.evaluate_sync(&code).await
-        } else if req.0.raw {
-            tab.page.evaluate(&code).await
-        } else {
-            tab.page.evaluate_function(&code, &req.0.arguments).await
-        }
-        .map_err(internal)?;
-        let size = serde_json::to_vec(&value).map_err(internal)?.len();
-        let maximum = req.0.max_size.unwrap_or(1_048_576).min(1_048_576);
-        if size > maximum {
-            return Err(invalid("Evaluation result exceeds its JSON byte limit"));
-        }
-        protocol_tool_response(eoka_protocol::Response::ok(value))
+        self.envelope_tool("extract", Operation::Eval(req.0)).await
     }
 
     #[tool(
         description = "Invoke and await a JavaScript function with JSON arguments, propagating exceptions. Use code or file; raw=true explicitly selects the raw script escape hatch."
     )]
     async fn exec(&self, req: Parameters<JsRequest>) -> Result<CallToolResult, ErrorData> {
-        let guard = self.state.lock().await;
-        let state = guard
-            .as_ref()
-            .ok_or_else(|| ErrorData::from(AgentError::NoBrowser))?;
-        let tab = state
-            .current_tab()
-            .ok_or_else(|| ErrorData::from(AgentError::NoTab))?;
-        let code = helpers::resolve_js_source(&req.0)?;
-        if req.0.no_await {
-            tab.page.execute_sync(&code).await.map_err(internal)?;
-            return protocol_tool_response(eoka_protocol::Response::err_detail(eoka_protocol::ErrorDetail::new("outcome_unknown", "Raw execution dispatched; asynchronous completion was not awaited. Inspect the page before further input.")));
-        }
-        if req.0.raw {
-            tab.page.execute(&code).await.map_err(internal)?;
-        } else {
-            tab.page
-                .execute_function(&code, &req.0.arguments)
-                .await
-                .map_err(internal)?;
-        }
-        text_ok("Executed successfully")
+        self.engine_tool("exec", Operation::Exec(req.0)).await
     }
 
     #[tool(
@@ -1298,31 +1208,17 @@ impl EokaServer {
         &self,
         req: Parameters<AcceptDialogRequest>,
     ) -> Result<CallToolResult, ErrorData> {
-        let guard = self.state.lock().await;
-        let state = guard
-            .as_ref()
-            .ok_or_else(|| ErrorData::from(AgentError::NoBrowser))?;
-        let tab = state
-            .current_tab()
-            .ok_or_else(|| ErrorData::from(AgentError::NoTab))?;
-        tab.page
-            .accept_dialog(req.0.prompt_text.as_deref())
+        let accept = eoka_protocol::DialogAcceptArgs {
+            prompt_text: req.0.prompt_text,
+        };
+        self.engine_tool("accept_dialog", Operation::DialogAccept(accept))
             .await
-            .map_err(internal)?;
-        text_ok("Dialog accepted")
     }
 
     #[tool(description = "Dismiss (cancel) a JavaScript alert/confirm/prompt dialog.")]
     async fn dismiss_dialog(&self) -> Result<CallToolResult, ErrorData> {
-        let guard = self.state.lock().await;
-        let state = guard
-            .as_ref()
-            .ok_or_else(|| ErrorData::from(AgentError::NoBrowser))?;
-        let tab = state
-            .current_tab()
-            .ok_or_else(|| ErrorData::from(AgentError::NoTab))?;
-        tab.page.dismiss_dialog().await.map_err(internal)?;
-        text_ok("Dialog dismissed")
+        self.engine_tool("dismiss_dialog", Operation::DialogDismiss)
+            .await
     }
 
     #[tool(
