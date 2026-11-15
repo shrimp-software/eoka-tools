@@ -59,19 +59,33 @@ pub struct BrowserState {
     _cloned_profile: Option<ClonedProfile>,
 }
 
+pub struct LaunchFlags {
+    pub headless: bool,
+    pub no_stealth: bool,
+    pub geo_align: bool,
+    pub sandbox: bool,
+    pub patch_binary: Option<bool>,
+}
+
 impl BrowserState {
     pub async fn launched(
-        headless: bool,
+        flags: LaunchFlags,
         copy_profile_from: Option<&std::path::Path>,
-        no_stealth: bool,
         proxy: Option<String>,
         persist_profile_dir: Option<&std::path::Path>,
-        geo_align: bool,
-        sandbox: bool,
     ) -> eoka::Result<Self> {
-        let patch_binary = std::env::var("EOKA_PATCH_BINARY")
-            .map(|v| v == "true" || v == "1")
-            .unwrap_or(false);
+        let LaunchFlags {
+            headless,
+            no_stealth,
+            geo_align,
+            sandbox,
+            patch_binary,
+        } = flags;
+        let patch_binary = patch_binary.unwrap_or_else(|| {
+            std::env::var("EOKA_PATCH_BINARY")
+                .map(|v| v == "true" || v == "1")
+                .unwrap_or(false)
+        });
 
         let proxy = proxy
             .map(|value| {

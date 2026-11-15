@@ -192,6 +192,7 @@ pub struct Engine {
     fetch_sessions: HashMap<String, CdpSession>,
     cloudflare: Option<crate::cloudflare::CloudflareWatcher>,
     recordings: crate::recordings::RecordingManager,
+    patch_binary: Option<bool>,
 }
 
 impl Engine {
@@ -231,7 +232,21 @@ impl Engine {
             fetch_sessions: HashMap::new(),
             cloudflare: None,
             recordings: Default::default(),
+            patch_binary: None,
         }
+    }
+
+    pub fn is_open(&self) -> bool {
+        self.state.is_some()
+    }
+
+    pub fn patch_binary(&mut self, patch: bool) {
+        self.patch_binary = Some(patch);
+    }
+
+    pub async fn launch_with(&mut self, spec: LaunchSpec) -> Result<(), String> {
+        self.spec = spec;
+        self.ensure_browser().await
     }
 
     /// An engine over a browser the caller owns and keeps managing, sharing
@@ -368,13 +383,16 @@ impl Engine {
                     None
                 };
                 let mut s = BrowserState::launched(
-                    *headless,
+                    state::LaunchFlags {
+                        headless: *headless,
+                        no_stealth: *no_stealth,
+                        geo_align: *geo_align,
+                        sandbox: *sandbox,
+                        patch_binary: self.patch_binary,
+                    },
                     from_profile.as_deref(),
-                    *no_stealth,
                     proxy.clone(),
                     persist_dir.as_deref(),
-                    *geo_align,
-                    *sandbox,
                 )
                 .await
                 .map_err(|e| e.to_string())?;
@@ -1451,6 +1469,9 @@ impl Engine {
         let no_navigate = args.no_navigate;
 
         let saved = read_saved_state_file(path)?;
+        if !no_navigate && !saved.url.is_empty() {
+            crate::url_policy::ensure_url_allowed(&saved.url)?;
+        }
 
         self.ensure_browser().await?;
         let state = self.require_state_mut()?;
@@ -2274,7 +2295,7 @@ impl Engine {
 
     async fn cmd_close(&mut self) -> Result<Response, EngineError> {
         self.downloads.stop().await;
-        if let Some(recorder) = self.network.clone() {
+        if let Some(recorder) = self.network.take() {
             let session = self
                 .state
                 .as_ref()
