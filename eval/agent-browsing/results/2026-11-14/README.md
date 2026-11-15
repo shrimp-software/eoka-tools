@@ -109,10 +109,15 @@ same calls against v0.14 and the branch on the same fixture:
 The leave-page replay also shows a defect both versions have: after the dialog
 is dismissed, clicking the link again starts no navigation, opens no dialog
 and reports `operation_pending` after eight seconds. That is where the failing
-agent got lost.
+agent got lost. The first click was still waiting for its URL expectation and
+held the tab's action gate, so the second click was never dispatched.
 
-Two changes were made after this run because of what the transcripts showed.
-Neither has been measured:
+Three changes were made after this run because of what the transcripts showed.
+None has been measured with an agent:
+
+- Dismissing a leave-page dialog stops the operations running on that tab and
+  names them. Replayed, the second click opens the dialog again and accepting
+  it reaches the summary page.
 
 - A rejected step request now prints the shapes a step and its `expect` take.
 - The instructions the MCP server sends say that `download_start` saves a file
