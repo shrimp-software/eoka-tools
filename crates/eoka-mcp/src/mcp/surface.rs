@@ -6,7 +6,18 @@ use serde_json::{json, Value};
 
 pub(super) type Client = RunningService<RoleClient, ()>;
 
+fn keep_state_out_of_the_home_directory() {
+    static STATE: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    let directory = STATE.get_or_init(|| {
+        let directory = std::env::temp_dir().join(format!("eoka-mcp-state-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).expect("a scratch state directory");
+        directory
+    });
+    std::env::set_var("EOKA_STATE_DIR", directory);
+}
+
 pub(super) async fn connect(server: EokaServer) -> Client {
+    keep_state_out_of_the_home_directory();
     let (server_io, client_io) = tokio::io::duplex(1 << 20);
     tokio::spawn(async move {
         if let Ok(service) = server.serve(server_io).await {
@@ -32,10 +43,20 @@ pub(super) async fn call(
 }
 
 pub(super) fn text(result: &CallToolResult) -> String {
-    serde_json::to_value(&result.content)
-        .ok()
-        .and_then(|content| content[0]["text"].as_str().map(str::to_owned))
-        .unwrap_or_else(|| serde_json::to_string(&result.content).unwrap_or_default())
+    let blocks = serde_json::to_value(&result.content).unwrap_or_default();
+    let blocks = blocks.as_array().cloned().unwrap_or_default();
+    let texts: Vec<&str> = blocks
+        .iter()
+        .filter_map(|block| block["text"].as_str())
+        .collect();
+    if texts.len() == blocks.len() {
+        return texts.join("\n");
+    }
+    let kinds: Vec<&str> = blocks
+        .iter()
+        .map(|block| block["type"].as_str().unwrap_or("unknown"))
+        .collect();
+    json!({"blocks": kinds, "text": texts.join("\n")}).to_string()
 }
 
 fn changed_lines(expected: &str, actual: &str) -> String {
@@ -100,7 +121,7 @@ async fn the_tool_list_a_client_sees_is_locked() {
     assert_locked("tools.default.txt", &(names.join("\n") + "\n"));
 }
 
-const PAGE: &str = "<!doctype html><title>Fixture</title><h1 id=\"h\">Heading</h1><p>Body text</p><a href=\"/next\">Next</a><button id=\"b\">Press</button><input id=\"i\" placeholder=\"Name\"><script>localStorage.setItem('k','v');sessionStorage.setItem('s','t');document.cookie='c=1; path=/';console.log('hello');</script>";
+const PAGE: &str = "<!doctype html><title>Fixture</title><h1 id=\"h\">Heading</h1><p>Body text</p><a href=\"/next\">Next</a><button id=\"b\">Press</button><input id=\"i\" placeholder=\"Name\"><select id=\"s\"><option>a</option><option>b</option></select><script>localStorage.setItem('k','v');sessionStorage.setItem('s','t');document.cookie='c=1; path=/';console.log('hello');</script>";
 
 async fn fixture() -> (String, tokio::task::JoinHandle<()>) {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -121,6 +142,11 @@ async fn fixture() -> (String, tokio::task::JoinHandle<()>) {
                 let path = request.split_whitespace().nth(1).unwrap_or("/");
                 let (kind, body) = if path.starts_with("/data") {
                     ("application/json", "{\"ok\":true}")
+                } else if path.starts_with("/file") {
+                    (
+                        "application/octet-stream\r\nContent-Disposition: attachment; filename=\"file.bin\"",
+                        "fixture download",
+                    )
                 } else {
                     ("text/html; charset=utf-8", PAGE)
                 };
@@ -203,6 +229,9 @@ fn without_timings(value: &mut Value) {
                 } else {
                     without_timings(entry);
                 }
+                if let ("tabs", Value::Array(tabs)) = (key.as_str(), entry) {
+                    tabs.sort_by_key(|tab| tab["url"].as_str().map(str::to_owned));
+                }
             }
         }
         Value::Array(items) => items.iter_mut().for_each(without_timings),
@@ -242,9 +271,16 @@ async fn every_mcp_tool_answers() {
     std::fs::create_dir_all(&scratch).unwrap();
     let scratch_text = scratch.to_string_lossy().into_owned();
     let state = scratch.join("state.json").to_string_lossy().into_owned();
+    let saved = scratch.join("file.bin").to_string_lossy().into_owned();
+    let action = uuid::Uuid::new_v4().to_string();
+    let batched = uuid::Uuid::new_v4().to_string();
     let client = connect(EokaServer::listing(false)).await;
     let steps: Vec<(&str, Value)> = vec![
         ("page_info", json!({})),
+        ("click", json!({"target": "css:#b"})),
+        ("agent_observe", json!({})),
+        ("cookies", json!({})),
+        ("navigate", json!({"url": "file:///etc/hostname"})),
         ("navigate", json!({"url": format!("{origin}/")})),
         ("page_info", json!({})),
         ("page_text", json!({})),
@@ -311,17 +347,160 @@ async fn every_mcp_tool_answers() {
         ("get_text", json!({"selector": "#h"})),
         ("get_text", json!({"selector": "#absent"})),
         ("exists", json!({"selector": "#h"})),
+        ("navigate", json!({"url": format!("{origin}/")})),
+        ("agent_observe", json!({"max_controls": 3})),
+        (
+            "agent_step",
+            json!({"action": {"kind": "hover", "target": "css:#b"}}),
+        ),
+        ("click", json!({"target": "css:#b"})),
+        ("fill", json!({"target": "css:#i", "text": "Ada"})),
+        ("select", json!({"target": "css:#s", "value": "b"})),
+        ("hover", json!({"target": "css:#b"})),
+        ("type_key", json!({"key": "Tab"})),
+        (
+            "click",
+            json!({"target": "text:Next", "expect": {"kind": "url", "value": "/next", "contains": true}}),
+        ),
+        ("back", json!({})),
+        ("forward", json!({})),
+        ("history_go", json!({"delta": -1})),
+        (
+            "action_perform",
+            json!({"operation_id": action, "action": {"kind": "reload"}}),
+        ),
+        ("operation_get", json!({"id": action})),
+        ("operation_wait", json!({"id": action, "timeout_ms": 2000})),
+        ("operation_cancel", json!({"id": action})),
+        (
+            "operation_get",
+            json!({"id": "00000000-0000-4000-8000-000000000000"}),
+        ),
+        ("operation_list", json!({"limit": 1, "before_ms": 1})),
+        (
+            "batch",
+            json!({"actions": [{"operation_id": batched, "action": {"kind": "reload"}}]}),
+        ),
+        ("extract", json!({"code": "() => document.title"})),
+        ("extract", json!({"code": "document.title", "raw": true})),
+        (
+            "extract",
+            json!({"code": "() => { throw new Error('boom') }"}),
+        ),
+        (
+            "exec",
+            json!({"code": "() => { document.body.dataset.done = '1' }"}),
+        ),
+        ("exec", json!({"code": "() => 0", "no_await": true})),
+        (
+            "inject_captcha_token",
+            json!({"code": "() => { window.injected = true }"}),
+        ),
+        (
+            "wait_for_network_idle",
+            json!({"idle_ms": 100, "timeout_ms": 3000}),
+        ),
+        ("screenshot", json!({})),
+        (
+            "exec",
+            json!({"code": "setTimeout(() => alert('hello'), 0)", "raw": true}),
+        ),
+        ("wait_ms", json!({"ms": 400})),
+        ("page_text", json!({})),
+        ("click", json!({"target": "css:#b"})),
+        ("accept_dialog", json!({})),
+        ("page_info", json!({})),
+        (
+            "exec",
+            json!({"code": "setTimeout(() => confirm('sure?'), 0)", "raw": true}),
+        ),
+        ("wait_ms", json!({"ms": 400})),
+        ("dismiss_dialog", json!({})),
+        ("dismiss_dialog", json!({})),
+        ("list_tabs", json!({})),
+        ("new_tab", json!({"url": format!("{origin}/next")})),
+        ("page_info", json!({})),
+        ("switch_tab", json!({"tab_id": "$first"})),
+        ("page_info", json!({})),
+        ("close_tab", json!({"tab_id": "$new"})),
+        ("close_tab", json!({"tab_id": "missing"})),
+        ("download_list", json!({})),
+        (
+            "download_start",
+            json!({"url": format!("{origin}/file"), "output": saved}),
+        ),
+        (
+            "download_wait",
+            json!({"id": "$download", "timeout_ms": 10000}),
+        ),
+        ("download_get", json!({"id": "$download"})),
+        ("download_cancel", json!({"id": "$download"})),
+        ("download_get", json!({"id": "missing"})),
+        ("load_state", json!({"path": state})),
+        ("page_info", json!({})),
+        ("load_state", json!({"path": "/nonexistent/state.json"})),
+        (
+            "click_intercept_nav",
+            json!({"target": "text:Next", "expect": {"kind": "url", "value": "/next", "contains": true}}),
+        ),
+        (
+            "solve_captcha",
+            json!({"api_key": "k", "captcha_type": "unknown", "website_url": "u", "website_key": "w"}),
+        ),
         ("close", json!({})),
         ("page_text", json!({})),
+        ("click", json!({"target": "css:#b"})),
+        ("list_tabs", json!({})),
+        ("close", json!({})),
     ];
+    let mut remembered: std::collections::HashMap<&str, String> = Default::default();
     let mut transcript = String::new();
     for (tool, arguments) in steps {
-        let outcome = call(&client, tool, arguments.clone()).await;
+        let mut filled = arguments.to_string();
+        for (name, value) in &remembered {
+            filled = filled.replace(name, value);
+        }
+        let outcome = call(&client, tool, serde_json::from_str(&filled).unwrap()).await;
         let (answered, reply) = match &outcome {
             Ok(result) if result.is_error == Some(true) => ("tool_error", text(result)),
             Ok(result) => ("ok", text(result)),
             Err(error) => ("protocol_error", error.clone()),
         };
+        let first_match = |pattern: &str| {
+            let start = reply.find(pattern)? + pattern.len();
+            let rest = &reply[start..];
+            Some(rest[..rest.find(['"', ']'])?].to_owned())
+        };
+        let reply = match tool {
+            "list_tabs" => {
+                let mut tabs: Vec<String> = Vec::new();
+                for line in reply.lines() {
+                    match tabs.last_mut() {
+                        Some(tab) if !line.starts_with('[') => {
+                            tab.push('\n');
+                            tab.push_str(line);
+                        }
+                        _ => tabs.push(line.to_owned()),
+                    }
+                }
+                let listed = reply
+                    .lines()
+                    .find(|line| line.contains("] * "))
+                    .and_then(|line| line.strip_prefix('[')?.split(']').next())
+                    .map(str::to_owned);
+                remembered.extend(listed.map(|id| ("$first", id)));
+                tabs.sort_by_key(|tab| tab.split_once("] ").map(|(_, rest)| rest.to_owned()));
+                tabs.join("\n") + "\n"
+            }
+            _ => reply.clone(),
+        };
+        match tool {
+            "new_tab" => remembered.extend(first_match("[").map(|id| ("$new", id))),
+            "download_start" => {
+                remembered.extend(first_match("\"id\":\"").map(|id| ("$download", id)))
+            }
+            _ => {}
+        }
         let arguments: Value =
             serde_json::from_str(&located(&arguments.to_string(), &origin, &scratch_text)).unwrap();
         let line = json!({
