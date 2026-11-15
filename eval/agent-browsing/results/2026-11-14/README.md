@@ -79,10 +79,9 @@ Three cases failed. v0.14 passed all three, so each transcript was read:
 
 - **Download through MCP.** The agent never called `download_start`. It clicked
   the download link six times and checked `download_list`, which stayed empty,
-  until the time cap. The download tools were not exercised. The server's
-  instructions were rewritten on this branch before the run and describe
-  `expect`, which may have steered the agent toward verified clicks. They did
-  not mention downloads before or after.
+  until the time cap. The download tools were not exercised. Pi does not pass
+  an MCP server's instructions to the model, so the instructions rewritten on
+  this branch were not seen by either agent.
 - **Leave-page dialog through the tool.** The agent was shown `dialog_open` with
   the hint that accepting leaves the page and dismissing stays. It dismissed,
   then wandered. v0.14 gave the same error and hint and its agent accepted;
@@ -91,17 +90,34 @@ Three cases failed. v0.14 passed all three, so each transcript was read:
   rejected step requests with a malformed `expect`, and it ran out of calls.
   Parsing a step is unchanged on this branch.
 
-None of the three shows a reply that this branch changed, apart from the
-instructions noted above. One repeat cannot separate an agent choosing
-differently from a real regression: 22 of 25 against 30 of 30 has overlapping
-intervals (70%–96% and 89%–100%), and the branch was not run a second time.
+None of the three shows a reply that this branch changed. One repeat cannot
+separate an agent choosing differently from a real regression: 22 of 25 against
+30 of 30 has overlapping intervals (70%–96% and 89%–100%), and the branch was
+not run a second time. So the failed cases were replayed without an agent, the
+same calls against v0.14 and the branch on the same fixture:
+
+- The MCP download run's calls, including `download_start`: identical replies,
+  and both saved the file.
+- The leave-page flow (fill, click with the dialog open, read, dismiss, click
+  again, accept), twice on each version: identical replies. The only
+  difference anywhere is between two runs of v0.14 itself, in a reply that
+  depends on timing.
+- `eoka step` parsing is unchanged on this branch. `fill` on a missing target
+  now reports `action_timeout` instead of `operation_pending`, which is the
+  intended effect of the engine's two-second report grace.
+
+The leave-page replay also shows a defect both versions have: after the dialog
+is dismissed, clicking the link again starts no navigation, opens no dialog
+and reports `operation_pending` after eight seconds. That is where the failing
+agent got lost.
 
 Two changes were made after this run because of what the transcripts showed.
 Neither has been measured:
 
 - A rejected step request now prints the shapes a step and its `expect` take.
 - The instructions the MCP server sends say that `download_start` saves a file
-  and that clicking a download link does not.
+  and that clicking a download link does not. Pi does not show these to the
+  model, so this helps only clients that do.
 
 ## Cost
 
