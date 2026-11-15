@@ -3101,6 +3101,26 @@ fn pointer_actions_reach_a_tab_behind_another_promptly_and_it_stays_behind() {
             json!({"pageId":behind,"selector":"#go","timeoutMs":8000}),
         ),
         ("click_shadow", json!({"pageId":behind,"selector":"#go"})),
+        (
+            "page.mouse_down",
+            json!({"pageId":behind,"x":40,"y":40,"button":"left"}),
+        ),
+        (
+            "page.mouse_up",
+            json!({"pageId":behind,"x":40,"y":40,"button":"left"}),
+        ),
+        (
+            "mouse.down",
+            json!({"pageId":behind,"x":60,"y":60,"button":"left"}),
+        ),
+        (
+            "mouse.up",
+            json!({"pageId":behind,"x":60,"y":60,"button":"left"}),
+        ),
+        ("page.key_down", json!({"pageId":behind,"key":"Shift"})),
+        ("page.key_up", json!({"pageId":behind,"key":"Shift"})),
+        ("key.down", json!({"pageId":behind,"key":"Shift"})),
+        ("key.up", json!({"pageId":behind,"key":"Shift"})),
     ] {
         let (reply, elapsed) = tabs.call(method, params);
         assert!(reply.get("result").is_some(), "{method}: {reply}");
