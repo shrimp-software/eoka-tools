@@ -28,6 +28,9 @@ use serde_json::json;
 
 #[tokio::main]
 async fn main() {
+    if let Ok(program) = std::env::current_exe() {
+        eoka_sdk::serve_daemons_from(program);
+    }
     let cli = Cli::parse();
     let agent_mode = cli.agent;
     let json_mode = cli.json || agent_mode;
