@@ -2,6 +2,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use eoka_server::downloads::DownloadManager;
 use eoka_server::engine::blockers::{self, Blocker, Remedies, Surface};
 use eoka_server::operations::OperationManager;
 use serde_json::{json, Value};
@@ -195,6 +196,7 @@ pub(super) async fn serve(
     listener: UnixListener,
     board: Arc<Board>,
     operations: OperationManager,
+    downloads: DownloadManager,
     accepted: mpsc::Sender<Admitted>,
 ) {
     let mut connections = JoinSet::new();
@@ -212,6 +214,7 @@ pub(super) async fn serve(
             stream,
             board.clone(),
             operations.clone(),
+            downloads.clone(),
             accepted.clone(),
         ));
     }
@@ -221,6 +224,7 @@ async fn connection_task(
     stream: tokio::net::UnixStream,
     board: Arc<Board>,
     operations: OperationManager,
+    downloads: DownloadManager,
     accepted: mpsc::Sender<Admitted>,
 ) {
     let (mut reader, mut writer) = stream.into_split();
@@ -276,6 +280,17 @@ async fn connection_task(
         reply(&mut writer, response).await;
         return;
     }
+    if DownloadManager::is_query(&request) {
+        tokio::select! {
+            response = downloads.query(&request) => {
+                if let Some(response) = response {
+                    reply(&mut writer, response).await;
+                }
+            }
+            _ = hung_up(&mut reader) => {}
+        }
+        return;
+    }
     let turn = match board.turn.clone().try_lock_owned() {
         Ok(turn) => turn,
         Err(_) => {
@@ -324,15 +339,11 @@ async fn handle_dialog(
         _ => return None,
     };
     let page = board.page()?;
-    let handled = tokio::time::timeout(Duration::from_secs(5), async {
-        if accept {
-            page.accept_dialog(arguments["prompt_text"].as_str())
-                .await
-                .map(|()| "Dialog accepted".to_string())
-        } else {
-            blockers::dismiss(operations, &page).await
-        }
-    })
+    let prompt_text = arguments["prompt_text"].as_str();
+    let handled = tokio::time::timeout(
+        Duration::from_secs(5),
+        blockers::answer(operations, &page, accept.then_some(prompt_text)),
+    )
     .await;
     Some(match handled {
         Ok(Ok(reply)) => Response::ok_text(reply),

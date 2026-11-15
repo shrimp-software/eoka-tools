@@ -1,10 +1,10 @@
 [package]
 name = "eoka-datadome"
 version = "0.6.2"
-edition = "2021"
-license = "MIT"
+edition.workspace = true
+license.workspace = true
 description = "Local DataDome slider captcha solver for the eoka ecosystem"
-repository = "https://github.com/shrimp-software/eoka-tools"
+repository.workspace = true
 
 [features]
 test-fixtures = ["tokio/net", "tokio/io-util"]

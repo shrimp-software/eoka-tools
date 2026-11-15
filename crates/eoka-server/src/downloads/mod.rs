@@ -162,6 +162,44 @@ impl Default for DownloadManager {
 }
 
 impl DownloadManager {
+    pub fn is_query(request: &eoka_protocol::Request) -> bool {
+        use eoka_protocol::Request;
+        matches!(
+            request,
+            Request::DownloadList
+                | Request::DownloadGet(_)
+                | Request::DownloadWait(_)
+                | Request::DownloadCancel(_)
+        )
+    }
+
+    pub async fn answer(&self, request: &eoka_protocol::Request) -> Response {
+        use eoka_protocol::Request;
+        match request {
+            Request::DownloadList => match serde_json::to_value(self.list()) {
+                Ok(list) => Response::ok(list),
+                Err(error) => Response::err(error.to_string()),
+            },
+            Request::DownloadGet(args) => match self.get(&args.id) {
+                Ok(job) => record_response(job.snapshot()),
+                Err(error) => Response::err_detail(error),
+            },
+            Request::DownloadCancel(args) => start_response(self.cancel(&args.id)),
+            Request::DownloadWait(args) => self.wait(&args.id, args.timeout_ms).await,
+            other => Response::err(format!("Unknown command: {}", other.cmd())),
+        }
+    }
+
+    pub async fn query(&self, request: &eoka_protocol::Request) -> Option<Response> {
+        if !Self::is_query(request) {
+            return None;
+        }
+        Some(match self.restore().await {
+            Ok(()) => self.answer(request).await,
+            Err(error) => Response::err_detail(error),
+        })
+    }
+
     pub async fn restore(&self) -> Result<(), ErrorDetail> {
         let store = self
             .inner

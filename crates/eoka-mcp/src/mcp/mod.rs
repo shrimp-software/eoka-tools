@@ -139,6 +139,8 @@ pub struct EokaServer {
     engine: Arc<Mutex<eoka_server::engine::Engine>>,
     unhealthy: Arc<std::sync::atomic::AtomicBool>,
     running: Arc<std::sync::Mutex<Option<(String, std::time::Instant)>>>,
+    busy_limit: std::time::Duration,
+    turn: Arc<Mutex<()>>,
     headless: bool,
     tool_router: ToolRouter<EokaServer>,
     downloads: eoka_server::downloads::DownloadManager,
@@ -349,6 +351,8 @@ impl EokaServer {
             engine: Arc::new(Mutex::new(engine)),
             unhealthy: Default::default(),
             running: Default::default(),
+            busy_limit: blocked::BUSY_LIMIT,
+            turn: Default::default(),
             headless,
             tool_router,
         }
@@ -469,9 +473,11 @@ impl EokaServer {
             .restore()
             .await
             .map_err(|e| internal(e.message))?;
-        protocol_tool_response(eoka_protocol::Response::ok(
-            serde_json::to_value(self.downloads.list()).map_err(internal)?,
-        ))
+        protocol_tool_response(
+            self.downloads
+                .answer(&eoka_protocol::Request::DownloadList)
+                .await,
+        )
     }
 
     #[tool]
@@ -483,10 +489,11 @@ impl EokaServer {
             .restore()
             .await
             .map_err(|e| internal(e.message))?;
-        protocol_tool_response(match self.downloads.get(&req.0.id) {
-            Ok(job) => eoka_server::downloads::record_response(job.snapshot()),
-            Err(error) => eoka_protocol::Response::err_detail(error),
-        })
+        protocol_tool_response(
+            self.downloads
+                .answer(&eoka_protocol::Request::DownloadGet(req.0))
+                .await,
+        )
     }
 
     #[tool]
@@ -498,9 +505,11 @@ impl EokaServer {
             .restore()
             .await
             .map_err(|e| internal(e.message))?;
-        protocol_tool_response(eoka_server::downloads::start_response(
-            self.downloads.cancel(&req.0.id),
-        ))
+        protocol_tool_response(
+            self.downloads
+                .answer(&eoka_protocol::Request::DownloadCancel(req.0))
+                .await,
+        )
     }
 
     #[tool]
@@ -512,7 +521,11 @@ impl EokaServer {
             .restore()
             .await
             .map_err(|e| internal(e.message))?;
-        protocol_tool_response(self.downloads.wait(&req.0.id, req.0.timeout_ms).await)
+        protocol_tool_response(
+            self.downloads
+                .answer(&eoka_protocol::Request::DownloadWait(req.0))
+                .await,
+        )
     }
 
     #[tool(description = "List all open browser tabs. Returns tab IDs, titles, and URLs.")]
@@ -708,6 +721,9 @@ impl EokaServer {
         description = "Execute durable actions in sequence. Each action supplies its own operation_id, action and options. Stops on an uncertain or failed outcome; completed records remain inspectable."
     )]
     async fn batch(&self, req: Parameters<BatchRequest>) -> Result<CallToolResult, ErrorData> {
+        for request in &req.0.actions {
+            helpers::ensure_action_urls_allowed(&serde_json::json!({"action": request.action}))?;
+        }
         let page = self.page().await?;
         let mut records = Vec::new();
         for request in req.0.actions {
@@ -1233,10 +1249,11 @@ impl ServerHandler for EokaServer {
             .map(Value::Object)
             .unwrap_or(Value::Null);
         let policy = blocked::policy_for_tool(&tool, &arguments);
-        let page = match self.gate_page(&tool).await {
-            Ok(page) => page,
+        let _turn = match self.take_turn(&tool).await {
+            Ok(turn) => turn,
             Err(busy) => return Ok(busy.into()),
         };
+        let page = self.engine.lock().await.current_page();
         if let Some(page) = &page {
             if let Some(refusal) = self.refuse_blocked(&tool, policy, page).await {
                 return Ok(refusal.into());

@@ -1,16 +1,16 @@
 [package]
 name = "eoka-mcp"
-version = "0.11.1"
-edition = "2021"
-license = "MIT"
+version = "0.11.2"
+edition.workspace = true
+license.workspace = true
 description = "MCP server for eoka browser automation tools"
 keywords = ["browser", "automation", "ai-agent", "mcp", "llm"]
 categories = ["web-programming", "development-tools"]
-repository = "https://github.com/shrimp-software/eoka-tools"
-homepage = "https://github.com/shrimp-software/eoka-tools"
+repository.workspace = true
+homepage.workspace = true
 documentation = "https://docs.rs/eoka-mcp"
 readme = "README.md"
-authors = ["cbxss"]
+authors.workspace = true
 
 [[bin]]
 name = "eoka-mcp"

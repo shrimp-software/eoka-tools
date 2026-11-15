@@ -379,3 +379,23 @@ fn a_busy_session_says_what_it_is_running_and_frees_itself_when_the_caller_leave
     }
     assert!(session.run(&["status"])["busy"].is_null());
 }
+
+#[test]
+#[ignore = "requires Chrome; download queries answer while a command runs"]
+fn download_queries_answer_while_another_command_runs() {
+    let site = Site::start();
+    let session = Session::new("stuck-downloads");
+    session.run(&["open", &site.url("/")]);
+    let busy = session
+        .command(&["eval", "() => new Promise(done => setTimeout(done, 4000))"])
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(500));
+    let (output, response, elapsed) = session.output(&["download", "list"]);
+    assert!(output.status.success(), "{response}");
+    assert_eq!(response["data"], serde_json::json!([]), "{response}");
+    assert!(elapsed < Duration::from_secs(2), "{elapsed:?}");
+    let mut busy = busy;
+    busy.wait().unwrap();
+}

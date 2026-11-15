@@ -7,7 +7,7 @@ use crate::protocol::{
 };
 
 pub(super) fn network_action_to_request(action: &NetworkAction) -> Request {
-    match action {
+    match action.clone() {
         NetworkAction::Record { action } => match action {
             NetworkRecordAction::Start {
                 patterns,
@@ -15,10 +15,10 @@ pub(super) fn network_action_to_request(action: &NetworkAction) -> Request {
                 max_body_bytes,
                 clear,
             } => Request::NetworkRecordStart(NetworkRecordStartArgs {
-                patterns: patterns.clone(),
-                no_bodies: *no_bodies,
-                max_body_bytes: *max_body_bytes,
-                clear: *clear,
+                patterns,
+                no_bodies,
+                max_body_bytes,
+                clear,
             }),
             NetworkRecordAction::Stop => Request::NetworkRecordStop,
             NetworkRecordAction::Status => Request::NetworkRecordStatus,
@@ -31,24 +31,22 @@ pub(super) fn network_action_to_request(action: &NetworkAction) -> Request {
             since,
             compact,
         } => Request::NetworkLog(NetworkLogArgs {
-            limit: *limit,
-            pattern: pattern.clone(),
-            method: method.clone(),
-            status: *status,
-            since: *since,
-            compact: *compact,
+            limit,
+            pattern,
+            method,
+            status,
+            since,
+            compact,
         }),
-        NetworkAction::Show { id, body, max_body } => Request::NetworkShow(NetworkShowArgs {
-            id: *id,
-            body: *body,
-            max_body: *max_body,
-        }),
-        NetworkAction::Har { path, settle_ms } => network_export_request(path, "har", *settle_ms),
+        NetworkAction::Show { id, body, max_body } => {
+            Request::NetworkShow(NetworkShowArgs { id, body, max_body })
+        }
+        NetworkAction::Har { path, settle_ms } => network_export_request(&path, "har", settle_ms),
         NetworkAction::Export {
             path,
             format,
             settle_ms,
-        } => network_export_request(path, format, *settle_ms),
+        } => network_export_request(&path, &format, settle_ms),
         NetworkAction::Wait {
             pattern,
             method,
@@ -57,15 +55,15 @@ pub(super) fn network_action_to_request(action: &NetworkAction) -> Request {
             since,
             include_existing,
         } => Request::NetworkWait(NetworkWaitArgs {
-            pattern: pattern.clone(),
-            method: method.clone(),
-            status: *status,
-            timeout: *timeout,
-            since: *since,
-            include_existing: *include_existing,
+            pattern,
+            method,
+            status,
+            timeout,
+            since,
+            include_existing,
         }),
         NetworkAction::Clear => Request::NetworkClear,
-        NetworkAction::Intercept { action } => intercept_action_to_request(action),
+        NetworkAction::Intercept { action } => intercept_action_to_request(&action),
     }
 }
 

@@ -15,6 +15,16 @@ use eoka_protocol::{
     TextArgs, WaitArgs, WasmFindArgs, WasmReadArgs, WasmWriteArgs,
 };
 
+macro_rules! forward_requests {
+    ($(fn $name:ident($($arg:ident: $ty:ty)?) => $variant:ident;)*) => {
+        $(
+            pub async fn $name(&self $(, $arg: $ty)?) -> anyhow::Result<Response> {
+                self.call(Request::$variant $(($arg))?).await
+            }
+        )*
+    };
+}
+
 #[derive(Debug, Clone)]
 pub struct EokaClient {
     session_name: String,
@@ -41,20 +51,11 @@ impl EokaClient {
         send_command(&self.session_name, request, self.spec.clone()).await
     }
 
-    pub async fn perform(
-        &self,
-        request: eoka_protocol::ActionPerformArgs,
-    ) -> anyhow::Result<Response> {
-        self.call(Request::ActionPerform(request)).await
-    }
     pub async fn agent_observe(
         &self,
         args: eoka_protocol::AgentObserveArgs,
     ) -> anyhow::Result<Response> {
         self.call(Request::AgentObserve(args)).await
-    }
-    pub async fn agent_step(&self, args: eoka_protocol::AgentStepArgs) -> anyhow::Result<Response> {
-        self.call(Request::AgentStep(args)).await
     }
     pub async fn operation(&self, id: impl Into<String>) -> anyhow::Result<Response> {
         self.call(Request::OperationGet(eoka_protocol::OperationIdArgs {
@@ -79,347 +80,95 @@ impl EokaClient {
         }))
         .await
     }
-    pub async fn open(&self, args: OpenArgs) -> anyhow::Result<Response> {
-        self.call(Request::Open(args)).await
-    }
-
-    pub async fn back(&self) -> anyhow::Result<Response> {
-        self.call(Request::Back).await
-    }
-
-    pub async fn forward(&self) -> anyhow::Result<Response> {
-        self.call(Request::Forward).await
-    }
-
-    pub async fn reload(&self) -> anyhow::Result<Response> {
-        self.call(Request::Reload).await
-    }
-
-    pub async fn snapshot(&self, args: SnapshotArgs) -> anyhow::Result<Response> {
-        self.call(Request::Snapshot(args)).await
-    }
-
-    pub async fn observe(&self, args: ObserveArgs) -> anyhow::Result<Response> {
-        self.call(Request::Observe(args)).await
-    }
-
-    pub async fn screenshot(&self, args: ScreenshotArgs) -> anyhow::Result<Response> {
-        self.call(Request::Screenshot(args)).await
-    }
-
-    pub async fn emulate(&self, args: EmulateArgs) -> anyhow::Result<Response> {
-        self.call(Request::Emulate(args)).await
-    }
-
-    pub async fn info(&self) -> anyhow::Result<Response> {
-        self.call(Request::Info).await
-    }
-
-    pub async fn frames(&self) -> anyhow::Result<Response> {
-        self.call(Request::Frames).await
-    }
-
-    pub async fn frame_eval(&self, args: FrameEvalArgs) -> anyhow::Result<Response> {
-        self.call(Request::FrameEval(args)).await
-    }
-
-    pub async fn text(&self) -> anyhow::Result<Response> {
-        self.call(Request::Text).await
-    }
-
-    pub async fn find(&self, args: TextArgs) -> anyhow::Result<Response> {
-        self.call(Request::Find(args)).await
-    }
-
-    pub async fn click(&self, args: TargetArgs) -> anyhow::Result<Response> {
-        self.call(Request::Click(args)).await
-    }
-
-    pub async fn double_click(&self, args: TargetArgs) -> anyhow::Result<Response> {
-        self.call(Request::DblClick(args)).await
-    }
-
-    pub async fn fill(&self, args: FillArgs) -> anyhow::Result<Response> {
-        self.call(Request::Fill(args)).await
-    }
-
-    pub async fn select(&self, args: SelectArgs) -> anyhow::Result<Response> {
-        self.call(Request::Select(args)).await
-    }
-
-    pub async fn hover(&self, args: TargetArgs) -> anyhow::Result<Response> {
-        self.call(Request::Hover(args)).await
-    }
-
-    pub async fn key(&self, args: KeyArgs) -> anyhow::Result<Response> {
-        self.call(Request::Key(args)).await
-    }
-
-    pub async fn mouse_down(&self, args: MouseButtonArgs) -> anyhow::Result<Response> {
-        self.call(Request::MouseDown(args)).await
-    }
-
-    pub async fn mouse_move(&self, args: MouseMoveArgs) -> anyhow::Result<Response> {
-        self.call(Request::MouseMove(args)).await
-    }
-
-    pub async fn mouse_up(&self, args: MouseButtonArgs) -> anyhow::Result<Response> {
-        self.call(Request::MouseUp(args)).await
-    }
-
-    pub async fn key_down(&self, args: KeyArgs) -> anyhow::Result<Response> {
-        self.call(Request::KeyDown(args)).await
-    }
-
-    pub async fn key_up(&self, args: KeyArgs) -> anyhow::Result<Response> {
-        self.call(Request::KeyUp(args)).await
-    }
-
-    pub async fn release_all_inputs(&self) -> anyhow::Result<Response> {
-        self.call(Request::ReleaseAllInputs).await
-    }
-
-    pub async fn scroll(&self, args: TargetArgs) -> anyhow::Result<Response> {
-        self.call(Request::Scroll(args)).await
-    }
-
-    pub async fn eval(&self, args: ScriptArgs) -> anyhow::Result<Response> {
-        self.call(Request::Eval(args)).await
-    }
-
-    pub async fn exec(&self, args: ScriptArgs) -> anyhow::Result<Response> {
-        self.call(Request::Exec(args)).await
-    }
-
-    pub async fn fetch(&self, args: FetchArgs) -> anyhow::Result<Response> {
-        self.call(Request::Fetch(args)).await
-    }
-
-    pub async fn download_start(
-        &self,
-        args: eoka_protocol::DownloadStartArgs,
-    ) -> anyhow::Result<Response> {
-        self.call(Request::DownloadStart(args)).await
-    }
-
-    pub async fn download_list(&self) -> anyhow::Result<Response> {
-        self.call(Request::DownloadList).await
-    }
-
-    pub async fn download_get(
-        &self,
-        args: eoka_protocol::DownloadIdArgs,
-    ) -> anyhow::Result<Response> {
-        self.call(Request::DownloadGet(args)).await
-    }
-
-    pub async fn download_wait(
-        &self,
-        args: eoka_protocol::DownloadWaitArgs,
-    ) -> anyhow::Result<Response> {
-        self.call(Request::DownloadWait(args)).await
-    }
-
-    pub async fn download_cancel(
-        &self,
-        args: eoka_protocol::DownloadIdArgs,
-    ) -> anyhow::Result<Response> {
-        self.call(Request::DownloadCancel(args)).await
-    }
-
-    pub async fn cookies(&self) -> anyhow::Result<Response> {
-        self.call(Request::Cookies).await
-    }
-
-    pub async fn set_cookie(&self, args: SetCookieArgs) -> anyhow::Result<Response> {
-        self.call(Request::SetCookie(args)).await
-    }
-
-    pub async fn delete_cookie(&self, args: DeleteCookieArgs) -> anyhow::Result<Response> {
-        self.call(Request::DeleteCookie(args)).await
-    }
-
-    pub async fn clear_cookies(&self) -> anyhow::Result<Response> {
-        self.call(Request::ClearCookies).await
-    }
-
-    pub async fn storage(&self, args: StorageArgs) -> anyhow::Result<Response> {
-        self.call(Request::Storage(args)).await
-    }
-
-    pub async fn set_storage(&self, args: SetStorageArgs) -> anyhow::Result<Response> {
-        self.call(Request::SetStorage(args)).await
-    }
-
-    pub async fn dump_storage(&self) -> anyhow::Result<Response> {
-        self.call(Request::DumpStorage).await
-    }
-
-    pub async fn save_state(&self, args: PathArgs) -> anyhow::Result<Response> {
-        self.call(Request::SaveState(args)).await
-    }
-
-    pub async fn load_state(&self, args: LoadStateArgs) -> anyhow::Result<Response> {
-        self.call(Request::LoadState(args)).await
-    }
-
-    pub async fn headers(&self, args: HeadersArgs) -> anyhow::Result<Response> {
-        self.call(Request::Headers(args)).await
-    }
-
-    pub async fn console(&self, args: ConsoleArgs) -> anyhow::Result<Response> {
-        self.call(Request::Console(args)).await
-    }
-
-    pub async fn errors(&self, args: ClearFlagArgs) -> anyhow::Result<Response> {
-        self.call(Request::Errors(args)).await
-    }
-
-    pub async fn tab_list(&self) -> anyhow::Result<Response> {
-        self.call(Request::TabList).await
-    }
-
-    pub async fn tab_new(&self, args: TabNewArgs) -> anyhow::Result<Response> {
-        self.call(Request::TabNew(args)).await
-    }
-
-    pub async fn tab_switch(&self, args: TabIdArgs) -> anyhow::Result<Response> {
-        self.call(Request::TabSwitch(args)).await
-    }
-
-    pub async fn tab_close(&self, args: TabIdArgs) -> anyhow::Result<Response> {
-        self.call(Request::TabClose(args)).await
-    }
-
-    pub async fn tab_attach(&self, args: TabIdArgs) -> anyhow::Result<Response> {
-        self.call(Request::TabAttach(args)).await
-    }
-
-    pub async fn clone_from(&self, args: CloneFromArgs) -> anyhow::Result<Response> {
-        self.call(Request::CloneFrom(args)).await
-    }
-
-    pub async fn wait(&self, args: WaitArgs) -> anyhow::Result<Response> {
-        self.call(Request::Wait(args)).await
-    }
-
-    pub async fn spa_info(&self) -> anyhow::Result<Response> {
-        self.call(Request::SpaInfo).await
-    }
-
-    pub async fn spa_navigate(&self, args: PathStringArgs) -> anyhow::Result<Response> {
-        self.call(Request::SpaNavigate(args)).await
-    }
-
-    pub async fn fake_camera(&self, args: FakeCameraArgs) -> anyhow::Result<Response> {
-        self.call(Request::FakeCamera(args)).await
-    }
-
-    pub async fn wasm_info(&self) -> anyhow::Result<Response> {
-        self.call(Request::WasmInfo).await
-    }
-
-    pub async fn wasm_read(&self, args: WasmReadArgs) -> anyhow::Result<Response> {
-        self.call(Request::WasmRead(args)).await
-    }
-
-    pub async fn wasm_write(&self, args: WasmWriteArgs) -> anyhow::Result<Response> {
-        self.call(Request::WasmWrite(args)).await
-    }
-
-    pub async fn wasm_find(&self, args: WasmFindArgs) -> anyhow::Result<Response> {
-        self.call(Request::WasmFind(args)).await
-    }
-
-    pub async fn intercept_add(&self, args: InterceptAddArgs) -> anyhow::Result<Response> {
-        self.call(Request::InterceptAdd(args)).await
-    }
-
-    pub async fn intercept_list(&self) -> anyhow::Result<Response> {
-        self.call(Request::InterceptList).await
-    }
-
-    pub async fn intercept_remove(&self, args: IdArgs) -> anyhow::Result<Response> {
-        self.call(Request::InterceptRemove(args)).await
-    }
-
-    pub async fn intercept_log(&self, args: ClearFlagArgs) -> anyhow::Result<Response> {
-        self.call(Request::InterceptLog(args)).await
-    }
-
-    pub async fn network_record_start(
-        &self,
-        args: NetworkRecordStartArgs,
-    ) -> anyhow::Result<Response> {
-        self.call(Request::NetworkRecordStart(args)).await
-    }
-
-    pub async fn network_record_stop(&self) -> anyhow::Result<Response> {
-        self.call(Request::NetworkRecordStop).await
-    }
-
-    pub async fn network_record_status(&self) -> anyhow::Result<Response> {
-        self.call(Request::NetworkRecordStatus).await
-    }
-
-    pub async fn network_log(&self, args: NetworkLogArgs) -> anyhow::Result<Response> {
-        self.call(Request::NetworkLog(args)).await
-    }
-
-    pub async fn network_show(&self, args: NetworkShowArgs) -> anyhow::Result<Response> {
-        self.call(Request::NetworkShow(args)).await
-    }
-
-    pub async fn network_wait(&self, args: NetworkWaitArgs) -> anyhow::Result<Response> {
-        self.call(Request::NetworkWait(args)).await
-    }
-
-    pub async fn network_export(&self, args: NetworkExportArgs) -> anyhow::Result<Response> {
-        self.call(Request::NetworkExport(args)).await
-    }
-
-    pub async fn network_clear(&self) -> anyhow::Result<Response> {
-        self.call(Request::NetworkClear).await
-    }
-
-    pub async fn js_mode(&self, args: ModeArgs) -> anyhow::Result<Response> {
-        self.call(Request::JsMode(args)).await
-    }
-
-    pub async fn js_allow(&self, args: DomainArgs) -> anyhow::Result<Response> {
-        self.call(Request::JsAllow(args)).await
-    }
-
-    pub async fn js_block(&self, args: DomainArgs) -> anyhow::Result<Response> {
-        self.call(Request::JsBlock(args)).await
-    }
-
-    pub async fn js_remove(&self, args: DomainArgs) -> anyhow::Result<Response> {
-        self.call(Request::JsRemove(args)).await
-    }
-
-    pub async fn js_list(&self) -> anyhow::Result<Response> {
-        self.call(Request::JsList).await
-    }
-
-    pub async fn close(&self) -> anyhow::Result<Response> {
-        self.call(Request::Close).await
-    }
-
-    pub async fn shutdown(&self) -> anyhow::Result<Response> {
-        self.call(Request::Shutdown).await
-    }
-
-    pub async fn captcha_datadome(&self, args: CaptchaDatadomeArgs) -> anyhow::Result<Response> {
-        self.call(Request::CaptchaDatadome(args)).await
-    }
-
-    pub async fn captcha_turnstile(&self, args: CaptchaTurnstileArgs) -> anyhow::Result<Response> {
-        self.call(Request::CaptchaTurnstile(args)).await
-    }
 
     pub async fn captcha_inject(&self, args: CaptchaInjectArgs) -> anyhow::Result<Response> {
         self.call(Request::CaptchaInject(args)).await
+    }
+
+    forward_requests! {
+        fn perform(request: eoka_protocol::ActionPerformArgs) => ActionPerform;
+        fn agent_step(args: eoka_protocol::AgentStepArgs) => AgentStep;
+        fn open(args: OpenArgs) => Open;
+        fn back() => Back;
+        fn forward() => Forward;
+        fn reload() => Reload;
+        fn snapshot(args: SnapshotArgs) => Snapshot;
+        fn observe(args: ObserveArgs) => Observe;
+        fn screenshot(args: ScreenshotArgs) => Screenshot;
+        fn emulate(args: EmulateArgs) => Emulate;
+        fn info() => Info;
+        fn frames() => Frames;
+        fn frame_eval(args: FrameEvalArgs) => FrameEval;
+        fn text() => Text;
+        fn find(args: TextArgs) => Find;
+        fn click(args: TargetArgs) => Click;
+        fn double_click(args: TargetArgs) => DblClick;
+        fn fill(args: FillArgs) => Fill;
+        fn select(args: SelectArgs) => Select;
+        fn hover(args: TargetArgs) => Hover;
+        fn key(args: KeyArgs) => Key;
+        fn mouse_down(args: MouseButtonArgs) => MouseDown;
+        fn mouse_move(args: MouseMoveArgs) => MouseMove;
+        fn mouse_up(args: MouseButtonArgs) => MouseUp;
+        fn key_down(args: KeyArgs) => KeyDown;
+        fn key_up(args: KeyArgs) => KeyUp;
+        fn release_all_inputs() => ReleaseAllInputs;
+        fn scroll(args: TargetArgs) => Scroll;
+        fn eval(args: ScriptArgs) => Eval;
+        fn exec(args: ScriptArgs) => Exec;
+        fn fetch(args: FetchArgs) => Fetch;
+        fn download_start(args: eoka_protocol::DownloadStartArgs) => DownloadStart;
+        fn download_list() => DownloadList;
+        fn download_get(args: eoka_protocol::DownloadIdArgs) => DownloadGet;
+        fn download_wait(args: eoka_protocol::DownloadWaitArgs) => DownloadWait;
+        fn download_cancel(args: eoka_protocol::DownloadIdArgs) => DownloadCancel;
+        fn cookies() => Cookies;
+        fn set_cookie(args: SetCookieArgs) => SetCookie;
+        fn delete_cookie(args: DeleteCookieArgs) => DeleteCookie;
+        fn clear_cookies() => ClearCookies;
+        fn storage(args: StorageArgs) => Storage;
+        fn set_storage(args: SetStorageArgs) => SetStorage;
+        fn dump_storage() => DumpStorage;
+        fn save_state(args: PathArgs) => SaveState;
+        fn load_state(args: LoadStateArgs) => LoadState;
+        fn headers(args: HeadersArgs) => Headers;
+        fn console(args: ConsoleArgs) => Console;
+        fn errors(args: ClearFlagArgs) => Errors;
+        fn tab_list() => TabList;
+        fn tab_new(args: TabNewArgs) => TabNew;
+        fn tab_switch(args: TabIdArgs) => TabSwitch;
+        fn tab_close(args: TabIdArgs) => TabClose;
+        fn tab_attach(args: TabIdArgs) => TabAttach;
+        fn clone_from(args: CloneFromArgs) => CloneFrom;
+        fn wait(args: WaitArgs) => Wait;
+        fn spa_info() => SpaInfo;
+        fn spa_navigate(args: PathStringArgs) => SpaNavigate;
+        fn fake_camera(args: FakeCameraArgs) => FakeCamera;
+        fn wasm_info() => WasmInfo;
+        fn wasm_read(args: WasmReadArgs) => WasmRead;
+        fn wasm_write(args: WasmWriteArgs) => WasmWrite;
+        fn wasm_find(args: WasmFindArgs) => WasmFind;
+        fn intercept_add(args: InterceptAddArgs) => InterceptAdd;
+        fn intercept_list() => InterceptList;
+        fn intercept_remove(args: IdArgs) => InterceptRemove;
+        fn intercept_log(args: ClearFlagArgs) => InterceptLog;
+        fn network_record_start(args: NetworkRecordStartArgs) => NetworkRecordStart;
+        fn network_record_stop() => NetworkRecordStop;
+        fn network_record_status() => NetworkRecordStatus;
+        fn network_log(args: NetworkLogArgs) => NetworkLog;
+        fn network_show(args: NetworkShowArgs) => NetworkShow;
+        fn network_wait(args: NetworkWaitArgs) => NetworkWait;
+        fn network_export(args: NetworkExportArgs) => NetworkExport;
+        fn network_clear() => NetworkClear;
+        fn js_mode(args: ModeArgs) => JsMode;
+        fn js_allow(args: DomainArgs) => JsAllow;
+        fn js_block(args: DomainArgs) => JsBlock;
+        fn js_remove(args: DomainArgs) => JsRemove;
+        fn js_list() => JsList;
+        fn close() => Close;
+        fn shutdown() => Shutdown;
+        fn captcha_datadome(args: CaptchaDatadomeArgs) => CaptchaDatadome;
+        fn captcha_turnstile(args: CaptchaTurnstileArgs) => CaptchaTurnstile;
     }
 }
 pub async fn send_command(

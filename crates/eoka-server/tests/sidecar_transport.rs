@@ -3260,3 +3260,278 @@ fn a_pointer_action_on_a_page_that_runs_no_frames_says_so() {
     assert_stayed_behind(&mut tabs, &behind, &front);
     tabs.finish();
 }
+
+fn masked(value: &Value, page: &str, root: &str, origin: &str) -> Value {
+    match value {
+        Value::String(text) => {
+            let text = text.split("\n    at ").next().unwrap_or_default();
+            let text = text
+                .replace(page, "<page>")
+                .replace(root, "<root>")
+                .replace(origin, "<origin>");
+            let hex = text.len() == 32 && text.chars().all(|c| c.is_ascii_hexdigit());
+            if hex {
+                json!("<id>")
+            } else if text.len() > 256 && !text.contains(' ') {
+                json!("<bytes>")
+            } else {
+                json!(text)
+            }
+        }
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(|item| masked(item, page, root, origin))
+                .collect(),
+        ),
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(key, item)| {
+                    let volatile = key.ends_with("Ms")
+                        || key.ends_with("_ms")
+                        || matches!(
+                            key.as_str(),
+                            "bytes"
+                                | "sha256"
+                                | "size"
+                                | "width"
+                                | "height"
+                                | "loaderId"
+                                | "id"
+                                | "userAgent"
+                        );
+                    let item = if volatile && (item.is_number() || item.is_string()) {
+                        json!("<volatile>")
+                    } else {
+                        masked(item, page, root, origin)
+                    };
+                    (key.clone(), item)
+                })
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+#[test]
+#[ignore = "requires Chrome; locks what every hand-written sidecar method answers"]
+fn hand_written_sidecar_methods_match_the_lock() {
+    let (root, state, scratch) = directories();
+    let mut server = Sidecar::start(&state, &scratch);
+    let page = launch(&mut server, &root.path().join("profile"));
+    let origin = format!("http://{}", fixture_server());
+    let goto = server.request(3, "open", json!({"pageId":page,"url":format!("{origin}/")}));
+    assert!(goto.get("result").is_some(), "{goto}");
+    let shot = scratch.join("shot.png").to_string_lossy().into_owned();
+    let p = page.as_str();
+    let calls: Vec<(&str, Value)> = vec![
+        ("page.text", json!({"pageId":p})),
+        ("page.text", json!({"pageId":"no-such-page"})),
+        ("page.content", json!({"pageId":p})),
+        ("page.title", json!({"pageId":p})),
+        ("page.url", json!({"pageId":p})),
+        ("page.get_text", json!({"pageId":p,"selector":"h1"})),
+        ("page.get_text", json!({"pageId":p,"selector":"#missing"})),
+        (
+            "page.get_attribute",
+            json!({"pageId":p,"selector":"#link","name":"href"}),
+        ),
+        (
+            "page.get_attribute",
+            json!({"pageId":p,"selector":"#link","name":"nope"}),
+        ),
+        ("page.exists", json!({"pageId":p,"selector":"h1"})),
+        ("page.exists", json!({"pageId":p,"selector":"#missing"})),
+        (
+            "page.wait_for",
+            json!({"pageId":p,"selector":"h1","timeoutMs":2000}),
+        ),
+        (
+            "page.wait_for",
+            json!({"pageId":p,"selector":"#missing","timeoutMs":300}),
+        ),
+        (
+            "page.wait_for_visible",
+            json!({"pageId":p,"selector":"h1","timeoutMs":2000}),
+        ),
+        (
+            "page.wait_for_text",
+            json!({"pageId":p,"text":"Heading","timeoutMs":2000}),
+        ),
+        (
+            "page.wait_for_text",
+            json!({"pageId":p,"text":"absent words","timeoutMs":300}),
+        ),
+        (
+            "page.evaluate",
+            json!({"pageId":p,"function":"(a, b) => a + b","arguments":[2,3]}),
+        ),
+        (
+            "page.evaluate",
+            json!({"pageId":p,"function":"() => { throw new Error('boom') }"}),
+        ),
+        (
+            "page.execute",
+            json!({"pageId":p,"function":"() => { document.title = 'fixture' }"}),
+        ),
+        (
+            "page.evaluate_raw",
+            json!({"pageId":p,"js":"({a: 1, b: [true, null]})"}),
+        ),
+        (
+            "page.evaluate_raw",
+            json!({"pageId":p,"js":"undefinedName.x"}),
+        ),
+        ("page.execute_raw", json!({"pageId":p,"js":"void 0"})),
+        ("page.frames", json!({"pageId":p})),
+        (
+            "page.evaluate_in_frame",
+            json!({"pageId":p,"frameId":"no-such-frame","js":"1"}),
+        ),
+        (
+            "page.click_shadow",
+            json!({"pageId":p,"selector":"#missing","timeoutMs":300}),
+        ),
+        ("page.solve_turnstile", json!({"pageId":p,"timeoutMs":300})),
+        (
+            "page.fetch",
+            json!({"pageId":p,"url":format!("{origin}/data")}),
+        ),
+        (
+            "page.fetch_bounded",
+            json!({"pageId":p,"url":format!("{origin}/data"),"maxBytes":1}),
+        ),
+        ("page.capture_state", json!({"pageId":p})),
+        ("page.screenshot", json!({"pageId":p})),
+        (
+            "page.screenshot",
+            json!({"pageId":p,"format":"png","quality":5}),
+        ),
+        ("page.screenshot_to_file", json!({"pageId":p,"path":shot})),
+        (
+            "page.set_viewport",
+            json!({"pageId":p,"width":640,"height":360,"deviceScaleFactor":2.0}),
+        ),
+        ("page.reset_viewport", json!({"pageId":p})),
+        ("page.mouse_move", json!({"pageId":p,"x":10,"y":10})),
+        (
+            "page.mouse_down",
+            json!({"pageId":p,"x":10,"y":10,"button":"left"}),
+        ),
+        (
+            "page.mouse_up",
+            json!({"pageId":p,"x":10,"y":10,"button":"left"}),
+        ),
+        ("page.key_down", json!({"pageId":p,"key":"Shift"})),
+        ("page.key_up", json!({"pageId":p,"key":"Shift"})),
+        ("page.release_all_inputs", json!({"pageId":p})),
+        (
+            "page.solve_captcha",
+            json!({"pageId":p,"apiKey":"k","captchaType":"nope","captchaMode":"token","websiteKey":"w","websiteURL":"http://127.0.0.1/"}),
+        ),
+        ("dialog.accept", json!({"pageId":p})),
+        ("dialog.dismiss", json!({"pageId":p})),
+        ("browser.tabs", json!({})),
+        ("browser.close_tab", json!({"pageId":"no-such-page"})),
+        ("page.close", json!({"pageId":"no-such-page"})),
+    ];
+    let root_path = root.path().to_string_lossy().into_owned();
+    let mut rendered = String::new();
+    for (index, (method, params)) in calls.into_iter().enumerate() {
+        let reply = server.request(100 + index as u64, method, params.clone());
+        let answer = reply
+            .get("result")
+            .map(|result| json!({"result": result}))
+            .unwrap_or_else(|| json!({"error": reply["error"]}));
+        let row = json!({
+            "method": method,
+            "params": masked(&params, &page, &root_path, &origin),
+            "reply": masked(&answer, &page, &root_path, &origin),
+        });
+        rendered.push_str(&serde_json::to_string(&row).unwrap());
+        rendered.push('\n');
+    }
+    let lock = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/locks/sidecar-replies.jsonl");
+    if std::env::var_os("EOKA_UPDATE_LOCKS").is_some() {
+        std::fs::create_dir_all(lock.parent().unwrap()).unwrap();
+        std::fs::write(&lock, &rendered).unwrap();
+        return;
+    }
+    let locked = std::fs::read_to_string(&lock).unwrap_or_default();
+    let changed: Vec<String> = locked
+        .lines()
+        .zip(rendered.lines())
+        .filter(|(a, b)| a != b)
+        .map(|(a, b)| format!("- {a}\n+ {b}"))
+        .collect();
+    assert!(
+        locked == rendered,
+        "Sidecar replies changed. If that is intended, rerun with EOKA_UPDATE_LOCKS=1 and list it in the pull request.\n{}",
+        changed.join("\n")
+    );
+}
+
+fn leave_fixture() -> std::net::SocketAddr {
+    const LEAVE: &str = "<!doctype html><title>leave</title><textarea id=note></textarea>\
+        <a id=summary href=/summary>Summary</a><script>note.addEventListener('input',()=>{\
+        window.onbeforeunload=e=>{e.preventDefault();e.returnValue=''}})</script>";
+    const SUMMARY: &str = "<!doctype html><title>summary</title><h1>Summary</h1>";
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            std::thread::spawn(move || {
+                let mut request = [0u8; 4096];
+                let read = std::io::Read::read(&mut stream, &mut request).unwrap_or(0);
+                let page = if String::from_utf8_lossy(&request[..read]).starts_with("GET /summary")
+                {
+                    SUMMARY
+                } else {
+                    LEAVE
+                };
+                let _ = stream.write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: text/html\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{page}",
+                        page.len()
+                    )
+                    .as_bytes(),
+                );
+            });
+        }
+    });
+    address
+}
+
+#[test]
+#[ignore = "requires Chrome; staying on a page frees the tab for the next click"]
+fn dismissing_a_leave_page_dialog_frees_the_tab_for_the_next_click() {
+    let mut blocked = Blocked::serving(leave_fixture());
+    let page = blocked.page_at("/leave");
+    let (filled, _) = blocked.act(
+        &page,
+        json!({"kind":"fill","target":css("#note"),"value":"draft"}),
+        None,
+        5000,
+    );
+    assert_eq!(filled["outcome"], "verified_complete", "{filled}");
+    let leave = json!({"kind":"click","target":css("#summary")});
+    let expect = json!({"kind":"url","value":"/summary","contains":true});
+    let (first, _) = blocked.act(&page, leave.clone(), Some(expect.clone()), 8000);
+    assert_eq!(first["error_code"], "dialog_open", "{first}");
+    let (dismissed, elapsed) = blocked.call("dialog.dismiss", json!({"pageId":page}));
+    assert!(dismissed.get("result").is_some(), "{dismissed}");
+    assert!(elapsed < QUICK, "{elapsed:?}");
+    let (again, elapsed) = blocked.act(&page, leave, Some(expect), 8000);
+    assert_eq!(again["error_code"], "dialog_open", "{again}");
+    assert!(elapsed < Duration::from_secs(4), "{elapsed:?}: {again}");
+    let (accepted, _) = blocked.call("dialog.accept", json!({"pageId":page}));
+    assert_eq!(accepted["result"], "Dialog accepted", "{accepted}");
+    blocked.ok(
+        "page.wait_for_text",
+        json!({"pageId":page,"text":"Summary","timeoutMs":5000}),
+    );
+    let title = blocked.ok("page.title", json!({"pageId":page}));
+    assert_eq!(title["title"], "summary", "{title}");
+    blocked.finish();
+}

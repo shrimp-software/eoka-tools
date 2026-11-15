@@ -34,7 +34,7 @@ fn parse_headers_json(raw: &str) -> serde_json::Value {
 }
 
 pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
-    match cmd {
+    match cmd.clone() {
         Command::View {
             cursor,
             role,
@@ -42,42 +42,39 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
             max_controls,
             timeout_ms,
         } => Request::AgentObserve(eoka_protocol::AgentObserveArgs {
-            cursor: cursor.clone(),
-            role: role.clone(),
-            name: name.clone(),
-            max_controls: *max_controls,
-            timeout_ms: *timeout_ms,
+            cursor,
+            role,
+            name,
+            max_controls,
+            timeout_ms,
         }),
         Command::Step { request } => {
-            Request::AgentStep(serde_json::from_str(request).unwrap_or_else(|error| {
+            Request::AgentStep(serde_json::from_str(&request).unwrap_or_else(|error| {
                 eprintln!("Invalid step request: {error}\n{STEP_SHAPES}");
                 std::process::exit(2)
             }))
         }
         Command::Action { request } => {
-            Request::ActionPerform(serde_json::from_str(request).unwrap_or_else(|e| {
+            Request::ActionPerform(serde_json::from_str(&request).unwrap_or_else(|e| {
                 eprintln!("Invalid action request: {e}");
                 std::process::exit(2)
             }))
         }
         Command::Operations { command } => match command {
             crate::cli::OperationCommand::Get { id } => {
-                Request::OperationGet(eoka_protocol::OperationIdArgs { id: id.clone() })
+                Request::OperationGet(eoka_protocol::OperationIdArgs { id })
             }
             crate::cli::OperationCommand::List { limit } => {
                 Request::OperationList(eoka_protocol::OperationListArgs {
-                    limit: Some(*limit),
+                    limit: Some(limit),
                     before_ms: None,
                 })
             }
             crate::cli::OperationCommand::Wait { id, timeout_ms } => {
-                Request::OperationWait(eoka_protocol::OperationWaitArgs {
-                    id: id.clone(),
-                    timeout_ms: *timeout_ms,
-                })
+                Request::OperationWait(eoka_protocol::OperationWaitArgs { id, timeout_ms })
             }
             crate::cli::OperationCommand::Cancel { id } => {
-                Request::OperationCancel(eoka_protocol::OperationIdArgs { id: id.clone() })
+                Request::OperationCancel(eoka_protocol::OperationIdArgs { id })
             }
         },
         Command::Download(args) => args.request().unwrap_or_else(|error| {
@@ -93,11 +90,11 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
             load_state,
         } => Request::Open(OpenArgs {
             operation: Default::default(),
-            url: url.clone(),
+            url,
             headers: headers.as_ref().map(|h| parse_headers_json(h)),
-            user_agent: user_agent.clone(),
-            bypass_csp: *bypass_csp,
-            inject_js: inject_js.clone(),
+            user_agent,
+            bypass_csp,
+            inject_js,
             load_state: load_state
                 .as_ref()
                 .map(|path| path.to_string_lossy().to_string()),
@@ -105,18 +102,17 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
         Command::Back => Request::Back,
         Command::Forward => Request::Forward,
         Command::Reload => Request::Reload,
-        Command::Snapshot { interactive, all } => Request::Snapshot(SnapshotArgs {
-            interactive: *interactive,
-            all: *all,
-        }),
+        Command::Snapshot { interactive, all } => {
+            Request::Snapshot(SnapshotArgs { interactive, all })
+        }
         Command::Observe {
             filter,
             max,
             structured,
         } => Request::Observe(ObserveArgs {
-            filter: filter.clone(),
-            max: *max,
-            structured: *structured || agent_mode,
+            filter,
+            max,
+            structured: structured || agent_mode,
         }),
         Command::Screenshot {
             output,
@@ -129,19 +125,19 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
             output: output
                 .as_ref()
                 .map(|path| path.to_string_lossy().to_string()),
-            annotate: *annotate,
+            annotate,
             format: format.as_deref().map(|format| match format {
                 "jpeg" => eoka_protocol::sidecar::ScreenshotFormat::Jpeg,
                 "webp" => eoka_protocol::sidecar::ScreenshotFormat::Webp,
                 _ => eoka_protocol::sidecar::ScreenshotFormat::Png,
             }),
-            quality: *quality,
-            clip: clip.clone(),
-            full_page: *full_page,
+            quality,
+            clip,
+            full_page,
         }),
         Command::Recording { action } => {
             let id = |id: &String| eoka_protocol::RecordingIdArgs {
-                recording_id: id.clone(),
+                recording_id: id.to_string(),
             };
             match action {
                 crate::cli::RecordingAction::Start {
@@ -151,23 +147,23 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
                     max_width,
                     max_height,
                 } => Request::RecordingStart(eoka_protocol::RecordingStartArgs {
-                    path: std::path::absolute(path)
-                        .unwrap_or_else(|_| path.clone())
+                    path: std::path::absolute(&path)
+                        .unwrap_or(path)
                         .to_string_lossy()
                         .to_string(),
-                    recording_id: id.clone(),
-                    max_width: *max_width,
-                    max_height: *max_height,
-                    fps: *fps,
+                    recording_id: id,
+                    max_width,
+                    max_height,
+                    fps,
                 }),
                 crate::cli::RecordingAction::Status { id: value } => {
-                    Request::RecordingGet(id(value))
+                    Request::RecordingGet(id(&value))
                 }
                 crate::cli::RecordingAction::Stop { id: value } => {
-                    Request::RecordingStop(id(value))
+                    Request::RecordingStop(id(&value))
                 }
                 crate::cli::RecordingAction::Cancel { id: value } => {
-                    Request::RecordingCancel(id(value))
+                    Request::RecordingCancel(id(&value))
                 }
             }
         }
@@ -178,55 +174,46 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
             desktop,
             reset,
         } => Request::Emulate(EmulateArgs {
-            width: *width,
-            height: *height,
-            dpr: *dpr,
-            desktop: *desktop,
-            reset: *reset,
+            width,
+            height,
+            dpr,
+            desktop,
+            reset,
         }),
         Command::Info => Request::Info,
         Command::Text => Request::Text,
-        Command::Find { text } => Request::Find(TextArgs { text: text.clone() }),
+        Command::Find { text } => Request::Find(TextArgs { text }),
         Command::Content => Request::Content,
         Command::Dialog { action } => match action {
             crate::cli::DialogAction::Accept { prompt_text } => {
-                Request::DialogAccept(eoka_protocol::DialogAcceptArgs {
-                    prompt_text: prompt_text.clone(),
-                })
+                Request::DialogAccept(eoka_protocol::DialogAcceptArgs { prompt_text })
             }
             crate::cli::DialogAction::Dismiss => Request::DialogDismiss,
         },
         Command::Captcha {
             action: CaptchaAction::Detect,
         } => Request::CaptchaDetect,
-        Command::GetText { selector } => Request::GetText(eoka_protocol::SelectorArgs {
-            selector: selector.clone(),
-        }),
+        Command::GetText { selector } => Request::GetText(eoka_protocol::SelectorArgs { selector }),
         Command::GetAttribute { selector, name } => {
-            Request::GetAttribute(eoka_protocol::AttributeArgs {
-                selector: selector.clone(),
-                name: name.clone(),
-            })
+            Request::GetAttribute(eoka_protocol::AttributeArgs { selector, name })
         }
-        Command::Exists { selector } => Request::Exists(eoka_protocol::SelectorArgs {
-            selector: selector.clone(),
-        }),
+        Command::Exists { selector } => Request::Exists(eoka_protocol::SelectorArgs { selector }),
         Command::ClickShadow {
             selector,
             frame,
             timeout_ms,
         } => Request::ClickShadow(eoka_protocol::ClickShadowArgs {
-            selector: selector.clone(),
-            frame_id: frame.clone(),
-            timeout_ms: *timeout_ms,
+            selector,
+            frame_id: frame,
+            timeout_ms,
         }),
         Command::Click { target } => Request::Click(TargetArgs {
             operation: Default::default(),
-            target: target.clone(),
+            target,
         }),
         Command::DoubleClick { target } => Request::DblClick(TargetArgs {
             operation: Default::default(),
-            target: target.clone(),
+            target,
         }),
         Command::Fill {
             target,
@@ -239,45 +226,45 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
                 eoka_protocol::InputMode::Sequential
             },
             operation: Default::default(),
-            target: target.clone(),
-            text: text.clone(),
+            target,
+            text,
         }),
         Command::Select { target, value } => Request::Select(SelectArgs {
             operation: Default::default(),
-            target: target.clone(),
-            value: value.clone(),
+            target,
+            value,
         }),
         Command::Hover { target } => Request::Hover(TargetArgs {
             operation: Default::default(),
-            target: target.clone(),
+            target,
         }),
         Command::Key { key } => Request::Key(KeyArgs {
             operation: Default::default(),
-            key: key.clone(),
+            key,
         }),
         Command::MouseDown { x, y, button } => Request::MouseDown(MouseButtonArgs {
-            x: *x,
-            y: *y,
-            button: parse_mouse_button(button),
+            x,
+            y,
+            button: parse_mouse_button(&button),
         }),
-        Command::MouseMove { x, y } => Request::MouseMove(MouseMoveArgs { x: *x, y: *y }),
+        Command::MouseMove { x, y } => Request::MouseMove(MouseMoveArgs { x, y }),
         Command::MouseUp { x, y, button } => Request::MouseUp(MouseButtonArgs {
-            x: *x,
-            y: *y,
-            button: parse_mouse_button(button),
+            x,
+            y,
+            button: parse_mouse_button(&button),
         }),
         Command::KeyDown { key } => Request::KeyDown(KeyArgs {
             operation: Default::default(),
-            key: key.clone(),
+            key,
         }),
         Command::KeyUp { key } => Request::KeyUp(KeyArgs {
             operation: Default::default(),
-            key: key.clone(),
+            key,
         }),
         Command::ReleaseAllInputs => Request::ReleaseAllInputs,
         Command::Scroll { target } => Request::Scroll(TargetArgs {
             operation: Default::default(),
-            target: target.clone(),
+            target,
         }),
         Command::Eval {
             args,
@@ -289,17 +276,17 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
             no_await,
         } => {
             let args = ScriptArgs {
-                arguments: serde_json::from_str(args).unwrap_or_else(|error| {
+                arguments: serde_json::from_str(&args).unwrap_or_else(|error| {
                     eprintln!("Invalid --args: {error}");
                     std::process::exit(2)
                 }),
-                raw: *raw,
-                code: code.clone(),
+                raw,
+                code,
                 file: file.as_ref().map(|path| path.to_string_lossy().to_string()),
-                max_size: *max_size,
-                no_await: *no_await,
+                max_size,
+                no_await,
             };
-            if *no_return {
+            if no_return {
                 Request::Exec(args)
             } else {
                 Request::Eval(args)
@@ -312,20 +299,20 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
             file,
             no_await,
         } => Request::Exec(ScriptArgs {
-            arguments: serde_json::from_str(args).unwrap_or_else(|error| {
+            arguments: serde_json::from_str(&args).unwrap_or_else(|error| {
                 eprintln!("Invalid --args: {error}");
                 std::process::exit(2)
             }),
-            raw: *raw,
-            code: code.clone(),
+            raw,
+            code,
             file: file.as_ref().map(|path| path.to_string_lossy().to_string()),
             max_size: None,
-            no_await: *no_await,
+            no_await,
         }),
         Command::Frames => Request::Frames,
         Command::FrameEval { frame, code, file } => Request::FrameEval(FrameEvalArgs {
-            frame: frame.clone(),
-            code: code.clone(),
+            frame,
+            code,
             file: file.as_ref().map(|path| path.to_string_lossy().to_string()),
         }),
         Command::Tack { .. } | Command::Tools { .. } => {
@@ -340,13 +327,13 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
             body_only,
             max_body,
         } => Request::Fetch(FetchArgs {
-            url: url.clone(),
-            method: method.clone(),
+            url,
+            method,
             headers: headers.as_ref().map(|h| parse_headers_json(h)),
-            body: body.clone(),
-            redirect: redirect.clone(),
-            body_only: *body_only,
-            max_body: *max_body,
+            body,
+            redirect,
+            body_only,
+            max_body,
         }),
         Command::Cookies => Request::Cookies,
         Command::SetCookie {
@@ -355,31 +342,30 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
             domain,
             path,
         } => Request::SetCookie(SetCookieArgs {
-            name: name.clone(),
-            value: value.clone(),
-            domain: domain.clone(),
-            path: path.clone(),
+            name,
+            value,
+            domain,
+            path,
         }),
-        Command::DeleteCookie { name, domain } => Request::DeleteCookie(DeleteCookieArgs {
-            name: name.clone(),
-            domain: domain.clone(),
-        }),
+        Command::DeleteCookie { name, domain } => {
+            Request::DeleteCookie(DeleteCookieArgs { name, domain })
+        }
         Command::ClearCookies => Request::ClearCookies,
         Command::Storage {
             key,
             session_storage,
         } => Request::Storage(StorageArgs {
-            key: key.clone(),
-            session_storage: *session_storage,
+            key,
+            session_storage,
         }),
         Command::SetStorage {
             key,
             value,
             session_storage,
         } => Request::SetStorage(SetStorageArgs {
-            key: key.clone(),
-            value: value.clone(),
-            session_storage: *session_storage,
+            key,
+            value,
+            session_storage,
         }),
         Command::DumpStorage => Request::DumpStorage,
         Command::SaveState { path } => Request::SaveState(PathArgs {
@@ -387,28 +373,17 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
         }),
         Command::LoadState { path, no_navigate } => Request::LoadState(LoadStateArgs {
             path: path.to_string_lossy().to_string(),
-            no_navigate: *no_navigate,
+            no_navigate,
         }),
-        Command::Headers { headers_json } => Request::Headers(HeadersArgs {
-            headers_json: headers_json.clone(),
-        }),
-        Command::Console { clear, level } => Request::Console(ConsoleArgs {
-            clear: *clear,
-            level: level.clone(),
-        }),
-        Command::Errors { clear } => Request::Errors(ClearFlagArgs { clear: *clear }),
+        Command::Headers { headers_json } => Request::Headers(HeadersArgs { headers_json }),
+        Command::Console { clear, level } => Request::Console(ConsoleArgs { clear, level }),
+        Command::Errors { clear } => Request::Errors(ClearFlagArgs { clear }),
         Command::Tab { action } => match action {
             TabAction::List => Request::TabList,
-            TabAction::New { url } => Request::TabNew(TabNewArgs { url: url.clone() }),
-            TabAction::Switch { tab_id } => Request::TabSwitch(TabIdArgs {
-                tab_id: tab_id.clone(),
-            }),
-            TabAction::Close { tab_id } => Request::TabClose(TabIdArgs {
-                tab_id: tab_id.clone(),
-            }),
-            TabAction::Attach { tab_id } => Request::TabAttach(TabIdArgs {
-                tab_id: tab_id.clone(),
-            }),
+            TabAction::New { url } => Request::TabNew(TabNewArgs { url }),
+            TabAction::Switch { tab_id } => Request::TabSwitch(TabIdArgs { tab_id }),
+            TabAction::Close { tab_id } => Request::TabClose(TabIdArgs { tab_id }),
+            TabAction::Attach { tab_id } => Request::TabAttach(TabIdArgs { tab_id }),
         },
         Command::Wait {
             ms,
@@ -420,38 +395,32 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
             timeout,
         } => Request::Wait(WaitArgs {
             expect: None,
-            ms: *ms,
-            text: text.clone(),
-            url: url.clone(),
-            load: load.clone(),
-            selector: selector.clone(),
+            ms,
+            text,
+            url,
+            load,
+            selector,
             state: state.as_deref().map(|state| match state {
                 "attached" => eoka_protocol::WaitSelectorState::Attached,
                 "hidden" => eoka_protocol::WaitSelectorState::Hidden,
                 _ => eoka_protocol::WaitSelectorState::Visible,
             }),
-            timeout: *timeout,
+            timeout,
         }),
         Command::SpaInfo => Request::SpaInfo,
-        Command::SpaNavigate { path } => {
-            Request::SpaNavigate(PathStringArgs { path: path.clone() })
-        }
+        Command::SpaNavigate { path } => Request::SpaNavigate(PathStringArgs { path }),
         Command::FakeCamera { file, loop_video } => Request::FakeCamera(FakeCameraArgs {
             file: file.to_string_lossy().to_string(),
-            loop_video: *loop_video,
+            loop_video,
         }),
         Command::Wasm { action } => match action {
             WasmAction::Info => Request::WasmInfo,
-            WasmAction::Read { addr, len, memory } => Request::WasmRead(WasmReadArgs {
-                addr: addr.clone(),
-                len: *len,
-                memory: memory.clone(),
-            }),
-            WasmAction::Write { addr, hex, memory } => Request::WasmWrite(WasmWriteArgs {
-                addr: addr.clone(),
-                hex: hex.clone(),
-                memory: memory.clone(),
-            }),
+            WasmAction::Read { addr, len, memory } => {
+                Request::WasmRead(WasmReadArgs { addr, len, memory })
+            }
+            WasmAction::Write { addr, hex, memory } => {
+                Request::WasmWrite(WasmWriteArgs { addr, hex, memory })
+            }
             WasmAction::Find {
                 pattern,
                 start,
@@ -459,31 +428,25 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
                 max,
                 memory,
             } => Request::WasmFind(WasmFindArgs {
-                pattern: pattern.clone(),
-                start: start.clone(),
-                end: end.clone(),
-                max: *max,
-                memory: memory.clone(),
+                pattern,
+                start,
+                end,
+                max,
+                memory,
             }),
         },
 
-        Command::Network { action } => network_action_to_request(action),
+        Command::Network { action } => network_action_to_request(&action),
         Command::Js { action } => match action {
-            JsAction::Mode { mode } => Request::JsMode(ModeArgs { mode: mode.clone() }),
-            JsAction::Allow { domain } => Request::JsAllow(DomainArgs {
-                domain: domain.clone(),
-            }),
-            JsAction::Block { domain } => Request::JsBlock(DomainArgs {
-                domain: domain.clone(),
-            }),
-            JsAction::Remove { domain } => Request::JsRemove(DomainArgs {
-                domain: domain.clone(),
-            }),
+            JsAction::Mode { mode } => Request::JsMode(ModeArgs { mode }),
+            JsAction::Allow { domain } => Request::JsAllow(DomainArgs { domain }),
+            JsAction::Block { domain } => Request::JsBlock(DomainArgs { domain }),
+            JsAction::Remove { domain } => Request::JsRemove(DomainArgs { domain }),
             JsAction::List => Request::JsList,
         },
         Command::Close => Request::Close,
         Command::CloneFrom { source, to } => Request::CloneFrom(CloneFromArgs {
-            source: source.clone(),
+            source,
             to: to.as_ref().map(|path| path.to_string_lossy().to_string()),
         }),
         Command::Captcha {
@@ -493,14 +456,12 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
                     timeout_ms,
                 },
         } => Request::CaptchaDatadome(CaptchaDatadomeArgs {
-            max_attempts: *max_attempts,
-            timeout_ms: *timeout_ms,
+            max_attempts,
+            timeout_ms,
         }),
         Command::Captcha {
             action: CaptchaAction::Turnstile { timeout_ms },
-        } => Request::CaptchaTurnstile(CaptchaTurnstileArgs {
-            timeout_ms: *timeout_ms,
-        }),
+        } => Request::CaptchaTurnstile(CaptchaTurnstileArgs { timeout_ms }),
         Command::Captcha {
             action:
                 CaptchaAction::Inject {
@@ -510,8 +471,8 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
                     click_after,
                 },
         } => captcha_inject_request(
-            token,
-            captcha_type,
+            &token,
+            &captcha_type,
             callback.as_deref(),
             click_after.as_deref(),
         ),

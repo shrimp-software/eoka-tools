@@ -735,6 +735,20 @@ pub async fn supersede_navigation(operations: &crate::operations::OperationManag
     }
 }
 
+pub async fn answer(
+    operations: &crate::operations::OperationManager,
+    page: &Page,
+    accept: Option<Option<&str>>,
+) -> eoka::Result<String> {
+    match accept {
+        Some(prompt_text) => {
+            page.accept_dialog(prompt_text).await?;
+            Ok("Dialog accepted".into())
+        }
+        None => dismiss(operations, page).await,
+    }
+}
+
 pub async fn dismiss(
     operations: &crate::operations::OperationManager,
     page: &Page,

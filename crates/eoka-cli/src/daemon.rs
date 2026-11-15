@@ -97,6 +97,7 @@ pub async fn run(session_name: &str, spec: LaunchSpec) -> anyhow::Result<()> {
         listener,
         board.clone(),
         handler.operation_manager(),
+        handler.download_manager(),
         accepted,
     ));
 

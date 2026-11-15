@@ -2,7 +2,7 @@ use clap::{Args, Subcommand};
 use eoka_protocol::{DownloadIdArgs, DownloadStartArgs, DownloadWaitArgs, Request, Response};
 use std::path::PathBuf;
 
-#[derive(Args)]
+#[derive(Clone, Args)]
 #[command(args_conflicts_with_subcommands = true, subcommand_negates_reqs = true)]
 #[command(group(clap::ArgGroup::new("download_trigger").args(["click", "url"]).required(true).multiple(false)))]
 pub struct DownloadCli {
@@ -39,7 +39,7 @@ pub struct DownloadCli {
     pub timeout_ms: u64,
 }
 
-#[derive(Subcommand)]
+#[derive(Clone, Subcommand)]
 pub enum DownloadAction {
     #[command(about = "List download jobs in this session")]
     List,

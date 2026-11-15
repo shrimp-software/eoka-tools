@@ -655,7 +655,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-cli"
-version = "0.14.3"
+version = "0.14.4"
 dependencies = [
  "anyhow",
  "clap",
@@ -715,7 +715,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-mcp"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -752,7 +752,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-runner"
-version = "0.7.7"
+version = "0.7.8"
 dependencies = [
  "chrono",
  "clap",
@@ -774,7 +774,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-sdk"
-version = "0.10.6"
+version = "0.10.7"
 dependencies = [
  "anyhow",
  "eoka",
@@ -788,7 +788,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-server"
-version = "0.11.2"
+version = "0.11.3"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -821,7 +821,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-tack"
-version = "0.9.4"
+version = "0.9.5"
 dependencies = [
  "async-trait",
  "eoka-protocol",
