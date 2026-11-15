@@ -1223,6 +1223,20 @@ impl ServerHandler for EokaServer {
         context: rmcp::service::RequestContext<rmcp::RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
         let tool = request.name.to_string();
+        if matches!(
+            tool.as_str(),
+            "operation_get"
+                | "operation_list"
+                | "operation_wait"
+                | "operation_cancel"
+                | "download_list"
+                | "download_get"
+                | "download_wait"
+                | "download_cancel"
+        ) {
+            let context = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
+            return self.tool_router.call(context).await;
+        }
         let arguments = request
             .arguments
             .clone()

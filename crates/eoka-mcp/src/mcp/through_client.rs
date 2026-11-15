@@ -477,3 +477,36 @@ async fn a_dialog_that_opens_before_the_first_page_tool_is_reported() {
     assert!(read.contains("Early"), "{read}");
     finish(client).await;
 }
+
+#[tokio::test]
+#[ignore = "requires Chrome; operations can be listed and cancelled while a page tool is running"]
+async fn operation_tools_answer_while_another_tool_holds_the_browser() {
+    let client = connect(EokaServer::listing(false)).await;
+    done(
+        &client,
+        "navigate",
+        json!({"url": "data:text/html,<title>one</title><p>text</p>"}),
+    )
+    .await;
+    let waiting = answer(
+        &client,
+        "wait_for_text",
+        json!({"text": "never shown", "timeout_ms": 8000}),
+    );
+    let asked = async {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let started = Instant::now();
+        let listed = answer(&client, "operation_list", json!({"limit": 5})).await;
+        let downloads = answer(&client, "download_list", json!({})).await;
+        (listed, downloads, started.elapsed())
+    };
+    let (waited, (listed, downloads, elapsed)) = tokio::join!(waiting, asked);
+    assert!(!waited.0, "{}", waited.1);
+    assert!(listed.0, "{}", listed.1);
+    assert!(downloads.0, "{}", downloads.1);
+    assert!(
+        elapsed < Duration::from_secs(3),
+        "operation and download queries waited {elapsed:?} for the page tool"
+    );
+    finish(client).await;
+}
