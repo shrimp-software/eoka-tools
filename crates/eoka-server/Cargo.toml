@@ -1,6 +1,6 @@
 [package]
 name = "eoka-server"
-version = "0.11.2"
+version = "0.11.3"
 edition.workspace = true
 license.workspace = true
 description = "Shared browser runtime and sidecar process for eoka browser automation"

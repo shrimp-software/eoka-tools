@@ -1,6 +1,6 @@
 [package]
 name = "eoka-sdk"
-version = "0.10.6"
+version = "0.10.7"
 edition.workspace = true
 license.workspace = true
 description = "Rust SDK for controlling eoka browser automation sessions"
