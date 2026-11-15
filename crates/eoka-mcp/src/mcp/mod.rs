@@ -355,11 +355,8 @@ impl EokaServer {
         &self,
         req: Parameters<eoka_protocol::AgentObserveArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        self.agent_command(
-            "agent_observe",
-            serde_json::to_value(req.0).map_err(internal)?,
-        )
-        .await
+        self.agent_tool("agent_observe", Operation::AgentObserve(req.0))
+            .await
     }
 
     #[tool]
@@ -367,9 +364,9 @@ impl EokaServer {
         &self,
         req: Parameters<eoka_protocol::AgentStepArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        let arguments = serde_json::to_value(req.0).map_err(internal)?;
-        helpers::ensure_action_urls_allowed(&arguments)?;
-        self.agent_command("agent_step", arguments).await
+        helpers::ensure_action_urls_allowed(&serde_json::to_value(&req.0).map_err(internal)?)?;
+        self.agent_tool("agent_step", Operation::AgentStep(req.0))
+            .await
     }
 
     #[tool]
