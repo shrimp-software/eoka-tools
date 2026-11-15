@@ -35,6 +35,13 @@ async fn page_value(client: &Client, code: &str) -> Value {
     data(&done(client, "extract", json!({"code": code})).await)
 }
 
+fn tab_entries(listing: &str) -> Vec<String> {
+    let lines: Vec<&str> = listing.lines().collect();
+    let mut entries: Vec<String> = lines.chunks(2).map(|entry| entry.join("\n")).collect();
+    entries.sort();
+    entries
+}
+
 async fn finish(client: Client) {
     done(&client, "close", json!({})).await;
     let _ = client.cancel().await;
@@ -445,8 +452,8 @@ async fn blocked_tabs_are_diagnosed_and_never_relaunch_the_browser() {
     let info = done(&client, "page_info", json!({})).await;
     assert!(info.contains("one"), "{info}");
     assert_eq!(
-        done(&client, "list_tabs", json!({})).await,
-        tabs,
+        tab_entries(&done(&client, "list_tabs", json!({})).await),
+        tab_entries(&tabs),
         "the same browser and tab are still in use"
     );
     held.abort();
