@@ -510,3 +510,25 @@ async fn operation_tools_answer_while_another_tool_holds_the_browser() {
     );
     finish(client).await;
 }
+
+#[tokio::test]
+#[ignore = "requires Chrome; a browser launched after close starts without the old network recording"]
+async fn a_relaunched_browser_does_not_inherit_the_old_network_recording() {
+    let client = connect(EokaServer::listing(true)).await;
+    let page = "data:text/html,<title>one</title><p>text</p>";
+    done(&client, "navigate", json!({"url": page})).await;
+    done(&client, "network_record_start", json!({})).await;
+    done(&client, "reload", json!({})).await;
+    let recording = data(&done(&client, "network_record_status", json!({})).await);
+    assert_eq!(recording["status"]["active"], true, "{recording}");
+    done(&client, "close", json!({})).await;
+
+    done(&client, "navigate", json!({"url": page})).await;
+    let relaunched = data(&done(&client, "network_record_status", json!({})).await);
+    assert_eq!(relaunched["status"]["active"], false, "{relaunched}");
+    assert_eq!(relaunched["status"]["entry_count"], 0, "{relaunched}");
+    done(&client, "network_record_start", json!({})).await;
+    let again = data(&done(&client, "network_record_status", json!({})).await);
+    assert_eq!(again["status"]["active"], true, "{again}");
+    finish(client).await;
+}

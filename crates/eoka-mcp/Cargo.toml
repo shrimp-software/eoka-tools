@@ -18,7 +18,6 @@ path = "src/main.rs"
 
 [dependencies]
 eoka-server = { workspace = true }
-eoka-proxy = { workspace = true }
 eoka-protocol = { workspace = true }
 captcha = { workspace = true }
 serde = { version = "1", features = ["derive"] }
@@ -28,7 +27,6 @@ rmcp = { version = "3.0.1", features = ["server", "transport-io"] }
 schemars = "1.0"
 anyhow = "1"
 base64 = "0.23"
-dirs = "7"
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]

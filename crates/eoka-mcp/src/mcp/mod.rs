@@ -608,9 +608,7 @@ impl EokaServer {
             .await
     }
 
-    #[tool(
-        description = "Click an element. Target: index (0), @e1 (snapshot ref), text:Submit, placeholder:Search, role:button, css:selector, id:my-btn, or plain text. Returns a durable operation ID. Never replays input."
-    )]
+    #[tool]
     async fn click(&self, req: Parameters<TargetRequest>) -> Result<CallToolResult, ErrorData> {
         self.action_tool(
             "click",
@@ -620,9 +618,7 @@ impl EokaServer {
         .await
     }
 
-    #[tool(
-        description = "Type text into an input. Target: index, text:Label, placeholder:Enter code, css:input, id:field. Returns a durable operation ID. Never replays input. Clears existing text."
-    )]
+    #[tool]
     async fn fill(&self, req: Parameters<FillRequest>) -> Result<CallToolResult, ErrorData> {
         self.action_tool(
             "fill",
@@ -632,9 +628,7 @@ impl EokaServer {
         .await
     }
 
-    #[tool(
-        description = "Select dropdown option. Target: index, text:Label, css:select, id:dropdown. Value matches option value or visible text."
-    )]
+    #[tool]
     async fn select(&self, req: Parameters<SelectRequest>) -> Result<CallToolResult, ErrorData> {
         self.action_tool(
             "select",
@@ -644,9 +638,7 @@ impl EokaServer {
         .await
     }
 
-    #[tool(
-        description = "Hover over element to trigger tooltips, menus, or hover states. Target: index, text:Label, css:selector, etc."
-    )]
+    #[tool]
     async fn hover(&self, req: Parameters<TargetRequest>) -> Result<CallToolResult, ErrorData> {
         self.action_tool(
             "hover",
@@ -747,9 +739,7 @@ impl EokaServer {
         ))
     }
 
-    #[tool(
-        description = "Scroll page. Target: 'up', 'down', 'top', 'bottom', or element target (index, text:Label, css:selector) to scroll into view."
-    )]
+    #[tool]
     async fn scroll(&self, req: Parameters<ScrollRequest>) -> Result<CallToolResult, ErrorData> {
         self.engine_tool("scroll", Operation::Scroll(req.0)).await
     }
@@ -1280,11 +1270,12 @@ impl ServerHandler for EokaServer {
             .with_server_info(Implementation::new("eoka-tools", env!("CARGO_PKG_VERSION")))
             .with_instructions(
                 "Browser automation.\n\n\
-                 TARGETING: Index (0) uses cache. Everything else is LIVE (resolved at action time):\n\
-                 Submit, text:Submit, placeholder:code, css:button, id:btn, role:button\n\n\
+                 TARGETING: resolved when the action runs: Submit, text:Submit, placeholder:code, css:button, id:btn, role:button, or a ref from agent_observe. Numeric indices are not accepted.\n\
+                 VERIFY: click and type_key take expect, a condition that is false now and true after the action. Without it the action runs and is reported as not verified.\n\
+                 BLOCKED: a reply with dialog_open, navigation_pending or navigation_timeout names the tool that clears it.\n\
+                 RETRY: actions are never replayed. Send the same operation_id again to ask about an action instead of repeating it.\n\n\
                  OBSERVE: filter='inputs'|'buttons', max=N\n\
-                 BATCH: batch([{action:'fill',target:'placeholder:code',text:'X'},{action:'click',target:'Submit'}])\n\
-                 AUTO-RETRY: click/fill retry once on stale\n\
+                 BATCH: batch({actions:[{operation_id:'<uuid>', action:{kind:'click', target:{query:{kind:'css', selector:'button'}}}, options:{expect:{kind:'url', value:'/done', contains:true}}}]}) — typed actions as in action_perform; stops at the first one that is not verified\n\
                  SPA: spa_info, spa_navigate, history_go\n\
                  Tabs: list_tabs, new_tab, switch_tab (auto-attaches to popups), close_tab\n\
                  TIMING: wait_ms(ms) — pause between actions\n\
