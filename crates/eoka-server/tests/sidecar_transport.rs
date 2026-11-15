@@ -3470,3 +3470,68 @@ fn hand_written_sidecar_methods_match_the_lock() {
         changed.join("\n")
     );
 }
+
+fn leave_fixture() -> std::net::SocketAddr {
+    const LEAVE: &str = "<!doctype html><title>leave</title><textarea id=note></textarea>\
+        <a id=summary href=/summary>Summary</a><script>note.addEventListener('input',()=>{\
+        window.onbeforeunload=e=>{e.preventDefault();e.returnValue=''}})</script>";
+    const SUMMARY: &str = "<!doctype html><title>summary</title><h1>Summary</h1>";
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            std::thread::spawn(move || {
+                let mut request = [0u8; 4096];
+                let read = std::io::Read::read(&mut stream, &mut request).unwrap_or(0);
+                let page = if String::from_utf8_lossy(&request[..read]).starts_with("GET /summary")
+                {
+                    SUMMARY
+                } else {
+                    LEAVE
+                };
+                let _ = stream.write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: text/html\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{page}",
+                        page.len()
+                    )
+                    .as_bytes(),
+                );
+            });
+        }
+    });
+    address
+}
+
+#[test]
+#[ignore = "requires Chrome; staying on a page frees the tab for the next click"]
+fn dismissing_a_leave_page_dialog_frees_the_tab_for_the_next_click() {
+    let mut blocked = Blocked::serving(leave_fixture());
+    let page = blocked.page_at("/leave");
+    let (filled, _) = blocked.act(
+        &page,
+        json!({"kind":"fill","target":css("#note"),"value":"draft"}),
+        None,
+        5000,
+    );
+    assert_eq!(filled["outcome"], "verified_complete", "{filled}");
+    let leave = json!({"kind":"click","target":css("#summary")});
+    let expect = json!({"kind":"url","value":"/summary","contains":true});
+    let (first, _) = blocked.act(&page, leave.clone(), Some(expect.clone()), 8000);
+    assert_eq!(first["error_code"], "dialog_open", "{first}");
+    let (dismissed, elapsed) = blocked.call("dialog.dismiss", json!({"pageId":page}));
+    assert!(dismissed.get("result").is_some(), "{dismissed}");
+    assert!(elapsed < QUICK, "{elapsed:?}");
+    let (again, elapsed) = blocked.act(&page, leave, Some(expect), 8000);
+    assert_eq!(again["error_code"], "dialog_open", "{again}");
+    assert!(elapsed < Duration::from_secs(4), "{elapsed:?}: {again}");
+    let (accepted, _) = blocked.call("dialog.accept", json!({"pageId":page}));
+    assert_eq!(accepted["result"], "Dialog accepted", "{accepted}");
+    blocked.ok(
+        "page.wait_for_text",
+        json!({"pageId":page,"text":"Summary","timeoutMs":5000}),
+    );
+    let title = blocked.ok("page.title", json!({"pageId":page}));
+    assert_eq!(title["title"], "summary", "{title}");
+    blocked.finish();
+}
