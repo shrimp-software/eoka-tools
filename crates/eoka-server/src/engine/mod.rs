@@ -274,6 +274,17 @@ impl Engine {
                 return Response::err(error);
             }
         }
+        self.handle_as(spoken, request).await
+    }
+
+    pub async fn handle_as(&mut self, spoken: Option<&str>, request: Request) -> Response {
+        if let Some(tab) = self
+            .state
+            .as_mut()
+            .and_then(|state| state.current_tab_mut())
+        {
+            tab.invalidate();
+        }
         self.spoken = spoken.map(str::to_owned);
         let response = self.handle(request).await;
         self.spoken = None;
