@@ -1,14 +1,14 @@
 [package]
 name = "eoka-sdk"
 version = "0.10.6"
-edition = "2021"
-license = "MIT"
+edition.workspace = true
+license.workspace = true
 description = "Rust SDK for controlling eoka browser automation sessions"
-repository = "https://github.com/shrimp-software/eoka-tools"
-homepage = "https://github.com/shrimp-software/eoka-tools"
+repository.workspace = true
+homepage.workspace = true
 documentation = "https://docs.rs/eoka-sdk"
 readme = "README.md"
-authors = ["cbxss"]
+authors.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }

@@ -1,14 +1,14 @@
 [package]
 name = "eoka-protocol"
 version = "0.10.1"
-edition = "2021"
-license = "MIT"
+edition.workspace = true
+license.workspace = true
 description = "Protocol and tool catalog definitions for eoka browser automation"
-repository = "https://github.com/shrimp-software/eoka-tools"
-homepage = "https://github.com/shrimp-software/eoka-tools"
+repository.workspace = true
+homepage.workspace = true
 documentation = "https://docs.rs/eoka-protocol"
 readme = "README.md"
-authors = ["cbxss"]
+authors.workspace = true
 
 [dependencies]
 schemars = { workspace = true }

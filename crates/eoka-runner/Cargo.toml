@@ -1,16 +1,16 @@
 [package]
 name = "eoka-runner"
 version = "0.7.7"
-edition = "2021"
-license = "MIT"
+edition.workspace = true
+license.workspace = true
 description = "Config-based browser automation — define actions in YAML, execute deterministically"
 keywords = ["browser", "automation", "yaml", "scripting", "cli"]
 categories = ["web-programming", "development-tools", "command-line-utilities"]
-repository = "https://github.com/shrimp-software/eoka-tools"
-homepage = "https://github.com/shrimp-software/eoka-tools"
+repository.workspace = true
+homepage.workspace = true
 documentation = "https://docs.rs/eoka-runner"
 readme = "README.md"
-authors = ["cbxss"]
+authors.workspace = true
 
 [[bin]]
 name = "eoka-runner"
