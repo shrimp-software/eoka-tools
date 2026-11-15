@@ -93,6 +93,18 @@ response retains the known job ID without claiming a current state. Wait timeout
 leave jobs running; inspect or wait for the same job instead of starting again.
 Old daemons need an explicit restart to provide the new evidence.
 
+## Blocked and busy sessions
+
+No CLI command blocks indefinitely. A tab with an open JavaScript dialog, or one
+waiting for a server that never answers, is reported within about half a second
+as `dialog_open` or `navigation_pending` with the command that clears it, instead
+of a 30-second protocol timeout per command. A navigation that gets no response
+before its deadline is stopped and reported as `navigation_timeout`, leaving the
+tab on its previous page. While one command runs, another waits at most 5 s and
+is then refused with `daemon_busy`, naming the running command. `eoka status`
+reports what a session is running and what blocks its tab. MCP tools and Tack
+receive the same codes. See [agent browsing](AGENT-BROWSING.md#blocked-and-busy-sessions).
+
 ## Browser downloads and bounded fetch
 
 Use an existing Eoka-owned session to save files with Chrome's cookies, proxy and
@@ -254,8 +266,10 @@ compiled ESM/declarations for Node 24 LTS (`^24.21.0`), one private sidecar per 
 owned launch or borrowed attachment, verified actions, durable operation recovery,
 page reads, bounded text fetch, PNG/JPEG/WebP screenshots and native MP4 recording.
 
-The current release, `0.1.0-beta.3`, bundles server `0.6.1` built against eoka
-`0.7.2`. Merging a version bump to `main` starts the npm release automatically.
+Each release bundles the server version recorded in
+`clients/node/release-manifest.json`, built against the eoka version in the
+workspace `Cargo.toml`. Merging a version bump to `main` starts the npm release
+automatically.
 
 `Browser.launch()` resolves an exact optional server package and installs pinned
 full Chrome for Testing (the build pinned in
@@ -307,10 +321,9 @@ These apply to the CLI and MCP server:
 
 ## Development
 
-Builds use published eoka `0.7.2` from crates.io. The workspace lockfile pins its
-registry source and checksum
-`bb088753bbef0585bcbaa1e868e4e59b5ee99db40844ba9cb3ec4822ca95e019`;
-no sibling core checkout or Cargo patch is required.
+Builds use the published eoka crate from crates.io at the version in the workspace
+`Cargo.toml`. `Cargo.lock` pins its registry source and checksum; no sibling core
+checkout or Cargo patch is required.
 
 ```sh
 mise run drift
@@ -349,12 +362,21 @@ curl -fsSL https://raw.githubusercontent.com/shrimp-software/eoka-tools/main/cra
 
 Update an installed CLI to the latest GitHub release (Linux and macOS, x86_64
 and aarch64). The download is verified against the release `SHA256SUMS` before
-the running binary is replaced:
+the running binary is replaced. Installed copies of the agent skill are then
+rewritten to match the installed binary:
 
 ```sh
-eoka update --check   # report installed and latest versions
+eoka update --check   # report installed and latest versions, and a stale skill
 eoka update           # install; add --kill-daemons to stop old session daemons
+eoka upgrade          # the same command
 ```
+
+The binary carries its own agent skill. `eoka skill refresh` rewrites the
+installed copies on its own, for example after `cargo install`; it looks under
+`~/.agents/skills`, `~/.claude/skills`, `~/.codex/skills`, `~/.pi/agent/skills`,
+`~/.config/opencode/skills`, `~/.cursor/skills` and `~/.gemini/skills`, and
+under `$CODEX_HOME/skills` and `$CLAUDE_CONFIG_DIR/skills`. Only the skill's
+own files are rewritten. `eoka update --keep-skill` leaves the copies alone.
 
 Inspect the generated protocol-backed tool catalog:
 
@@ -371,16 +393,29 @@ eoka tack 'return await tools.invoke({ path: "eoka.info", input: {} });'
 ## Documentation
 
 - [eoka-mcp](crates/eoka-mcp/README.md)
-- [eoka CLI skill](crates/eoka-cli/SKILL.md)
+- [eoka CLI skill](crates/eoka-cli/skill/SKILL.md)
 - [eoka-runner](crates/eoka-runner/README.md)
 - [Go client](clients/go/README.md)
 - [server protocol](PROTOCOL.md)
 
-Install the Codex skill with the open skills CLI:
+Install the skill from the binary, without Node. With no directory it writes
+`~/.agents/skills/eoka`, which Codex and other agents that read
+`~/.agents/skills` use, and `~/.claude/skills/eoka` for Claude Code when
+`~/.claude` exists. Name a directory for any other agent or for a
+project-local copy:
 
 ```sh
-npx skills add https://github.com/shrimp-software/eoka-tools/tree/main/crates/eoka-cli --skill eoka -a codex -y
+eoka skill install
+eoka skill install .claude/skills/eoka
 ```
+
+Or install the Codex skill with the open skills CLI:
+
+```sh
+npx skills add https://github.com/shrimp-software/eoka-tools/tree/main/crates/eoka-cli/skill --skill eoka --global -a codex -y
+```
+
+Either way, `eoka update` keeps the installed copies current afterwards.
 
 ## License
 

@@ -1,6 +1,6 @@
 # Downloads and recovery
 
-Use CLI 0.10.0, the same named session and `--agent` on every call. Keep JSON
+Use the same named session and `--agent` on every call. Keep JSON
 responses, stderr and exit status. A successful start means admission, not file
 completion. Record `data.id`, which is also the operation ID, and inspect
 `data.state`. Supply a fresh `--operation-id` before starting when recovery from

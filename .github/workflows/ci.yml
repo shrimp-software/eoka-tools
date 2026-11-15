@@ -64,7 +64,7 @@ jobs:
           fetch-depth: 0 # crate-version check compares against release tags
       - name: Release versions are consistent
         run: node scripts/bump-release.mjs --check
-      - uses: shrimp-software/eoka/.github/actions/rust@2e108f041f487df9acc2b04fe5508ec4bf041a56
+      - uses: shrimp-software/eoka/.github/actions/rust@e6662c5f7faf03b5f6c2979903367003c426b5d4
         if: env.RUST == 'true'
         with:
           components: rustfmt, clippy
@@ -108,7 +108,7 @@ jobs:
               -p eoka-datadome -p eoka-proxy -p eoka-email
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: shrimp-software/eoka/.github/actions/rust@2e108f041f487df9acc2b04fe5508ec4bf041a56
+      - uses: shrimp-software/eoka/.github/actions/rust@e6662c5f7faf03b5f6c2979903367003c426b5d4
       # macOS's per-user TMPDIR is long enough to push session socket paths
       # past the 104-byte limit; give the runtime directory a short base.
       - name: Short runtime directory
@@ -143,7 +143,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      - uses: shrimp-software/eoka/.github/actions/rust@2e108f041f487df9acc2b04fe5508ec4bf041a56
+      - uses: shrimp-software/eoka/.github/actions/rust@e6662c5f7faf03b5f6c2979903367003c426b5d4
         with:
           cache-key: node-schema
       - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b
@@ -165,11 +165,11 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      - uses: shrimp-software/eoka/.github/actions/rust@2e108f041f487df9acc2b04fe5508ec4bf041a56
+      - uses: shrimp-software/eoka/.github/actions/rust@e6662c5f7faf03b5f6c2979903367003c426b5d4
         with:
           cache-key: browser
       - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b
-      - uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: cargo-nextest
       - name: Build native client, SDK and test archive
@@ -215,7 +215,7 @@ jobs:
         with:
           go-version: "1.21"
       - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b
-      - uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         if: matrix.suite != 'clients'
         with:
           tool: cargo-nextest

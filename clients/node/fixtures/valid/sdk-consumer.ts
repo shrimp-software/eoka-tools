@@ -17,6 +17,7 @@ import {
 } from "@cbxss/eoka";
 import type {
   Action,
+  ActionOptions,
   ActionReceipt,
   CallOptions,
   ConnectOptions,
@@ -32,6 +33,7 @@ import type {
   LocatorSpec,
   MethodResults,
   OperationRecord,
+  PageBlocker,
   PerformOptions,
   WaitOptions,
   Artifact,
@@ -42,7 +44,7 @@ import type {
   RecordingFailure,
   RecordingState,
 } from "@cbxss/eoka";
-import type { MethodName, MethodParams, ProtocolResponse, ServerError } from "@cbxss/eoka/protocol";
+import type { ActionOptions as WireActionOptions, MethodName, MethodParams, ProtocolResponse, ServerError } from "@cbxss/eoka/protocol";
 import { protocolVersion as wireVersion } from "@cbxss/eoka/protocol";
 
 export const launchOptions: LaunchOptions = {
@@ -50,6 +52,7 @@ export const launchOptions: LaunchOptions = {
   executablePath: "/opt/chrome/chrome",
   sandbox: true,
   viewport: { width: 1024, height: 768, deviceScaleFactor: 1 },
+  defaultTimeoutMs: 60000,
 };
 export const managedLaunchOptions: LaunchOptions = {
   browserCacheDir: "/opt/eoka/cache",
@@ -72,20 +75,40 @@ export const platform: PlatformId = selectPlatform("linux", "x64", "2.35");
 export const connectOptions: ConnectOptions = {
   serverPath: "/opt/eoka/eoka-server",
   browserWSEndpoint: "ws://127.0.0.1:9222/devtools/browser/example",
+  defaultTimeoutMs: null,
 };
 export const locator: LocatorSpec = { query: { kind: "css", selector: "#name" } };
 export const expectation: Expectation = { kind: "value", target: locator, value: "Ada" };
 export const action: Action = { kind: "fill", target: locator, value: "Ada" };
+export const actionOptions: ActionOptions = { expect: expectation, timeout_ms: 5000, destination: "current", wait_for_target: true };
+export const wireActionOptions: WireActionOptions = { expect: expectation };
 export const performOptions: PerformOptions = {
   operationId: "7f2e1450-f1bd-4a5e-b111-215a5d873e26",
   actionOptions: { expect: expectation, timeout_ms: 5000 },
   timeoutMs: 6000,
 };
+export const reusedOptions: PerformOptions[] = [{ actionOptions }, { actionOptions: wireActionOptions }];
 export const waitOptions: WaitOptions = { waitTimeoutMs: 1000, timeoutMs: 2000 };
 export const callOptions: CallOptions = { signal: new AbortController().signal, timeoutMs: 2000 };
 export const details: ErrorDetails = { operationId: performOptions.operationId! };
 export const wireError: ServerError = { code: "InvalidParams", message: "Invalid request" };
 export const response: ProtocolResponse<"page.evaluate"> = { id: 1, result: { result: { answer: 42 } } };
+
+export function describeBlocker(error: EokaError): string | undefined {
+  const blocker: PageBlocker | undefined = error.blocker;
+  if (blocker?.kind === "dialog") {
+    const dialogType: string = blocker.dialogType;
+    const text: string = blocker.message;
+    return `${dialogType} "${text}" on ${blocker.url} for ${blocker.elapsedMs} ms`;
+  }
+  if (blocker?.kind === "navigation") {
+    const url: string | null | undefined = blocker.url;
+    const elapsedMs: number = blocker.elapsedMs;
+    return `${url ?? "a navigation"} pending for ${elapsedMs} ms`;
+  }
+  return undefined;
+}
+export const blockedDetails: ErrorDetails = { blocker: { kind: "navigation", elapsedMs: 6500 } };
 
 export async function useClient<M extends MethodName>(client: InvokeClient, method: M, params: MethodParams[M]): Promise<MethodResults[M]> {
   return client.invoke(method, params, callOptions);
@@ -98,6 +121,12 @@ export async function usePage(page: Page): Promise<{ receipt: ActionReceipt; rec
   await operation.get(callOptions);
   await page.operation(operation.id).get(callOptions);
   const evaluation = await page.invoke("page.evaluate", { pageId: page.id, function: "()=>({ answer: 42 })" });
+  const sum: number = await page.evaluate((a: number, b: number) => a + b, [2, 3]);
+  const awaited: { answer: number } = await page.evaluate(async () => ({ answer: 42 }), [], callOptions);
+  const dynamic: unknown = await page.evaluate("()=>({ answer: 42 })");
+  await page.execute(() => undefined);
+  await page.execute("(value)=>{ void value; }", [sum]);
+  void [awaited, dynamic];
   const bounded = await page.fetchBounded("/text", { maxBytes: 8192 });
   const retainedBytes: number = bounded.bytesRead;
   const omission: string | null | undefined = bounded.bodyOmitted;

@@ -4,6 +4,10 @@ use std::sync::{atomic::Ordering, Arc};
 use std::time::Duration;
 use tokio_tungstenite::tungstenite::Message;
 
+fn request(cmd: &str, arguments: Value) -> Request {
+    eoka_protocol::request_from_cmd(cmd, arguments).unwrap()
+}
+
 struct PausePeer {
     transport: Arc<eoka::cdp::Transport>,
     events: tokio::sync::mpsc::Sender<String>,
@@ -262,17 +266,17 @@ async fn idle_file_failure_during_datadome_entry_cannot_become_a_clean_baseline(
     let mut handler = Engine::new("entry-integrity", LaunchSpec::Connect { ws_url });
     assert!(
         handler
-            .handle("tab_attach", &json!({"tab_id":page.target_id()}))
+            .handle(request("tab_attach", json!({"tab_id":page.target_id()})))
             .await
             .ok
     );
     let files = tempfile::tempdir().unwrap();
     assert!(
         handler
-            .handle(
+            .handle(request(
                 "intercept_add",
-                &json!({"url_pattern":"*/idle", "respond":files.path().join("missing")})
-            )
+                json!({"url_pattern":"*/idle", "respond":files.path().join("missing")})
+            ))
             .await
             .ok
     );
@@ -299,8 +303,7 @@ async fn idle_file_failure_during_datadome_entry_cannot_become_a_clean_baseline(
     .await
     .unwrap();
     assert_eq!(handler.fetch_dropped.load(Ordering::Relaxed), 0);
-    let args = json!({"timeout_ms":20000});
-    let command = handler.handle("captcha_datadome", &args);
+    let command = handler.handle(request("captcha_datadome", json!({"timeout_ms":20000})));
     let release = async {
         tokio::time::sleep(Duration::from_millis(50)).await;
         drop(permit);
@@ -317,6 +320,13 @@ async fn idle_file_failure_during_datadome_entry_cannot_become_a_clean_baseline(
         Some("datadome_cleanup_failed"),
         "{result:?}"
     );
-    assert!(handler.handle("close", &json!({})).await.ok);
+    assert!(handler.handle(Request::Close).await.ok);
     browser.close().await.unwrap();
+}
+
+#[test]
+fn a_command_is_small_enough_to_run_on_a_worker_thread_stack() {
+    let mut engine = Engine::new("stack", LaunchSpec::Reuse);
+    let command = engine.handle(Request::Info);
+    assert!(std::mem::size_of_val(&command) < 16 * 1024);
 }

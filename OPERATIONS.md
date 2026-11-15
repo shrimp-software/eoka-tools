@@ -71,9 +71,10 @@ older daemons reject unsupported durable requests before input. Restart daemons
 explicitly after upgrading.
 
 The stdio sidecar negotiates its own protocol with `server.hello`; its method
-list is not the CLI tool catalog. Operation waits, list snapshots and get/cancel
-for admitted IDs run independently of ordinary page requests. Unknown-ID
-get/cancel requests retain ordering behind prior queued admissions; list is
+list is not the CLI tool catalog. Ordinary requests run one at a time per page
+and concurrently across pages. Operation waits, list snapshots and get/cancel
+for admitted IDs run independently of them. An unknown-ID get/cancel request
+waits only for an earlier queued request carrying the same operation ID; list is
 a current snapshot rather than a barrier. Controls still consume the advertised
 in-flight budget. Replies may arrive out of order, and timing out a local waiter
 does not cancel the stored operation. Sidecar errors preserve structured data and caller-known

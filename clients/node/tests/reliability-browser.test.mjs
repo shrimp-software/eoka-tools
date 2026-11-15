@@ -50,8 +50,11 @@ test('real browser preserves sequential input, scoped references, exceptions and
     assert.notEqual(clicked.observation.tab_id, page.id);
     assert.equal(await browser.page(clicked.observation.tab_id).evaluate('()=>document.querySelector("#ready").disabled'), false);
   } finally {
-    if (browser) await browser.close();
-    server.closeAllConnections();
-    await new Promise(resolve => server.close(resolve));
+    try {
+      if (browser) await browser.close();
+    } finally {
+      server.closeAllConnections();
+      await new Promise(resolve => server.close(resolve));
+    }
   }
 });

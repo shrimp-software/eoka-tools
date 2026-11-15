@@ -59,19 +59,33 @@ pub struct BrowserState {
     _cloned_profile: Option<ClonedProfile>,
 }
 
+pub struct LaunchFlags {
+    pub headless: bool,
+    pub no_stealth: bool,
+    pub geo_align: bool,
+    pub sandbox: bool,
+    pub patch_binary: Option<bool>,
+}
+
 impl BrowserState {
     pub async fn launched(
-        headless: bool,
+        flags: LaunchFlags,
         copy_profile_from: Option<&std::path::Path>,
-        no_stealth: bool,
         proxy: Option<String>,
         persist_profile_dir: Option<&std::path::Path>,
-        geo_align: bool,
-        sandbox: bool,
     ) -> eoka::Result<Self> {
-        let patch_binary = std::env::var("EOKA_PATCH_BINARY")
-            .map(|v| v == "true" || v == "1")
-            .unwrap_or(false);
+        let LaunchFlags {
+            headless,
+            no_stealth,
+            geo_align,
+            sandbox,
+            patch_binary,
+        } = flags;
+        let patch_binary = patch_binary.unwrap_or_else(|| {
+            std::env::var("EOKA_PATCH_BINARY")
+                .map(|v| v == "true" || v == "1")
+                .unwrap_or(false)
+        });
 
         let proxy = proxy
             .map(|value| {
@@ -204,10 +218,16 @@ impl BrowserState {
         }
 
         let page = self.browser.new_page(url).await?;
-        let id = page.target_id().to_string();
-        self.tabs.insert(id.clone(), TabState::new(page));
+        let id = self.track(page);
         self.current_tab_id = Some(id.clone());
         Ok(self.tabs.get_mut(&id).expect("just inserted"))
+    }
+
+    fn track(&mut self, page: Page) -> String {
+        super::blockers::watch(&page);
+        let id = page.target_id().to_string();
+        self.tabs.insert(id.clone(), TabState::new(page));
+        id
     }
 
     pub fn current_tab(&self) -> Option<&TabState> {
@@ -224,8 +244,7 @@ impl BrowserState {
 
     pub async fn ensure_blank_tab(&mut self) -> eoka::Result<&mut TabState> {
         let page = self.browser.new_blank_page().await?;
-        let id = page.target_id().to_string();
-        self.tabs.insert(id.clone(), TabState::new(page));
+        let id = self.track(page);
         self.current_tab_id = Some(id.clone());
         Ok(self.tabs.get_mut(&id).expect("just inserted"))
     }
@@ -235,8 +254,7 @@ impl BrowserState {
             Some(u) => self.browser.new_page(u).await?,
             None => self.browser.new_blank_page().await?,
         };
-        let tab_id = page.target_id().to_string();
-        self.tabs.insert(tab_id.clone(), TabState::new(page));
+        let tab_id = self.track(page);
         self.browser.activate_tab(&tab_id).await?;
         self.current_tab_id = Some(tab_id.clone());
         let tab = self.tabs.get_mut(&tab_id).expect("just inserted");
@@ -246,7 +264,7 @@ impl BrowserState {
     pub async fn switch_tab(&mut self, tab_id: &str) -> eoka::Result<()> {
         if !self.tabs.contains_key(tab_id) {
             let page = self.browser.attach_page(tab_id).await?;
-            self.tabs.insert(tab_id.to_string(), TabState::new(page));
+            self.track(page);
         }
         self.browser.activate_tab(tab_id).await?;
         self.current_tab_id = Some(tab_id.to_string());
@@ -256,7 +274,7 @@ impl BrowserState {
     pub async fn attach_existing_tab(&mut self, tab_id: &str) -> eoka::Result<()> {
         if !self.tabs.contains_key(tab_id) {
             let page = self.browser.attach_page(tab_id).await?;
-            self.tabs.insert(tab_id.to_string(), TabState::new(page));
+            self.track(page);
         }
         self.current_tab_id = Some(tab_id.to_string());
         Ok(())
@@ -267,7 +285,10 @@ impl BrowserState {
         if self.tabs.len() <= 1 {
             return Err(eoka::Error::cdp_msg("Cannot close the last tab"));
         }
-        let release_result = page.release_all_inputs().await;
+        let release_result =
+            tokio::time::timeout(std::time::Duration::from_secs(2), page.release_all_inputs())
+                .await
+                .unwrap_or(Ok(()));
         self.browser.close_tab(tab_id).await?;
         if let Some(next_tab_id) =
             reconcile_closed_tab(&mut self.tabs, &mut self.current_tab_id, tab_id)
@@ -286,11 +307,24 @@ impl BrowserState {
         } = self;
         let mut release_error = None;
         for tab in tabs.values() {
-            if let Err(error) = tab.page.release_all_inputs().await {
-                release_error.get_or_insert(error);
+            let released = tokio::time::timeout(
+                std::time::Duration::from_secs(2),
+                tab.page.release_all_inputs(),
+            )
+            .await;
+            match released {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    release_error.get_or_insert(error);
+                }
+                Err(_) if adopted => {
+                    release_error.get_or_insert(eoka::Error::Timeout(
+                        "Held input was not released within 2 s".into(),
+                    ));
+                }
+                Err(_) => {}
             }
         }
-        // A browser adopted from another owner is released, not closed.
         if !adopted {
             Arc::try_unwrap(browser)
                 .map_err(|_| eoka::Error::cdp_msg("Browser is still in use"))?

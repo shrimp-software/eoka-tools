@@ -12,6 +12,10 @@ use crate::protocol::{
 };
 use network::network_action_to_request;
 
+const STEP_SHAPES: &str = r##"A step is {"action":{"kind":"click","target":"text:Submit"},"expect":{...}}. target is a ref from view, text:..., css:... or id:....
+expect is one of: {"kind":"url","value":"/done","contains":true}, {"kind":"visible","target":{"query":{"kind":"css","selector":"#id"}}}, {"kind":"text","target":{"query":{"kind":"css","selector":"#id"}},"value":"Saved"}, {"kind":"value","target":{"query":{"kind":"css","selector":"#id"}},"value":"x"}.
+fill and select verify themselves and need no expect. To act without verifying, leave expect out and add "mode":"explore"."##;
+
 fn parse_mouse_button(button: &str) -> MouseButton {
     serde_json::from_value(serde_json::Value::String(button.to_owned())).unwrap_or_else(|error| {
         eprintln!("Error: invalid mouse button: {error}");
@@ -46,7 +50,7 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
         }),
         Command::Step { request } => {
             Request::AgentStep(serde_json::from_str(request).unwrap_or_else(|error| {
-                eprintln!("Invalid step request: {error}");
+                eprintln!("Invalid step request: {error}\n{STEP_SHAPES}");
                 std::process::exit(2)
             }))
         }
@@ -519,6 +523,7 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
         | Command::Doctor
         | Command::Kill
         | Command::Update(_)
+        | Command::Skill { .. }
         | Command::CdpUrl { .. }
         | Command::Batch { .. } => {
             unreachable!(
@@ -835,153 +840,188 @@ mod tests {
         assert!(err.to_string().contains("unrecognized subcommand"));
     }
 
+    fn subcommands(args: &[&str]) -> String {
+        use clap::CommandFactory;
+        let mut command = Cli::command();
+        let mut words = Vec::new();
+        for word in &args[1..] {
+            let Some(next) = command.find_subcommand(word).cloned() else {
+                break;
+            };
+            words.push(next.get_name().to_owned());
+            command = next;
+        }
+        words.join(" ")
+    }
+
+    #[test]
+    fn hints_spell_every_command_the_way_the_cli_does() {
+        let mut misspelled = Vec::new();
+        let mut seen = std::collections::BTreeSet::new();
+        for args in DAEMON_COMMANDS {
+            let cmd = assert_command_maps_to_cataloged_operation(args);
+            if !seen.insert(cmd) {
+                continue;
+            }
+            let named = operation_by_cmd(cmd).unwrap().cli_command();
+            let real = subcommands(args);
+            if named != real {
+                misspelled.push(format!(
+                    "{cmd}: hints say `eoka {named}`, the CLI is `eoka {real}`"
+                ));
+            }
+        }
+        assert!(misspelled.is_empty(), "{}", misspelled.join("\n"));
+    }
+
+    const DAEMON_COMMANDS: &[&[&str]] = &[
+        &["eoka", "open", "https://example.com"],
+        &["eoka", "back"],
+        &["eoka", "forward"],
+        &["eoka", "reload"],
+        &["eoka", "snapshot"],
+        &["eoka", "observe"],
+        &["eoka", "screenshot"],
+        &["eoka", "emulate"],
+        &["eoka", "info"],
+        &["eoka", "frames"],
+        &["eoka", "frame-eval", "id:fixture-frame", "1+1"],
+        &["eoka", "text"],
+        &["eoka", "find", "Submit"],
+        &["eoka", "content"],
+        &["eoka", "dialog", "accept", "--prompt-text", "yes"],
+        &["eoka", "dialog", "dismiss"],
+        &["eoka", "captcha", "detect"],
+        &[
+            "eoka",
+            "screenshot",
+            "--format",
+            "jpeg",
+            "--quality",
+            "80",
+            "--clip",
+            "0,0,10,20",
+        ],
+        &["eoka", "recording", "start", "out.mp4", "--fps", "30"],
+        &[
+            "eoka",
+            "recording",
+            "status",
+            "b9b87b7a-cc6d-4a25-b098-73271cc9c4cb",
+        ],
+        &[
+            "eoka",
+            "recording",
+            "stop",
+            "b9b87b7a-cc6d-4a25-b098-73271cc9c4cb",
+        ],
+        &[
+            "eoka",
+            "recording",
+            "cancel",
+            "b9b87b7a-cc6d-4a25-b098-73271cc9c4cb",
+        ],
+        &["eoka", "get-text", "h1"],
+        &["eoka", "get-attribute", "a", "href"],
+        &["eoka", "exists", "#save"],
+        &["eoka", "click-shadow", "button", "--frame", "F1"],
+        &["eoka", "wait", "--selector", "#ready", "--state", "hidden"],
+        &["eoka", "click", "Submit"],
+        &["eoka", "dblclick", "Submit"],
+        &["eoka", "fill", "Email", "ada@example.com"],
+        &["eoka", "select", "Country", "CA"],
+        &["eoka", "hover", "Menu"],
+        &["eoka", "key", "Enter"],
+        &["eoka", "mouse-down", "10", "20"],
+        &["eoka", "mouse-move", "10", "20"],
+        &["eoka", "mouse-up", "10", "20", "--button", "right"],
+        &["eoka", "key-down", "Shift"],
+        &["eoka", "key-up", "Shift"],
+        &["eoka", "release-all-inputs"],
+        &["eoka", "scroll", "down"],
+        &["eoka", "eval", "1 + 1"],
+        &["eoka", "exec", "window.clicked = true"],
+        &["eoka", "fetch", "https://example.com/api"],
+        &["eoka", "cookies"],
+        &["eoka", "set-cookie", "sid", "123"],
+        &["eoka", "delete-cookie", "sid"],
+        &["eoka", "clear-cookies"],
+        &["eoka", "storage"],
+        &["eoka", "set-storage", "token", "abc"],
+        &["eoka", "dump-storage"],
+        &["eoka", "save-state", "state.json"],
+        &["eoka", "load-state", "state.json"],
+        &["eoka", "headers", r#"{"x-test":"1"}"#],
+        &["eoka", "console"],
+        &["eoka", "errors"],
+        &["eoka", "tab", "list"],
+        &["eoka", "tab", "new", "https://example.com"],
+        &["eoka", "tab", "switch", "tab-1"],
+        &["eoka", "tab", "close", "tab-1"],
+        &["eoka", "tab", "attach", "tab-1"],
+        &["eoka", "wait", "100"],
+        &["eoka", "fake-camera", "camera.mp4"],
+        &["eoka", "wasm", "info"],
+        &["eoka", "wasm", "read", "0x10", "4"],
+        &["eoka", "wasm", "write", "0x10", "deadbeef"],
+        &["eoka", "wasm", "find", "deadbeef"],
+        &["eoka", "js", "mode", "block-all"],
+        &["eoka", "js", "allow", "example.com"],
+        &["eoka", "js", "block", "ads.example"],
+        &["eoka", "js", "remove", "example.com"],
+        &["eoka", "js", "list"],
+        &["eoka", "spa-info"],
+        &["eoka", "spa-navigate", "/account"],
+        &["eoka", "captcha", "inject", "token"],
+        &["eoka", "captcha", "turnstile"],
+        &["eoka", "network", "record", "start"],
+        &["eoka", "network", "record", "stop"],
+        &["eoka", "network", "record", "status"],
+        &["eoka", "network", "log"],
+        &["eoka", "network", "show", "1"],
+        &["eoka", "network", "wait"],
+        &["eoka", "network", "har", "capture.har"],
+        &["eoka", "network", "export", "capture.har"],
+        &["eoka", "network", "clear"],
+        &["eoka", "network", "intercept", "add", "*/api/*"],
+        &["eoka", "network", "intercept", "list"],
+        &["eoka", "network", "intercept", "remove", "1"],
+        &["eoka", "network", "intercept", "log"],
+        &["eoka", "clone-from", "9222"],
+        &["eoka", "close"],
+        &["eoka", "view"],
+        &[
+            "eoka",
+            "step",
+            r#"{"action":{"kind":"press_key","key":"Tab"}}"#,
+        ],
+        &[
+            "eoka",
+            "action",
+            r#"{"operation_id":"a116d158-2cc5-4473-b73c-616b4b73cb0e","action":{"kind":"reload"}}"#,
+        ],
+        &["eoka", "operations", "get", "operation"],
+        &["eoka", "operations", "list"],
+        &["eoka", "operations", "wait", "operation"],
+        &["eoka", "operations", "cancel", "operation"],
+        &[
+            "eoka",
+            "download",
+            "--url",
+            "https://example.com/file",
+            "--out",
+            "/tmp/file",
+        ],
+        &["eoka", "download", "list"],
+        &["eoka", "download", "status", "job"],
+        &["eoka", "download", "wait", "job"],
+        &["eoka", "download", "cancel", "job"],
+        &["eoka", "captcha", "datadome"],
+    ];
+
     #[test]
     fn daemon_backed_cli_commands_map_to_cataloged_protocol_operations() {
-        let commands: &[&[&str]] = &[
-            &["eoka", "open", "https://example.com"],
-            &["eoka", "back"],
-            &["eoka", "forward"],
-            &["eoka", "reload"],
-            &["eoka", "snapshot"],
-            &["eoka", "observe"],
-            &["eoka", "screenshot"],
-            &["eoka", "emulate"],
-            &["eoka", "info"],
-            &["eoka", "frames"],
-            &["eoka", "frame-eval", "id:fixture-frame", "1+1"],
-            &["eoka", "text"],
-            &["eoka", "find", "Submit"],
-            &["eoka", "content"],
-            &["eoka", "dialog", "accept", "--prompt-text", "yes"],
-            &["eoka", "dialog", "dismiss"],
-            &["eoka", "captcha", "detect"],
-            &[
-                "eoka",
-                "screenshot",
-                "--format",
-                "jpeg",
-                "--quality",
-                "80",
-                "--clip",
-                "0,0,10,20",
-            ],
-            &["eoka", "recording", "start", "out.mp4", "--fps", "30"],
-            &[
-                "eoka",
-                "recording",
-                "status",
-                "b9b87b7a-cc6d-4a25-b098-73271cc9c4cb",
-            ],
-            &[
-                "eoka",
-                "recording",
-                "stop",
-                "b9b87b7a-cc6d-4a25-b098-73271cc9c4cb",
-            ],
-            &[
-                "eoka",
-                "recording",
-                "cancel",
-                "b9b87b7a-cc6d-4a25-b098-73271cc9c4cb",
-            ],
-            &["eoka", "get-text", "h1"],
-            &["eoka", "get-attribute", "a", "href"],
-            &["eoka", "exists", "#save"],
-            &["eoka", "click-shadow", "button", "--frame", "F1"],
-            &["eoka", "wait", "--selector", "#ready", "--state", "hidden"],
-            &["eoka", "click", "Submit"],
-            &["eoka", "dblclick", "Submit"],
-            &["eoka", "fill", "Email", "ada@example.com"],
-            &["eoka", "select", "Country", "CA"],
-            &["eoka", "hover", "Menu"],
-            &["eoka", "key", "Enter"],
-            &["eoka", "mouse-down", "10", "20"],
-            &["eoka", "mouse-move", "10", "20"],
-            &["eoka", "mouse-up", "10", "20", "--button", "right"],
-            &["eoka", "key-down", "Shift"],
-            &["eoka", "key-up", "Shift"],
-            &["eoka", "release-all-inputs"],
-            &["eoka", "scroll", "down"],
-            &["eoka", "eval", "1 + 1"],
-            &["eoka", "exec", "window.clicked = true"],
-            &["eoka", "fetch", "https://example.com/api"],
-            &["eoka", "cookies"],
-            &["eoka", "set-cookie", "sid", "123"],
-            &["eoka", "delete-cookie", "sid"],
-            &["eoka", "clear-cookies"],
-            &["eoka", "storage"],
-            &["eoka", "set-storage", "token", "abc"],
-            &["eoka", "dump-storage"],
-            &["eoka", "save-state", "state.json"],
-            &["eoka", "load-state", "state.json"],
-            &["eoka", "headers", r#"{"x-test":"1"}"#],
-            &["eoka", "console"],
-            &["eoka", "errors"],
-            &["eoka", "tab", "list"],
-            &["eoka", "tab", "new", "https://example.com"],
-            &["eoka", "tab", "switch", "tab-1"],
-            &["eoka", "tab", "close", "tab-1"],
-            &["eoka", "tab", "attach", "tab-1"],
-            &["eoka", "wait", "100"],
-            &["eoka", "fake-camera", "camera.mp4"],
-            &["eoka", "wasm", "info"],
-            &["eoka", "wasm", "read", "0x10", "4"],
-            &["eoka", "wasm", "write", "0x10", "deadbeef"],
-            &["eoka", "wasm", "find", "deadbeef"],
-            &["eoka", "js", "mode", "block-all"],
-            &["eoka", "js", "allow", "example.com"],
-            &["eoka", "js", "block", "ads.example"],
-            &["eoka", "js", "remove", "example.com"],
-            &["eoka", "js", "list"],
-            &["eoka", "spa-info"],
-            &["eoka", "spa-navigate", "/account"],
-            &["eoka", "captcha", "inject", "token"],
-            &["eoka", "captcha", "turnstile"],
-            &["eoka", "network", "record", "start"],
-            &["eoka", "network", "record", "stop"],
-            &["eoka", "network", "record", "status"],
-            &["eoka", "network", "log"],
-            &["eoka", "network", "show", "1"],
-            &["eoka", "network", "wait"],
-            &["eoka", "network", "har", "capture.har"],
-            &["eoka", "network", "export", "capture.har"],
-            &["eoka", "network", "clear"],
-            &["eoka", "network", "intercept", "add", "*/api/*"],
-            &["eoka", "network", "intercept", "list"],
-            &["eoka", "network", "intercept", "remove", "1"],
-            &["eoka", "network", "intercept", "log"],
-            &["eoka", "clone-from", "9222"],
-            &["eoka", "close"],
-            &["eoka", "view"],
-            &[
-                "eoka",
-                "step",
-                r#"{"action":{"kind":"press_key","key":"Tab"}}"#,
-            ],
-            &[
-                "eoka",
-                "action",
-                r#"{"operation_id":"a116d158-2cc5-4473-b73c-616b4b73cb0e","action":{"kind":"reload"}}"#,
-            ],
-            &["eoka", "operations", "get", "operation"],
-            &["eoka", "operations", "list"],
-            &["eoka", "operations", "wait", "operation"],
-            &["eoka", "operations", "cancel", "operation"],
-            &[
-                "eoka",
-                "download",
-                "--url",
-                "https://example.com/file",
-                "--out",
-                "/tmp/file",
-            ],
-            &["eoka", "download", "list"],
-            &["eoka", "download", "status", "job"],
-            &["eoka", "download", "wait", "job"],
-            &["eoka", "download", "cancel", "job"],
-            &["eoka", "captcha", "datadome"],
-        ];
-
+        let commands = DAEMON_COMMANDS;
         let reached: std::collections::BTreeSet<&str> = commands
             .iter()
             .map(|args| assert_command_maps_to_cataloged_operation(args))

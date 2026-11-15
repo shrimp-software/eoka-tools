@@ -9,7 +9,7 @@ struct Example {
 }
 
 fn skill_docs() -> Vec<PathBuf> {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("skill");
     let mut references: Vec<PathBuf> = std::fs::read_dir(root.join("references"))
         .unwrap()
         .map(|entry| entry.unwrap().path())
@@ -137,7 +137,7 @@ fn every_action_kind_is_documented() {
         "action kinds were not found in the schema"
     );
 
-    let reference = Path::new(env!("CARGO_MANIFEST_DIR")).join("references/actions.md");
+    let reference = Path::new(env!("CARGO_MANIFEST_DIR")).join("skill/references/actions.md");
     let text = std::fs::read_to_string(&reference).unwrap();
     // A kind counts only when it names a row of the kinds table, so prose that
     // happens to mention `click` or `back` does not satisfy this.

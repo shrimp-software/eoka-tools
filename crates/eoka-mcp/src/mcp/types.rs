@@ -102,6 +102,7 @@ pub struct SolveCaptchaRequest {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct DetectCaptchaRequest {
     #[schemars(description = "Auto-detect hCaptcha or reCAPTCHA on current page")]
+    #[allow(dead_code)]
     pub auto_detect: Option<bool>,
 }
 

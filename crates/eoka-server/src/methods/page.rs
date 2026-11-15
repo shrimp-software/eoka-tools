@@ -211,14 +211,16 @@ pub async fn evaluate_in_frame(state: &AppState, params: Value) -> Result<Value,
 
 pub async fn click_shadow(state: &AppState, params: Value) -> Result<Value, ServerError> {
     let params: ClickShadowParams = parse_params(params)?;
-    let receipt = state
-        .page(&params.page_id)?
-        .click_shadow_with_timeout(
+    let page = state.page(&params.page_id)?;
+    let receipt = crate::capture::painting(
+        &page,
+        page.click_shadow_with_timeout(
             params.frame_id.as_deref(),
             &params.selector,
             std::time::Duration::from_millis(params.timeout_ms),
-        )
-        .await?;
+        ),
+    )
+    .await?;
     encode(ClickShadowResult {
         frame_id: receipt.frame_id,
         selector: receipt.selector,
@@ -230,7 +232,7 @@ pub async fn click_shadow(state: &AppState, params: Value) -> Result<Value, Serv
 pub async fn solve_turnstile(state: &AppState, params: Value) -> Result<Value, ServerError> {
     let params: SolveTurnstileParams = parse_params(params)?;
     let receipt = crate::cloudflare::solve_turnstile(
-        state.page(&params.page_id)?,
+        &state.page(&params.page_id)?,
         std::time::Duration::from_millis(params.timeout_ms),
     )
     .await?;
@@ -323,10 +325,8 @@ fn screenshot_bytes(bytes: &[u8]) -> Result<Value, ServerError> {
 pub async fn screenshot(state: &AppState, params: Value) -> Result<Value, ServerError> {
     let params: ScreenshotParams = parse_params(params)?;
     params.validate()?;
-    let bytes = state
-        .page(&params.page_id)?
-        .screenshot_with_options(&params.options())
-        .await?;
+    let page = state.page(&params.page_id)?;
+    let bytes = crate::capture::screenshot(&page, &params.options()).await?;
     screenshot_bytes(&bytes)
 }
 
@@ -337,7 +337,7 @@ pub async fn screenshot_to_file(state: &AppState, params: Value) -> Result<Value
     let mut staging = crate::artifacts::StagedArtifact::prepare(&params.path)
         .await
         .map_err(|error| error.server_error())?;
-    let bytes = match page.screenshot_with_options(&params.options()).await {
+    let bytes = match crate::capture::screenshot(&page, &params.options()).await {
         Ok(bytes) => bytes,
         Err(error) => {
             let mut error = ServerError::from(error);
@@ -389,10 +389,8 @@ pub async fn mouse_down(state: &AppState, params: Value) -> Result<Value, Server
 
 pub async fn mouse_move(state: &AppState, params: Value) -> Result<Value, ServerError> {
     let params: MouseMoveParams = parse_params(params)?;
-    state
-        .page(&params.page_id)?
-        .mouse_move(params.mouse.x, params.mouse.y)
-        .await?;
+    let page = state.page(&params.page_id)?;
+    crate::capture::painting(&page, page.mouse_move(params.mouse.x, params.mouse.y)).await?;
     Ok(json!({}))
 }
 
@@ -466,14 +464,14 @@ pub async fn solve_captcha(state: &AppState, params: Value) -> Result<Value, Ser
         params.callback.as_deref(),
     );
     let page = state.page(&params.page_id)?;
-    let mut result = captcha_injection_result(page, &script).await?;
+    let mut result = captcha_injection_result(&page, &script).await?;
     let callback_count = result
         .get("callbacks")
         .and_then(Value::as_array)
         .map_or(0, Vec::len);
     if callback_count <= 1 {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        let settled = captcha_injection_result(page, &script).await?;
+        let settled = captcha_injection_result(&page, &script).await?;
         if settled
             .get("callbacks")
             .and_then(Value::as_array)
@@ -497,7 +495,7 @@ async fn captcha_injection_result(page: &eoka::Page, script: &str) -> Result<Val
     })
 }
 
-pub async fn close(state: &mut AppState, params: Value) -> Result<Value, ServerError> {
+pub async fn close(state: &AppState, params: Value) -> Result<Value, ServerError> {
     let params: PageIdParams = parse_params(params)?;
     if let Some(error) = close_tab_impl(state, &params.page_id).await? {
         return Err(error);

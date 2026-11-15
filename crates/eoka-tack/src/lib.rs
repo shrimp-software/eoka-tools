@@ -149,14 +149,36 @@ impl Tool for EokaTool {
                 raw: None,
                 error: None,
             },
-            Ok(response) => failed_tool(
-                "eoka_error",
-                response
-                    .error
-                    .unwrap_or_else(|| "Eoka command failed".to_string()),
-            ),
+            Ok(response) => failed_response(response),
             Err(error) => failed_tool("transport_error", error.to_string()),
         }
+    }
+}
+
+fn failed_response(response: eoka_sdk::Response) -> ToolCallOutput {
+    let mut message = response
+        .error
+        .unwrap_or_else(|| "Eoka command failed".to_string());
+    let detail = response.error_detail;
+    if let Some(hint) = detail.as_ref().and_then(|detail| detail.hint.as_deref()) {
+        message.push_str(" Hint: ");
+        message.push_str(hint);
+    }
+    ToolCallOutput {
+        ok: false,
+        data: response.data,
+        text: None,
+        raw: None,
+        error: Some(ToolCallError {
+            message,
+            code: Some(
+                detail
+                    .as_ref()
+                    .map_or("eoka_error", |detail| detail.code.as_str())
+                    .to_string(),
+            ),
+            details: detail.and_then(|detail| serde_json::to_value(detail).ok()),
+        }),
     }
 }
 
@@ -252,6 +274,30 @@ mod tests {
                 sandbox: true,
             },
         ))
+    }
+
+    #[test]
+    fn a_failed_tool_keeps_its_error_code_and_next_step() {
+        let failed = failed_response(eoka_sdk::Response::err_detail(
+            eoka_protocol::ErrorDetail::new("dialog_open", "A JavaScript alert dialog is open.")
+                .hint("Run `dialog.accept` or `dialog.dismiss`."),
+        ));
+        let error = failed.error.unwrap();
+        assert!(!failed.ok);
+        assert_eq!(error.code.as_deref(), Some("dialog_open"));
+        assert!(error.message.contains("A JavaScript alert dialog is open."));
+        assert!(error.message.contains("Hint: Run `dialog.accept`"));
+        assert_eq!(error.details.unwrap()["code"], "dialog_open");
+        let plain = failed_response(eoka_sdk::Response {
+            ok: false,
+            data: None,
+            error: None,
+            error_detail: None,
+            meta: None,
+        });
+        let error = plain.error.unwrap();
+        assert_eq!(error.code.as_deref(), Some("eoka_error"));
+        assert_eq!(error.message, "Eoka command failed");
     }
 
     #[test]

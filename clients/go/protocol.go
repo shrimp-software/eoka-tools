@@ -12,6 +12,8 @@ type ProtocolVersion struct {
 	Minor uint32 `json:"minor"`
 }
 
+var understoodProtocol = ProtocolVersion{Major: 2, Minor: 2}
+
 type TransportLimits struct {
 	MaxMessageBytes int `json:"maxMessageBytes"`
 	MaxInFlight     int `json:"maxInFlight"`
@@ -35,7 +37,7 @@ func (b *Browser) ServerInfo() ServerInfo {
 
 func (b *Browser) hello(ctx context.Context, requiredMethods ...string) error {
 	var raw json.RawMessage
-	if err := b.t.call(ctx, "server.hello", map[string]any{"protocol": ProtocolVersion{Major: 2, Minor: 0}}, &raw); err != nil {
+	if err := b.t.call(ctx, "server.hello", map[string]any{"protocol": ProtocolVersion{Major: 2, Minor: 0}, "understands": understoodProtocol}, &raw); err != nil {
 		if HasCode(err, ErrCodeUnknownMethod) || HasCode(err, ErrCodeProtocolMismatch) {
 			var serverError *Error
 			errors.As(err, &serverError)

@@ -1,4 +1,5 @@
 import { isAbsolute, toNamespacedPath } from 'node:path';
+import { traceCallSites } from './call-site.js';
 import type { CallOptions, InvokeClient } from './client.js';
 import { EokaError, type ErrorDetails } from './errors.js';
 import type { Artifact, ErrorData, RecordingFailure, RecordingRecord } from './generated/protocol.js';
@@ -133,3 +134,5 @@ export class Recording {
     return record;
   }
 }
+
+traceCallSites(Recording.prototype);

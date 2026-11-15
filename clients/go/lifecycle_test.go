@@ -46,7 +46,7 @@ func serveLifecycleFixture(mode string) int {
 		switch request.Method {
 		case "server.hello":
 			params, _ := json.Marshal(request.Params)
-			if string(params) != `{"protocol":{"major":2,"minor":0}}` {
+			if string(params) != `{"protocol":{"major":2,"minor":0},"understands":{"major":2,"minor":2}}` {
 				response.Error = &rpcError{Code: ErrCodeInvalidParams, Message: "unexpected hello params"}
 			} else if mode == "legacy" {
 				response.Error = &rpcError{Code: ErrCodeUnknownMethod, Message: "server.hello"}

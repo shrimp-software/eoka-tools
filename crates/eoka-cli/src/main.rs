@@ -14,6 +14,7 @@ mod output;
 mod protocol;
 mod session;
 mod sessions;
+mod skill;
 #[cfg(test)]
 mod skill_examples;
 mod update;
@@ -27,6 +28,9 @@ use serde_json::json;
 
 #[tokio::main]
 async fn main() {
+    if let Ok(program) = std::env::current_exe() {
+        eoka_sdk::serve_daemons_from(program);
+    }
     let cli = Cli::parse();
     let agent_mode = cli.agent;
     let json_mode = cli.json || agent_mode;
@@ -90,23 +94,13 @@ async fn main() {
             return;
         }
         Command::Status => {
-            let running = client::is_daemon_running(&effective_session);
+            let status = sessions::status(&effective_session).await;
             if json_mode {
-                let response = protocol::Response::ok(json!({
-                    "running": running,
-                    "session": effective_session,
-                    "socket": session::socket_path(&effective_session).to_string_lossy(),
-                }))
-                .with_meta(response_meta(&effective_session, "status"));
+                let response = protocol::Response::ok(status)
+                    .with_meta(response_meta(&effective_session, "status"));
                 output::print_response(&response, true);
-            } else if running {
-                println!("Daemon running (session={})", effective_session);
-                println!(
-                    "Socket: {}",
-                    session::socket_path(&effective_session).display()
-                );
             } else {
-                println!("No daemon running (session={})", effective_session);
+                print!("{}", sessions::status_text(&status));
             }
             return;
         }
@@ -119,6 +113,14 @@ async fn main() {
             let response = update::run(args)
                 .await
                 .with_meta(response_meta(&effective_session, "update"));
+            output::print_response(&response, json_mode);
+            if !response.ok {
+                std::process::exit(1);
+            }
+            return;
+        }
+        Command::Skill { action } => {
+            let response = skill::run(action).with_meta(response_meta(&effective_session, "skill"));
             output::print_response(&response, json_mode);
             if !response.ok {
                 std::process::exit(1);
@@ -314,14 +316,10 @@ async fn main() {
     }
     let request_cmd = request.cmd();
 
-    let response = match client::send_command(&effective_session, request, spec.clone()).await {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("Error: {}", e);
-            std::process::exit(1);
-        }
-    }
-    .with_meta(response_meta(&effective_session, request_cmd));
+    let response = client::send_command(&effective_session, request, spec.clone())
+        .await
+        .unwrap_or_else(|error| protocol::Response::err(error.to_string()))
+        .with_meta(response_meta(&effective_session, request_cmd));
 
     output::print_response(&response, json_mode);
 

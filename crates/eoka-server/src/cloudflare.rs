@@ -60,14 +60,12 @@ pub async fn solve_turnstile(page: &Page, timeout: Duration) -> eoka::Result<Tur
         match frame {
             Some(frame) => {
                 let remaining = deadline.saturating_duration_since(Instant::now());
-                match page
-                    .click_shadow_with_timeout(
-                        Some(&frame.id),
-                        CHECKBOX,
-                        remaining.min(CLICK_TIMEOUT).max(Duration::from_millis(1)),
-                    )
-                    .await
-                {
+                let click = page.click_shadow_with_timeout(
+                    Some(&frame.id),
+                    CHECKBOX,
+                    remaining.min(CLICK_TIMEOUT).max(Duration::from_millis(1)),
+                );
+                match crate::capture::painting(page, click).await {
                     Ok(_) => clicks += 1,
                     Err(error) => last_error = Some(error),
                 }

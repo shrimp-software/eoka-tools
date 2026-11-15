@@ -11,19 +11,18 @@ Requires Node.js 24.21+ (ESM only). Supported platforms: Linux x64/arm64 (glibc 
 ## Quick start
 
 ```js
+import { writeFile } from "node:fs/promises";
 import { Browser } from "@cbxss/eoka";
 
-const browser = await Browser.launch();
-try {
-  const page = await browser.newPage("https://example.com");
-  console.log(await page.title());
-  await page.screenshotToFile({ path: "./example.png" });
-} finally {
-  await browser.close();
-}
+await using browser = await Browser.launch();
+const page = await browser.newPage("https://example.com");
+console.log(await page.title());
+await writeFile("example.png", await page.screenshot());
 ```
 
 The first launch downloads a pinned Chrome for Testing build (about 200 MB) into a per-user cache. Later launches reuse it.
+
+`await using` closes the browser when the script or the enclosing block ends, including when it throws. Without it, call `await browser.close()` in a `finally`. A browser that is never closed keeps Chrome and your Node.js process running.
 
 ## Pages
 
@@ -36,7 +35,7 @@ await page.click("button[type=submit]", {
 
 await page.waitForText("Welcome");
 const heading = await page.getText("h1");
-const count = await page.evaluate("()=>document.querySelectorAll('li').length");
+const count = await page.evaluate(() => document.querySelectorAll("li").length);
 ```
 
 String targets are CSS selectors. An action resolves only after its result is verified. `click`, `type`, `pressKey`, `submit` and `drag` need an `expect` that describes the result.
@@ -45,12 +44,79 @@ String targets are CSS selectors. An action resolves only after its result is ve
 - **Waits:** `waitFor`, `waitForVisible`, `waitForText`
 - **Actions:** `goto`, `fill`, `select`, `hover`, `click`, `type`, `pressKey`, `submit`, `drag`
 
+`evaluate(fn, args)` runs a function in the page and returns its result. Pass a function or its source as a string. Only the source is sent, so the function cannot see variables from your script; pass them through `args`. Arguments and the result must be JSON-compatible (no `undefined`, `NaN`, `Date` or DOM nodes) and at most 1 MiB. `execute(fn, args)` is for side effects: it runs the function and discards the result.
+
+```js
+const total = await page.evaluate((a, b) => a + b, [2, 3]); // 5
+await page.execute(() => window.scrollTo(0, document.body.scrollHeight));
+```
+
 Every page-scoped operation in the `eoka` CLI's catalog is available under `page.ops`, generated from that catalog: console and error logs, cookies and storage, network recording and interception, downloads, JavaScript policy, dialogs and more. Inputs are typed; results are untyped for now. Tabs, recording and the browser lifecycle keep their own methods on `Browser` and `Page`. Catalog actions such as `page.ops.reload()` return their operation record, including when the outcome is unverified, so check `outcome` on it. These operations include ones that read and write local files; see the protocol reference before passing untrusted input.
 
 ```js
 await page.ops.networkRecordStart();
 const logs = await page.ops.console({ clear: true });
 const cookies = await page.ops.cookies();
+```
+
+### Timeouts
+
+For an action, `timeoutMs` is how long the server keeps trying. The default is 30 seconds.
+
+```js
+await page.fill("#email", "ada@example.com", { timeoutMs: 5000 });
+```
+
+When that time runs out the call rejects with `code: "action_timeout"` and a message that gives the reason, such as `fill "#email" timed out after 5000 ms: target not found. The page received no input.` If the input was sent but `expect` was not met, the message says so. The action is not undone, so check the page before you act again.
+
+The SDK waits 10 seconds past the action deadline for the server's answer before it gives up with `DeadlineExceeded`. `actionOptions.timeout_ms` is the same server deadline under its protocol name. Set it together with `timeoutMs` only when you want a different local deadline; both are then used exactly as given. Unknown keys in `actionOptions` are rejected before anything is sent.
+
+For every other call, `timeoutMs` is a local deadline for that call, and server-side waits have their own option (`waitTimeoutMs`, `resolveTimeoutMs`). A call without `timeoutMs` is abandoned after `defaultTimeoutMs`: 120 seconds, or the server-side wait it asked for plus 10 seconds when that is longer. Change it with `Browser.launch({ defaultTimeoutMs })`; `null` turns it off. An expired local deadline undoes nothing: `error.requestState` tells you whether the request was `not_sent` or `may_have_been_sent`.
+
+### Parallel calls
+
+The sidecar accepts a limited number of requests at once (`browser.hello.limits.maxInFlight`). Calls beyond that limit wait inside the SDK and are sent as earlier ones finish, so `Promise.all` over many calls works. A waiting call still honors its `timeoutMs` and `signal`, and then rejects with `requestState: "not_sent"`.
+
+## Dialogs and stalled pages
+
+An open JavaScript dialog (`alert`, `confirm`, `prompt` or a "leave this page?" prompt) and a navigation that is still waiting for its response both stop Chrome from answering anything else on that tab. Calls on such a tab reject promptly, say what is in the way and what to do next:
+
+| `error.code` | What happened | Next step |
+| --- | --- | --- |
+| `DialogOpen` | The call was made on a tab that has a dialog open. | `page.ops.dialogAccept()` or `page.ops.dialogDismiss()` |
+| `dialog_open` | An action's own input opened a dialog. The input was sent. | Clear the dialog, then check the page. |
+| `NavigationPending` | The tab is waiting for a navigation that has not answered. | Wait, or navigate again with `page.goto(url)`. |
+| `navigation_timeout` | A navigation got no response within its deadline. The load was stopped and the tab still shows the previous page. | Allow more time, or check the URL and network. |
+| `PageUnresponsive` | The page answers nothing and neither cause is known. | Let it settle, or continue in `browser.newPage(url)`. |
+
+The message keeps the server's own text, including the dialog's message or the pending URL, and ends with the next step. An action that was interrupted after its input was sent reports `navigation_pending` or `page_unresponsive` in the same way as `dialog_open`. All of this needs a server with the `pageBlockers` capability (`browser.hasCapability("pageBlockers")`); without it such calls run into their deadline instead.
+
+```js
+try {
+  await page.click("#delete", {
+    actionOptions: { expect: { kind: "hidden", target: { query: { kind: "css", selector: "#row" } } } },
+  });
+} catch (error) {
+  if (!(error instanceof EokaError) || error.code !== "dialog_open") throw error;
+  await page.ops.dialogAccept(); // { prompt_text: "Ada" } answers a prompt()
+}
+```
+
+On `DialogOpen` and `NavigationPending`, `error.blocker` describes the obstacle: `{ kind: "dialog", dialogType, message, url, elapsedMs }` or `{ kind: "navigation", url, elapsedMs }`. The action codes in `snake_case` come from the operation record, which carries the text but no `blocker`.
+
+```js
+try {
+  console.log(await page.title());
+} catch (error) {
+  if (!(error instanceof EokaError) || error.blocker === undefined) throw error;
+  if (error.blocker.kind === "dialog") {
+    console.log(error.blocker.dialogType, error.blocker.message);
+    await page.ops.dialogDismiss();
+  } else {
+    console.log("still waiting for", error.blocker.url);
+    await page.goto("https://example.com"); // or page.ops.reload() to return to the page still displayed
+  }
+}
 ```
 
 ## Shadow DOM and Turnstile
@@ -106,7 +172,8 @@ await Browser.launch({
   download: "auto", // "never" fails when Chrome isn't cached
   browserCacheDir: "/opt/eoka/cache",
   viewport: { width: 1280, height: 720, deviceScaleFactor: 1 },
-  timeoutMs: 30000,
+  timeoutMs: 30000,          // deadline for the launch itself
+  defaultTimeoutMs: 120000,  // default; for later calls without timeoutMs
 });
 ```
 
@@ -142,6 +209,8 @@ try {
 }
 ```
 
+`error.stack` includes the line of your code that made the call. A failed action also carries `record`, `receipt` and, as `cause`, the server's own message. `error.requestState` says whether the request was `not_sent`, `may_have_been_sent` or `acknowledged`, and `error.blocker` is set when a dialog or a pending navigation is in the way (see [Dialogs and stalled pages](#dialogs-and-stalled-pages)).
+
 ## Linux and Docker
 
 Chrome needs its usual system libraries even in headless mode. On Debian:
@@ -175,5 +244,7 @@ npm ci --ignore-scripts --omit=optional
 npm run build
 npm test
 ```
+
+[EVALS.md](https://github.com/shrimp-software/eoka-tools/blob/main/clients/node/EVALS.md) describes the real-browser suites that check caller mistakes, misbehaving pages and the examples in this README, and how to run them.
 
 Releases are automatic: merge a version bump to `main` and approve the `npm-prerelease` deployment.

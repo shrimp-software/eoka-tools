@@ -7,15 +7,15 @@ pub async fn click_once(
     _viewport_only: bool,
 ) -> Result<String, String> {
     let target = crate::operations::commands::live_locator(target).map_err(|e| e.to_string())?;
-    tab.page
-        .act(
-            eoka::Action::Click {
-                target,
-                human: false,
-                double: false,
-            },
-            Default::default(),
-        )
+    let click = tab.page.act(
+        eoka::Action::Click {
+            target,
+            human: false,
+            double: false,
+        },
+        Default::default(),
+    );
+    crate::capture::painting(&tab.page, click)
         .await
         .map_err(|e| e.to_string())?;
     Ok("Click dispatched".into())

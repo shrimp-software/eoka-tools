@@ -3,7 +3,9 @@ import html
 import json
 import re
 import threading
+import time
 from collections import defaultdict
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -15,7 +17,12 @@ TASKS = {
     "download": "Download the CSV report exactly once into {downloads}/report.csv and confirm the saved file.",
     "dynamic": "Prepare the report, then generate it once when the control becomes available. Confirm completion.",
     "pagination": "Find Mira Chen in the directory and report her email address.",
+    "dialog": "Subscribe ava@example.test to the newsletter exactly once and confirm the result.",
+    "silent": "Open the quarterly report and report the total revenue. One of the two mirrors may never respond.",
+    "login": "Sign in with username ava and password hunter2-test, then report the account number.",
+    "leave": "Type the note draft into the note field, then open the Summary page and report the summary code.",
 }
+SILENT_SECONDS = 600
 
 
 class Fixture:
@@ -39,21 +46,37 @@ class Fixture:
                 self.end_headers()
                 self.wfile.write(body)
 
+            def redirect(self, location, cookie=None):
+                self.send_response(303)
+                self.send_header("Location", location)
+                self.send_header("Content-Length", "0")
+                if cookie:
+                    self.send_header("Set-Cookie", f"{cookie}; Path=/")
+                self.end_headers()
+
             def do_POST(self):
-                run = self.path.strip("/").split("/")[0]
+                parts = urlparse(self.path).path.strip("/").split("/")
+                run = parts[0]
                 self.audit(run)
                 body = self.rfile.read(int(self.headers.get("Content-Length", "0"))).decode()
                 fixture.events[run].append({"path": self.path, "body": body})
+                if len(parts) > 2 and parts[1] == "login" and parts[2] == "session":
+                    fields = parse_qs(body)
+                    signed_in = fields.get("username") == ["ava"] and fields.get("password") == ["hunter2-test"]
+                    base = f"/{run}/login"
+                    self.redirect(f"{base}/account" if signed_in else f"{base}?error=1", f"sid={run}" if signed_in else None)
+                    return
                 self.send(json.dumps({"status": "complete"}), "application/json")
 
             def do_GET(self):
-                parts = urlparse(self.path).path.strip("/").split("/")
+                url = urlparse(self.path)
+                parts = url.path.strip("/").split("/")
                 if len(parts) < 2:
                     self.send("Missing fixture")
                     return
                 run, task, *rest = parts
                 self.audit(run)
-                fixture.visits[run].add(urlparse(self.path).path)
+                fixture.visits[run].add(url.path)
                 base = f"/{run}/{task}"
                 if task == "pricing":
                     body = '<h1>Plans</h1><h2>Basic</h2><p>$12 per month</p><h2>Pro</h2><p>$29 per month</p><h2>Team</h2><p>$79 per month</p>' if rest else f'<h1>Acme workspace</h1><a href="{base}/plans">Plans and pricing</a>'
@@ -75,9 +98,29 @@ class Fixture:
                     body = f'<h1>Staff directory</h1><p>Page {page} of 3</p><h2>{name}</h2><p>{email}</p>'
                     if page < 3:
                         body += f'<a href="{base}/{page + 1}">Next page</a>'
+                elif task == "dialog":
+                    body = '<h1>Newsletter</h1><form id=f><label>Email<input name=email type=email required></label><button>Subscribe</button></form><p id=status role=status>Not subscribed</p><script>f.onsubmit=async e=>{e.preventDefault();if(!confirm("Subscribe "+f.email.value+"?"))return;await fetch(location.pathname,{method:"POST",body:new URLSearchParams(new FormData(f))});document.querySelector("#status").textContent="Subscribed "+f.email.value}</script>'
+                elif task == "silent":
+                    if rest == ["mirror-a"]:
+                        time.sleep(SILENT_SECONDS)
+                        return
+                    body = '<h1>Quarterly report</h1><p>Total revenue: $48,210</p>' if rest == ["mirror-b"] else f'<h1>Reports</h1><a href="{base}/mirror-a">Quarterly report (mirror A)</a><a href="{base}/mirror-b">Quarterly report (mirror B)</a>'
+                elif task == "login":
+                    cookies = SimpleCookie(self.headers.get("Cookie", ""))
+                    signed_in = "sid" in cookies and cookies["sid"].value == run
+                    if rest == ["account"] and not signed_in:
+                        self.redirect(base)
+                        return
+                    if rest == ["account"]:
+                        body = '<h1>Your account</h1><p>Account number: AC-7731</p>'
+                    else:
+                        error = '<p role=alert>Invalid username or password</p>' if "error" in parse_qs(url.query) else ""
+                        body = f'<h1>Sign in</h1>{error}<form method=post action="{base}/session"><label>Username<input name=username required></label><label>Password<input name=password type=password required></label><button>Sign in</button></form>'
+                elif task == "leave":
+                    body = '<h1>Summary</h1><p>Summary code: SM-2096</p>' if rest else f'<h1>Notes</h1><label>Note<textarea id=note></textarea></label><a id=summary hidden href="{base}/summary">Summary</a><script>note.addEventListener("input",()=>{{summary.hidden=!note.value;window.onbeforeunload=note.value?e=>{{e.preventDefault();e.returnValue=""}}:null}})</script>'
                 else:
                     body = "Unknown task"
-                self.send(f'<!doctype html><title>{html.escape(task)}</title><style>body{{font:18px sans-serif;padding:32px}}input,select,button,a{{display:block;margin:14px 0;padding:10px}}</style>{body}')
+                self.send(f'<!doctype html><title>{html.escape(task)}</title><style>body{{font:18px sans-serif;padding:32px}}input,select,button,a,textarea{{display:block;margin:14px 0;padding:10px}}[hidden]{{display:none}}</style>{body}')
 
             def audit(self, run):
                 user_agent = self.headers.get("User-Agent", "")
@@ -85,6 +128,7 @@ class Fixture:
                     fixture.non_browser_requests[run].append({"path": self.path, "user_agent": user_agent})
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.server.daemon_threads = True
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
 
     def start(self):
@@ -96,17 +140,26 @@ class Fixture:
 
     def score(self, run, task, answer, downloads):
         events = self.events[run]
+        visits = self.visits[run]
         effects = len(events)
         if task == "pricing":
-            success = bool(re.search(r"(?<!\d)29(?:\.00)?(?!\d)", answer)) and f"/{run}/pricing/plans" in self.visits[run]
+            success = bool(re.search(r"(?<!\d)29(?:\.00)?(?!\d)", answer)) and f"/{run}/pricing/plans" in visits
         elif task == "tabs":
-            success = "ZX-4821" in answer and f"/{run}/tabs/tracker" in self.visits[run]
+            success = "ZX-4821" in answer and f"/{run}/tabs/tracker" in visits
         elif task == "pagination":
-            success = "mira@example.test" in answer and f"/{run}/pagination/3" in self.visits[run]
+            success = "mira@example.test" in answer and f"/{run}/pagination/3" in visits
         elif task == "form":
             success = effects == 1 and parse_qs(events[0]["body"]) == {"name": ["Ava Park"], "email": ["ava@example.test"], "role": ["analyst"]}
         elif task == "dynamic":
             success = effects == 1 and events[0]["body"] == "generate"
+        elif task == "dialog":
+            success = effects == 1 and parse_qs(events[0]["body"]) == {"email": ["ava@example.test"]}
+        elif task == "silent":
+            success = bool(re.search(r"48,?210", answer)) and f"/{run}/silent/mirror-b" in visits
+        elif task == "login":
+            success = "AC-7731" in answer and effects == 1 and parse_qs(events[0]["body"]) == {"username": ["ava"], "password": ["hunter2-test"]}
+        elif task == "leave":
+            success = "SM-2096" in answer and f"/{run}/leave/summary" in visits
         else:
             path = downloads / "report.csv"
             success = effects == 1 and path.is_file() and path.read_bytes() == REPORT

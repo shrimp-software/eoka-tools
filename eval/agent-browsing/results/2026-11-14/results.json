@@ -1,0 +1,3343 @@
+[
+  {
+    "version": "v0.14",
+    "surface": "tool",
+    "task": "pricing",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 5.37,
+    "tool_calls": 2,
+    "usage": {
+      "input": 3610,
+      "output": 311,
+      "cacheRead": 1536,
+      "cacheWrite": 0,
+      "totalTokens": 5457
+    },
+    "cost_usd": 0.000397,
+    "answer": "The monthly price of the Pro plan is **$29 per month**.\n\n```json\n{\"success\":true,\"answer\":\"$29 per month\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.13",
+    "surface": "tool",
+    "task": "pricing",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 11.579,
+    "tool_calls": 6,
+    "usage": {
+      "input": 7303,
+      "output": 809,
+      "cacheRead": 18944,
+      "cacheWrite": 0,
+      "totalTokens": 27056
+    },
+    "cost_usd": 0.001676,
+    "answer": "The Pro plan is $29 per month.\n\n```json\n{\"success\":true,\"answer\":\"$29 per month\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.12",
+    "surface": "tool",
+    "task": "pricing",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 25.095,
+    "tool_calls": 9,
+    "usage": {
+      "input": 12122,
+      "output": 1197,
+      "cacheRead": 50432,
+      "cacheWrite": 0,
+      "totalTokens": 63751
+    },
+    "cost_usd": 0.003666,
+    "answer": "I found the pricing information. The Pro plan costs **$29 per month**.\n\n{\"success\": true, \"answer\": \"$29 per month\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.13",
+    "surface": "skill",
+    "task": "pricing",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 25.445,
+    "tool_calls": 13,
+    "usage": {
+      "input": 10969,
+      "output": 1752,
+      "cacheRead": 74752,
+      "cacheWrite": 0,
+      "totalTokens": 87473
+    },
+    "cost_usd": 0.005074,
+    "answer": "{\"success\":true,\"answer\":\"$29 per month\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 2,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.12",
+    "surface": "skill",
+    "task": "pricing",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 37.063,
+    "tool_calls": 20,
+    "usage": {
+      "input": 28547,
+      "output": 2636,
+      "cacheRead": 153344,
+      "cacheWrite": 0,
+      "totalTokens": 184527
+    },
+    "cost_usd": 0.010281,
+    "answer": "The monthly price of the Pro plan is **$29 per month**.\n\n```json\n{\"success\":true,\"answer\":\"$29 per month\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 2,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.14",
+    "surface": "skill",
+    "task": "pricing",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 24.695,
+    "tool_calls": 13,
+    "usage": {
+      "input": 11075,
+      "output": 2017,
+      "cacheRead": 78848,
+      "cacheWrite": 0,
+      "totalTokens": 91940
+    },
+    "cost_usd": 0.005404,
+    "answer": "{\"success\":true,\"answer\":\"$29 per month\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 2,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.12",
+    "surface": "mcp",
+    "task": "pricing",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 19.288,
+    "tool_calls": 10,
+    "usage": {
+      "input": 21433,
+      "output": 1137,
+      "cacheRead": 93696,
+      "cacheWrite": 0,
+      "totalTokens": 116266
+    },
+    "cost_usd": 0.006268,
+    "answer": "The monthly price of the Pro plan is **$29 per month**.\n\n```json\n{\"success\":true,\"answer\":\"$29 per month\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.14",
+    "surface": "mcp",
+    "task": "pricing",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 14.231,
+    "tool_calls": 8,
+    "usage": {
+      "input": 14430,
+      "output": 951,
+      "cacheRead": 82688,
+      "cacheWrite": 0,
+      "totalTokens": 98069
+    },
+    "cost_usd": 0.005284,
+    "answer": "The monthly price of the Pro plan is **$29**.\n\n```json\n{\"success\":true,\"answer\":\"$29\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.13",
+    "surface": "mcp",
+    "task": "pricing",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 41.466,
+    "tool_calls": 18,
+    "usage": {
+      "input": 37193,
+      "output": 2575,
+      "cacheRead": 205824,
+      "cacheWrite": 0,
+      "totalTokens": 245592
+    },
+    "cost_usd": 0.01331,
+    "answer": "The monthly price of the Pro plan is **$29 per month**.\n\n{\"success\":true,\"answer\":\"$29 per month\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.12",
+    "surface": "skill",
+    "task": "form",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 21.74,
+    "tool_calls": 15,
+    "usage": {
+      "input": 16453,
+      "output": 3257,
+      "cacheRead": 125184,
+      "cacheWrite": 0,
+      "totalTokens": 144894
+    },
+    "cost_usd": 0.008548,
+    "answer": "The contact form has been successfully submitted and confirmed. The page displays the confirmation message \"Request received for Ava Park\".\n\n```json\n{\"success\":true,\"answer\":\"The contact form was submitted successfully with name Ava Park, email ava@example.test, and role Analyst. The page confirms: 'Request received for Ava Park'.\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/82fdf270191b/form",
+        "body": "name=Ava+Park&email=ava%40example.test&role=analyst"
+      }
+    ],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 2,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.13",
+    "surface": "tool",
+    "task": "form",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 60.692,
+    "tool_calls": 15,
+    "usage": {
+      "input": 29230,
+      "output": 2183,
+      "cacheRead": 195328,
+      "cacheWrite": 0,
+      "totalTokens": 226741
+    },
+    "cost_usd": 0.01221,
+    "answer": "The form has been submitted successfully. The confirmation message \"Request received for Ava Park\" is displayed on the page, confirming the submission with the name Ava Park, email ava@example.test, and role Analyst.\n\n```json\n{\"success\":true,\"answer\":\"Contact form submitted successfully for Ava Park (ava@example.test, Analyst). Page confirms: 'Request received for Ava Park'.\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/eedf2e6d3d28/form",
+        "body": "name=Ava+Park&email=ava%40example.test&role=analyst"
+      }
+    ],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.14",
+    "surface": "tool",
+    "task": "form",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 55.135,
+    "tool_calls": 11,
+    "usage": {
+      "input": 34450,
+      "output": 1978,
+      "cacheRead": 89856,
+      "cacheWrite": 0,
+      "totalTokens": 126284
+    },
+    "cost_usd": 0.007105,
+    "answer": "The contact form was successfully submitted and confirmed. The page displays the confirmation message: **\"Request received for Ava Park\"**.\n\n```json\n{\"success\":true,\"answer\":\"The contact form was submitted once with name Ava Park, email ava@example.test, and role Analyst. The page confirmed with the message 'Request received for Ava Park'.\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/9f6c66ff381c/form",
+        "body": "name=Ava+Park&email=ava%40example.test&role=analyst"
+      }
+    ],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.13",
+    "surface": "skill",
+    "task": "form",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 19.642,
+    "tool_calls": 13,
+    "usage": {
+      "input": 16591,
+      "output": 2341,
+      "cacheRead": 113920,
+      "cacheWrite": 0,
+      "totalTokens": 132852
+    },
+    "cost_usd": 0.007579,
+    "answer": "The form was successfully submitted. The page shows the confirmation message \"Request received for Ava Park\", confirming the submission with name Ava Park, email ava@example.test, and role Analyst.\n\n```json\n{\"success\":true,\"answer\":\"Form submitted successfully; page displayed 'Request received for Ava Park'\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/a20e4a353e30/form",
+        "body": "name=Ava+Park&email=ava%40example.test&role=analyst"
+      }
+    ],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.12",
+    "surface": "mcp",
+    "task": "form",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 26.399,
+    "tool_calls": 17,
+    "usage": {
+      "input": 29233,
+      "output": 2600,
+      "cacheRead": 297984,
+      "cacheWrite": 0,
+      "totalTokens": 329817
+    },
+    "cost_usd": 0.017531,
+    "answer": "{\"success\":true,\"answer\":\"The contact form was submitted once with Name: Ava Park, Email: ava@example.test, Role: Analyst. The page confirmed: 'Request received for Ava Park'.\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/06630231e9cd/form",
+        "body": "name=Ava+Park&email=ava%40example.test&role=analyst"
+      }
+    ],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.14",
+    "surface": "skill",
+    "task": "form",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 32.613,
+    "tool_calls": 11,
+    "usage": {
+      "input": 12744,
+      "output": 2213,
+      "cacheRead": 77312,
+      "cacheWrite": 0,
+      "totalTokens": 92269
+    },
+    "cost_usd": 0.005499,
+    "answer": "The form has been submitted successfully. The page displays the message **\"Request received for Ava Park\"**, confirming the submission with name Ava Park, email ava@example.test, and role Analyst.\n\n```json\n{\"success\":true,\"answer\":\"Contact form submitted successfully with name 'Ava Park', email 'ava@example.test', role 'Analyst'. Confirmation message displayed: 'Request received for Ava Park'.\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/593af7b92260/form",
+        "body": "name=Ava+Park&email=ava%40example.test&role=analyst"
+      }
+    ],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.13",
+    "surface": "mcp",
+    "task": "form",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 47.583,
+    "tool_calls": 23,
+    "usage": {
+      "input": 25942,
+      "output": 3153,
+      "cacheRead": 309504,
+      "cacheWrite": 0,
+      "totalTokens": 338599
+    },
+    "cost_usd": 0.018191,
+    "answer": "{\"success\":true,\"answer\":\"The contact form was submitted successfully with name Ava Park, email ava@example.test, and role Analyst. The page now displays the message \\\"Request received for Ava Park\\\" confirming the submission.\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/e095bad83ae8/form",
+        "body": "name=Ava+Park&email=ava%40example.test&role=analyst"
+      }
+    ],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.14",
+    "surface": "mcp",
+    "task": "form",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 31.809,
+    "tool_calls": 19,
+    "usage": {
+      "input": 19214,
+      "output": 2001,
+      "cacheRead": 77568,
+      "cacheWrite": 0,
+      "totalTokens": 98783
+    },
+    "cost_usd": 0.00574,
+    "answer": "The form was submitted successfully. The page now shows the confirmation message: **\"Request received for Ava Park\"**, confirming the submission with the correct details (Name: Ava Park, Email: ava@example.test, Role: Analyst).\n\n```json\n{\"success\":true,\"answer\":\"Contact form submitted successfully with Name 'Ava Park', Email 'ava@example.test', and Role 'Analyst'. Confirmation message displayed: 'Request received for Ava Park'.\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/1fb03ae1918e/form",
+        "body": "name=Ava+Park&email=ava%40example.test&role=analyst"
+      }
+    ],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.14",
+    "surface": "tool",
+    "task": "tabs",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 6.171,
+    "tool_calls": 3,
+    "usage": {
+      "input": 4006,
+      "output": 330,
+      "cacheRead": 5120,
+      "cacheWrite": 0,
+      "totalTokens": 9456
+    },
+    "cost_usd": 0.000605,
+    "answer": "{\"success\":true,\"answer\":\"ZX-4821\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.12",
+    "surface": "tool",
+    "task": "tabs",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 40.217,
+    "tool_calls": 7,
+    "usage": {
+      "input": 7005,
+      "output": 749,
+      "cacheRead": 22272,
+      "cacheWrite": 0,
+      "totalTokens": 30026
+    },
+    "cost_usd": 0.001801,
+    "answer": "{\"success\":true,\"answer\":\"ZX-4821\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 2,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.13",
+    "surface": "tool",
+    "task": "tabs",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 20.74,
+    "tool_calls": 6,
+    "usage": {
+      "input": 6825,
+      "output": 738,
+      "cacheRead": 19456,
+      "cacheWrite": 0,
+      "totalTokens": 27019
+    },
+    "cost_usd": 0.001646,
+    "answer": "The tracking code is **ZX-4821**.\n\n```json\n{\n  \"success\": true,\n  \"answer\": \"ZX-4821\"\n}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.12",
+    "surface": "skill",
+    "task": "tabs",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 12.43,
+    "tool_calls": 6,
+    "usage": {
+      "input": 8603,
+      "output": 915,
+      "cacheRead": 23296,
+      "cacheWrite": 0,
+      "totalTokens": 32814
+    },
+    "cost_usd": 0.002007,
+    "answer": "I found the tracking code on the shipment tracker page: **ZX-4821**.\n\n```json\n{\"success\":true,\"answer\":\"ZX-4821\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.13",
+    "surface": "skill",
+    "task": "tabs",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 12.582,
+    "tool_calls": 5,
+    "usage": {
+      "input": 6476,
+      "output": 666,
+      "cacheRead": 15104,
+      "cacheWrite": 0,
+      "totalTokens": 22246
+    },
+    "cost_usd": 0.001379,
+    "answer": "The tracking code is **ZX-4821**. The link opened in a new tab and the tracker page displayed it clearly.\n\n```json\n{\"success\":true,\"answer\":\"ZX-4821\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.14",
+    "surface": "skill",
+    "task": "tabs",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 23.747,
+    "tool_calls": 11,
+    "usage": {
+      "input": 13091,
+      "output": 1462,
+      "cacheRead": 58880,
+      "cacheWrite": 0,
+      "totalTokens": 73433
+    },
+    "cost_usd": 0.004256,
+    "answer": "The tracking code is clearly shown in the page text excerpt: `Tracking code: ZX-4821`.\n\n```json\n{\"success\":true,\"answer\":\"ZX-4821\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.12",
+    "surface": "mcp",
+    "task": "tabs",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 27.451,
+    "tool_calls": 14,
+    "usage": {
+      "input": 36843,
+      "output": 1262,
+      "cacheRead": 166912,
+      "cacheWrite": 0,
+      "totalTokens": 205017
+    },
+    "cost_usd": 0.010756,
+    "answer": "The tracking code is **ZX-4821**.\n\n```json\n{\n  \"success\": true,\n  \"answer\": \"ZX-4821\"\n}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.12",
+    "surface": "tool",
+    "task": "download",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 8.775,
+    "tool_calls": 3,
+    "usage": {
+      "input": 4879,
+      "output": 587,
+      "cacheRead": 3072,
+      "cacheWrite": 0,
+      "totalTokens": 8538
+    },
+    "cost_usd": 0.000662,
+    "answer": "The CSV report has been downloaded exactly once and saved successfully.\n\n```json\n{\"success\":true,\"answer\":\"Downloaded report.csv (36 bytes, SHA256: c7e1f983fbd73ae90509e553899d5ab5c442be038fda14f0e0bc1b54cb359708) to /var/tmp/eoka-eval/baseline-1/v0.12-tool-download-0/downloads/report.csv\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/48fd35c5598e/download/report.csv",
+        "download": true
+      }
+    ],
+    "expected_download_sha256": "c7e1f983fbd73ae90509e553899d5ab5c442be038fda14f0e0bc1b54cb359708",
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.13",
+    "surface": "tool",
+    "task": "download",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 7.724,
+    "tool_calls": 3,
+    "usage": {
+      "input": 3303,
+      "output": 526,
+      "cacheRead": 4608,
+      "cacheWrite": 0,
+      "totalTokens": 8437
+    },
+    "cost_usd": 0.000632,
+    "answer": "The CSV report has been downloaded and saved successfully.\n\n```json\n{\"success\": true, \"answer\": \"Downloaded report.csv (36 bytes, sha256: c7e1f983fbd73ae90509e553899d5ab5c442be038fda14f0e0bc1b54cb359708) to /var/tmp/eoka-eval/baseline-1/v0.13-tool-download-0/downloads/report.csv\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/1ab6a803ff5c/download/report.csv",
+        "download": true
+      }
+    ],
+    "expected_download_sha256": "c7e1f983fbd73ae90509e553899d5ab5c442be038fda14f0e0bc1b54cb359708",
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.14",
+    "surface": "tool",
+    "task": "download",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 6.071,
+    "tool_calls": 4,
+    "usage": {
+      "input": 3845,
+      "output": 891,
+      "cacheRead": 8448,
+      "cacheWrite": 0,
+      "totalTokens": 13184
+    },
+    "cost_usd": 0.001016,
+    "answer": "{\"success\":true,\"answer\":\"CSV report downloaded once to /var/tmp/eoka-eval/baseline-1/v0.14-tool-download-0/downloads/report.csv (36 bytes, SHA256 c7e1f983fbd73ae90509e553899d5ab5c442be038fda14f0e0bc1b54cb359708) and confirmed as verified complete.\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/481e1df4d2a9/download/report.csv",
+        "download": true
+      }
+    ],
+    "expected_download_sha256": "c7e1f983fbd73ae90509e553899d5ab5c442be038fda14f0e0bc1b54cb359708",
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.14",
+    "surface": "mcp",
+    "task": "tabs",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 35.208,
+    "tool_calls": 18,
+    "usage": {
+      "input": 43186,
+      "output": 2138,
+      "cacheRead": 236800,
+      "cacheWrite": 0,
+      "totalTokens": 282124
+    },
+    "cost_usd": 0.014961,
+    "answer": "{\"success\": true, \"answer\": \"ZX-4821\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.12",
+    "surface": "skill",
+    "task": "download",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 16.086,
+    "tool_calls": 10,
+    "usage": {
+      "input": 7390,
+      "output": 1613,
+      "cacheRead": 39936,
+      "cacheWrite": 0,
+      "totalTokens": 48939
+    },
+    "cost_usd": 0.003092,
+    "answer": "{\"success\":true,\"answer\":\"Downloaded report.csv (36 bytes, verified SHA256 c7e1f983fbd73ae90509e553899d5ab5c442be038fda14f0e0bc1b54cb359708). Contains CSV data: name,total / Ava Park,29 / Mira Chen,43.\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/36ce801993e5/download/report.csv",
+        "download": true
+      }
+    ],
+    "expected_download_sha256": "c7e1f983fbd73ae90509e553899d5ab5c442be038fda14f0e0bc1b54cb359708",
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.13",
+    "surface": "skill",
+    "task": "download",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 17.837,
+    "tool_calls": 12,
+    "usage": {
+      "input": 9656,
+      "output": 1819,
+      "cacheRead": 67328,
+      "cacheWrite": 0,
+      "totalTokens": 78803
+    },
+    "cost_usd": 0.004668,
+    "answer": "```json\n{\"success\": true, \"answer\": \"Downloaded the CSV report exactly once to /var/tmp/eoka-eval/baseline-1/v0.13-skill-download-0/downloads/report.csv (36 bytes, sha256 c7e1f983fbd73ae90509e553899d5ab5c442be038fda14f0e0bc1b54cb359708) from http://127.0.0.1:42149/a64c76ef5984/download using session a64c76ef5984 with --no-geo-align. The file contains two data rows: Ava Park,29 and Mira Chen,43.\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/a64c76ef5984/download/report.csv",
+        "download": true
+      }
+    ],
+    "expected_download_sha256": "c7e1f983fbd73ae90509e553899d5ab5c442be038fda14f0e0bc1b54cb359708",
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.14",
+    "surface": "skill",
+    "task": "download",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 17.937,
+    "tool_calls": 11,
+    "usage": {
+      "input": 10739,
+      "output": 1829,
+      "cacheRead": 72192,
+      "cacheWrite": 0,
+      "totalTokens": 84760
+    },
+    "cost_usd": 0.00497,
+    "answer": "The file is saved and verified. The SHA-256 hash `c7e1f983fbd73ae90509e553899d5ab5c442be038fda14f0e0bc1b54cb359708` matches the verified receipt.\n\n```json\n{\"success\":true,\"answer\":\"Downloaded report.csv (36 bytes, SHA-256 c7e1f983fbd73ae90509e553899d5ab5c442be038fda14f0e0bc1b54cb359708) to /var/tmp/eoka-eval/baseline-1/v0.14-skill-download-0/downloads/report.csv\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/c807d14c3d99/download/report.csv",
+        "download": true
+      }
+    ],
+    "expected_download_sha256": "c7e1f983fbd73ae90509e553899d5ab5c442be038fda14f0e0bc1b54cb359708",
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.13",
+    "surface": "mcp",
+    "task": "tabs",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 80.371,
+    "tool_calls": 27,
+    "usage": {
+      "input": 29295,
+      "output": 3546,
+      "cacheRead": 467456,
+      "cacheWrite": 0,
+      "totalTokens": 500297
+    },
+    "cost_usd": 0.026433,
+    "answer": "{\"success\":true,\"answer\":\"The tracking code is ZX-4821\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.12",
+    "surface": "tool",
+    "task": "form",
+    "repetition": 0,
+    "agent_exit_code": 143,
+    "elapsed_s": 240.016,
+    "tool_calls": 28,
+    "usage": {
+      "input": 73118,
+      "output": 5131,
+      "cacheRead": 527616,
+      "cacheWrite": 0,
+      "totalTokens": 605865
+    },
+    "cost_usd": 0.032346,
+    "answer": "The Role dropdown is open. Let me select the \"Analyst\" option.",
+    "success": false,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": null,
+    "false_success": false,
+    "timed_out": true,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": true,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.12",
+    "surface": "tool",
+    "task": "dynamic",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 27.298,
+    "tool_calls": 13,
+    "usage": {
+      "input": 14676,
+      "output": 3073,
+      "cacheRead": 91648,
+      "cacheWrite": 0,
+      "totalTokens": 109397
+    },
+    "cost_usd": 0.006699,
+    "answer": "The task is complete. Here's a summary of what happened:\n\n1. **Prepared the report** - Clicked the \"Prepare report\" button (which was the only control initially available). The page changed from \"Not prepared\" to \"Preparing\" state.\n2. **Waited for control availability** - After preparation, the \"Generate report\" button became enabled.\n3. **Generated the report** - Clicked the \"Generate report\" button, which produced the final message: **\"Report generated\"**.\n\nBoth steps were completed successfully.\n\n```json\n{\"success\":true,\"answer\":\"Report was prepared (Prepare report clicked, state changed to 'Preparing'), then generated once the Generate report control became enabled (Generate report clicked, state changed to 'Report generated').\"}```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/fa5c640c4f83/dynamic",
+        "body": "generate"
+      }
+    ],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.12",
+    "surface": "mcp",
+    "task": "download",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 48.385,
+    "tool_calls": 17,
+    "usage": {
+      "input": 7227,
+      "output": 2131,
+      "cacheRead": 60416,
+      "cacheWrite": 0,
+      "totalTokens": 69774
+    },
+    "cost_usd": 0.004341,
+    "answer": "{\"success\":true,\"answer\":\"CSV report downloaded and saved to /var/tmp/eoka-eval/baseline-1/v0.12-mcp-download-0/downloads/report.csv (36 bytes, sha256 c7e1f983fbd73ae90509e553899d5ab5c442be038fda14f0e0bc1b54cb359708).\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/840f05fb053b/download/report.csv",
+        "download": true
+      }
+    ],
+    "expected_download_sha256": "c7e1f983fbd73ae90509e553899d5ab5c442be038fda14f0e0bc1b54cb359708",
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.14",
+    "surface": "tool",
+    "task": "dynamic",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 8.374,
+    "tool_calls": 6,
+    "usage": {
+      "input": 8259,
+      "output": 981,
+      "cacheRead": 24832,
+      "cacheWrite": 0,
+      "totalTokens": 34072
+    },
+    "cost_usd": 0.002096,
+    "answer": "{\"success\":true,\"answer\":\"Report prepared and generated successfully. The page now shows 'Report generated'.\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/bb0a0c1ab82a/dynamic",
+        "body": "generate"
+      }
+    ],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.13",
+    "surface": "tool",
+    "task": "dynamic",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 19.689,
+    "tool_calls": 8,
+    "usage": {
+      "input": 10365,
+      "output": 1372,
+      "cacheRead": 34048,
+      "cacheWrite": 0,
+      "totalTokens": 45785
+    },
+    "cost_usd": 0.002838,
+    "answer": "The task is complete. I prepared the report by clicking the \"Prepare report\" button, waited for it to complete (the \"Generate report\" button became enabled), and then clicked \"Generate report\" to generate the report. The page now confirms \"Report generated\".\n\n```json\n{\"success\":true,\"answer\":\"Report was prepared and then generated successfully. The page now shows 'Report generated'.\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/e9c11d2bf39d/dynamic",
+        "body": "generate"
+      }
+    ],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.13",
+    "surface": "mcp",
+    "task": "download",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 67.851,
+    "tool_calls": 29,
+    "usage": {
+      "input": 11823,
+      "output": 3991,
+      "cacheRead": 162048,
+      "cacheWrite": 0,
+      "totalTokens": 177862
+    },
+    "cost_usd": 0.01049,
+    "answer": "The CSV report was successfully downloaded and saved exactly once.\n\n**Summary:**\n- Navigated to the page at `http://127.0.0.1:42149/2c64bad04754/download`\n- Found a link \"Download CSV report\" pointing to `/2c64bad04754/download/report.csv`\n- Used `download_start` with the click target to trigger the download\n- Waited for completion and confirmed the file was saved\n- File saved at: `/var/tmp/eoka-eval/baseline-1/v0.13-mcp-download-0/downloads/report.csv`\n- File size: 36 bytes\n- SHA256: `c7e1f983fbd73ae90509e553899d5ab5c442be038fda14f0e0bc1b54cb359708`\n- State: `completed`\n\n```json\n{\"success\":true,\"answer\":\"The CSV report was downloaded exactly once and saved to /var/tmp/eoka-eval/baseline-1/v0.13-mcp-download-0/downloads/report.csv (36 bytes, SHA256 c7e1f983fbd73ae90509e553899d5ab5c442be038fda14f0e0bc1b54cb359708).\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/2c64bad04754/download/report.csv",
+        "download": true
+      }
+    ],
+    "expected_download_sha256": "c7e1f983fbd73ae90509e553899d5ab5c442be038fda14f0e0bc1b54cb359708",
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.14",
+    "surface": "mcp",
+    "task": "download",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 81.069,
+    "tool_calls": 25,
+    "usage": {
+      "input": 9217,
+      "output": 2616,
+      "cacheRead": 102912,
+      "cacheWrite": 0,
+      "totalTokens": 114745
+    },
+    "cost_usd": 0.006784,
+    "answer": "{\"success\":true,\"answer\":\"CSV report was downloaded successfully to /var/tmp/eoka-eval/baseline-1/v0.14-mcp-download-0/downloads/report.csv. The download completed with 36 bytes received, SHA256 c7e1f983fbd73ae90509e553899d5ab5c442be038fda14f0e0bc1b54cb359708, and the file is verified saved at the target path.\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/7da1abb58568/download/report.csv",
+        "download": true
+      }
+    ],
+    "expected_download_sha256": "c7e1f983fbd73ae90509e553899d5ab5c442be038fda14f0e0bc1b54cb359708",
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.13",
+    "surface": "skill",
+    "task": "dynamic",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 51.136,
+    "tool_calls": 16,
+    "usage": {
+      "input": 17188,
+      "output": 2503,
+      "cacheRead": 144896,
+      "cacheWrite": 0,
+      "totalTokens": 164587
+    },
+    "cost_usd": 0.009231,
+    "answer": "```json\n{\"success\":true,\"answer\":\"Opened browser with --no-geo-align at the task URL, clicked 'Prepare report' to prepare it, waited for 'Generate report' to become enabled, clicked it, and the page confirmed 'Report generated'. Task completed successfully.\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/4a049cf45105/dynamic",
+        "body": "generate"
+      }
+    ],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.12",
+    "surface": "mcp",
+    "task": "dynamic",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 29.618,
+    "tool_calls": 22,
+    "usage": {
+      "input": 20981,
+      "output": 2869,
+      "cacheRead": 261888,
+      "cacheWrite": 0,
+      "totalTokens": 285738
+    },
+    "cost_usd": 0.015435,
+    "answer": "{\"success\":true,\"answer\":\"Report prepared and generated successfully. Steps: (1) Clicked 'Prepare report', (2) Waited for 'Generate report' control to become available, (3) Clicked 'Generate report', (4) Confirmed 'Report generated' message.\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/82c9c6a8d8a6/dynamic",
+        "body": "generate"
+      }
+    ],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.13",
+    "surface": "mcp",
+    "task": "dynamic",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 14.236,
+    "tool_calls": 14,
+    "usage": {
+      "input": 23763,
+      "output": 1653,
+      "cacheRead": 211712,
+      "cacheWrite": 0,
+      "totalTokens": 237128
+    },
+    "cost_usd": 0.012518,
+    "answer": "```json\n{\"success\":true,\"answer\":\"Successfully prepared the report by clicking 'Prepare report', then generated it by clicking 'Generate report' when the button became available. The page confirms 'Report generated'.\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/19f1121efe09/dynamic",
+        "body": "generate"
+      }
+    ],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 2,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.14",
+    "surface": "skill",
+    "task": "dynamic",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 77.723,
+    "tool_calls": 15,
+    "usage": {
+      "input": 12717,
+      "output": 2488,
+      "cacheRead": 109312,
+      "cacheWrite": 0,
+      "totalTokens": 124517
+    },
+    "cost_usd": 0.007221,
+    "answer": "The report has been generated successfully. The page now shows \"Report generated\".\n\n```json\n{\"success\":true,\"answer\":\"Report was prepared by clicking 'Prepare report', then generated by clicking 'Generate report' when it became enabled. Page confirmed with 'Report generated' message.\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/5ba7e8d8310f/dynamic",
+        "body": "generate"
+      }
+    ],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.13",
+    "surface": "tool",
+    "task": "pagination",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 6.972,
+    "tool_calls": 5,
+    "usage": {
+      "input": 6710,
+      "output": 691,
+      "cacheRead": 15616,
+      "cacheWrite": 0,
+      "totalTokens": 23017
+    },
+    "cost_usd": 0.001427,
+    "answer": "I found Mira Chen on page 3 of the directory. Her email address is **mira@example.test**.\n\n{\"success\":true,\"answer\":\"mira@example.test\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.12",
+    "surface": "tool",
+    "task": "pagination",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 35.509,
+    "tool_calls": 5,
+    "usage": {
+      "input": 5496,
+      "output": 671,
+      "cacheRead": 13056,
+      "cacheWrite": 0,
+      "totalTokens": 19223
+    },
+    "cost_usd": 0.00123,
+    "answer": "Found Mira Chen on page 3 of the staff directory. Her email address is **mira@example.test**.\n\n```json\n{\"success\":true,\"answer\":\"mira@example.test\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.14",
+    "surface": "tool",
+    "task": "pagination",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 6.923,
+    "tool_calls": 6,
+    "usage": {
+      "input": 7299,
+      "output": 804,
+      "cacheRead": 22784,
+      "cacheWrite": 0,
+      "totalTokens": 30887
+    },
+    "cost_usd": 0.001866,
+    "answer": "{\"success\": true, \"answer\": \"mira@example.test\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.12",
+    "surface": "skill",
+    "task": "pagination",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 13.931,
+    "tool_calls": 10,
+    "usage": {
+      "input": 16797,
+      "output": 1563,
+      "cacheRead": 44288,
+      "cacheWrite": 0,
+      "totalTokens": 62648
+    },
+    "cost_usd": 0.003758,
+    "answer": "Based on the page content, Mira Chen's email address is **mira@example.test**.\n\n```json\n{\"success\":true,\"answer\":\"mira@example.test\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 2,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.14",
+    "surface": "mcp",
+    "task": "dynamic",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 60.592,
+    "tool_calls": 16,
+    "usage": {
+      "input": 11697,
+      "output": 2110,
+      "cacheRead": 90112,
+      "cacheWrite": 0,
+      "totalTokens": 103919
+    },
+    "cost_usd": 0.00604,
+    "answer": "{\"success\":true,\"answer\":\"Report prepared and generated successfully. Status shows 'Report generated'.\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/207d0558c342/dynamic",
+        "body": "generate"
+      }
+    ],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.13",
+    "surface": "skill",
+    "task": "pagination",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 11.73,
+    "tool_calls": 9,
+    "usage": {
+      "input": 11998,
+      "output": 1276,
+      "cacheRead": 65024,
+      "cacheWrite": 0,
+      "totalTokens": 78298
+    },
+    "cost_usd": 0.004425,
+    "answer": "{\"success\":true,\"answer\":\"mira@example.test\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 2,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.12",
+    "surface": "skill",
+    "task": "dynamic",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 145.413,
+    "tool_calls": 21,
+    "usage": {
+      "input": 15715,
+      "output": 3474,
+      "cacheRead": 193024,
+      "cacheWrite": 0,
+      "totalTokens": 212213
+    },
+    "cost_usd": 0.012,
+    "answer": "The report has been prepared and generated successfully. The page now shows \"Report generated\".\n\n```json\n{\"success\":true,\"answer\":\"Report prepared and generated successfully. Final page status: 'Report generated'.\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/4d5582fba17d/dynamic",
+        "body": "generate"
+      }
+    ],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.14",
+    "surface": "skill",
+    "task": "pagination",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 47.426,
+    "tool_calls": 18,
+    "usage": {
+      "input": 18725,
+      "output": 2783,
+      "cacheRead": 158720,
+      "cacheWrite": 0,
+      "totalTokens": 180228
+    },
+    "cost_usd": 0.010125,
+    "answer": "{\"success\":true,\"answer\":\"mira@example.test\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.12",
+    "surface": "mcp",
+    "task": "pagination",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 54.937,
+    "tool_calls": 13,
+    "usage": {
+      "input": 26571,
+      "output": 2192,
+      "cacheRead": 168448,
+      "cacheWrite": 0,
+      "totalTokens": 197211
+    },
+    "cost_usd": 0.010737,
+    "answer": "Found Mira Chen's email address: **mira@example.test**.\n\n```json\n{\"success\":true,\"answer\":\"mira@example.test\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.14",
+    "surface": "mcp",
+    "task": "pagination",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 41.516,
+    "tool_calls": 18,
+    "usage": {
+      "input": 34863,
+      "output": 4694,
+      "cacheRead": 440832,
+      "cacheWrite": 0,
+      "totalTokens": 480389
+    },
+    "cost_usd": 0.025897,
+    "answer": "{\"success\":true,\"answer\":\"Mira Chen's email address is mira@example.test.\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.13",
+    "surface": "tool",
+    "task": "dialog",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 15.334,
+    "tool_calls": 10,
+    "usage": {
+      "input": 13760,
+      "output": 1602,
+      "cacheRead": 66816,
+      "cacheWrite": 0,
+      "totalTokens": 82178
+    },
+    "cost_usd": 0.00475,
+    "answer": "The subscription was successful. The page now displays \"Subscribed ava@example.test\" confirming the operation.\n\n```json\n{\"success\":true,\"answer\":\"Successfully subscribed ava@example.test to the newsletter. The page shows 'Subscribed ava@example.test' as confirmation.\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/a38eb00ee5aa/dialog",
+        "body": "email=ava%40example.test"
+      }
+    ],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [
+      "dialog_open"
+    ],
+    "stuck": false,
+    "recovered": true,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.14",
+    "surface": "tool",
+    "task": "dialog",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 14.282,
+    "tool_calls": 11,
+    "usage": {
+      "input": 16122,
+      "output": 2268,
+      "cacheRead": 90368,
+      "cacheWrite": 0,
+      "totalTokens": 108758
+    },
+    "cost_usd": 0.006345,
+    "answer": "The subscription was successful. The page now displays \"Subscribed ava@example.test\" confirming the result.\n\n```json\n{\"success\":true,\"answer\":\"Successfully subscribed ava@example.test to the newsletter exactly once. The page confirms with 'Subscribed ava@example.test'.\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/5ccc577c130b/dialog",
+        "body": "email=ava%40example.test"
+      }
+    ],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [
+      "dialog_open"
+    ],
+    "stuck": false,
+    "recovered": true,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.13",
+    "surface": "mcp",
+    "task": "pagination",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 76.262,
+    "tool_calls": 22,
+    "usage": {
+      "input": 26473,
+      "output": 3259,
+      "cacheRead": 304896,
+      "cacheWrite": 0,
+      "totalTokens": 334628
+    },
+    "cost_usd": 0.018035,
+    "answer": "{\"success\":true,\"answer\":\"mira@example.test\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.13",
+    "surface": "skill",
+    "task": "dialog",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 25.797,
+    "tool_calls": 15,
+    "usage": {
+      "input": 24689,
+      "output": 2231,
+      "cacheRead": 149760,
+      "cacheWrite": 0,
+      "totalTokens": 176680
+    },
+    "cost_usd": 0.009726,
+    "answer": "The subscription was successful. Here's a summary of what happened:\n\n1. **Opened the browser** with `--no-geo-align` and navigated to the dialog page.\n2. **Filled** the email field with `ava@example.test`.\n3. **Clicked** Subscribe \u2014 this triggered a JavaScript confirm dialog saying \"Subscribe ava@example.test?\".\n4. **Accepted** the confirm dialog.\n5. **Verified** the page now displays the message **\"Subscribed ava@example.test\"**, confirming the subscription succeeded.\n\n```json\n{\"success\":true,\"answer\":\"Successfully subscribed ava@example.test to the newsletter. The page now shows 'Subscribed ava@example.test'.\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/5e410256ae3f/dialog",
+        "body": "email=ava%40example.test"
+      }
+    ],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [
+      "dialog_open"
+    ],
+    "stuck": false,
+    "recovered": true,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.14",
+    "surface": "skill",
+    "task": "dialog",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 46.826,
+    "tool_calls": 19,
+    "usage": {
+      "input": 20130,
+      "output": 3398,
+      "cacheRead": 193536,
+      "cacheWrite": 0,
+      "totalTokens": 217064
+    },
+    "cost_usd": 0.012212,
+    "answer": "The task is complete. Let me summarize:\n\n1. I opened the URL `http://127.0.0.1:42149/ae40a539f503/dialog` with the eoka session `ae40a539f503` passing `--no-geo-align`.\n2. The page showed a newsletter subscription form with an Email field and Subscribe button, initially displaying \"Not subscribed\".\n3. I filled in `ava@example.test` in the Email field.\n4. I clicked Subscribe, which triggered a JavaScript confirm dialog asking \"Subscribe ava@example.test?\".\n5. I accepted the dialog to confirm the subscription.\n6. The page then displayed \"Subscribed ava@example.test\", confirming the subscription was successful.\n\nThe subscription was performed exactly once and the result is confirmed.\n\n```json\n{\"success\":true,\"answer\":\"Successfully subscribed ava@example.test to the newsletter. The page confirmed with the message 'Subscribed ava@example.test'.\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/ae40a539f503/dialog",
+        "body": "email=ava%40example.test"
+      }
+    ],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [
+      "dialog_open"
+    ],
+    "stuck": false,
+    "recovered": true,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.13",
+    "surface": "mcp",
+    "task": "dialog",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 30.152,
+    "tool_calls": 18,
+    "usage": {
+      "input": 14026,
+      "output": 2139,
+      "cacheRead": 94464,
+      "cacheWrite": 0,
+      "totalTokens": 110629
+    },
+    "cost_usd": 0.006387,
+    "answer": "{\"success\":true,\"answer\":\"Successfully subscribed ava@example.test to the newsletter exactly once. The page confirmed with 'Subscribed ava@example.test'.\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/7c5fa2ed0c21/dialog",
+        "body": "email=ava%40example.test"
+      }
+    ],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [
+      "dialog_open"
+    ],
+    "stuck": false,
+    "recovered": true,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.14",
+    "surface": "mcp",
+    "task": "dialog",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 14.982,
+    "tool_calls": 12,
+    "usage": {
+      "input": 16071,
+      "output": 1364,
+      "cacheRead": 115712,
+      "cacheWrite": 0,
+      "totalTokens": 133147
+    },
+    "cost_usd": 0.007203,
+    "answer": "{\"success\":true,\"answer\":\"Subscribed ava@example.test to the newsletter exactly once. The page initially showed 'Not subscribed' and after filling the email, clicking Subscribe, and accepting the confirmation dialog, it displayed 'Subscribed ava@example.test'.\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/1bad2c448c7d/dialog",
+        "body": "email=ava%40example.test"
+      }
+    ],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [
+      "dialog_open"
+    ],
+    "stuck": false,
+    "recovered": true,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.12",
+    "surface": "mcp",
+    "task": "dialog",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 101.996,
+    "tool_calls": 24,
+    "usage": {
+      "input": 28790,
+      "output": 3112,
+      "cacheRead": 449792,
+      "cacheWrite": 0,
+      "totalTokens": 481694
+    },
+    "cost_usd": 0.02533,
+    "answer": "Success! After filling in the email and clicking Subscribe, a dialog appeared which I accepted, and the page now shows \"Subscribed ava@example.test\" as confirmation.\n\n```json\n{\"success\":true,\"answer\":\"Subscribed ava@example.test to the newsletter. The page now displays 'Subscribed ava@example.test' confirming the subscription.\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/cfb8a76bdd34/dialog",
+        "body": "email=ava%40example.test"
+      }
+    ],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.12",
+    "surface": "tool",
+    "task": "dialog",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 171.938,
+    "tool_calls": 26,
+    "usage": {
+      "input": 22979,
+      "output": 5141,
+      "cacheRead": 379904,
+      "cacheWrite": 0,
+      "totalTokens": 408024
+    },
+    "cost_usd": 0.022458,
+    "answer": "{\"success\":true,\"answer\":\"Successfully subscribed ava@example.test to the newsletter. The page confirms 'Subscribed ava@example.test'.\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/5b8c6ef5fbbb/dialog",
+        "body": "email=ava%40example.test"
+      }
+    ],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 2,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.13",
+    "surface": "tool",
+    "task": "silent",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 38.312,
+    "tool_calls": 11,
+    "usage": {
+      "input": 10797,
+      "output": 1201,
+      "cacheRead": 45824,
+      "cacheWrite": 0,
+      "totalTokens": 57822
+    },
+    "cost_usd": 0.003372,
+    "answer": "{\"success\":true,\"answer\":\"$48,210\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [
+      "navigation_pending"
+    ],
+    "stuck": false,
+    "recovered": true,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.14",
+    "surface": "tool",
+    "task": "silent",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 35.608,
+    "tool_calls": 6,
+    "usage": {
+      "input": 6695,
+      "output": 854,
+      "cacheRead": 16640,
+      "cacheWrite": 0,
+      "totalTokens": 24189
+    },
+    "cost_usd": 0.001551,
+    "answer": "The quarterly report from mirror B shows the total revenue: **$48,210**.\n\n```json\n{\"success\": true, \"answer\": \"The total revenue from the quarterly report is $48,210.\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.13",
+    "surface": "skill",
+    "task": "silent",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 42.225,
+    "tool_calls": 10,
+    "usage": {
+      "input": 8847,
+      "output": 1408,
+      "cacheRead": 49920,
+      "cacheWrite": 0,
+      "totalTokens": 60175
+    },
+    "cost_usd": 0.003572,
+    "answer": "The page for mirror B loaded successfully. The quarterly report shows \"Total revenue: $48,210\".\n\n```json\n{\"success\":true,\"answer\":\"$48,210\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [
+      "navigation_timeout"
+    ],
+    "stuck": false,
+    "recovered": true,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.12",
+    "surface": "skill",
+    "task": "dialog",
+    "repetition": 0,
+    "agent_exit_code": 143,
+    "elapsed_s": 240.016,
+    "tool_calls": 46,
+    "usage": {
+      "input": 31944,
+      "output": 7470,
+      "cacheRead": 720384,
+      "cacheWrite": 0,
+      "totalTokens": 759798
+    },
+    "cost_usd": 0.040978,
+    "answer": "",
+    "success": false,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": null,
+    "false_success": false,
+    "timed_out": true,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": true,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.12",
+    "surface": "tool",
+    "task": "silent",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 142.695,
+    "tool_calls": 18,
+    "usage": {
+      "input": 14170,
+      "output": 2199,
+      "cacheRead": 99328,
+      "cacheWrite": 0,
+      "totalTokens": 115697
+    },
+    "cost_usd": 0.006664,
+    "answer": "The quarterly report from mirror B shows the total revenue is **$48,210**.\n\n```json\n{\"success\": true, \"answer\": \"The total revenue is $48,210.\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 2,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.14",
+    "surface": "skill",
+    "task": "silent",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 24.704,
+    "tool_calls": 10,
+    "usage": {
+      "input": 12986,
+      "output": 1691,
+      "cacheRead": 76800,
+      "cacheWrite": 0,
+      "totalTokens": 91477
+    },
+    "cost_usd": 0.00525,
+    "answer": "The quarterly report shows **Total revenue: $48,210**.\n\n```json\n{\"success\":true,\"answer\":\"$48,210\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [
+      "navigation_timeout"
+    ],
+    "stuck": false,
+    "recovered": true,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.12",
+    "surface": "skill",
+    "task": "silent",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 111.121,
+    "tool_calls": 29,
+    "usage": {
+      "input": 18990,
+      "output": 4698,
+      "cacheRead": 310784,
+      "cacheWrite": 0,
+      "totalTokens": 334472
+    },
+    "cost_usd": 0.018603,
+    "answer": "The total revenue is **$48,210**.\n\nI used the eoka session `bf66a1444584` with `--no-geo-align`, navigated to the silent page, clicked \"Quarterly report (mirror B)\" after mirror A failed to respond (as expected), and the quarterly report displayed the total revenue.\n\n```json\n{\"success\":true,\"answer\":\"$48,210\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.14",
+    "surface": "mcp",
+    "task": "silent",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 31.704,
+    "tool_calls": 23,
+    "usage": {
+      "input": 12082,
+      "output": 2368,
+      "cacheRead": 120576,
+      "cacheWrite": 0,
+      "totalTokens": 135026
+    },
+    "cost_usd": 0.007699,
+    "answer": "{\"success\":true,\"answer\":\"$48,210\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [
+      "navigation_timeout"
+    ],
+    "stuck": false,
+    "recovered": true,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.13",
+    "surface": "mcp",
+    "task": "silent",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 51.583,
+    "tool_calls": 13,
+    "usage": {
+      "input": 6615,
+      "output": 1208,
+      "cacheRead": 34816,
+      "cacheWrite": 0,
+      "totalTokens": 42639
+    },
+    "cost_usd": 0.002615,
+    "answer": "{\"success\":true,\"answer\":\"Total revenue: $48,210\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [
+      "navigation_timeout"
+    ],
+    "stuck": false,
+    "recovered": true,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.12",
+    "surface": "tool",
+    "task": "login",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 23.844,
+    "tool_calls": 12,
+    "usage": {
+      "input": 13323,
+      "output": 2154,
+      "cacheRead": 77568,
+      "cacheWrite": 0,
+      "totalTokens": 93045
+    },
+    "cost_usd": 0.005514,
+    "answer": "{\"success\":true,\"answer\":\"AC-7731\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/d1bb2418094b/login/session",
+        "body": "username=ava&password=hunter2-test"
+      }
+    ],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.12",
+    "surface": "mcp",
+    "task": "silent",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 86.576,
+    "tool_calls": 16,
+    "usage": {
+      "input": 10366,
+      "output": 1579,
+      "cacheRead": 93696,
+      "cacheWrite": 0,
+      "totalTokens": 105641
+    },
+    "cost_usd": 0.005914,
+    "answer": "The quarterly report on mirror B shows: **Total revenue: $48,210**.\n\n{\"success\":true,\"answer\":\"$48,210\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.13",
+    "surface": "tool",
+    "task": "login",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 44.469,
+    "tool_calls": 14,
+    "usage": {
+      "input": 11080,
+      "output": 1461,
+      "cacheRead": 79616,
+      "cacheWrite": 0,
+      "totalTokens": 92157
+    },
+    "cost_usd": 0.005192,
+    "answer": "I successfully signed in with username \"ava\" and password \"hunter2-test\". The account number is displayed on the page.\n\n{\"success\":true,\"answer\":\"AC-7731\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/bf60ab2cd7b0/login/session",
+        "body": "username=ava&password=hunter2-test"
+      }
+    ],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.12",
+    "surface": "skill",
+    "task": "login",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 21.14,
+    "tool_calls": 13,
+    "usage": {
+      "input": 12886,
+      "output": 2435,
+      "cacheRead": 100096,
+      "cacheWrite": 0,
+      "totalTokens": 115417
+    },
+    "cost_usd": 0.006745,
+    "answer": "{\"success\":true,\"answer\":\"AC-7731\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/c55787a609f0/login/session",
+        "body": "username=ava&password=hunter2-test"
+      }
+    ],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.12",
+    "surface": "mcp",
+    "task": "login",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 14.333,
+    "tool_calls": 9,
+    "usage": {
+      "input": 8026,
+      "output": 1083,
+      "cacheRead": 33280,
+      "cacheWrite": 0,
+      "totalTokens": 42389
+    },
+    "cost_usd": 0.002553,
+    "answer": "The account number is **AC-7731**.\n\n```json\n{\"success\":true,\"answer\":\"AC-7731\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/538b82617971/login/session",
+        "body": "username=ava&password=hunter2-test"
+      }
+    ],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.13",
+    "surface": "skill",
+    "task": "login",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 19.989,
+    "tool_calls": 10,
+    "usage": {
+      "input": 12969,
+      "output": 1845,
+      "cacheRead": 65792,
+      "cacheWrite": 0,
+      "totalTokens": 80606
+    },
+    "cost_usd": 0.004768,
+    "answer": "I've successfully signed in with the credentials and found the account number.\n\n```json\n{\"success\":true,\"answer\":\"AC-7731\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/64f342e6b69b/login/session",
+        "body": "username=ava&password=hunter2-test"
+      }
+    ],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.14",
+    "surface": "skill",
+    "task": "login",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 32.205,
+    "tool_calls": 14,
+    "usage": {
+      "input": 13188,
+      "output": 2219,
+      "cacheRead": 123904,
+      "cacheWrite": 0,
+      "totalTokens": 139311
+    },
+    "cost_usd": 0.007853,
+    "answer": "{\n  \"success\": true,\n  \"answer\": \"AC-7731\"\n}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/edf818a2cd4b/login/session",
+        "body": "username=ava&password=hunter2-test"
+      }
+    ],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.13",
+    "surface": "mcp",
+    "task": "login",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 20.19,
+    "tool_calls": 17,
+    "usage": {
+      "input": 15046,
+      "output": 2103,
+      "cacheRead": 99584,
+      "cacheWrite": 0,
+      "totalTokens": 116733
+    },
+    "cost_usd": 0.006678,
+    "answer": "The login was successful. The account number is **AC-7731**.\n\n```json\n{\"success\":true,\"answer\":\"AC-7731\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/4f2abab836be/login/session",
+        "body": "username=ava&password=hunter2-test"
+      }
+    ],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.14",
+    "surface": "mcp",
+    "task": "login",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 35.71,
+    "tool_calls": 17,
+    "usage": {
+      "input": 25457,
+      "output": 1722,
+      "cacheRead": 204288,
+      "cacheWrite": 0,
+      "totalTokens": 231467
+    },
+    "cost_usd": 0.012262,
+    "answer": "{\"success\": true, \"answer\": \"AC-7731\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/5fba92c2c3eb/login/session",
+        "body": "username=ava&password=hunter2-test"
+      }
+    ],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.14",
+    "surface": "tool",
+    "task": "leave",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 22.291,
+    "tool_calls": 14,
+    "usage": {
+      "input": 16338,
+      "output": 2420,
+      "cacheRead": 119040,
+      "cacheWrite": 0,
+      "totalTokens": 137798
+    },
+    "cost_usd": 0.007858,
+    "answer": "The note draft has been typed into the note field, and I've opened the Summary page. The summary code is **SM-2096**.\n\n```json\n{\n  \"success\": true,\n  \"answer\": \"SM-2096\"\n}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [
+      "dialog_open"
+    ],
+    "stuck": false,
+    "recovered": true,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.14",
+    "surface": "tool",
+    "task": "login",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 151.909,
+    "tool_calls": 20,
+    "usage": {
+      "input": 38678,
+      "output": 3069,
+      "cacheRead": 216320,
+      "cacheWrite": 0,
+      "totalTokens": 258067
+    },
+    "cost_usd": 0.014131,
+    "answer": "{\"success\":true,\"answer\":\"AC-7731\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 1,
+    "duplicate_effects": 0,
+    "events": [
+      {
+        "path": "/3018afc836da/login/session",
+        "body": "username=ava&password=hunter2-test"
+      }
+    ],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": false,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.13",
+    "surface": "skill",
+    "task": "leave",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 42.416,
+    "tool_calls": 19,
+    "usage": {
+      "input": 18410,
+      "output": 3035,
+      "cacheRead": 183808,
+      "cacheWrite": 0,
+      "totalTokens": 205253
+    },
+    "cost_usd": 0.011477,
+    "answer": "{\"success\":true,\"answer\":\"SM-2096\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [
+      "dialog_open"
+    ],
+    "stuck": false,
+    "recovered": true,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.14",
+    "surface": "skill",
+    "task": "leave",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 26.457,
+    "tool_calls": 21,
+    "usage": {
+      "input": 16663,
+      "output": 3583,
+      "cacheRead": 196352,
+      "cacheWrite": 0,
+      "totalTokens": 216598
+    },
+    "cost_usd": 0.012263,
+    "answer": "The summary code is **SM-2096**. Let me report the result.\n\n```json\n{\"success\":true,\"answer\":\"Summary code: SM-2096\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 2,
+    "blocked_codes": [
+      "dialog_open"
+    ],
+    "stuck": false,
+    "recovered": true,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.12",
+    "surface": "tool",
+    "task": "leave",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 155.088,
+    "tool_calls": 41,
+    "usage": {
+      "input": 24811,
+      "output": 6162,
+      "cacheRead": 632064,
+      "cacheWrite": 0,
+      "totalTokens": 663037
+    },
+    "cost_usd": 0.035617,
+    "answer": "Based on my actions:\n\n1. **Typed the note draft**: I typed \"I would like to request a leave of absence.\" into the Note textbox on the `/leave` page. After typing, a \"Summary\" link appeared, confirming the note was accepted.\n\n2. **Summary page**: Unfortunately, I was unable to open the Summary page and retrieve the summary code due to recurring transport timeouts with the browser tab (CDP commands failing). The browser entered a stuck state where navigation and view commands were timing out.\n\nI was able to successfully complete step 1 (typing the note into the note field). However, I could not complete step 2 (opening the Summary page and reporting the summary code) because the browser became unresponsive after the note was entered.\n\n```json\n{\"success\":false,\"answer\":\"Typed note draft into the note field, but could not open the Summary page to retrieve the summary code due to browser transport errors and timeouts.\"}\n```",
+    "success": false,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": false,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 2,
+    "blocked_codes": [],
+    "stuck": true,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.13",
+    "surface": "mcp",
+    "task": "leave",
+    "repetition": 0,
+    "infrastructure_error": "token cap reached before this run",
+    "success": null
+  },
+  {
+    "version": "v0.14",
+    "surface": "mcp",
+    "task": "leave",
+    "repetition": 0,
+    "infrastructure_error": "token cap reached before this run",
+    "success": null
+  },
+  {
+    "version": "v0.13",
+    "surface": "tool",
+    "task": "leave",
+    "repetition": 0,
+    "agent_exit_code": 143,
+    "elapsed_s": 240.032,
+    "tool_calls": 29,
+    "usage": {
+      "input": 24830,
+      "output": 7327,
+      "cacheRead": 408832,
+      "cacheWrite": 0,
+      "totalTokens": 440989
+    },
+    "cost_usd": 0.02498,
+    "answer": "",
+    "success": false,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": null,
+    "false_success": false,
+    "timed_out": true,
+    "longest_repeat": 1,
+    "blocked_codes": [
+      "dialog_open"
+    ],
+    "stuck": true,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.12",
+    "surface": "skill",
+    "task": "leave",
+    "repetition": 0,
+    "agent_exit_code": 143,
+    "elapsed_s": 240.016,
+    "tool_calls": 41,
+    "usage": {
+      "input": 46803,
+      "output": 5472,
+      "cacheRead": 504832,
+      "cacheWrite": 0,
+      "totalTokens": 557107
+    },
+    "cost_usd": 0.030044,
+    "answer": "\n\n",
+    "success": false,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": null,
+    "false_success": false,
+    "timed_out": true,
+    "longest_repeat": 3,
+    "blocked_codes": [],
+    "stuck": true,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.12",
+    "surface": "mcp",
+    "task": "leave",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 187.714,
+    "tool_calls": 33,
+    "usage": {
+      "input": 25215,
+      "output": 4083,
+      "cacheRead": 354560,
+      "cacheWrite": 0,
+      "totalTokens": 383858
+    },
+    "cost_usd": 0.020826,
+    "answer": "{\"success\":true,\"answer\":\"SM-2096\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [],
+    "stuck": true,
+    "recovered": false,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  }
+]

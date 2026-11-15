@@ -1,0 +1,74 @@
+{
+  "model": {
+    "defaultProvider": "openrouter",
+    "defaultModel": "deepseek/deepseek-v4-flash",
+    "defaultThinkingLevel": "high"
+  },
+  "pi_version": "1.4.0",
+  "chrome": "Google Chrome 157.0.8103.15 beta",
+  "versions": [
+    {
+      "label": "v0.12",
+      "eoka": {
+        "sha256": "4a9d5e04a0fa23cf739b2aca9b73e6abcd4056a273da206452675049d41d27fc",
+        "version": "eoka 0.12.1"
+      },
+      "mcp": {
+        "sha256": "ca12db85e3f5a84016868150758d3f58d700a9a5533f91c3748972d91e1e8ef2",
+        "version": null
+      },
+      "skill_sha256": "0ebc4a9b18cd56f0babaa3e00bcd6b4136dca5d90ea5ac24cf4892c3236009c6"
+    },
+    {
+      "label": "v0.13",
+      "eoka": {
+        "sha256": "1798de396452affd42a9ece44ec6907cea670a5cca0ef09bbd7b44ec28b5d043",
+        "version": "eoka 0.13.0"
+      },
+      "mcp": {
+        "sha256": "415d1ca634a7a3f3ce241096459bb0975c41ee655dc25fb0ff845ed1b9b4a703",
+        "version": null
+      },
+      "skill_sha256": "7c9021eca8aefcd144f0ff265fafce6189ae5b9fd6afe8ad331731e5f8bf70e1"
+    },
+    {
+      "label": "v0.14",
+      "eoka": {
+        "sha256": "24a67e3cb337b02019104b988a804597fcf36333aabac6615781936c26a94876",
+        "version": "eoka 0.14.1"
+      },
+      "mcp": {
+        "sha256": "17cbfe9f6bd1b9fa9ed54a89c2ebfcdbae1f3cc45a9abf970c3613907afbda6a",
+        "version": null
+      },
+      "skill_sha256": "a3d94c0a27afcbe992cd4f7b01ed6b3dc2448f92aa0902c0527a5aa958f60573"
+    }
+  ],
+  "surfaces": [
+    "tool",
+    "skill",
+    "mcp"
+  ],
+  "mcp_exposure": "codemode",
+  "tasks": [
+    "pricing",
+    "form",
+    "tabs",
+    "download",
+    "dynamic",
+    "pagination",
+    "dialog",
+    "silent",
+    "login",
+    "leave"
+  ],
+  "task_source_sha256": "6f1748b0aaf6370ae1636eb0e1e248ef30ccac67cc4bf80c91e65969b406935f",
+  "runner_sha256": "72d0e4948bef0c0d299ad3e05f01b2dc660a7c4ae16a6fc896bbc1eba2c3d2fd",
+  "extension_sha256": "98eefec0f0bd49b274f4771586e42ecea32561dec4e49beb82111fb2868aff79",
+  "repeats": 1,
+  "jobs": 4,
+  "token_cap": 13000000,
+  "scope": "Controlled local fixtures, text tools, one configured model; not production or broad benchmark evidence",
+  "tokens_used": 14746536,
+  "cost_usd": 0.8176
+}

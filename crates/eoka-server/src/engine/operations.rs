@@ -1,14 +1,14 @@
 use super::*;
 use crate::operations::{commands, OperationManager};
 
+const FAILURE_REPORT_GRACE_MS: u64 = 2_000;
+
 impl Engine {
     pub fn operation_manager(&self) -> OperationManager {
         self.operations.clone()
     }
 
     pub(super) async fn handle_action(&mut self, cmd: &str, args: &Value) -> Response {
-        // Every action is a durable operation. A caller that did not name one
-        // gets a fresh ID, returned in the record.
         let mut args = args.clone();
         if !args.is_object() {
             args = serde_json::json!({});
@@ -17,9 +17,21 @@ impl Engine {
             args["operation_id"] = Value::String(uuid::Uuid::new_v4().to_string());
         }
         let args = &args;
+        let reloads = cmd == "reload" || args["action"]["kind"] == "reload";
+        let mut script_applied = None;
         let result: anyhow::Result<_> = async {
             let page = &self.require_tab().map_err(anyhow::Error::msg)?.page;
-            let budget = commands::options(args)?.timeout_ms.min(60_000);
+            if reloads && self.script_policy.is_active() {
+                let enabled = self.script_enabled_for(&page.url().await?);
+                if let Some(enabled) = enabled {
+                    page.set_javascript_enabled(enabled).await?;
+                    script_applied = Some(enabled);
+                }
+            }
+            let budget = commands::options(args)?
+                .timeout_ms
+                .min(60_000)
+                .saturating_add(FAILURE_REPORT_GRACE_MS);
             let record = self
                 .agent
                 .lock()
@@ -27,8 +39,7 @@ impl Engine {
                 .command(&self.operations, page, cmd, args.clone())
                 .await?;
             if matches!(record.state, eoka_protocol::OperationState::Running) {
-                self.operations
-                    .wait(&record.id, budget)
+                blockers::wait_unless_dialog(&self.operations, page, &record.id, budget)
                     .await
                     .map_err(commands::uncertain)
             } else {
@@ -36,6 +47,9 @@ impl Engine {
             }
         }
         .await;
+        if let Some(enabled) = script_applied {
+            self.script_policy.note_applied(enabled);
+        }
         match result {
             Ok(record) => Response::action_result(record),
             Err(error) => {

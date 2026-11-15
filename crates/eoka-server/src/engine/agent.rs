@@ -1,7 +1,12 @@
 use super::*;
 
+pub(super) enum AgentCall {
+    Observe(eoka_protocol::AgentObserveArgs),
+    Step(eoka_protocol::AgentStepArgs),
+}
+
 impl Engine {
-    pub(super) async fn handle_agent(&mut self, cmd: &str, args: &Value) -> Response {
+    pub(super) async fn handle_agent(&mut self, call: AgentCall) -> Response {
         let mut result: anyhow::Result<Response> = async {
             let state = self
                 .state
@@ -12,30 +17,25 @@ impl Engine {
                 .ok_or_else(|| anyhow::anyhow!("Open a tab first"))?
                 .page
                 .clone();
-            match cmd {
-                "agent_observe" => Ok(Response::ok(serde_json::to_value(
+            match call {
+                AgentCall::Observe(args) => Ok(Response::ok(serde_json::to_value(
                     self.agent
                         .lock()
                         .await
-                        .observe(&state.browser, &page, serde_json::from_value(args.clone())?)
+                        .observe(&state.browser, &page, args)
                         .await?,
                 )?)),
-                "agent_step" => Ok(Response::agent_result(
+                AgentCall::Step(args) => Ok(Response::agent_result(
                     self.agent
                         .lock()
                         .await
-                        .step_selected(
-                            &state.browser,
-                            &page,
-                            &self.operations,
-                            serde_json::from_value(args.clone())?,
-                        )
+                        .step_selected(&state.browser, &page, &self.operations, args)
                         .await?,
                 )),
-                _ => anyhow::bail!("Unknown agent tool"),
             }
         }
         .await;
+        let mut moved = false;
         if let Ok(response) = &mut result {
             if let Some(id) = response
                 .data
@@ -45,14 +45,22 @@ impl Engine {
             {
                 if let Some(state) = self.state.as_mut() {
                     if state.current_tab_id.as_deref() != Some(id.as_str()) {
-                        if let Err(error) = state.attach_existing_tab(&id).await {
-                            if let Some(data) = response.data.as_mut() {
-                                data["observation_error"] =
-                                    json!(format!("Destination selection failed: {error}"));
+                        match state.attach_existing_tab(&id).await {
+                            Ok(()) => moved = true,
+                            Err(error) => {
+                                if let Some(data) = response.data.as_mut() {
+                                    data["observation_error"] =
+                                        json!(format!("Destination selection failed: {error}"));
+                                }
                             }
                         }
                     }
                 }
+            }
+        }
+        if moved {
+            if let Err(error) = self.sync_current_target_features().await {
+                eprintln!("[eoka] could not carry interception to the new tab: {error}");
             }
         }
         match result {

@@ -38,6 +38,13 @@ impl FileFailure {
     }
 }
 
+fn occupied(output: &Path) -> String {
+    format!(
+        "output already exists: {}; file output never overwrites, so choose a new path or remove the existing file first",
+        output.display()
+    )
+}
+
 pub struct StagedArtifact {
     pub output: PathBuf,
     pub partial: PathBuf,
@@ -80,7 +87,7 @@ impl StagedArtifact {
                 Ok(_) => {
                     return Err(FileFailure::new(
                         RecordingFailureStage::Start,
-                        "output already exists",
+                        occupied(&output),
                         None,
                     ))
                 }
@@ -251,7 +258,14 @@ impl StagedArtifact {
         }
         self.verify(&self.partial)?;
         crate::file_publication::publish_no_replace(&self.partial, &self.output).map_err(
-            |error| FileFailure::new(RecordingFailureStage::Publish, error, Some(&self.partial)),
+            |error| {
+                let message = if error.kind() == std::io::ErrorKind::AlreadyExists {
+                    occupied(&self.output)
+                } else {
+                    error.to_string()
+                };
+                FileFailure::new(RecordingFailureStage::Publish, message, Some(&self.partial))
+            },
         )?;
         if let Err(failure) = self.verify(&self.output) {
             let rollback = std::fs::remove_file(&self.output);
@@ -297,6 +311,46 @@ mod tests {
         assert_eq!(failure.stage, RecordingFailureStage::Publish);
         assert_eq!(std::fs::read(&output).unwrap(), b"previous");
         assert_eq!(std::fs::read(&stage.partial).unwrap(), b"complete image");
+        let published = std::fs::canonicalize(&output).unwrap();
+        assert!(published.is_absolute());
+        assert!(
+            failure.message.contains(published.to_str().unwrap()),
+            "{}",
+            failure.message
+        );
+        assert!(failure.message.contains("never overwrites"));
+        assert_eq!(
+            failure.partial_path.as_deref(),
+            Some(stage.partial.to_str().unwrap())
+        );
+    }
+
+    #[tokio::test]
+    async fn existing_output_is_refused_with_its_absolute_path() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = std::fs::canonicalize(root.path()).unwrap();
+        let output = directory.join("capture.png");
+        std::fs::write(&output, b"previous").unwrap();
+        let requested = root.path().join(".").join("capture.png");
+        let failure = match StagedArtifact::prepare(requested.to_str().unwrap()).await {
+            Ok(_) => panic!("an existing output must be refused"),
+            Err(failure) => failure,
+        };
+        assert_eq!(failure.stage, RecordingFailureStage::Start);
+        assert_eq!(
+            failure.message,
+            format!(
+                "output already exists: {}; file output never overwrites, so choose a new path or remove the existing file first",
+                output.display()
+            )
+        );
+        assert!(failure.partial_path.is_none());
+        let error = failure.server_error();
+        assert_eq!(error.code, ErrorCode::FileOutput);
+        assert!(error.message.contains(output.to_str().unwrap()));
+        assert_eq!(error.data.unwrap().detail.unwrap().code, "file_start");
+        assert_eq!(std::fs::read(&output).unwrap(), b"previous");
+        assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 1);
     }
 
     #[tokio::test]

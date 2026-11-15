@@ -1,0 +1,76 @@
+[
+  {
+    "version": "v0.13",
+    "surface": "mcp",
+    "task": "leave",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 22.445,
+    "tool_calls": 17,
+    "usage": {
+      "input": 29277,
+      "output": 2586,
+      "cacheRead": 257280,
+      "cacheWrite": 0,
+      "totalTokens": 289143
+    },
+    "cost_usd": 0.015492,
+    "answer": "The note draft has been typed into the note field and the Summary page has been opened. The summary code is: **SM-2096**.\n\n```json\n{\"success\":true,\"answer\":\"SM-2096\"}\n```",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 1,
+    "blocked_codes": [
+      "dialog_open"
+    ],
+    "stuck": false,
+    "recovered": true,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  },
+  {
+    "version": "v0.14",
+    "surface": "mcp",
+    "task": "leave",
+    "repetition": 0,
+    "agent_exit_code": 0,
+    "elapsed_s": 27.051,
+    "tool_calls": 20,
+    "usage": {
+      "input": 10179,
+      "output": 2338,
+      "cacheRead": 107520,
+      "cacheWrite": 0,
+      "totalTokens": 120037
+    },
+    "cost_usd": 0.006937,
+    "answer": "{\"success\":true,\"answer\":\"SM-2096\"}",
+    "success": true,
+    "valid": true,
+    "non_browser_requests": [],
+    "side_effects": 0,
+    "duplicate_effects": 0,
+    "events": [],
+    "expected_download_sha256": null,
+    "claimed_success": true,
+    "false_success": false,
+    "timed_out": false,
+    "longest_repeat": 2,
+    "blocked_codes": [
+      "dialog_open"
+    ],
+    "stuck": false,
+    "recovered": true,
+    "observed_models": [
+      "openrouter/deepseek/deepseek-v4-flash"
+    ]
+  }
+]

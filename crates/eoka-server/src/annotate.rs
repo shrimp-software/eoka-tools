@@ -6,7 +6,7 @@ const ANNOTATE_JS: &str = include_str!("js/annotate.js");
 
 pub async fn annotated_screenshot(page: &Page, elements: &[InteractiveElement]) -> Result<Vec<u8>> {
     if elements.is_empty() {
-        return page.screenshot().await;
+        return crate::capture::screenshot(page, &Default::default()).await;
     }
 
     let elem_data: Vec<serde_json::Value> = elements
@@ -27,7 +27,7 @@ pub async fn annotated_screenshot(page: &Page, elements: &[InteractiveElement]) 
 
     page.execute(&inject_js).await?;
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    let png = page.screenshot().await?;
+    let png = crate::capture::screenshot(page, &Default::default()).await?;
     page.execute("document.getElementById('__eoka_overlay')?.remove()")
         .await?;
 

@@ -86,7 +86,9 @@ impl Trigger {
                 id: journal.id.clone(),
             }));
         }
-        page.act(action, options).await.map(|_| ())
+        crate::capture::painting(page, page.act(action, options))
+            .await
+            .map(|_| ())
     }
 }
 
