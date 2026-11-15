@@ -56,5 +56,8 @@
     "@types/node": "24.19.2",
     "sigstore": "5.0.1",
     "typescript": "6.0.3"
+  },
+  "overrides": {
+    "basic-ftp": "6.2.6"
   }
 }
