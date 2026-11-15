@@ -1,4 +1,4 @@
-# 2026-11-14: three released versions on three surfaces
+# 2026-11-14: three released versions and one branch on three surfaces
 
 One repeat per cell. Read the direction, not the percentages: the intervals
 below overlap, so this run does not establish a difference on its own.
@@ -18,22 +18,25 @@ below overlap, so this run does not establish a difference on its own.
 | v0.14 | 0.14.1 | 0.10.0 | from tag `eoka-cli-v0.14.1` | typed engine, 31 MCP tools on it (#123) |
 
 `manifest.json` has the binary and skill hashes. `results.json` has every case.
+Two cases the first run did not reach (the leave-page task through MCP on v0.13
+and v0.14) were run afterwards and are in `baseline-leave-results.json`; the
+tables below include them.
 
 ## Result
 
 | Version | Scored | Passed | 95% interval | Stuck | Recovered after a blocked-tab error | Tokens |
 |---|---|---|---|---|---|---|
 | v0.12 | 30 | 26 | 70%–95% | 5 | 0 | 6.8 M |
-| v0.13 | 29 | 28 | 83%–99% | 1 | 7 | 4.2 M |
-| v0.14 | 29 | 29 | 88%–100% | 0 | 7 | 3.7 M |
+| v0.13 | 30 | 29 | 83%–99% | 1 | 8 | 4.5 M |
+| v0.14 | 30 | 30 | 89%–100% | 0 | 8 | 3.9 M |
 
 By surface (passed/scored, stuck in brackets):
 
 | Version | tool | skill | mcp |
 |---|---|---|---|
 | v0.12 | 8/10 (2) | 8/10 (2) | 10/10 (1) |
-| v0.13 | 9/10 (1) | 10/10 (0) | 9/9 (0) |
-| v0.14 | 10/10 (0) | 10/10 (0) | 9/9 (0) |
+| v0.13 | 9/10 (1) | 10/10 (0) | 10/10 (0) |
+| v0.14 | 10/10 (0) | 10/10 (0) | 10/10 (0) |
 
 What did not pass:
 
@@ -45,24 +48,65 @@ What did not pass:
   `dialog_open` and still ran out of time.
 - v0.14: nothing.
 
-Seven cases in each of v0.13 and v0.14 passed after the agent was shown
+Eight cases in each of v0.13 and v0.14 passed after the agent was shown
 `dialog_open`, `navigation_pending` or `navigation_timeout`. These are the
 dialog, leave-page and silent-server tasks.
 
 ## What this says and does not say
 
 - The MCP replies that #123 changed did not cost anything measurable: the MCP
-  surface passed 9 of 9 on both v0.13 and v0.14.
+  surface passed 10 of 10 on both v0.13 and v0.14.
 - Getting stuck is what costs tokens. The six stuck cases used 380,000 to
   760,000 tokens each; the median case that was not stuck used 109,000.
-- With one repeat, 26 of 30 against 29 of 29 is not a statistically established
+- With one repeat, 26 of 30 against 30 of 30 is not a statistically established
   difference.
-- Two cases were not run: the leave-page task through MCP on v0.13 and v0.14.
-  The run stopped starting cases at its token cap.
+
+## The branch that puts the MCP server on the engine
+
+Measured at commit `6f4075d` of `refactor/mcp-on-the-engine`, release builds,
+same agent, tasks and browser. Results are in `branch/`.
+
+| Surface | Scored | Passed | Stuck | Recovered |
+|---|---|---|---|---|
+| tool | 9 | 7 | 2 | 1 |
+| skill | 8 | 8 | 0 | 3 |
+| mcp | 8 | 7 | 2 | 2 |
+
+Five cases were not run because the token cap was reached: pricing on all
+three surfaces and pagination through the skill and MCP.
+
+Three cases failed. v0.14 passed all three, so each transcript was read:
+
+- **Download through MCP.** The agent never called `download_start`. It clicked
+  the download link six times and checked `download_list`, which stayed empty,
+  until the time cap. The download tools were not exercised. The server's
+  instructions were rewritten on this branch before the run and describe
+  `expect`, which may have steered the agent toward verified clicks. They did
+  not mention downloads before or after.
+- **Leave-page dialog through the tool.** The agent was shown `dialog_open` with
+  the hint that accepting leaves the page and dismissing stays. It dismissed,
+  then wandered. v0.14 gave the same error and hint and its agent accepted;
+  v0.13 also failed this case.
+- **Contact form through the tool.** Fourteen of the agent's thirty calls were
+  rejected step requests with a malformed `expect`, and it ran out of calls.
+  Parsing a step is unchanged on this branch.
+
+None of the three shows a reply that this branch changed, apart from the
+instructions noted above. One repeat cannot separate an agent choosing
+differently from a real regression: 22 of 25 against 30 of 30 has overlapping
+intervals (70%–96% and 89%–100%), and the branch was not run a second time.
+
+Two changes were made after this run because of what the transcripts showed.
+Neither has been measured:
+
+- A rejected step request now prints the shapes a step and its `expect` take.
+- The instructions the MCP server sends say that `download_start` saves a file
+  and that clicking a download link does not.
 
 ## Cost
 
-14.7 million tokens, $0.82. Runs are far larger than the 21,000 tokens the
+The three released versions took 15.2 million tokens ($0.84) and the branch
+6.8 million ($0.37). Runs are far larger than the 21,000 tokens the
 earlier single-tool pilots used: about 30,000 to 100,000 through the tool,
 80,000 to 165,000 through the skill and 130,000 to 240,000 through MCP at the
 median. Five repeats of this matrix would be about 75 million tokens.

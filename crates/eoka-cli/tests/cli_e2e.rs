@@ -100,6 +100,22 @@ fn tack_executes_without_browser_tools() {
 }
 
 #[test]
+fn a_malformed_step_says_what_a_step_looks_like() {
+    let output = run(
+        "malformed-step",
+        &[
+            "step",
+            r#"{"action":{"kind":"click","target":"text:Go"},"expect":{"kind":"focused","value":true}}"#,
+        ],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("missing field `target`"), "{stderr}");
+    assert!(stderr.contains(r#""mode":"explore""#), "{stderr}");
+    assert!(stderr.contains(r#"{"kind":"url""#), "{stderr}");
+}
+
+#[test]
 fn agent_mode_implies_json_and_meta() {
     let session = format!("eoka-agent-test-{}", std::process::id());
     let output = run(&session, &["--agent", "doctor"]);

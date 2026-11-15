@@ -1,0 +1,50 @@
+{
+  "model": {
+    "defaultProvider": "openrouter",
+    "defaultModel": "deepseek/deepseek-v4-flash",
+    "defaultThinkingLevel": "high"
+  },
+  "pi_version": "1.4.0",
+  "chrome": "Google Chrome 157.0.8103.15 beta",
+  "versions": [
+    {
+      "label": "branch",
+      "eoka": {
+        "sha256": "3039cfd6a0b8903a60eee90634aea266a2d479c8b2ff1a7e226ee81930d22a64",
+        "version": "eoka 0.14.2"
+      },
+      "mcp": {
+        "sha256": "63ea4f836519e0942cba8ee6741fd9743fd85e1d328d9a8d7423862c490f5a99",
+        "version": null
+      },
+      "skill_sha256": "a3d94c0a27afcbe992cd4f7b01ed6b3dc2448f92aa0902c0527a5aa958f60573"
+    }
+  ],
+  "surfaces": [
+    "tool",
+    "skill",
+    "mcp"
+  ],
+  "mcp_exposure": "codemode",
+  "tasks": [
+    "dialog",
+    "leave",
+    "silent",
+    "login",
+    "tabs",
+    "form",
+    "download",
+    "dynamic",
+    "pagination",
+    "pricing"
+  ],
+  "task_source_sha256": "6f1748b0aaf6370ae1636eb0e1e248ef30ccac67cc4bf80c91e65969b406935f",
+  "runner_sha256": "72d0e4948bef0c0d299ad3e05f01b2dc660a7c4ae16a6fc896bbc1eba2c3d2fd",
+  "extension_sha256": "98eefec0f0bd49b274f4771586e42ecea32561dec4e49beb82111fb2868aff79",
+  "repeats": 1,
+  "jobs": 4,
+  "token_cap": 5500000,
+  "scope": "Controlled local fixtures, text tools, one configured model; not production or broad benchmark evidence",
+  "tokens_used": 6834593,
+  "cost_usd": 0.3731
+}

@@ -1283,6 +1283,7 @@ impl ServerHandler for EokaServer {
                  FETCH: fetch(url, method?, headers?, body?, redirect?, max_body?) — HTTP request from browser session, bypasses Cloudflare/bot detection\n\
                  COOKIES: cookies, set_cookie, delete_cookie, clear_cookies\n\
                  DIALOGS: accept_dialog, dismiss_dialog\n\
+                 DOWNLOADS: download_start(url or click, output) saves a file and returns an id for download_wait. Clicking a download link does not save the file.\n\
                  STATE: save_state(path) — persist auth state (cookies+storage) to JSON, load_state(path, navigate?) — restore it\n\
                  STORAGE: local_storage_get/set, session_storage_get/set, dump_storage\n\
                  CONSOLE: console(clear?, level?) — read captured console output (auto-injects on first call)\n\
