@@ -539,3 +539,38 @@ async fn a_relaunched_browser_does_not_inherit_the_old_network_recording() {
     assert_eq!(again["status"]["active"], true, "{again}");
     finish(client).await;
 }
+
+#[tokio::test]
+#[ignore = "requires Chrome; a queued call is held to the busy limit"]
+async fn a_queued_call_is_refused_once_it_has_waited_the_busy_limit() {
+    let mut server = EokaServer::listing(false);
+    server.busy_limit = Duration::from_millis(700);
+    let client = std::sync::Arc::new(connect(server).await);
+    done(
+        &client,
+        "navigate",
+        json!({"url": "data:text/html,<p>busy</p>"}),
+    )
+    .await;
+    let wait = |delay: u64| {
+        let client = client.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(delay)).await;
+            let started = Instant::now();
+            let reply = answer(&client, "wait_ms", json!({"ms": 500})).await;
+            (reply, started.elapsed())
+        })
+    };
+    let first = wait(0);
+    let second = wait(50);
+    let third = wait(100);
+    let (first, _) = first.await.unwrap();
+    let (second, _) = second.await.unwrap();
+    let ((ok, reply), waited) = third.await.unwrap();
+    assert!(first.0, "{first:?}");
+    assert!(second.0, "{second:?}");
+    assert!(!ok, "the third call waited {waited:?} and ran: {reply}");
+    assert!(reply.contains("daemon_busy"), "{reply}");
+    assert!(waited < Duration::from_millis(1000), "{waited:?}");
+    done(&client, "close", json!({})).await;
+}

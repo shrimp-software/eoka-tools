@@ -139,6 +139,8 @@ pub struct EokaServer {
     engine: Arc<Mutex<eoka_server::engine::Engine>>,
     unhealthy: Arc<std::sync::atomic::AtomicBool>,
     running: Arc<std::sync::Mutex<Option<(String, std::time::Instant)>>>,
+    busy_limit: std::time::Duration,
+    turn: Arc<Mutex<()>>,
     headless: bool,
     tool_router: ToolRouter<EokaServer>,
     downloads: eoka_server::downloads::DownloadManager,
@@ -349,6 +351,8 @@ impl EokaServer {
             engine: Arc::new(Mutex::new(engine)),
             unhealthy: Default::default(),
             running: Default::default(),
+            busy_limit: blocked::BUSY_LIMIT,
+            turn: Default::default(),
             headless,
             tool_router,
         }
@@ -1233,10 +1237,11 @@ impl ServerHandler for EokaServer {
             .map(Value::Object)
             .unwrap_or(Value::Null);
         let policy = blocked::policy_for_tool(&tool, &arguments);
-        let page = match self.gate_page(&tool).await {
-            Ok(page) => page,
+        let _turn = match self.take_turn(&tool).await {
+            Ok(turn) => turn,
             Err(busy) => return Ok(busy.into()),
         };
+        let page = self.engine.lock().await.current_page();
         if let Some(page) = &page {
             if let Some(refusal) = self.refuse_blocked(&tool, policy, page).await {
                 return Ok(refusal.into());

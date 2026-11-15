@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use super::{EokaServer, MCP_OWN_TOOL_COMMANDS, MCP_PROTOCOL_TOOL_ROUTES};
 
-const BUSY_LIMIT: Duration = Duration::from_secs(60);
+pub(super) const BUSY_LIMIT: Duration = Duration::from_secs(60);
 
 pub(super) fn command_for_tool(tool: &str) -> &str {
     match tool {
@@ -81,9 +81,12 @@ impl EokaServer {
         *self.running.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
 
-    pub(super) async fn gate_page(&self, tool: &str) -> Result<Option<Page>, CallToolResult> {
-        match tokio::time::timeout(BUSY_LIMIT, self.engine.lock()).await {
-            Ok(engine) => Ok(engine.current_page()),
+    pub(super) async fn take_turn(
+        &self,
+        tool: &str,
+    ) -> Result<tokio::sync::OwnedMutexGuard<()>, CallToolResult> {
+        match tokio::time::timeout(self.busy_limit, self.turn.clone().lock_owned()).await {
+            Ok(turn) => Ok(turn),
             Err(_) => {
                 let occupant = self
                     .running
@@ -143,7 +146,7 @@ impl EokaServer {
         let Some(text) = failure_text(&result) else {
             return result;
         };
-        let Ok(Some(page)) = self.gate_page(tool).await else {
+        let Some(page) = self.engine.lock().await.current_page() else {
             return result;
         };
         let navigation_action = policy == Policy::Navigate;
