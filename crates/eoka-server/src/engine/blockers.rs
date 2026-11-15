@@ -735,6 +735,43 @@ pub async fn supersede_navigation(operations: &crate::operations::OperationManag
     }
 }
 
+pub async fn dismiss(
+    operations: &crate::operations::OperationManager,
+    page: &Page,
+) -> eoka::Result<String> {
+    let leaving =
+        matches!(current(page), Some(Blocker::Dialog(dialog)) if dialog.kind == "beforeunload");
+    page.dismiss_dialog().await?;
+    if !leaving {
+        return Ok("Dialog dismissed".into());
+    }
+    let mut stopped = Vec::new();
+    for record in running_on(operations, page).await {
+        if operations.cancel(&record.id).await.is_ok() {
+            stopped.push(record);
+        }
+    }
+    for record in &stopped {
+        settle(operations, &record.id).await;
+    }
+    Ok(match stopped.as_slice() {
+        [] => "Dialog dismissed".into(),
+        records => format!(
+            "Dialog dismissed. The page stays and the navigation is cancelled, so {} stopped: {}.",
+            if records.len() == 1 {
+                "the operation that started it was"
+            } else {
+                "the operations waiting on it were"
+            },
+            records
+                .iter()
+                .map(|record| format!("{} {}", record.action, record.id))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    })
+}
+
 pub async fn finish_navigation(
     operations: &crate::operations::OperationManager,
     page: &Page,

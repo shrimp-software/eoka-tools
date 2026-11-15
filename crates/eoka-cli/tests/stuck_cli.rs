@@ -6,6 +6,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 const HOME: &str = "<title>home</title><h1>Home</h1><a id=\"hang\" href=\"/hang\">Slow link</a>";
+const LEAVE: &str = "<title>leave</title><textarea id=\"note\"></textarea><a id=\"summary\" href=\"/summary\">Summary</a><script>note.addEventListener('input',()=>{window.onbeforeunload=e=>{e.preventDefault();e.returnValue=''}})</script>";
+const SUMMARY: &str = "<title>summary</title><h1>Summary</h1>";
 const DIALOG: &str = "<title>dialog</title><button id=\"alert\" onclick=\"alert('saved')\">Save</button><button id=\"plain\" onclick=\"document.title='clicked'\">Plain</button>";
 
 struct Site {
@@ -46,6 +48,8 @@ fn serve(mut stream: TcpStream, silent: &Mutex<Vec<TcpStream>>) {
             return;
         }
         "/dialog" => DIALOG,
+        "/leave" => LEAVE,
+        "/summary" => SUMMARY,
         "/" => HOME,
         _ => {
             let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
@@ -211,6 +215,53 @@ fn an_open_dialog_is_reported_with_the_command_that_clears_it() {
     );
     session.run(&["dialog", "dismiss"]);
     assert_eq!(session.run(&["info"])["title"], "dialog");
+}
+
+#[test]
+#[ignore = "requires Chrome; staying on a page stops the click that tried to leave it"]
+fn dismissing_a_leave_page_dialog_frees_the_tab_for_the_next_click() {
+    let site = Site::start();
+    let session = Session::new("stuck-leave");
+    let fast = Duration::from_secs(5);
+    session.run(&["open", &site.url("/leave")]);
+    session.run(&[
+        "step",
+        r#"{"action":{"kind":"fill","target":"css:#note","text":"draft"}}"#,
+    ]);
+    let leave = r#"{"action":{"kind":"click","target":"css:#summary"},"expect":{"kind":"url","value":"/summary","contains":true}}"#;
+
+    let first = session.refused(&["step", leave], "dialog_open", fast);
+    let operation = first["data"]["operation_id"].as_str().unwrap().to_owned();
+    assert_eq!(
+        session.run(&["status"])["blocker"]["dialog_type"],
+        "beforeunload"
+    );
+
+    let dismissed = session.run(&["dialog", "dismiss"]);
+    assert!(
+        dismissed.as_str().unwrap().contains(&operation),
+        "{dismissed}"
+    );
+    let (_, record, _) =
+        session.output(&["operations", "wait", &operation, "--timeout-ms", "1000"]);
+    assert_eq!(record["data"]["state"], "finished", "{record}");
+    assert_eq!(session.run(&["info"])["title"], "leave");
+
+    let again = session.refused(&["step", leave], "dialog_open", fast);
+    assert_eq!(
+        again["data"]["operation"]["dispatch_intent"], true,
+        "{again}"
+    );
+    session.run(&["dialog", "accept"]);
+    let (_, record, _) = session.output(&[
+        "operations",
+        "wait",
+        again["data"]["operation_id"].as_str().unwrap(),
+        "--timeout-ms",
+        "10000",
+    ]);
+    assert_eq!(record["data"]["outcome"], "verified_complete", "{record}");
+    assert_eq!(session.run(&["info"])["title"], "summary");
 }
 
 #[test]

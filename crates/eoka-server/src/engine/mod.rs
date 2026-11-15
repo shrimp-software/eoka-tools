@@ -1094,8 +1094,9 @@ impl Engine {
                 Ok(Response::ok_text("Dialog accepted"))
             }
             None => {
-                tab.page.dismiss_dialog().await?;
-                Ok(Response::ok_text("Dialog dismissed"))
+                let page = tab.page.clone();
+                let reply = blockers::dismiss(&self.operations, &page).await?;
+                Ok(Response::ok_text(reply))
             }
         }
     }
