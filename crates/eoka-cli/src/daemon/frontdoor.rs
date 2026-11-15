@@ -279,7 +279,7 @@ async fn connection_task(
     let turn = match board.turn.clone().try_lock_owned() {
         Ok(turn) => turn,
         Err(_) => {
-            if let Some(response) = handle_dialog(&board, &request, &arguments).await {
+            if let Some(response) = handle_dialog(&board, &operations, &request, &arguments).await {
                 reply(&mut writer, response).await;
                 return;
             }
@@ -312,7 +312,12 @@ async fn connection_task(
         .await;
 }
 
-async fn handle_dialog(board: &Board, request: &Request, arguments: &Value) -> Option<Response> {
+async fn handle_dialog(
+    board: &Board,
+    operations: &OperationManager,
+    request: &Request,
+    arguments: &Value,
+) -> Option<Response> {
     let accept = match request.cmd() {
         "dialog_accept" => true,
         "dialog_dismiss" => false,
@@ -321,15 +326,16 @@ async fn handle_dialog(board: &Board, request: &Request, arguments: &Value) -> O
     let page = board.page()?;
     let handled = tokio::time::timeout(Duration::from_secs(5), async {
         if accept {
-            page.accept_dialog(arguments["prompt_text"].as_str()).await
+            page.accept_dialog(arguments["prompt_text"].as_str())
+                .await
+                .map(|()| "Dialog accepted".to_string())
         } else {
-            page.dismiss_dialog().await
+            blockers::dismiss(operations, &page).await
         }
     })
     .await;
     Some(match handled {
-        Ok(Ok(())) if accept => Response::ok_text("Dialog accepted"),
-        Ok(Ok(())) => Response::ok_text("Dialog dismissed"),
+        Ok(Ok(reply)) => Response::ok_text(reply),
         Ok(Err(error)) => Response::err(error.to_string()),
         Err(_) => Response::err("Timeout: the browser did not acknowledge the dialog command"),
     })
