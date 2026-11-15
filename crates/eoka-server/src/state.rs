@@ -9,6 +9,46 @@ use parking_lot::Mutex;
 
 use eoka_protocol::sidecar::ServerError;
 
+pub fn catalog_result(
+    response: eoka_protocol::Response,
+    page: Option<&Page>,
+) -> Result<serde_json::Value, ServerError> {
+    use eoka_protocol::sidecar::ErrorCode;
+    if response.ok {
+        return Ok(response.data.unwrap_or(serde_json::Value::Null));
+    }
+    if let Some(record) = response.data.as_ref().filter(|data| {
+        data.get("id").is_some_and(|id| id.is_string()) && data.get("state").is_some()
+    }) {
+        return Ok(record.clone());
+    }
+    let mut error = match response.error_detail {
+        Some(detail) if ErrorCode::for_blocker_detail(&detail.code).is_some() => match page {
+            Some(page) => crate::methods::blocked::blocked_detail(detail, page),
+            None => ServerError::blocked(detail, None),
+        },
+        Some(detail) => match eoka_protocol::sidecar::core_error_code(&detail.code) {
+            Some(code) => ServerError::new(code, detail.message),
+            None => ServerError::from_detail(detail),
+        },
+        None => ServerError::new(
+            ErrorCode::Operation,
+            response
+                .error
+                .unwrap_or_else(|| "Operation failed".to_owned()),
+        ),
+    };
+    let operation_id = response.data.as_ref().and_then(|data| {
+        data["operation_id"]
+            .as_str()
+            .or_else(|| data["id"].as_str())
+    });
+    if let Some(id) = operation_id {
+        error.data.get_or_insert_with(Default::default).operation_id = Some(id.to_owned());
+    }
+    Err(error)
+}
+
 #[derive(Clone, Default)]
 pub struct AppState {
     pub agent: crate::agent::SharedAgentSession,
@@ -97,7 +137,17 @@ impl AppState {
         request: eoka_protocol::Request,
         spoken: Option<&str>,
     ) -> Result<serde_json::Value, ServerError> {
-        use eoka_protocol::sidecar::ErrorCode;
+        let page = self.page(page_id)?;
+        let response = self.respond(page_id, request, spoken).await?;
+        catalog_result(response, Some(&page))
+    }
+
+    pub async fn respond(
+        &self,
+        page_id: &str,
+        request: eoka_protocol::Request,
+        spoken: Option<&str>,
+    ) -> Result<eoka_protocol::Response, ServerError> {
         let page = self.page(page_id)?;
         let browser = self.browser()?;
         let response = {
@@ -120,38 +170,7 @@ impl AppState {
             });
             Box::pin(engine.handle_on(page_id, &page, request, spoken)).await
         };
-        if response.ok {
-            return Ok(response.data.unwrap_or(serde_json::Value::Null));
-        }
-        if let Some(record) = response.data.as_ref().filter(|data| {
-            data.get("id").is_some_and(|id| id.is_string()) && data.get("state").is_some()
-        }) {
-            return Ok(record.clone());
-        }
-        let mut error = match response.error_detail {
-            Some(detail) if ErrorCode::for_blocker_detail(&detail.code).is_some() => {
-                crate::methods::blocked::blocked_detail(detail, &page)
-            }
-            Some(detail) => match eoka_protocol::sidecar::core_error_code(&detail.code) {
-                Some(code) => ServerError::new(code, detail.message),
-                None => ServerError::from_detail(detail),
-            },
-            None => ServerError::new(
-                ErrorCode::Operation,
-                response
-                    .error
-                    .unwrap_or_else(|| "Operation failed".to_owned()),
-            ),
-        };
-        let operation_id = response.data.as_ref().and_then(|data| {
-            data["operation_id"]
-                .as_str()
-                .or_else(|| data["id"].as_str())
-        });
-        if let Some(id) = operation_id {
-            error.data.get_or_insert_with(Default::default).operation_id = Some(id.to_owned());
-        }
-        Err(error)
+        Ok(response)
     }
 
     pub async fn release_engine_tab(&self, id: &str) {

@@ -1,68 +1,31 @@
 use super::*;
-use eoka_server::operations::commands;
 
 impl EokaServer {
-    pub(super) async fn perform_command(
+    pub(super) async fn action_tool(
         &self,
-        cmd: &str,
-        mut args: Value,
+        tool: &str,
+        command: &str,
+        mut arguments: Value,
     ) -> Result<CallToolResult, ErrorData> {
-        if args["operation_id"].is_null() {
-            args["operation_id"] = Value::String(new_operation_id());
-        }
-        let unverified = runs_unverified(cmd, &args);
+        let operation_id = match arguments["operation_id"].as_str() {
+            Some(id) => id.to_owned(),
+            None => new_operation_id(),
+        };
+        let unverified = runs_unverified(command, &arguments);
         if unverified {
-            args["exploratory"] = Value::Bool(true);
+            arguments["exploratory"] = Value::Bool(true);
         }
-        let page = {
-            let guard = self.state.lock().await;
-            guard
-                .as_ref()
-                .ok_or_else(|| ErrorData::from(AgentError::NoBrowser))?
-                .current_tab()
-                .ok_or_else(|| ErrorData::from(AgentError::NoTab))?
-                .page
-                .clone()
-        };
-        let budget = commands::options(&args)
-            .map_err(internal)?
-            .timeout_ms
-            .min(60_000)
-            .saturating_add(FAILURE_REPORT_GRACE_MS);
-        let id = args["operation_id"].as_str().map(str::to_owned);
-        let record = self
-            .agent
-            .lock()
-            .await
-            .command(&self.operations, &page, cmd, args)
-            .await;
-        let record = match record {
-            Ok(record) => record,
-            Err(error) => {
-                return protocol_tool_response(with_action_hint(commands::failure(error, id)))
-            }
-        };
-        let record = if matches!(record.state, eoka_protocol::OperationState::Running) {
-            match eoka_server::engine::blockers::wait_unless_dialog(
-                &self.operations,
-                &page,
-                &record.id,
-                budget,
-            )
-            .await
-            {
-                Ok(record) => record,
-                Err(error) => {
-                    return protocol_tool_response(commands::failure(
-                        commands::uncertain(error),
-                        Some(record.id),
-                    ))
-                }
-            }
+        let request = if command == "action_perform" {
+            arguments["operation_id"] = Value::String(operation_id);
+            eoka_protocol::request_from_cmd(command, arguments).map_err(invalid)?
         } else {
-            record
+            Operation::ActionCommand(eoka_protocol::ActionCommandArgs {
+                operation_id,
+                command: command.to_owned(),
+                arguments,
+            })
         };
-        let response = eoka_protocol::Response::action_result(record);
+        let (response, _) = self.respond(tool, request, Needs::Page).await?;
         protocol_tool_response(if unverified {
             as_unverified_success(response)
         } else {
@@ -71,7 +34,6 @@ impl EokaServer {
     }
 }
 
-const FAILURE_REPORT_GRACE_MS: u64 = 2_000;
 const EXPECT_REQUIRED_HINT: &str = "Add expect with what the action should change, for example {\"kind\":\"url\",\"value\":\"/submit\",\"contains\":true}. If the result is unknown, use the click tool without expect.";
 const EXPECT_SATISFIED_HINT: &str = "This expect was already true before the action, so it cannot prove the action worked. Use a condition that is false now, or omit expect if the result is unknown.";
 const UNVERIFIED_NOTE: &str = "The action ran, but its result was not verified because no expect was given. Read the page with page_text or observe to see what happened. Do not repeat the action unless the page shows it failed.";

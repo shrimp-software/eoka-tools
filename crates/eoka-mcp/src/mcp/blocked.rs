@@ -82,11 +82,8 @@ impl EokaServer {
     }
 
     pub(super) async fn gate_page(&self, tool: &str) -> Result<Option<Page>, CallToolResult> {
-        match tokio::time::timeout(BUSY_LIMIT, self.state.lock()).await {
-            Ok(guard) => Ok(guard
-                .as_ref()
-                .and_then(|state| state.current_tab())
-                .map(|tab| tab.page.clone())),
+        match tokio::time::timeout(BUSY_LIMIT, self.engine.lock()).await {
+            Ok(engine) => Ok(engine.current_page()),
             Err(_) => {
                 let occupant = self
                     .running
@@ -168,11 +165,11 @@ impl EokaServer {
     }
 
     pub(super) async fn transport_alive(&self) -> bool {
-        let guard = self.state.lock().await;
-        guard
-            .as_ref()
-            .and_then(|state| state.current_tab())
-            .is_some_and(|tab| !tab.page.session().transport().is_closed())
+        self.engine
+            .lock()
+            .await
+            .current_page()
+            .is_some_and(|page| !page.session().transport().is_closed())
     }
 }
 
@@ -214,120 +211,6 @@ mod tests {
         for action in ["click", "fill", "type_key", "batch", "agent_step"] {
             assert_eq!(policy_for_tool(action, &none), Policy::Gate, "{action}");
         }
-    }
-
-    fn text(result: &CallToolResult) -> String {
-        serde_json::to_string(&result.content).unwrap()
-    }
-
-    fn navigation(
-        url: String,
-        timeout_ms: Option<u64>,
-    ) -> super::super::Parameters<super::super::NavigateRequest> {
-        super::super::Parameters(super::super::NavigateRequest {
-            operation: eoka_protocol::ActionSettings {
-                timeout_ms,
-                ..Default::default()
-            },
-            url,
-            headers: None,
-            user_agent: None,
-            bypass_csp: None,
-        })
-    }
-
-    #[tokio::test]
-    #[ignore = "requires Chrome; a dialog or a silent server is diagnosed instead of timing out"]
-    async fn blocked_tabs_are_diagnosed_and_never_relaunch_the_browser() {
-        let server = EokaServer::new();
-        server
-            .navigate(navigation(
-                "data:text/html,<title>one</title><h1>Heading</h1>".into(),
-                None,
-            ))
-            .await
-            .unwrap();
-        let page = server.gate_page("page_info").await.unwrap().unwrap();
-        blockers::watch(&page);
-        page.execute_sync("setTimeout(() => alert('saved'), 0)")
-            .await
-            .unwrap();
-        let opened = Instant::now();
-        while blockers::current(&page).is_none() {
-            assert!(opened.elapsed() < Duration::from_secs(5), "no dialog event");
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-
-        let started = Instant::now();
-        let refused = server
-            .refuse_blocked("page_info", Policy::Read, &page)
-            .await
-            .expect("a dialog must refuse page reads");
-        assert!(started.elapsed() < Duration::from_secs(5));
-        assert_eq!(refused.is_error, Some(true));
-        assert!(text(&refused).contains("dialog_open"), "{}", text(&refused));
-        assert!(
-            text(&refused).contains("accept_dialog"),
-            "{}",
-            text(&refused)
-        );
-        assert!(text(&refused).contains("saved"), "{}", text(&refused));
-        assert!(server
-            .refuse_blocked("accept_dialog", Policy::Free, &page)
-            .await
-            .is_none());
-        let interrupted = tokio::time::timeout(
-            Duration::from_secs(5),
-            blockers::race(
-                &page,
-                Policy::Script,
-                None,
-                true,
-                std::future::pending::<()>(),
-            ),
-        )
-        .await
-        .expect("a read in flight must be interrupted by the dialog")
-        .expect_err("the dialog stops the read");
-        assert!(text(&stopped("extract", Policy::Script, &interrupted)).contains("dialog_open"));
-        server.dismiss_dialog().await.unwrap();
-        assert!(server
-            .refuse_blocked("page_info", Policy::Read, &page)
-            .await
-            .is_none());
-
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let silent = format!("http://{}/", listener.local_addr().unwrap());
-        let held = tokio::spawn(async move {
-            let mut connections = Vec::new();
-            while let Ok((connection, _)) = listener.accept().await {
-                connections.push(connection);
-            }
-        });
-        let started = Instant::now();
-        let result = server
-            .navigate(navigation(silent, Some(2000)))
-            .await
-            .unwrap();
-        let explained = server
-            .explain_blocked("navigate", Policy::Navigate, Ok(result.into()))
-            .await
-            .unwrap();
-        let CallToolResponse::Complete(explained) = explained else {
-            panic!("navigation must complete with a result")
-        };
-        assert!(started.elapsed() < Duration::from_secs(15));
-        assert!(
-            text(&explained).contains("navigation_timeout"),
-            "{}",
-            text(&explained)
-        );
-        let info = server.page_info().await.unwrap();
-        assert!(text(&info).contains("one"), "{}", text(&info));
-        assert!(server.transport_alive().await);
-        assert!(!server.state.lock().await.as_ref().unwrap().unhealthy);
-        held.abort();
-        server.close().await.unwrap();
     }
 
     #[test]

@@ -14,7 +14,7 @@ export default function (pi: ExtensionAPI) {
             ? Type.Object({ args: Type.Array(Type.String()) })
             : Type.Object({ code: Type.String() }),
         async execute(_id, params, signal) {
-            if (++calls > 30) throw new Error("Tool call budget exceeded");
+            if (++calls > (config.budget ?? 30)) throw new Error("Tool call budget exceeded");
             const started = Date.now();
             const args = config.backend === "eoka"
                 ? ["--agent", "--session", config.session, "--no-geo-align", ...(params as any).args]

@@ -1,42 +1,12 @@
-use std::collections::HashMap;
 use std::fmt::Write;
 
 use eoka_server::eoka::Page;
 use rmcp::model::{CallToolResult, ContentBlock, ErrorData};
-use serde::{Deserialize, Serialize};
 
 use eoka_server::InteractiveElement;
 
-use eoka_server::saved_state::StorageRestoreReport;
-
 use super::error::{internal, invalid};
 use super::types::JsRequest;
-
-pub(crate) async fn title_nonblocking(page: &Page) -> String {
-    page.evaluate_sync("document.title || ''")
-        .await
-        .unwrap_or_default()
-}
-
-pub(crate) async fn wait_for_stable(page: &Page) -> eoka_server::eoka::Result<()> {
-    let start = std::time::Instant::now();
-    let max_wait = std::time::Duration::from_secs(10);
-    loop {
-        let ready: String = page
-            .evaluate_sync("document.readyState || 'loading'")
-            .await
-            .unwrap_or_else(|_| "loading".to_string());
-        if ready == "interactive" || ready == "complete" {
-            return Ok(());
-        }
-        if start.elapsed() > max_wait {
-            return Err(eoka_server::eoka::Error::cdp_msg(
-                "Page did not reach interactive state within 10s",
-            ));
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    }
-}
 
 pub(crate) fn resolve_js(req: &JsRequest) -> Result<String, ErrorData> {
     let source = resolve_js_source(req)?;
@@ -76,99 +46,36 @@ pub(crate) fn element_list(elements: &[InteractiveElement]) -> String {
     out
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct SavedState {
-    pub url: String,
-    pub cookies: Vec<SavedCookie>,
-    pub local_storage: HashMap<String, String>,
-    pub session_storage: HashMap<String, String>,
-    pub user_agent: String,
-    #[serde(default)]
-    pub saved_at: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct SavedCookie {
-    pub name: String,
-    pub value: String,
-    pub domain: String,
-    pub path: String,
-    pub expires: f64,
-    pub http_only: bool,
-    pub secure: bool,
-    pub same_site: Option<String>,
-}
-
-impl From<eoka_server::eoka::SessionCookie> for SavedCookie {
-    fn from(c: eoka_server::eoka::SessionCookie) -> Self {
-        Self {
-            name: c.name,
-            value: c.value,
-            domain: c.domain,
-            path: c.path,
-            expires: c.expires.unwrap_or(0.0),
-            http_only: c.http_only,
-            secure: c.secure,
-            same_site: c.same_site,
-        }
-    }
-}
-
-impl SavedCookie {
-    pub fn to_session_cookie(&self) -> eoka_server::eoka::SessionCookie {
-        eoka_server::eoka::SessionCookie {
-            name: self.name.clone(),
-            value: self.value.clone(),
-            domain: self.domain.clone(),
-            path: self.path.clone(),
-            secure: self.secure,
-            http_only: self.http_only,
-            same_site: self.same_site.clone(),
-            expires: if self.expires > 0.0 {
-                Some(self.expires)
-            } else {
-                None
-            },
-        }
-    }
-}
-
-pub(crate) async fn restore_state(
-    page: &Page,
-    state: &SavedState,
-) -> Result<StorageRestoreReport, ErrorData> {
-    eoka_server::saved_state::clear_covered_cookies(
-        page,
-        &state.url,
-        state.cookies.iter().map(|c| c.domain.as_str()),
-    )
-    .await
-    .map_err(internal)?;
-    let set_cookies: Vec<eoka_server::eoka::SessionCookie> = state
-        .cookies
-        .iter()
-        .map(|c| c.to_session_cookie())
-        .collect();
-    if !set_cookies.is_empty() {
-        page.set_cookies_bulk(set_cookies).await.map_err(internal)?;
-    }
-
-    eoka_server::saved_state::restore_storage(
-        page,
-        &state.url,
-        &state.local_storage,
-        &state.session_storage,
-    )
-    .await
-    .map_err(internal)
-}
-
 pub(crate) fn ensure_url_allowed(url: &str) -> Result<(), ErrorData> {
     eoka_server::url_policy::ensure_url_allowed(url).map_err(invalid)
 }
 
 pub(crate) fn ensure_action_urls_allowed(arguments: &serde_json::Value) -> Result<(), ErrorData> {
     eoka_server::url_policy::ensure_args_allowed(arguments).map_err(invalid)
+}
+
+pub(crate) fn parse_proxy_env() -> eoka_server::eoka::Result<Option<String>> {
+    if let Ok(path) = std::env::var("EOKA_PROXY_FILE") {
+        let contents = std::fs::read_to_string(path)?;
+        let lines: Vec<&str> = contents
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .collect();
+        if lines.is_empty() {
+            return Err(eoka_server::eoka::Error::Launch(
+                "proxy file does not contain a proxy".to_owned(),
+            ));
+        }
+        use std::time::SystemTime;
+        let index = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos() as usize % lines.len())
+            .unwrap_or(0);
+        Ok(Some(lines[index].to_owned()))
+    } else {
+        Ok(std::env::var("EOKA_PROXY").ok())
+    }
 }
 
 #[cfg(test)]
@@ -256,224 +163,5 @@ mod tests {
         let result = text_ok("hello").unwrap();
         assert!(!result.is_error.unwrap_or(false));
         assert_eq!(result.content.len(), 1);
-    }
-
-    #[test]
-    fn saved_cookie_from_cdp_cookie() {
-        let cdp = eoka_server::eoka::SessionCookie {
-            name: "sid".into(),
-            value: "abc123".into(),
-            domain: ".example.com".into(),
-            path: "/".into(),
-            secure: true,
-            http_only: true,
-            same_site: Some("Lax".into()),
-            expires: Some(1700000000.0),
-        };
-        let saved = SavedCookie::from(cdp);
-        assert_eq!(saved.name, "sid");
-        assert_eq!(saved.domain, ".example.com");
-        assert!(saved.http_only);
-        assert!(saved.secure);
-        assert_eq!(saved.same_site.as_deref(), Some("Lax"));
-
-        let sc = saved.to_session_cookie();
-        assert_eq!(sc.name, "sid");
-        assert_eq!(sc.domain, ".example.com");
-        assert!(sc.http_only);
-        assert_eq!(sc.expires, Some(1700000000.0));
-    }
-
-    #[test]
-    fn saved_cookie_session_cookie_no_expires() {
-        let saved = SavedCookie {
-            name: "tmp".into(),
-            value: "v".into(),
-            domain: "example.com".into(),
-            path: "/".into(),
-            expires: -1.0,
-            http_only: false,
-            secure: false,
-            same_site: None,
-        };
-        let sc = saved.to_session_cookie();
-        assert_eq!(sc.expires, None);
-    }
-
-    #[test]
-    fn saved_state_roundtrip_json() {
-        let state = SavedState {
-            url: "https://example.com".into(),
-            cookies: vec![SavedCookie {
-                name: "a".into(),
-                value: "b".into(),
-                domain: ".example.com".into(),
-                path: "/".into(),
-                expires: 0.0,
-                http_only: false,
-                secure: false,
-                same_site: None,
-            }],
-            local_storage: [("key".into(), "val".into())].into(),
-            session_storage: HashMap::new(),
-            user_agent: "test".into(),
-            saved_at: "12345".into(),
-        };
-        let json = serde_json::to_string(&state).unwrap();
-        let restored: SavedState = serde_json::from_str(&json).unwrap();
-        assert_eq!(restored.url, "https://example.com");
-        assert_eq!(restored.cookies.len(), 1);
-        assert_eq!(restored.cookies[0].name, "a");
-        assert_eq!(restored.cookies[0].value, "b");
-        assert_eq!(restored.cookies[0].domain, ".example.com");
-        assert_eq!(restored.local_storage.get("key").unwrap(), "val");
-        assert!(restored.session_storage.is_empty());
-        assert_eq!(restored.user_agent, "test");
-        assert_eq!(restored.saved_at, "12345");
-    }
-
-    #[test]
-    fn saved_state_empty_roundtrip() {
-        let state = SavedState {
-            url: "about:blank".into(),
-            cookies: vec![],
-            local_storage: HashMap::new(),
-            session_storage: HashMap::new(),
-            user_agent: "".into(),
-            saved_at: "0".into(),
-        };
-        let json = serde_json::to_string(&state).unwrap();
-        let restored: SavedState = serde_json::from_str(&json).unwrap();
-        assert!(restored.cookies.is_empty());
-        assert!(restored.local_storage.is_empty());
-        assert!(restored.session_storage.is_empty());
-    }
-
-    #[test]
-    fn saved_cookie_all_fields_survive_conversion() {
-        let cdp = eoka_server::eoka::SessionCookie {
-            name: "token".into(),
-            value: "eyJhbGciOiJSUzI1NiJ9".into(),
-            domain: ".app.example.com".into(),
-            path: "/api".into(),
-            secure: true,
-            http_only: true,
-            same_site: Some("Strict".into()),
-            expires: Some(1893456000.0),
-        };
-        let saved = SavedCookie::from(cdp);
-        let sc = saved.to_session_cookie();
-
-        assert_eq!(sc.name, "token");
-        assert_eq!(sc.value, "eyJhbGciOiJSUzI1NiJ9");
-        assert_eq!(sc.domain, ".app.example.com");
-        assert_eq!(sc.path, "/api");
-        assert_eq!(sc.expires, Some(1893456000.0));
-        assert!(sc.http_only);
-        assert!(sc.secure);
-        assert_eq!(sc.same_site.as_deref(), Some("Strict"));
-    }
-
-    #[test]
-    fn saved_cookie_unicode_values() {
-        let saved = SavedCookie {
-            name: "lang".into(),
-            value: "日本語".into(),
-            domain: ".example.com".into(),
-            path: "/".into(),
-            expires: 0.0,
-            http_only: false,
-            secure: false,
-            same_site: None,
-        };
-        let json = serde_json::to_string(&saved).unwrap();
-        let restored: SavedCookie = serde_json::from_str(&json).unwrap();
-        assert_eq!(restored.value, "日本語");
-    }
-
-    #[test]
-    fn saved_state_many_storage_keys() {
-        let mut ls = HashMap::new();
-        for i in 0..100 {
-            ls.insert(format!("key_{}", i), format!("value_{}", i));
-        }
-        let state = SavedState {
-            url: "https://example.com".into(),
-            cookies: vec![],
-            local_storage: ls,
-            session_storage: HashMap::new(),
-            user_agent: "test".into(),
-            saved_at: "0".into(),
-        };
-        let json = serde_json::to_string(&state).unwrap();
-        let restored: SavedState = serde_json::from_str(&json).unwrap();
-        assert_eq!(restored.local_storage.len(), 100);
-        assert_eq!(restored.local_storage.get("key_42").unwrap(), "value_42");
-    }
-
-    #[test]
-    fn saved_state_file_write_and_read() {
-        let state = SavedState {
-            url: "https://example.com/dashboard".into(),
-            cookies: vec![
-                SavedCookie {
-                    name: "sid".into(),
-                    value: "abc".into(),
-                    domain: ".example.com".into(),
-                    path: "/".into(),
-                    expires: 1893456000.0,
-                    http_only: true,
-                    secure: true,
-                    same_site: Some("Lax".into()),
-                },
-                SavedCookie {
-                    name: "theme".into(),
-                    value: "dark".into(),
-                    domain: "example.com".into(),
-                    path: "/".into(),
-                    expires: 0.0,
-                    http_only: false,
-                    secure: false,
-                    same_site: None,
-                },
-            ],
-            local_storage: [("token".into(), "jwt.xyz".into())].into(),
-            session_storage: [("tab_id".into(), "t1".into())].into(),
-            user_agent: "Mozilla/5.0 Test".into(),
-            saved_at: "1700000000".into(),
-        };
-
-        let dir = std::env::temp_dir().join("eoka_test_state");
-        let _ = std::fs::create_dir_all(&dir);
-        let path = dir.join("test_state.json");
-
-        let json = serde_json::to_string_pretty(&state).unwrap();
-        std::fs::write(&path, &json).unwrap();
-
-        let contents = std::fs::read_to_string(&path).unwrap();
-        let restored: SavedState = serde_json::from_str(&contents).unwrap();
-
-        assert_eq!(restored.url, "https://example.com/dashboard");
-        assert_eq!(restored.cookies.len(), 2);
-        assert_eq!(restored.cookies[0].name, "sid");
-        assert!(restored.cookies[0].http_only);
-        assert_eq!(restored.cookies[1].name, "theme");
-        assert_eq!(restored.local_storage.get("token").unwrap(), "jwt.xyz");
-        assert_eq!(restored.session_storage.get("tab_id").unwrap(), "t1");
-
-        let _ = std::fs::remove_file(&path);
-        let _ = std::fs::remove_dir(&dir);
-    }
-
-    #[test]
-    fn saved_state_invalid_json_fails() {
-        let result = serde_json::from_str::<SavedState>("not json");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn saved_state_missing_field_fails() {
-        let result = serde_json::from_str::<SavedState>(r#"{"cookies":[]}"#);
-        assert!(result.is_err());
     }
 }

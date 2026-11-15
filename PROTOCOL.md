@@ -237,7 +237,7 @@ daemon. The schema bundle lists them under `catalogMethods`.
 
 Some catalog state belongs to the browser session rather than one page: the
 network recorder and its log, the download slot, and the JavaScript policy
-(`js.*`, which applies to navigations made through catalog `open`). Interception
+(`js.*`, which applies to navigations made through catalog `open` and `reload`). Interception
 rules are re-applied to whichever page a catalog call addresses. Catalog actions
 reach a page behind another tab the same way `actions.perform` does (see
 [Durable actions](#durable-actions-and-operation-queries)).
@@ -255,6 +255,30 @@ over `actions.perform`, a duplicate of a named catalog operation, or distinct fo
 a stated reason. The schema bundle lists the duplicates and their catalog
 operation under `replacedMethods`. They stay available in protocol 2 and are
 removed in the next major, once catalog results are typed.
+
+That major was sized in November 2026 and deferred. It can remove the 20
+duplicates and the 11 typed conveniences, neither of which any SDK action
+needs, for a net of roughly 100 to 400 lines once the SDK adapters are counted.
+Lifecycle, shared and distinct methods (33 in all) stay registered. Before the
+removal the daemon needs its own protocol constant, the replacement operations
+need typed results, page-scoped operations must run on the page's lane without
+moving the session's current page, and catalog failures must keep `data.cdp`,
+`data.receipt` and `data.source`. No method can be removed inside protocol 2,
+including the 13 that neither SDK sends.
+
+`page.human_fill` is `page.fill`: the core library's fill has no human-like
+variant, so both send the same action.
+
+The JavaScript policy is applied by catalog `open`, `reload` and `tab.new`. It is
+not applied to `back`, `forward` or a link that leaves the host, because the
+destination is not known before the navigation starts.
+
+A JavaScript dialog is reported from the event Chrome sends when it opens.
+Chrome does not send that event again to a session that attaches afterwards,
+and `Page.enable` on such a tab does not answer until the dialog closes. So
+attaching to a tab whose dialog is already open (a browser reached with
+`connect`, or a popup that alerted before anyone switched to it) times out
+instead of naming the dialog.
 
 ```json
 {"id":7,"method":"console","params":{"pageId":"<id>","clear":false}}

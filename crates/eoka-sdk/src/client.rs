@@ -923,11 +923,30 @@ async fn wait_for_socket(session_name: &str) -> anyhow::Result<UnixStream> {
         }
     }
 }
+static DAEMON_PROGRAM: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+pub fn serve_daemons_from(program: std::path::PathBuf) {
+    let _ = DAEMON_PROGRAM.set(program);
+}
+
+fn daemon_program(
+    host: Option<&std::path::PathBuf>,
+    configured: Option<std::ffi::OsString>,
+) -> std::path::PathBuf {
+    host.cloned()
+        .or_else(|| {
+            configured
+                .filter(|path| !path.is_empty())
+                .map(std::path::PathBuf::from)
+        })
+        .unwrap_or_else(|| "eoka".into())
+}
+
 fn launch_daemon(session_name: &str, spec: &LaunchSpec) -> anyhow::Result<()> {
     session::ensure_runtime_dir()?;
 
-    let exe = std::env::current_exe()?;
-    let mut cmd = StdCommand::new(exe);
+    let program = daemon_program(DAEMON_PROGRAM.get(), std::env::var_os("EOKA_BIN"));
+    let mut cmd = StdCommand::new(&program);
     cmd.arg("--daemon").arg("--session").arg(session_name);
     let mut proxy_for_stdin = None;
 
@@ -1006,7 +1025,12 @@ fn launch_daemon(session_name: &str, spec: &LaunchSpec) -> anyhow::Result<()> {
         cmd.process_group(0);
     }
 
-    let mut child = cmd.spawn()?;
+    let mut child = cmd.spawn().map_err(|error| {
+        anyhow::anyhow!(
+            "Could not start the Eoka daemon with `{}`: {error}. Install the eoka CLI or set EOKA_BIN to its path.",
+            program.display()
+        )
+    })?;
     if let Some(proxy) = proxy_for_stdin {
         use std::io::Write;
         let mut stdin = child
@@ -1438,6 +1462,24 @@ mod tests {
         assert!(response.error.unwrap().contains(&id));
         assert_eq!(response.error_detail.unwrap().retryable, Some(false));
         std::fs::remove_file(socket).unwrap();
+    }
+
+    #[test]
+    fn the_daemon_is_the_eoka_cli_not_whatever_program_uses_the_sdk() {
+        let cli = std::path::PathBuf::from("/opt/tools/eoka-renamed");
+        assert_eq!(
+            daemon_program(Some(&cli), Some("/elsewhere/eoka".into())),
+            cli
+        );
+        assert_eq!(
+            daemon_program(None, Some("/elsewhere/eoka".into())),
+            std::path::PathBuf::from("/elsewhere/eoka")
+        );
+        assert_eq!(
+            daemon_program(None, Some("".into())),
+            std::path::PathBuf::from("eoka")
+        );
+        assert_eq!(daemon_program(None, None), std::path::PathBuf::from("eoka"));
     }
 
     #[test]

@@ -12,6 +12,10 @@ use crate::protocol::{
 };
 use network::network_action_to_request;
 
+const STEP_SHAPES: &str = r##"A step is {"action":{"kind":"click","target":"text:Submit"},"expect":{...}}. target is a ref from view, text:..., css:... or id:....
+expect is one of: {"kind":"url","value":"/done","contains":true}, {"kind":"visible","target":{"query":{"kind":"css","selector":"#id"}}}, {"kind":"text","target":{"query":{"kind":"css","selector":"#id"}},"value":"Saved"}, {"kind":"value","target":{"query":{"kind":"css","selector":"#id"}},"value":"x"}.
+fill and select verify themselves and need no expect. To act without verifying, leave expect out and add "mode":"explore"."##;
+
 fn parse_mouse_button(button: &str) -> MouseButton {
     serde_json::from_value(serde_json::Value::String(button.to_owned())).unwrap_or_else(|error| {
         eprintln!("Error: invalid mouse button: {error}");
@@ -46,7 +50,7 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
         }),
         Command::Step { request } => {
             Request::AgentStep(serde_json::from_str(request).unwrap_or_else(|error| {
-                eprintln!("Invalid step request: {error}");
+                eprintln!("Invalid step request: {error}\n{STEP_SHAPES}");
                 std::process::exit(2)
             }))
         }

@@ -100,6 +100,22 @@ fn tack_executes_without_browser_tools() {
 }
 
 #[test]
+fn a_malformed_step_says_what_a_step_looks_like() {
+    let output = run(
+        "malformed-step",
+        &[
+            "step",
+            r#"{"action":{"kind":"click","target":"text:Go"},"expect":{"kind":"focused","value":true}}"#,
+        ],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("missing field `target`"), "{stderr}");
+    assert!(stderr.contains(r#""mode":"explore""#), "{stderr}");
+    assert!(stderr.contains(r#"{"kind":"url""#), "{stderr}");
+}
+
+#[test]
 fn agent_mode_implies_json_and_meta() {
     let session = format!("eoka-agent-test-{}", std::process::id());
     let output = run(&session, &["--agent", "doctor"]);
@@ -253,6 +269,34 @@ fn spawns_daemon_and_completes_a_real_command() {
         status_after_json["data"]["running"],
         serde_json::json!(false)
     );
+}
+
+#[test]
+#[ignore = "requires Chrome; the JavaScript policy applies to reloads and new tabs"]
+fn the_javascript_policy_follows_reloads_and_new_tabs() {
+    let session = format!("eoka-js-policy-test-{}", std::process::id());
+    let page = "data:text/html,<title>plain</title><script>document.title='scripted'</script>";
+    let title = |context: &str| {
+        let info = run(&session, &["--json", "info"]);
+        assert_success(&info, context);
+        let info: serde_json::Value = serde_json::from_slice(&info.stdout).unwrap();
+        info["data"]["title"].as_str().unwrap().to_owned()
+    };
+    clean_session(&session);
+    assert_success(
+        &run(&session, &["--no-js", "open", page]),
+        "open without scripts",
+    );
+    assert_eq!(title("blocked page"), "plain");
+    assert_success(&run(&session, &["tab", "new", page]), "new tab");
+    assert_eq!(title("a new tab keeps scripts blocked"), "plain");
+    assert_success(
+        &run(&session, &["js", "mode", "allow-all"]),
+        "allow scripts",
+    );
+    assert_success(&run(&session, &["reload"]), "reload");
+    assert_eq!(title("a reload applies the new policy"), "scripted");
+    clean_session(&session);
 }
 
 #[test]

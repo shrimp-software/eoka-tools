@@ -35,6 +35,7 @@ impl Engine {
             }
         }
         .await;
+        let mut moved = false;
         if let Ok(response) = &mut result {
             if let Some(id) = response
                 .data
@@ -44,14 +45,22 @@ impl Engine {
             {
                 if let Some(state) = self.state.as_mut() {
                     if state.current_tab_id.as_deref() != Some(id.as_str()) {
-                        if let Err(error) = state.attach_existing_tab(&id).await {
-                            if let Some(data) = response.data.as_mut() {
-                                data["observation_error"] =
-                                    json!(format!("Destination selection failed: {error}"));
+                        match state.attach_existing_tab(&id).await {
+                            Ok(()) => moved = true,
+                            Err(error) => {
+                                if let Some(data) = response.data.as_mut() {
+                                    data["observation_error"] =
+                                        json!(format!("Destination selection failed: {error}"));
+                                }
                             }
                         }
                     }
                 }
+            }
+        }
+        if moved {
+            if let Err(error) = self.sync_current_target_features().await {
+                eprintln!("[eoka] could not carry interception to the new tab: {error}");
             }
         }
         match result {

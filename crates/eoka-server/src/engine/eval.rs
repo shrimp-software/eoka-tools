@@ -51,7 +51,7 @@ impl Engine {
         if !args.raw {
             if args.no_await {
                 return Err(
-                    "Function evaluation awaits completion; --no-await requires --raw".into(),
+                    "Function evaluation awaits completion; no-await also requires raw".into(),
                 );
             }
             let value: Value = self
@@ -106,7 +106,7 @@ impl Engine {
         if args.no_await {
             if !args.raw {
                 return Err(
-                    "Function execution awaits completion; --no-await requires --raw".into(),
+                    "Function execution awaits completion; no-await also requires raw".into(),
                 );
             }
             tab.page

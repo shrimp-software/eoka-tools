@@ -192,6 +192,7 @@ pub struct Engine {
     fetch_sessions: HashMap<String, CdpSession>,
     cloudflare: Option<crate::cloudflare::CloudflareWatcher>,
     recordings: crate::recordings::RecordingManager,
+    patch_binary: Option<bool>,
 }
 
 impl Engine {
@@ -231,7 +232,21 @@ impl Engine {
             fetch_sessions: HashMap::new(),
             cloudflare: None,
             recordings: Default::default(),
+            patch_binary: None,
         }
+    }
+
+    pub fn is_open(&self) -> bool {
+        self.state.is_some()
+    }
+
+    pub fn patch_binary(&mut self, patch: bool) {
+        self.patch_binary = Some(patch);
+    }
+
+    pub async fn launch_with(&mut self, spec: LaunchSpec) -> Result<(), String> {
+        self.spec = spec;
+        self.ensure_browser().await
     }
 
     /// An engine over a browser the caller owns and keeps managing, sharing
@@ -273,6 +288,17 @@ impl Engine {
             if let Err(error) = self.sync_current_target_features().await {
                 return Response::err(error);
             }
+        }
+        self.handle_as(spoken, request).await
+    }
+
+    pub async fn handle_as(&mut self, spoken: Option<&str>, request: Request) -> Response {
+        if let Some(tab) = self
+            .state
+            .as_mut()
+            .and_then(|state| state.current_tab_mut())
+        {
+            tab.invalidate();
         }
         self.spoken = spoken.map(str::to_owned);
         let response = self.handle(request).await;
@@ -357,13 +383,16 @@ impl Engine {
                     None
                 };
                 let mut s = BrowserState::launched(
-                    *headless,
+                    state::LaunchFlags {
+                        headless: *headless,
+                        no_stealth: *no_stealth,
+                        geo_align: *geo_align,
+                        sandbox: *sandbox,
+                        patch_binary: self.patch_binary,
+                    },
                     from_profile.as_deref(),
-                    *no_stealth,
                     proxy.clone(),
                     persist_dir.as_deref(),
-                    *geo_align,
-                    *sandbox,
                 )
                 .await
                 .map_err(|e| e.to_string())?;
@@ -416,6 +445,15 @@ impl Engine {
             let tabs = self.state.as_ref().map(|state| &state.tabs);
             watcher.set_pages(tabs.into_iter().flatten().map(|(id, tab)| (id, &tab.page)));
         }
+    }
+
+    fn script_enabled_for(&self, url: &str) -> Option<bool> {
+        self.script_policy.is_active().then(|| {
+            let host = url::Url::parse(url)
+                .ok()
+                .and_then(|parsed| parsed.host_str().map(str::to_owned));
+            self.script_policy.resolve(host.as_deref().unwrap_or(""))
+        })
     }
 
     fn require_tab(&self) -> Result<&TabState, String> {
@@ -721,12 +759,7 @@ impl Engine {
         let user_agent = args.user_agent.as_deref();
         let bypass_csp = args.bypass_csp;
         let inject_js = args.inject_js.as_deref();
-        let script_enabled = self.script_policy.is_active().then(|| {
-            let host = url::Url::parse(&url)
-                .ok()
-                .and_then(|parsed| parsed.host_str().map(str::to_owned));
-            self.script_policy.resolve(host.as_deref().unwrap_or(""))
-        });
+        let script_enabled = self.script_enabled_for(&url);
         let _has_extras = headers.is_some()
             || user_agent.is_some()
             || bypass_csp
@@ -1436,6 +1469,9 @@ impl Engine {
         let no_navigate = args.no_navigate;
 
         let saved = read_saved_state_file(path)?;
+        if !no_navigate && !saved.url.is_empty() {
+            crate::url_policy::ensure_url_allowed(&saved.url)?;
+        }
 
         self.ensure_browser().await?;
         let state = self.require_state_mut()?;
@@ -1541,17 +1577,23 @@ impl Engine {
         self.ensure_browser().await?;
         let url = args.url.as_deref();
         let active_recorder = self.network.clone();
+        let script_enabled = url.and_then(|url| self.script_enabled_for(url));
         let state = self.require_state_mut()?;
         let (tab_id, url, title) = {
             let record_first_navigation = match active_recorder.as_ref() {
                 Some(recorder) => recorder.is_active().await,
                 None => false,
             };
-            let (tab_id, tab) = if let (Some(url), true) = (url, record_first_navigation) {
+            let prepared = record_first_navigation || script_enabled.is_some();
+            let (tab_id, tab) = if let (Some(url), true) = (url, prepared) {
                 let (tab_id, tab) = state.new_tab(None).await?;
                 let session = tab.page.session().clone();
-                if let Some(recorder) = active_recorder.as_ref() {
+                if let Some(recorder) = active_recorder.as_ref().filter(|_| record_first_navigation)
+                {
                     recorder.update_session(&session).await?;
+                }
+                if let Some(enabled) = script_enabled {
+                    tab.page.set_javascript_enabled(enabled).await?;
                 }
                 tab.page.goto(url).await?;
                 (tab_id, tab)
@@ -1561,6 +1603,9 @@ impl Engine {
             let (url, title) = tab_summary(tab).await?;
             (tab_id, url, title)
         };
+        if let Some(enabled) = script_enabled {
+            self.script_policy.note_applied(enabled);
+        }
         self.sync_current_target_features().await?;
         Ok(Response::ok_text(format!(
             "Opened new tab [{}]\nURL: {}\nTitle: {}",
@@ -2250,7 +2295,7 @@ impl Engine {
 
     async fn cmd_close(&mut self) -> Result<Response, EngineError> {
         self.downloads.stop().await;
-        if let Some(recorder) = self.network.clone() {
+        if let Some(recorder) = self.network.take() {
             let session = self
                 .state
                 .as_ref()
