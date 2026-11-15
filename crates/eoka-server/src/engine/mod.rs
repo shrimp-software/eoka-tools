@@ -418,6 +418,15 @@ impl Engine {
         }
     }
 
+    fn script_enabled_for(&self, url: &str) -> Option<bool> {
+        self.script_policy.is_active().then(|| {
+            let host = url::Url::parse(url)
+                .ok()
+                .and_then(|parsed| parsed.host_str().map(str::to_owned));
+            self.script_policy.resolve(host.as_deref().unwrap_or(""))
+        })
+    }
+
     fn require_tab(&self) -> Result<&TabState, String> {
         self.state
             .as_ref()
@@ -721,12 +730,7 @@ impl Engine {
         let user_agent = args.user_agent.as_deref();
         let bypass_csp = args.bypass_csp;
         let inject_js = args.inject_js.as_deref();
-        let script_enabled = self.script_policy.is_active().then(|| {
-            let host = url::Url::parse(&url)
-                .ok()
-                .and_then(|parsed| parsed.host_str().map(str::to_owned));
-            self.script_policy.resolve(host.as_deref().unwrap_or(""))
-        });
+        let script_enabled = self.script_enabled_for(&url);
         let _has_extras = headers.is_some()
             || user_agent.is_some()
             || bypass_csp
@@ -1541,17 +1545,23 @@ impl Engine {
         self.ensure_browser().await?;
         let url = args.url.as_deref();
         let active_recorder = self.network.clone();
+        let script_enabled = url.and_then(|url| self.script_enabled_for(url));
         let state = self.require_state_mut()?;
         let (tab_id, url, title) = {
             let record_first_navigation = match active_recorder.as_ref() {
                 Some(recorder) => recorder.is_active().await,
                 None => false,
             };
-            let (tab_id, tab) = if let (Some(url), true) = (url, record_first_navigation) {
+            let prepared = record_first_navigation || script_enabled.is_some();
+            let (tab_id, tab) = if let (Some(url), true) = (url, prepared) {
                 let (tab_id, tab) = state.new_tab(None).await?;
                 let session = tab.page.session().clone();
-                if let Some(recorder) = active_recorder.as_ref() {
+                if let Some(recorder) = active_recorder.as_ref().filter(|_| record_first_navigation)
+                {
                     recorder.update_session(&session).await?;
+                }
+                if let Some(enabled) = script_enabled {
+                    tab.page.set_javascript_enabled(enabled).await?;
                 }
                 tab.page.goto(url).await?;
                 (tab_id, tab)
@@ -1561,6 +1571,9 @@ impl Engine {
             let (url, title) = tab_summary(tab).await?;
             (tab_id, url, title)
         };
+        if let Some(enabled) = script_enabled {
+            self.script_policy.note_applied(enabled);
+        }
         self.sync_current_target_features().await?;
         Ok(Response::ok_text(format!(
             "Opened new tab [{}]\nURL: {}\nTitle: {}",

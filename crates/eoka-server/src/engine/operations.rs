@@ -15,8 +15,17 @@ impl Engine {
             args["operation_id"] = Value::String(uuid::Uuid::new_v4().to_string());
         }
         let args = &args;
+        let reloads = cmd == "reload" || args["action"]["kind"] == "reload";
+        let mut script_applied = None;
         let result: anyhow::Result<_> = async {
             let page = &self.require_tab().map_err(anyhow::Error::msg)?.page;
+            if reloads && self.script_policy.is_active() {
+                let enabled = self.script_enabled_for(&page.url().await?);
+                if let Some(enabled) = enabled {
+                    page.set_javascript_enabled(enabled).await?;
+                    script_applied = Some(enabled);
+                }
+            }
             let budget = commands::options(args)?.timeout_ms.min(60_000);
             let record = self
                 .agent
@@ -33,6 +42,9 @@ impl Engine {
             }
         }
         .await;
+        if let Some(enabled) = script_applied {
+            self.script_policy.note_applied(enabled);
+        }
         match result {
             Ok(record) => Response::action_result(record),
             Err(error) => {

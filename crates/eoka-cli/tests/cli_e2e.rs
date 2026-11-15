@@ -256,6 +256,34 @@ fn spawns_daemon_and_completes_a_real_command() {
 }
 
 #[test]
+#[ignore = "requires Chrome; the JavaScript policy applies to reloads and new tabs"]
+fn the_javascript_policy_follows_reloads_and_new_tabs() {
+    let session = format!("eoka-js-policy-test-{}", std::process::id());
+    let page = "data:text/html,<title>plain</title><script>document.title='scripted'</script>";
+    let title = |context: &str| {
+        let info = run(&session, &["--json", "info"]);
+        assert_success(&info, context);
+        let info: serde_json::Value = serde_json::from_slice(&info.stdout).unwrap();
+        info["data"]["title"].as_str().unwrap().to_owned()
+    };
+    clean_session(&session);
+    assert_success(
+        &run(&session, &["--no-js", "open", page]),
+        "open without scripts",
+    );
+    assert_eq!(title("blocked page"), "plain");
+    assert_success(&run(&session, &["tab", "new", page]), "new tab");
+    assert_eq!(title("a new tab keeps scripts blocked"), "plain");
+    assert_success(
+        &run(&session, &["js", "mode", "allow-all"]),
+        "allow scripts",
+    );
+    assert_success(&run(&session, &["reload"]), "reload");
+    assert_eq!(title("a reload applies the new policy"), "scripted");
+    clean_session(&session);
+}
+
+#[test]
 #[ignore = "requires Chrome"]
 fn network_record_exports_local_fetch_to_har() {
     let session = format!("eoka-har-e2e-test-{}", std::process::id());
