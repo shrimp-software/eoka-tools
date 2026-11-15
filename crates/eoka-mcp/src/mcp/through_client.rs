@@ -574,3 +574,17 @@ async fn a_queued_call_is_refused_once_it_has_waited_the_busy_limit() {
     assert!(waited < Duration::from_millis(1000), "{waited:?}");
     done(&client, "close", json!({})).await;
 }
+
+#[tokio::test]
+async fn a_batch_cannot_navigate_to_a_local_file() {
+    let client = connect(EokaServer::listing(false)).await;
+    let reply = failed(
+        &client,
+        "batch",
+        json!({"actions":[{"operation_id": uuid::Uuid::new_v4().to_string(),
+            "action":{"kind":"navigate","url":"file:///etc/passwd"}}]}),
+    )
+    .await;
+    assert!(reply.contains("file: URLs are blocked"), "{reply}");
+    let _ = client.cancel().await;
+}

@@ -712,6 +712,9 @@ impl EokaServer {
         description = "Execute durable actions in sequence. Each action supplies its own operation_id, action and options. Stops on an uncertain or failed outcome; completed records remain inspectable."
     )]
     async fn batch(&self, req: Parameters<BatchRequest>) -> Result<CallToolResult, ErrorData> {
+        for request in &req.0.actions {
+            helpers::ensure_action_urls_allowed(&serde_json::json!({"action": request.action}))?;
+        }
         let page = self.page().await?;
         let mut records = Vec::new();
         for request in req.0.actions {
