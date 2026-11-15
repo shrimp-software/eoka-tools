@@ -526,6 +526,13 @@ impl Engine {
                 Some(response) => response,
                 None => Response::err(format!("Unknown command: {cmd}")),
             },
+            query @ (Request::DownloadList
+            | Request::DownloadGet(_)
+            | Request::DownloadWait(_)
+            | Request::DownloadCancel(_)) => match self.downloads.query(&query).await {
+                Some(response) => response,
+                None => Response::err(format!("Unknown command: {cmd}")),
+            },
             Request::ActionPerform(_) => self.handle_action(cmd, args).await,
             action if action.is_convenience_action() => self.handle_action(cmd, args).await,
             Request::DownloadStart(start) => {
@@ -567,17 +574,6 @@ impl Engine {
         if matches!(request, Request::Close | Request::TabClose(_)) {
             self.operations.stop().await;
         }
-        if matches!(
-            request,
-            Request::DownloadList
-                | Request::DownloadGet(_)
-                | Request::DownloadWait(_)
-                | Request::DownloadCancel(_)
-        ) {
-            if let Err(error) = self.downloads.restore().await {
-                return Response::err_detail(error);
-            }
-        }
         let idle = self.idle_fetch_drain.take();
         self.stop_fetch_drain(idle).await;
         self.drain_fetch_events().await;
@@ -591,15 +587,10 @@ impl Engine {
 
     async fn dispatch(&mut self, request: Request) -> Result<Response, EngineError> {
         match request {
-            Request::DownloadList => Ok(Response::ok(serde_json::to_value(self.downloads.list())?)),
-            Request::DownloadGet(args) => Ok(match self.downloads.get(&args.id) {
-                Ok(job) => crate::downloads::record_response(job.snapshot()),
-                Err(error) => Response::err_detail(error),
-            }),
-            Request::DownloadCancel(args) => Ok(crate::downloads::start_response(
-                self.downloads.cancel(&args.id),
-            )),
-            Request::DownloadWait(args) => Ok(self.downloads.wait(&args.id, args.timeout_ms).await),
+            query @ (Request::DownloadList
+            | Request::DownloadGet(_)
+            | Request::DownloadWait(_)
+            | Request::DownloadCancel(_)) => Ok(self.downloads.answer(&query).await),
             Request::Open(args) => self.cmd_open(&args).await,
             Request::Snapshot(args) => self.cmd_snapshot(&args).await,
             Request::Observe(args) => self.cmd_observe(&args).await,

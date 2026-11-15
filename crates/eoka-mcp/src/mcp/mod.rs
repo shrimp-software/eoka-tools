@@ -473,9 +473,11 @@ impl EokaServer {
             .restore()
             .await
             .map_err(|e| internal(e.message))?;
-        protocol_tool_response(eoka_protocol::Response::ok(
-            serde_json::to_value(self.downloads.list()).map_err(internal)?,
-        ))
+        protocol_tool_response(
+            self.downloads
+                .answer(&eoka_protocol::Request::DownloadList)
+                .await,
+        )
     }
 
     #[tool]
@@ -487,10 +489,11 @@ impl EokaServer {
             .restore()
             .await
             .map_err(|e| internal(e.message))?;
-        protocol_tool_response(match self.downloads.get(&req.0.id) {
-            Ok(job) => eoka_server::downloads::record_response(job.snapshot()),
-            Err(error) => eoka_protocol::Response::err_detail(error),
-        })
+        protocol_tool_response(
+            self.downloads
+                .answer(&eoka_protocol::Request::DownloadGet(req.0))
+                .await,
+        )
     }
 
     #[tool]
@@ -502,9 +505,11 @@ impl EokaServer {
             .restore()
             .await
             .map_err(|e| internal(e.message))?;
-        protocol_tool_response(eoka_server::downloads::start_response(
-            self.downloads.cancel(&req.0.id),
-        ))
+        protocol_tool_response(
+            self.downloads
+                .answer(&eoka_protocol::Request::DownloadCancel(req.0))
+                .await,
+        )
     }
 
     #[tool]
@@ -516,7 +521,11 @@ impl EokaServer {
             .restore()
             .await
             .map_err(|e| internal(e.message))?;
-        protocol_tool_response(self.downloads.wait(&req.0.id, req.0.timeout_ms).await)
+        protocol_tool_response(
+            self.downloads
+                .answer(&eoka_protocol::Request::DownloadWait(req.0))
+                .await,
+        )
     }
 
     #[tool(description = "List all open browser tabs. Returns tab IDs, titles, and URLs.")]
