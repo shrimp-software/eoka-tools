@@ -274,6 +274,7 @@ async fn every_mcp_tool_answers() {
     let saved = scratch.join("file.bin").to_string_lossy().into_owned();
     let action = uuid::Uuid::new_v4().to_string();
     let batched = uuid::Uuid::new_v4().to_string();
+    let unexpected = uuid::Uuid::new_v4().to_string();
     let client = connect(EokaServer::listing(false)).await;
     let steps: Vec<(&str, Value)> = vec![
         ("page_info", json!({})),
@@ -365,6 +366,22 @@ async fn every_mcp_tool_answers() {
         ("back", json!({})),
         ("forward", json!({})),
         ("history_go", json!({"delta": -1})),
+        (
+            "click",
+            json!({"target": "css:#b", "expect": {"kind": "url", "value": "/", "contains": true}}),
+        ),
+        (
+            "action_perform",
+            json!({
+                "operation_id": unexpected,
+                "action": {"kind": "click", "target": {"query": {"kind": "css", "selector": "#b"}}}
+            }),
+        ),
+        ("click", json!({"target": "css:#absent", "timeout_ms": 500})),
+        (
+            "fill",
+            json!({"target": "css:#absent", "text": "x", "timeout_ms": 500}),
+        ),
         (
             "action_perform",
             json!({"operation_id": action, "action": {"kind": "reload"}}),

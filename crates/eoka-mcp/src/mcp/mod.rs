@@ -174,11 +174,11 @@ impl EokaServer {
         self.engine_tool(spoken, request).await
     }
 
-    async fn engine_tool(
+    async fn respond(
         &self,
         tool: &str,
         operation: Operation,
-    ) -> Result<CallToolResult, ErrorData> {
+    ) -> Result<(eoka_protocol::Response, eoka_server::eoka::Page), ErrorData> {
         let read_only = operation.spec().read_only;
         let mut guard = self.lock_browser().await?;
         let state = guard
@@ -188,38 +188,56 @@ impl EokaServer {
             .current_tab_id
             .clone()
             .ok_or_else(|| ErrorData::from(AgentError::NoTab))?;
+        let page = state
+            .current_tab()
+            .ok_or_else(|| ErrorData::from(AgentError::NoTab))?
+            .page
+            .clone();
         let server = state.server.clone();
         let spoken = tool.to_owned();
-        let result =
-            tokio::spawn(async move { server.catalog(&page_id, operation, Some(&spoken)).await })
+        let mut response =
+            tokio::spawn(async move { server.respond(&page_id, operation, Some(&spoken)).await })
                 .await
-                .map_err(internal)?;
+                .map_err(internal)?
+                .unwrap_or_else(|error| match error.data.and_then(|data| data.detail) {
+                    Some(detail) => eoka_protocol::Response::err_detail(detail),
+                    None => eoka_protocol::Response::err(error.message),
+                });
         if !read_only {
             if let Some(tab) = state.current_tab_mut() {
                 tab.invalidate();
             }
         }
-        let mut error = match result {
+        let failure = response.error.clone().unwrap_or_default();
+        let answered_late = failure.to_ascii_lowercase().contains("timed out")
+            && !page.session().transport().is_closed();
+        if !response.ok && is_transport_error_msg(&failure) && !answered_late {
+            eprintln!("[eoka-mcp] connection lost, marking unhealthy: {failure}");
+            state.unhealthy = true;
+            let lost = " (connection lost - will relaunch on next call)";
+            if let Some(error) = response.error.as_mut() {
+                error.push_str(lost);
+            }
+            if let Some(detail) = response.error_detail.as_mut() {
+                detail.message.push_str(lost);
+            }
+        }
+        Ok((response, page))
+    }
+
+    async fn engine_tool(
+        &self,
+        tool: &str,
+        operation: Operation,
+    ) -> Result<CallToolResult, ErrorData> {
+        let (response, page) = self.respond(tool, operation).await?;
+        let error = match eoka_server::state::catalog_result(response, Some(&page)) {
             Ok(Value::String(text)) => return text_ok(text),
             Ok(data) => return text_ok(serde_json::to_string(&data).map_err(internal)?),
             Err(error) => error,
         };
         if let Some(detail) = blocked::blocked_detail(&error) {
             return Ok(blocked::refusal(detail));
-        }
-        let answered_late = error.message.to_ascii_lowercase().contains("timed out")
-            && state
-                .current_tab()
-                .is_some_and(|tab| !tab.page.session().transport().is_closed());
-        if is_transport_error_msg(&error.message) && !answered_late {
-            eprintln!(
-                "[eoka-mcp] connection lost, marking unhealthy: {}",
-                error.message
-            );
-            state.unhealthy = true;
-            error
-                .message
-                .push_str(" (connection lost - will relaunch on next call)");
         }
         Ok(CallToolResult::error(vec![ContentBlock::text(
             serde_json::to_string(&error).map_err(internal)?,
@@ -361,7 +379,8 @@ impl EokaServer {
     ) -> Result<CallToolResult, ErrorData> {
         let arguments = serde_json::to_value(req.0).map_err(internal)?;
         helpers::ensure_action_urls_allowed(&arguments)?;
-        self.perform_command("action_perform", arguments).await
+        self.action_tool("action_perform", "action_perform", arguments)
+            .await
     }
     #[tool]
     async fn operation_get(
@@ -761,40 +780,60 @@ impl EokaServer {
         description = "Click an element. Target: index (0), @e1 (snapshot ref), text:Submit, placeholder:Search, role:button, css:selector, id:my-btn, or plain text. Returns a durable operation ID. Never replays input."
     )]
     async fn click(&self, req: Parameters<TargetRequest>) -> Result<CallToolResult, ErrorData> {
-        self.perform_command("click", serde_json::to_value(req.0).map_err(internal)?)
-            .await
+        self.action_tool(
+            "click",
+            "click",
+            serde_json::to_value(req.0).map_err(internal)?,
+        )
+        .await
     }
 
     #[tool(
         description = "Type text into an input. Target: index, text:Label, placeholder:Enter code, css:input, id:field. Returns a durable operation ID. Never replays input. Clears existing text."
     )]
     async fn fill(&self, req: Parameters<FillRequest>) -> Result<CallToolResult, ErrorData> {
-        self.perform_command("fill", serde_json::to_value(req.0).map_err(internal)?)
-            .await
+        self.action_tool(
+            "fill",
+            "fill",
+            serde_json::to_value(req.0).map_err(internal)?,
+        )
+        .await
     }
 
     #[tool(
         description = "Select dropdown option. Target: index, text:Label, css:select, id:dropdown. Value matches option value or visible text."
     )]
     async fn select(&self, req: Parameters<SelectRequest>) -> Result<CallToolResult, ErrorData> {
-        self.perform_command("select", serde_json::to_value(req.0).map_err(internal)?)
-            .await
+        self.action_tool(
+            "select",
+            "select",
+            serde_json::to_value(req.0).map_err(internal)?,
+        )
+        .await
     }
 
     #[tool(
         description = "Hover over element to trigger tooltips, menus, or hover states. Target: index, text:Label, css:selector, etc."
     )]
     async fn hover(&self, req: Parameters<TargetRequest>) -> Result<CallToolResult, ErrorData> {
-        self.perform_command("hover", serde_json::to_value(req.0).map_err(internal)?)
-            .await
+        self.action_tool(
+            "hover",
+            "hover",
+            serde_json::to_value(req.0).map_err(internal)?,
+        )
+        .await
     }
 
     #[tool(
         description = "Press keyboard key. Common: Enter, Tab, Escape, ArrowDown, ArrowUp, Backspace, Space."
     )]
     async fn type_key(&self, req: Parameters<TypeKeyRequest>) -> Result<CallToolResult, ErrorData> {
-        self.perform_command("key", serde_json::to_value(req.0).map_err(internal)?)
-            .await
+        self.action_tool(
+            "type_key",
+            "key",
+            serde_json::to_value(req.0).map_err(internal)?,
+        )
+        .await
     }
 
     #[tool]
@@ -983,8 +1022,12 @@ impl EokaServer {
         &self,
         req: Parameters<eoka_protocol::ActionSettings>,
     ) -> Result<CallToolResult, ErrorData> {
-        self.perform_command("back", serde_json::to_value(req.0).map_err(internal)?)
-            .await
+        self.action_tool(
+            "back",
+            "back",
+            serde_json::to_value(req.0).map_err(internal)?,
+        )
+        .await
     }
 
     #[tool(description = "Go forward in browser history.")]
@@ -992,8 +1035,12 @@ impl EokaServer {
         &self,
         req: Parameters<eoka_protocol::ActionSettings>,
     ) -> Result<CallToolResult, ErrorData> {
-        self.perform_command("forward", serde_json::to_value(req.0).map_err(internal)?)
-            .await
+        self.action_tool(
+            "forward",
+            "forward",
+            serde_json::to_value(req.0).map_err(internal)?,
+        )
+        .await
     }
 
     #[tool(
@@ -1027,7 +1074,7 @@ impl EokaServer {
             .operation_id
             .clone()
             .unwrap_or_else(operations::new_operation_id);
-        self.perform_command("action_perform",serde_json::json!({"operation_id":id,"action":{"kind":"history","delta":req.0.delta},"options":{"timeout_ms":req.0.operation.timeout_ms.unwrap_or(30000),"expect":req.0.operation.expect}})).await
+        self.action_tool("history_go", "action_perform",serde_json::json!({"operation_id":id,"action":{"kind":"history","delta":req.0.delta},"options":{"timeout_ms":req.0.operation.timeout_ms.unwrap_or(30000),"expect":req.0.operation.expect}})).await
     }
 
     #[tool(description = "Get all cookies for the current page. Returns JSON array of cookies.")]
@@ -1192,7 +1239,9 @@ impl EokaServer {
             "timeout_ms": req.0.operation.timeout_ms,
         });
         if self.operations.get(&id).await.is_ok() {
-            return self.perform_command("click", arguments).await;
+            return self
+                .action_tool("click_intercept_nav", "click", arguments)
+                .await;
         }
         self.ensure_browser().await?;
         let mut guard = self.state.lock().await;
@@ -1222,7 +1271,8 @@ impl EokaServer {
             .await
             .map_err(internal)?;
         drop(guard);
-        self.perform_command("click", arguments).await
+        self.action_tool("click_intercept_nav", "click", arguments)
+            .await
     }
 
     #[tool(description = "Delete a specific cookie by name.")]

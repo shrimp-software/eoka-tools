@@ -1,6 +1,8 @@
 use super::*;
 use crate::operations::{commands, OperationManager};
 
+const FAILURE_REPORT_GRACE_MS: u64 = 2_000;
+
 impl Engine {
     pub fn operation_manager(&self) -> OperationManager {
         self.operations.clone()
@@ -26,7 +28,10 @@ impl Engine {
                     script_applied = Some(enabled);
                 }
             }
-            let budget = commands::options(args)?.timeout_ms.min(60_000);
+            let budget = commands::options(args)?
+                .timeout_ms
+                .min(60_000)
+                .saturating_add(FAILURE_REPORT_GRACE_MS);
             let record = self
                 .agent
                 .lock()

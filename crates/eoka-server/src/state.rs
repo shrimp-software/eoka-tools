@@ -138,6 +138,17 @@ impl AppState {
         spoken: Option<&str>,
     ) -> Result<serde_json::Value, ServerError> {
         let page = self.page(page_id)?;
+        let response = self.respond(page_id, request, spoken).await?;
+        catalog_result(response, Some(&page))
+    }
+
+    pub async fn respond(
+        &self,
+        page_id: &str,
+        request: eoka_protocol::Request,
+        spoken: Option<&str>,
+    ) -> Result<eoka_protocol::Response, ServerError> {
+        let page = self.page(page_id)?;
         let browser = self.browser()?;
         let response = {
             let mut engine = self.shared.engine.lock().await;
@@ -159,7 +170,7 @@ impl AppState {
             });
             Box::pin(engine.handle_on(page_id, &page, request, spoken)).await
         };
-        catalog_result(response, Some(&page))
+        Ok(response)
     }
 
     pub async fn release_engine_tab(&self, id: &str) {
