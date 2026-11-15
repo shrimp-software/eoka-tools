@@ -204,10 +204,16 @@ impl BrowserState {
         }
 
         let page = self.browser.new_page(url).await?;
-        let id = page.target_id().to_string();
-        self.tabs.insert(id.clone(), TabState::new(page));
+        let id = self.track(page);
         self.current_tab_id = Some(id.clone());
         Ok(self.tabs.get_mut(&id).expect("just inserted"))
+    }
+
+    fn track(&mut self, page: Page) -> String {
+        super::blockers::watch(&page);
+        let id = page.target_id().to_string();
+        self.tabs.insert(id.clone(), TabState::new(page));
+        id
     }
 
     pub fn current_tab(&self) -> Option<&TabState> {
@@ -224,8 +230,7 @@ impl BrowserState {
 
     pub async fn ensure_blank_tab(&mut self) -> eoka::Result<&mut TabState> {
         let page = self.browser.new_blank_page().await?;
-        let id = page.target_id().to_string();
-        self.tabs.insert(id.clone(), TabState::new(page));
+        let id = self.track(page);
         self.current_tab_id = Some(id.clone());
         Ok(self.tabs.get_mut(&id).expect("just inserted"))
     }
@@ -235,8 +240,7 @@ impl BrowserState {
             Some(u) => self.browser.new_page(u).await?,
             None => self.browser.new_blank_page().await?,
         };
-        let tab_id = page.target_id().to_string();
-        self.tabs.insert(tab_id.clone(), TabState::new(page));
+        let tab_id = self.track(page);
         self.browser.activate_tab(&tab_id).await?;
         self.current_tab_id = Some(tab_id.clone());
         let tab = self.tabs.get_mut(&tab_id).expect("just inserted");
@@ -246,7 +250,7 @@ impl BrowserState {
     pub async fn switch_tab(&mut self, tab_id: &str) -> eoka::Result<()> {
         if !self.tabs.contains_key(tab_id) {
             let page = self.browser.attach_page(tab_id).await?;
-            self.tabs.insert(tab_id.to_string(), TabState::new(page));
+            self.track(page);
         }
         self.browser.activate_tab(tab_id).await?;
         self.current_tab_id = Some(tab_id.to_string());
@@ -256,7 +260,7 @@ impl BrowserState {
     pub async fn attach_existing_tab(&mut self, tab_id: &str) -> eoka::Result<()> {
         if !self.tabs.contains_key(tab_id) {
             let page = self.browser.attach_page(tab_id).await?;
-            self.tabs.insert(tab_id.to_string(), TabState::new(page));
+            self.track(page);
         }
         self.current_tab_id = Some(tab_id.to_string());
         Ok(())
