@@ -324,15 +324,11 @@ async fn handle_dialog(
         _ => return None,
     };
     let page = board.page()?;
-    let handled = tokio::time::timeout(Duration::from_secs(5), async {
-        if accept {
-            page.accept_dialog(arguments["prompt_text"].as_str())
-                .await
-                .map(|()| "Dialog accepted".to_string())
-        } else {
-            blockers::dismiss(operations, &page).await
-        }
-    })
+    let prompt_text = arguments["prompt_text"].as_str();
+    let handled = tokio::time::timeout(
+        Duration::from_secs(5),
+        blockers::answer(operations, &page, accept.then_some(prompt_text)),
+    )
     .await;
     Some(match handled {
         Ok(Ok(reply)) => Response::ok_text(reply),

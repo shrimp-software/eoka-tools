@@ -70,14 +70,10 @@ async fn answer_dialog(
     let operation = catalog_operation(method).ok_or_else(|| ServerError::unknown_method(method))?;
     let (page_id, request) = catalog_request(operation, params)?;
     let page = state.page(&page_id)?;
-    if method == "dialog.accept" {
-        page.accept_dialog(request.args_json()["prompt_text"].as_str())
-            .await?;
-        Ok(Value::String("Dialog accepted".into()))
-    } else {
-        page.dismiss_dialog().await?;
-        Ok(Value::String("Dialog dismissed".into()))
-    }
+    let arguments = request.args_json();
+    let accept = (method == "dialog.accept").then_some(arguments["prompt_text"].as_str());
+    let reply = crate::engine::blockers::answer(&state.operations, &page, accept).await?;
+    Ok(Value::String(reply))
 }
 
 async fn route(state: &AppState, method: &str, params: Value) -> Result<Value, ServerError> {

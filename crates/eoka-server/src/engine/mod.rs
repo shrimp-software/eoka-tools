@@ -1087,18 +1087,9 @@ impl Engine {
     async fn cmd_dialog(&mut self, accept: Option<Option<&str>>) -> Result<Response, EngineError> {
         let tab = self.require_tab_mut()?;
         tab.invalidate();
-        match accept {
-            Some(prompt_text) => {
-                let result = tab.page.accept_dialog(prompt_text).await;
-                result?;
-                Ok(Response::ok_text("Dialog accepted"))
-            }
-            None => {
-                let page = tab.page.clone();
-                let reply = blockers::dismiss(&self.operations, &page).await?;
-                Ok(Response::ok_text(reply))
-            }
-        }
+        let page = tab.page.clone();
+        let reply = blockers::answer(&self.operations, &page, accept).await?;
+        Ok(Response::ok_text(reply))
     }
 
     async fn cmd_captcha_detect(&mut self) -> Result<Response, EngineError> {
