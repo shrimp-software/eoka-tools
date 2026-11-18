@@ -20,7 +20,6 @@ path = "src/bin/main.rs"
 eoka = { workspace = true }
 eoka-proxy = { workspace = true }
 eoka-email = { workspace = true, features = ["async"] }
-chrono = { version = "0.4", features = ["clock"] }
 regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

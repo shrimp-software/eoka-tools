@@ -30,7 +30,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 captcha = { workspace = true }
 eoka-datadome = { workspace = true }
-chrono = "0.4"
+time = { version = "0.3", features = ["formatting", "macros"] }
 
 rusqlite = { version = "0.42", features = ["bundled", "fallible_uint"] }
 uuid = { version = "1", features = ["v4"] }

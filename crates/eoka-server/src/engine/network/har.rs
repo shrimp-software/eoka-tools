@@ -234,13 +234,13 @@ fn har_time(entry: &NetworkEntry) -> String {
     let millis = (secs * 1000.0).round() as i64;
     let whole = millis.div_euclid(1000);
     let ms = millis.rem_euclid(1000);
-    format!(
-        "{}.{:03}Z",
-        chrono::DateTime::from_timestamp(whole, 0)
-            .unwrap_or_default()
-            .format("%Y-%m-%dT%H:%M:%S"),
-        ms
-    )
+    let date = time::OffsetDateTime::from_unix_timestamp(whole)
+        .unwrap_or(time::OffsetDateTime::UNIX_EPOCH)
+        .format(time::macros::format_description!(
+            "[year]-[month]-[day]T[hour]:[minute]:[second]"
+        ))
+        .unwrap_or_default();
+    format!("{date}.{ms:03}Z")
 }
 
 pub(super) fn atomic_write_json(path: &Path, value: &Value) -> Result<(), String> {
