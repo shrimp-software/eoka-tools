@@ -35,6 +35,7 @@ struct EntryState {
     cancelled: bool,
     publishing: bool,
     partial_path: Option<String>,
+    media: Option<mp4::MediaSummary>,
 }
 
 struct Entry {
@@ -134,6 +135,10 @@ impl Entry {
                 Ok(artifact) => {
                     state.record.state = RecordingState::Completed;
                     state.record.artifact = Some(artifact);
+                    if let Some(media) = state.media {
+                        state.record.frames = Some(media.frames);
+                        state.record.duration_ms = Some(media.duration_ms);
+                    }
                     state.record.failure = None;
                     state.partial_path = None;
                 },
@@ -290,12 +295,15 @@ impl RecordingManager {
                     path: params.path.clone(),
                     artifact: None,
                     failure: None,
+                    frames: None,
+                    duration_ms: None,
                 },
                 admitted: false,
                 started: false,
                 cancelled: false,
                 publishing: false,
                 partial_path: None,
+                media: None,
             }),
             params,
             changed,
@@ -706,7 +714,7 @@ async fn run(entry: Arc<Entry>, page: Result<Page, ServerError>) {
             finish_cancel(&entry, Some(&native), &mut stage, Some(failure)).await;
             return;
         }
-        Some(Ok(())) => {}
+        Some(Ok(media)) => entry.update(|state| state.media = Some(media)),
     }
     let publisher = entry.clone();
     let published = tokio::task::spawn_blocking(move || {
@@ -767,7 +775,7 @@ impl RecordingSource for NativeRecording {
     }
 }
 
-async fn repair_stage(stage: &mut StagedArtifact) -> Result<(), RecordingFailure> {
+async fn repair_stage(stage: &mut StagedArtifact) -> Result<mp4::MediaSummary, RecordingFailure> {
     let partial_path = Some(stage.partial.to_string_lossy().into_owned());
     let file = stage.recording_file().map_err(file_failure)?;
     let result = tokio::time::timeout(Duration::from_secs(5), async {
@@ -802,7 +810,7 @@ async fn repair_stage(stage: &mut StagedArtifact) -> Result<(), RecordingFailure
 async fn drain(
     native: &impl RecordingSource,
     stage: &mut StagedArtifact,
-) -> Result<(), RecordingFailure> {
+) -> Result<mp4::MediaSummary, RecordingFailure> {
     let partial = || Some(stage.partial.to_string_lossy().into_owned());
     match tokio::time::timeout(Duration::from_secs(15), native.stop()).await {
         Ok(result) => {
@@ -858,8 +866,9 @@ async fn drain(
             Some(stage.partial.to_string_lossy().into_owned()),
         )
     })?;
-    repair_stage(stage).await?;
-    stage.seal().await.map_err(file_failure)
+    let media = repair_stage(stage).await?;
+    stage.seal().await.map_err(file_failure)?;
+    Ok(media)
 }
 
 #[cfg(test)]

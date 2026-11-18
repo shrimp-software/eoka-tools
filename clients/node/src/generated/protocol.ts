@@ -73,7 +73,7 @@ export type ErrorData__PageBlocker = ({ "dialogType": string; "elapsedMs": numbe
 export type ErrorData__PageContext = { "headings": Array<string>; "messages": Array<string>; "ready_state": string; "tab_id": string; "text_excerpt": string; "title": string; "truncated": boolean; "url": string; [key: string]: unknown; };
 export type ErrorData__RecordingFailure = { "cleanupUncertain"?: (boolean | null); "code": ErrorData__ErrorCode; "message": string; "partialPath"?: (string | null); "stage": ErrorData__RecordingFailureStage; [key: string]: unknown; };
 export type ErrorData__RecordingFailureStage = (("start" | "stop" | "read" | "write" | "flush" | "close" | "publish" | "cancel" | "disconnect") & string);
-export type ErrorData__RecordingRecord = { "artifact"?: (ErrorData__Artifact | null); "failure"?: (ErrorData__RecordingFailure | null); "pageId": string; "path": string; "recordingId": string; "state": ErrorData__RecordingState; [key: string]: unknown; };
+export type ErrorData__RecordingRecord = { "artifact"?: (ErrorData__Artifact | null); "durationMs"?: (number | null); "failure"?: (ErrorData__RecordingFailure | null); "frames"?: (number | null); "pageId": string; "path": string; "recordingId": string; "state": ErrorData__RecordingState; [key: string]: unknown; };
 export type ErrorData__RecordingState = (("running" | "finalizing" | "completed" | "cancelled" | "failed") & string);
 export type ErrorData__ServerError = { "code": ErrorData__ErrorCode; "data"?: (ErrorData | null); "message": string; [key: string]: unknown; };
 
@@ -124,7 +124,7 @@ export type RecordingFailureStage = (("start" | "stop" | "read" | "write" | "flu
 
 export type RecordingIdParams = { "recordingId": string; [key: string]: unknown; };
 
-export type RecordingRecord = { "artifact"?: (RecordingRecord__Artifact | null); "failure"?: (RecordingRecord__RecordingFailure | null); "pageId": string; "path": string; "recordingId": string; "state": RecordingRecord__RecordingState; [key: string]: unknown; };
+export type RecordingRecord = { "artifact"?: (RecordingRecord__Artifact | null); "durationMs"?: (number | null); "failure"?: (RecordingRecord__RecordingFailure | null); "frames"?: (number | null); "pageId": string; "path": string; "recordingId": string; "state": RecordingRecord__RecordingState; [key: string]: unknown; };
 export type RecordingRecord__Artifact = { "bytes": number; "container"?: (RecordingRecord__ArtifactContainer | null); "mimeType": string; "path": string; [key: string]: unknown; };
 export type RecordingRecord__ArtifactContainer = ("mp4" & string);
 export type RecordingRecord__ErrorCode = (("ElementNotFound" | "ElementNotVisible" | "Timeout" | "RetryExhausted" | "Cdp" | "InvalidPage" | "InvalidParams" | "UnknownMethod" | "Internal" | "ProtocolMismatch" | "MessageTooLarge" | "ServerBusy" | "ShuttingDown" | "Cancelled" | "Action" | "Operation" | "ScreenshotTooLarge" | "FileOutput" | "RecordingUnsupported" | "RecordingNotFound" | "RecordingConflict" | "RecordingAlreadyActive" | "RecordingInvalidState" | "RecordingFailed" | "DialogOpen" | "NavigationPending" | "PageUnresponsive") & string);
@@ -154,7 +154,7 @@ export type Response__PageBlocker = ({ "dialogType": string; "elapsedMs": number
 export type Response__PageContext = { "headings": Array<string>; "messages": Array<string>; "ready_state": string; "tab_id": string; "text_excerpt": string; "title": string; "truncated": boolean; "url": string; [key: string]: unknown; };
 export type Response__RecordingFailure = { "cleanupUncertain"?: (boolean | null); "code": Response__ErrorCode; "message": string; "partialPath"?: (string | null); "stage": Response__RecordingFailureStage; [key: string]: unknown; };
 export type Response__RecordingFailureStage = (("start" | "stop" | "read" | "write" | "flush" | "close" | "publish" | "cancel" | "disconnect") & string);
-export type Response__RecordingRecord = { "artifact"?: (Response__Artifact | null); "failure"?: (Response__RecordingFailure | null); "pageId": string; "path": string; "recordingId": string; "state": Response__RecordingState; [key: string]: unknown; };
+export type Response__RecordingRecord = { "artifact"?: (Response__Artifact | null); "durationMs"?: (number | null); "failure"?: (Response__RecordingFailure | null); "frames"?: (number | null); "pageId": string; "path": string; "recordingId": string; "state": Response__RecordingState; [key: string]: unknown; };
 export type Response__RecordingState = (("running" | "finalizing" | "completed" | "cancelled" | "failed") & string);
 export type Response__ServerError = { "code": Response__ErrorCode; "data"?: (Response__ErrorData | null); "message": string; [key: string]: unknown; };
 
@@ -186,7 +186,7 @@ export type ServerError__PageBlocker = ({ "dialogType": string; "elapsedMs": num
 export type ServerError__PageContext = { "headings": Array<string>; "messages": Array<string>; "ready_state": string; "tab_id": string; "text_excerpt": string; "title": string; "truncated": boolean; "url": string; [key: string]: unknown; };
 export type ServerError__RecordingFailure = { "cleanupUncertain"?: (boolean | null); "code": ServerError__ErrorCode; "message": string; "partialPath"?: (string | null); "stage": ServerError__RecordingFailureStage; [key: string]: unknown; };
 export type ServerError__RecordingFailureStage = (("start" | "stop" | "read" | "write" | "flush" | "close" | "publish" | "cancel" | "disconnect") & string);
-export type ServerError__RecordingRecord = { "artifact"?: (ServerError__Artifact | null); "failure"?: (ServerError__RecordingFailure | null); "pageId": string; "path": string; "recordingId": string; "state": ServerError__RecordingState; [key: string]: unknown; };
+export type ServerError__RecordingRecord = { "artifact"?: (ServerError__Artifact | null); "durationMs"?: (number | null); "failure"?: (ServerError__RecordingFailure | null); "frames"?: (number | null); "pageId": string; "path": string; "recordingId": string; "state": ServerError__RecordingState; [key: string]: unknown; };
 export type ServerError__RecordingState = (("running" | "finalizing" | "completed" | "cancelled" | "failed") & string);
 
 export type TransportLimits = { "maxInFlight": number; "maxMessageBytes": number; [key: string]: unknown; };
@@ -955,7 +955,7 @@ export type MethodPageWaitForVisibleResult = Record<string, never>;
 
 export type MethodRecordingCancelParams = { "recordingId": string; [key: string]: unknown; };
 
-export type MethodRecordingCancelResult = { "artifact"?: (MethodRecordingCancelResult__Artifact | null); "failure"?: (MethodRecordingCancelResult__RecordingFailure | null); "pageId": string; "path": string; "recordingId": string; "state": MethodRecordingCancelResult__RecordingState; [key: string]: unknown; };
+export type MethodRecordingCancelResult = { "artifact"?: (MethodRecordingCancelResult__Artifact | null); "durationMs"?: (number | null); "failure"?: (MethodRecordingCancelResult__RecordingFailure | null); "frames"?: (number | null); "pageId": string; "path": string; "recordingId": string; "state": MethodRecordingCancelResult__RecordingState; [key: string]: unknown; };
 export type MethodRecordingCancelResult__Artifact = { "bytes": number; "container"?: (MethodRecordingCancelResult__ArtifactContainer | null); "mimeType": string; "path": string; [key: string]: unknown; };
 export type MethodRecordingCancelResult__ArtifactContainer = ("mp4" & string);
 export type MethodRecordingCancelResult__ErrorCode = (("ElementNotFound" | "ElementNotVisible" | "Timeout" | "RetryExhausted" | "Cdp" | "InvalidPage" | "InvalidParams" | "UnknownMethod" | "Internal" | "ProtocolMismatch" | "MessageTooLarge" | "ServerBusy" | "ShuttingDown" | "Cancelled" | "Action" | "Operation" | "ScreenshotTooLarge" | "FileOutput" | "RecordingUnsupported" | "RecordingNotFound" | "RecordingConflict" | "RecordingAlreadyActive" | "RecordingInvalidState" | "RecordingFailed" | "DialogOpen" | "NavigationPending" | "PageUnresponsive") & string);
@@ -965,7 +965,7 @@ export type MethodRecordingCancelResult__RecordingState = (("running" | "finaliz
 
 export type MethodRecordingGetParams = { "recordingId": string; [key: string]: unknown; };
 
-export type MethodRecordingGetResult = { "artifact"?: (MethodRecordingGetResult__Artifact | null); "failure"?: (MethodRecordingGetResult__RecordingFailure | null); "pageId": string; "path": string; "recordingId": string; "state": MethodRecordingGetResult__RecordingState; [key: string]: unknown; };
+export type MethodRecordingGetResult = { "artifact"?: (MethodRecordingGetResult__Artifact | null); "durationMs"?: (number | null); "failure"?: (MethodRecordingGetResult__RecordingFailure | null); "frames"?: (number | null); "pageId": string; "path": string; "recordingId": string; "state": MethodRecordingGetResult__RecordingState; [key: string]: unknown; };
 export type MethodRecordingGetResult__Artifact = { "bytes": number; "container"?: (MethodRecordingGetResult__ArtifactContainer | null); "mimeType": string; "path": string; [key: string]: unknown; };
 export type MethodRecordingGetResult__ArtifactContainer = ("mp4" & string);
 export type MethodRecordingGetResult__ErrorCode = (("ElementNotFound" | "ElementNotVisible" | "Timeout" | "RetryExhausted" | "Cdp" | "InvalidPage" | "InvalidParams" | "UnknownMethod" | "Internal" | "ProtocolMismatch" | "MessageTooLarge" | "ServerBusy" | "ShuttingDown" | "Cancelled" | "Action" | "Operation" | "ScreenshotTooLarge" | "FileOutput" | "RecordingUnsupported" | "RecordingNotFound" | "RecordingConflict" | "RecordingAlreadyActive" | "RecordingInvalidState" | "RecordingFailed" | "DialogOpen" | "NavigationPending" | "PageUnresponsive") & string);
@@ -975,7 +975,7 @@ export type MethodRecordingGetResult__RecordingState = (("running" | "finalizing
 
 export type MethodRecordingStartParams = { "fps"?: (number | null); "maxHeight"?: (number | null); "maxWidth"?: (number | null); "pageId": string; "path": string; "recordingId": string; };
 
-export type MethodRecordingStartResult = { "artifact"?: (MethodRecordingStartResult__Artifact | null); "failure"?: (MethodRecordingStartResult__RecordingFailure | null); "pageId": string; "path": string; "recordingId": string; "state": MethodRecordingStartResult__RecordingState; [key: string]: unknown; };
+export type MethodRecordingStartResult = { "artifact"?: (MethodRecordingStartResult__Artifact | null); "durationMs"?: (number | null); "failure"?: (MethodRecordingStartResult__RecordingFailure | null); "frames"?: (number | null); "pageId": string; "path": string; "recordingId": string; "state": MethodRecordingStartResult__RecordingState; [key: string]: unknown; };
 export type MethodRecordingStartResult__Artifact = { "bytes": number; "container"?: (MethodRecordingStartResult__ArtifactContainer | null); "mimeType": string; "path": string; [key: string]: unknown; };
 export type MethodRecordingStartResult__ArtifactContainer = ("mp4" & string);
 export type MethodRecordingStartResult__ErrorCode = (("ElementNotFound" | "ElementNotVisible" | "Timeout" | "RetryExhausted" | "Cdp" | "InvalidPage" | "InvalidParams" | "UnknownMethod" | "Internal" | "ProtocolMismatch" | "MessageTooLarge" | "ServerBusy" | "ShuttingDown" | "Cancelled" | "Action" | "Operation" | "ScreenshotTooLarge" | "FileOutput" | "RecordingUnsupported" | "RecordingNotFound" | "RecordingConflict" | "RecordingAlreadyActive" | "RecordingInvalidState" | "RecordingFailed" | "DialogOpen" | "NavigationPending" | "PageUnresponsive") & string);
@@ -985,7 +985,7 @@ export type MethodRecordingStartResult__RecordingState = (("running" | "finalizi
 
 export type MethodRecordingStopParams = { "recordingId": string; [key: string]: unknown; };
 
-export type MethodRecordingStopResult = { "artifact"?: (MethodRecordingStopResult__Artifact | null); "failure"?: (MethodRecordingStopResult__RecordingFailure | null); "pageId": string; "path": string; "recordingId": string; "state": MethodRecordingStopResult__RecordingState; [key: string]: unknown; };
+export type MethodRecordingStopResult = { "artifact"?: (MethodRecordingStopResult__Artifact | null); "durationMs"?: (number | null); "failure"?: (MethodRecordingStopResult__RecordingFailure | null); "frames"?: (number | null); "pageId": string; "path": string; "recordingId": string; "state": MethodRecordingStopResult__RecordingState; [key: string]: unknown; };
 export type MethodRecordingStopResult__Artifact = { "bytes": number; "container"?: (MethodRecordingStopResult__ArtifactContainer | null); "mimeType": string; "path": string; [key: string]: unknown; };
 export type MethodRecordingStopResult__ArtifactContainer = ("mp4" & string);
 export type MethodRecordingStopResult__ErrorCode = (("ElementNotFound" | "ElementNotVisible" | "Timeout" | "RetryExhausted" | "Cdp" | "InvalidPage" | "InvalidParams" | "UnknownMethod" | "Internal" | "ProtocolMismatch" | "MessageTooLarge" | "ServerBusy" | "ShuttingDown" | "Cancelled" | "Action" | "Operation" | "ScreenshotTooLarge" | "FileOutput" | "RecordingUnsupported" | "RecordingNotFound" | "RecordingConflict" | "RecordingAlreadyActive" | "RecordingInvalidState" | "RecordingFailed" | "DialogOpen" | "NavigationPending" | "PageUnresponsive") & string);
