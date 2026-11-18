@@ -54,9 +54,9 @@ impl Engine {
                     "Function evaluation awaits completion; no-await also requires raw".into(),
                 );
             }
-            let value: Value = self
-                .require_tab()?
-                .page
+            let page = &self.require_tab()?.page;
+            let code = prepare_script(page, &code, &args.arguments).await?;
+            let value: Value = page
                 .evaluate_function(&code, &args.arguments)
                 .await
                 .map_err(|e| e.to_string())?;
@@ -120,6 +120,7 @@ impl Engine {
                 .await
                 .map_err(|error| error.to_string())?;
         } else {
+            let code = prepare_script(&tab.page, &code, &args.arguments).await?;
             tab.page
                 .execute_function(&code, &args.arguments)
                 .await
@@ -314,6 +315,50 @@ fn build_limited_eval_js(code: &str, max_size: usize) -> String {
         source = json_str(code),
         max = max_size,
     )
+}
+
+async fn prepare_script(
+    page: &eoka::Page,
+    source: &str,
+    arguments: &[Value],
+) -> Result<String, EngineError> {
+    let callable = callable_script(source);
+    let callable_error = match syntax_error(page, &callable).await? {
+        None => return Ok(callable),
+        Some(error) => error,
+    };
+    if !arguments.is_empty() {
+        return Err(format!(
+            "arguments need code that is a function, such as (a, b) => a + b: {callable_error}"
+        )
+        .into());
+    }
+    let statements = statement_script(source);
+    match syntax_error(page, &statements).await? {
+        None => Ok(statements),
+        Some(error) => Err(format!("JavaScript does not parse: {error}").into()),
+    }
+}
+
+fn callable_script(source: &str) -> String {
+    let expression = source.trim_end().trim_end_matches(';');
+    format!(
+        "(async (...eokaArguments) => {{ const eokaValue = ({expression}\n); if (typeof eokaValue === 'function') return await eokaValue(...eokaArguments); if (eokaArguments.length) throw new TypeError('arguments were given but code is not a function'); return await eokaValue; }})"
+    )
+}
+
+fn statement_script(source: &str) -> String {
+    format!("(async () => {{\n{source}\n}})")
+}
+
+async fn syntax_error(page: &eoka::Page, script: &str) -> Result<Option<String>, EngineError> {
+    let encoded = serde_json::to_string(script).map_err(|error| error.to_string())?;
+    Ok(page
+        .evaluate_sync(&format!(
+            "(() => {{ try {{ new Function({encoded}); return null; }} catch (error) {{ return error instanceof SyntaxError ? String(error) : null; }} }})()"
+        ))
+        .await
+        .map_err(|error| error.to_string())?)
 }
 
 fn resolve_js(file: Option<&str>, code: Option<&str>) -> Result<String, String> {

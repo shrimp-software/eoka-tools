@@ -771,7 +771,7 @@ impl EokaServer {
     }
 
     #[tool(
-        description = "Invoke a JavaScript function with JSON arguments and return its awaited JSON result. Use code or file for the function; raw=true explicitly selects the raw script escape hatch."
+        description = "Run JavaScript in the page and return its awaited JSON result. code (or file) may be a function, called once with arguments, such as (sel) => document.querySelector(sel).textContent; an expression, such as document.title; or statements, run as an async function body where return gives the value. The code runs exactly once. raw=true sends the code to CDP unchanged."
     )]
     async fn extract(&self, req: Parameters<JsRequest>) -> Result<CallToolResult, ErrorData> {
         self.envelope_tool("extract", Operation::Eval(req.0), Needs::Page)
@@ -779,7 +779,7 @@ impl EokaServer {
     }
 
     #[tool(
-        description = "Invoke and await a JavaScript function with JSON arguments, propagating exceptions. Use code or file; raw=true explicitly selects the raw script escape hatch."
+        description = "Run JavaScript in the page for its side effects, awaiting it and propagating exceptions. code (or file) may be a function, called once with arguments; an expression, such as an IIFE; or statements, such as const el = document.createElement('div'); document.body.append(el). The code runs exactly once. raw=true sends the code to CDP unchanged."
     )]
     async fn exec(&self, req: Parameters<JsRequest>) -> Result<CallToolResult, ErrorData> {
         self.engine_tool("exec", Operation::Exec(req.0)).await

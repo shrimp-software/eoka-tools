@@ -37,3 +37,4 @@ return the operation record.
 - `click`, double click and `type_key` can omit `expect`. They then run unverified and return `status: outcome_unknown` with a `note`, so read the page next and do not repeat the action blindly.
 - `fill` and `select` find fields by label. Several matches return `ambiguous_target` instead of a guess.
 - `agent_step` accepts the same targets as `click` and `fill`, as well as refs.
+- `extract` and `exec` accept a function (called with `arguments`), an expression such as `document.title`, or statements run as an async function body (`return` gives the value). Syntax is checked before the code runs, so it runs exactly once. `raw=true` sends the code to CDP unchanged.
