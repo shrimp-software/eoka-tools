@@ -28,7 +28,7 @@ impl Runner {
         let proxy = config
             .proxy
             .as_deref()
-            .map(eoka_proxy::parse)
+            .map(eoka_server::proxy::parse)
             .transpose()
             .map_err(|error| crate::Error::Config(error.to_string()))?;
         let stealth = eoka::StealthConfig {
