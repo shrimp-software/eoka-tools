@@ -60,8 +60,6 @@ jobs:
       RUST: ${{ needs.changes.outputs.rust }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0 # crate-version check compares against release tags
       - name: Release versions are consistent
         run: node scripts/bump-release.mjs --check
       - uses: shrimp-software/eoka/.github/actions/rust@e6662c5f7faf03b5f6c2979903367003c426b5d4
@@ -78,9 +76,6 @@ jobs:
           for package in eoka-solvers eoka-server eoka-mcp eoka-cli; do
             cargo clippy --locked -p "$package" --all-targets --no-default-features -- -D warnings
           done
-      - name: Crate versions
-        if: env.RUST == 'true'
-        run: bash scripts/check-crate-versions.sh
       # The drift tests themselves run in the unit job; this is the one
       # drift rule that is not a test.
       - name: CLI does not depend on eoka-mcp

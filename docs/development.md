@@ -64,10 +64,20 @@ mise run node-build
 mise run sidecar-check
 ```
 
-Each Node release bundles the server version recorded in
-`clients/node/release-manifest.json`. Merging a version bump to `main`
-publishes every crate whose version is not yet on crates.io and starts the npm
-release.
+## Releasing
+
+Every crate, the Node SDK and the Go client's server pin share one version, the
+`[workspace.package]` version in `Cargo.toml`. To release:
+
+```sh
+node scripts/bump-release.mjs 0.19.0
+```
+
+Merge that to `main`. Publish puts every crate on crates.io, tags
+`eoka-cli-v0.19.0` and `eoka-server-v0.19.0`, releases both binaries and
+starts the npm release, which waits for approval of the `npm-prerelease`
+deployment. A merge without a version bump publishes nothing. CI runs
+`node scripts/bump-release.mjs --check` to catch files that drifted.
 
 ## Browser regression tests
 

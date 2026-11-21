@@ -1,6 +1,6 @@
 [package]
 name = "eoka-solvers"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "Optional CAPTCHA solvers for eoka: Anti-Captcha provider, local DataDome slider and token injection"

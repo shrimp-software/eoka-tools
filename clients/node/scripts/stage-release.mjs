@@ -18,7 +18,7 @@ export async function stageRelease({ artifacts, output, hostOnly = false, public
   const selected = hostOnly ? [detectPlatform()] : [...platforms];
   if (!hostOnly && (selected.length !== platformIds.length || !platformIds.every((id) => selected.includes(id)))) throw new Error('Release staging requires all five server artifacts. Use --host-only for a clearly marked local development gate.');
   if (publication && hostOnly) throw new Error('Publication cannot use host-only development artifacts');
-  if (publication && ((await versionDrift(root)).length || Object.values(manifest.server.platforms).some(pin => pin.development))) throw new Error('Publication requires consistent release versions (scripts/bump-release.mjs --check) and non-development source metadata');
+  if (publication && ((await versionDrift()).length || Object.values(manifest.server.platforms).some(pin => pin.development))) throw new Error('Publication requires consistent release versions (scripts/bump-release.mjs --check) and non-development source metadata');
   try {
     await lstat(output);
     throw new Error(`Refusing to replace existing staging output: ${output}`);
