@@ -1,5 +1,3 @@
-//! `eoka update`: replace this executable with a published release binary.
-
 use crate::{cli::UpdateArgs, client, launch_spec::LaunchSpec, protocol, session, skill};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -36,7 +34,6 @@ impl std::fmt::Display for Version {
     }
 }
 
-/// Release target published by `.github/workflows/release-eoka-cli.yml`.
 fn release_target() -> Option<&'static str> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("linux", "x86_64") if cfg!(target_env = "gnu") => Some("x86_64-unknown-linux-gnu"),
@@ -47,48 +44,49 @@ fn release_target() -> Option<&'static str> {
     }
 }
 
-fn http_client() -> Result<reqwest::Client, String> {
-    reqwest::Client::builder()
+fn http_client() -> Result<ureq::Agent, String> {
+    let config = ureq::Agent::config_builder()
         .user_agent(concat!("eoka-cli/", env!("CARGO_PKG_VERSION")))
-        .connect_timeout(Duration::from_secs(15))
-        .timeout(Duration::from_secs(300))
-        .build()
-        .map_err(|error| format!("Could not create the HTTP client: {error}"))
+        .timeout_connect(Some(Duration::from_secs(15)))
+        .timeout_global(Some(Duration::from_secs(300)))
+        .tls_config(
+            ureq::tls::TlsConfig::builder()
+                .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+                .build(),
+        )
+        .build();
+    Ok(config.into())
 }
 
-async fn get_bytes(client: &reqwest::Client, url: &str, limit: usize) -> Result<Vec<u8>, String> {
-    let mut response = client
-        .get(url)
-        .send()
-        .await
-        .map_err(|error| format!("Request to {url} failed: {error}"))?;
-    let status = response.status();
-    if !status.is_success() {
-        let rate_limited = matches!(status.as_u16(), 403 | 429);
-        let hint = if rate_limited {
-            "; GitHub may be rate limiting this address, try again later"
-        } else {
-            ""
-        };
-        return Err(format!("{url} returned {status}{hint}"));
-    }
-    let mut body = Vec::new();
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .map_err(|error| format!("Reading {url} failed: {error}"))?
-    {
-        if body.len() + chunk.len() > limit {
-            return Err(format!("{url} exceeds the {limit} byte limit"));
+async fn get_bytes(client: &ureq::Agent, url: &str, limit: usize) -> Result<Vec<u8>, String> {
+    let client = client.clone();
+    let owned_url = url.to_string();
+    let outcome = tokio::task::spawn_blocking(move || {
+        client
+            .get(&owned_url)
+            .call()?
+            .body_mut()
+            .with_config()
+            .limit(limit as u64)
+            .read_to_vec()
+    })
+    .await
+    .map_err(|error| format!("Request to {url} failed: {error}"))?;
+    outcome.map_err(|error| match error {
+        ureq::Error::StatusCode(status) => {
+            let hint = if matches!(status, 403 | 429) {
+                "; GitHub may be rate limiting this address, try again later"
+            } else {
+                ""
+            };
+            format!("{url} returned {status}{hint}")
         }
-        body.extend_from_slice(&chunk);
-    }
-    Ok(body)
+        ureq::Error::BodyExceedsLimit(_) => format!("{url} exceeds the {limit} byte limit"),
+        error => format!("Request to {url} failed: {error}"),
+    })
 }
 
-/// Highest published CLI version. The repository's "latest" release may be an
-/// `eoka-server` tag, so the release list is filtered by tag prefix instead.
-async fn latest_version(client: &reqwest::Client, api_base: &str) -> Result<Version, String> {
+async fn latest_version(client: &ureq::Agent, api_base: &str) -> Result<Version, String> {
     let url = format!("{api_base}/repos/{REPOSITORY}/releases?per_page=100");
     let body = get_bytes(client, &url, MAX_METADATA_BYTES).await?;
     let releases: Vec<Value> = serde_json::from_slice(&body)
@@ -122,7 +120,7 @@ fn expected_checksum(sums: &str, asset: &str) -> Option<String> {
 }
 
 async fn download_verified(
-    client: &reqwest::Client,
+    client: &ureq::Agent,
     download_base: &str,
     version: Version,
     target: &str,
@@ -210,8 +208,6 @@ fn refresh_skill_with(binary: &Path) -> Value {
         })
 }
 
-/// Write beside `dest`, confirm the new binary reports `version`, then rename
-/// over `dest`. `dest` is untouched unless every step succeeds.
 fn install(binary: &[u8], dest: &Path, version: Version) -> Result<(), String> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
@@ -247,7 +243,6 @@ fn install(binary: &[u8], dest: &Path, version: Version) -> Result<(), String> {
     result
 }
 
-/// The first `eoka` on `PATH`, when it is a different file from `dest`.
 fn path_shadow(dest: &Path, path_var: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
     let first = std::env::split_paths(path_var?)
         .map(|directory| directory.join("eoka"))
@@ -256,7 +251,6 @@ fn path_shadow(dest: &Path, path_var: Option<&std::ffi::OsStr>) -> Option<PathBu
     (!same).then_some(first)
 }
 
-/// Running daemons whose version differs from `installed`.
 async fn stale_daemons(installed: &str, kill: bool) -> Vec<Value> {
     let mut stale = Vec::new();
     for name in session::list_sessions() {

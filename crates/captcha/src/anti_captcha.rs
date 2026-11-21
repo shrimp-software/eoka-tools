@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use std::fmt;
 use std::time::Duration;
@@ -26,7 +26,6 @@ struct CreateTaskRequest {
     task: CaptchaTask,
 }
 
-/// Task types supported by Anti-Captcha.
 #[derive(Debug, Serialize)]
 #[serde(tag = "type")]
 enum CaptchaTask {
@@ -111,7 +110,6 @@ struct GetResultResponse {
     solution: Option<CaptchaSolution>,
 }
 
-/// The normalized answer returned by Anti-Captcha.
 #[derive(Debug, Deserialize)]
 pub struct CaptchaSolution {
     #[serde(rename = "gRecaptchaResponse")]
@@ -135,26 +133,23 @@ impl CaptchaSolution {
     }
 }
 
-/// Anti-Captcha API client.
 pub struct AntiCaptcha {
-    client: reqwest::Client,
+    agent: ureq::Agent,
     api_key: String,
 }
 impl AntiCaptcha {
     pub fn new(api_key: impl Into<String>) -> Self {
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert(
-            reqwest::header::ACCEPT,
-            reqwest::header::HeaderValue::from_static("application/json"),
-        );
+        let config = ureq::Agent::config_builder()
+            .timeout_connect(Some(CONNECT_TIMEOUT))
+            .timeout_global(Some(REQUEST_TIMEOUT))
+            .tls_config(
+                ureq::tls::TlsConfig::builder()
+                    .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+                    .build(),
+            )
+            .build();
         Self {
-            client: reqwest::Client::builder()
-                .default_headers(headers)
-                .http1_only()
-                .connect_timeout(CONNECT_TIMEOUT)
-                .timeout(REQUEST_TIMEOUT)
-                .build()
-                .expect("static HTTP client configuration is valid"),
+            agent: config.into(),
             api_key: api_key.into(),
         }
     }
@@ -260,7 +255,7 @@ impl AntiCaptcha {
     }
 
     async fn solve(&self, task: CaptchaTask) -> Result<CaptchaSolution> {
-        let response = self
+        let created: CreateTaskResponse = self
             .post_json_with_retry(
                 "createTask",
                 &CreateTaskRequest {
@@ -269,10 +264,6 @@ impl AntiCaptcha {
                 },
             )
             .await?;
-        let created: CreateTaskResponse = response
-            .json()
-            .await
-            .map_err(|e| CaptchaError(e.to_string()))?;
         if created.error_id != 0 {
             return Err(provider_error(
                 "createTask",
@@ -286,7 +277,7 @@ impl AntiCaptcha {
         let deadline = tokio::time::Instant::now() + SOLVE_TIMEOUT;
         loop {
             tokio::time::sleep(Duration::from_secs(2)).await;
-            let response = self
+            let result: GetResultResponse = self
                 .post_json_with_retry(
                     "getTaskResult",
                     &GetResultRequest {
@@ -295,10 +286,6 @@ impl AntiCaptcha {
                     },
                 )
                 .await?;
-            let result: GetResultResponse = response
-                .json()
-                .await
-                .map_err(|e| CaptchaError(e.to_string()))?;
             if result.error_id != 0 {
                 return Err(provider_error(
                     "getTaskResult",
@@ -325,19 +312,27 @@ impl AntiCaptcha {
         ))
     }
 
-    async fn post_json_with_retry<T: Serialize + ?Sized>(
+    async fn post_json_with_retry<T: Serialize + ?Sized, R: DeserializeOwned + Send + 'static>(
         &self,
         operation: &str,
         body: &T,
-    ) -> Result<reqwest::Response> {
+    ) -> Result<R> {
+        let body = serde_json::to_value(body).map_err(|e| CaptchaError(e.to_string()))?;
+        let url = format!("{API_BASE}/{operation}");
         for attempt in 0..=RETRY_ATTEMPTS {
-            let result = self
-                .client
-                .post(format!("{API_BASE}/{operation}"))
-                .json(body)
-                .send()
-                .await
-                .and_then(reqwest::Response::error_for_status);
+            let agent = self.agent.clone();
+            let url = url.clone();
+            let body = body.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                agent
+                    .post(&url)
+                    .header("Accept", "application/json")
+                    .send_json(body)?
+                    .body_mut()
+                    .read_json::<R>()
+            })
+            .await
+            .map_err(|e| CaptchaError(format!("{operation} failed: {e}")))?;
             match result {
                 Ok(response) => return Ok(response),
                 Err(error) if retryable(&error) && attempt < RETRY_ATTEMPTS => {
@@ -350,12 +345,13 @@ impl AntiCaptcha {
     }
 }
 
-fn retryable(error: &reqwest::Error) -> bool {
-    error.is_connect()
-        || error.is_timeout()
-        || error
-            .status()
-            .is_some_and(|status| status.is_server_error())
+fn retryable(error: &ureq::Error) -> bool {
+    match error {
+        ureq::Error::StatusCode(status) => (500..600).contains(status),
+        ureq::Error::ConnectionFailed | ureq::Error::HostNotFound | ureq::Error::Timeout(_) => true,
+        ureq::Error::Io(error) => error.kind() == std::io::ErrorKind::ConnectionRefused,
+        _ => false,
+    }
 }
 
 fn required(name: &str, value: &str) -> Result<()> {
