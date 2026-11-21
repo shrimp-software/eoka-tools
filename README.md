@@ -1,8 +1,32 @@
 # eoka-tools
 
+[![CI](https://github.com/shrimp-software/eoka-tools/actions/workflows/ci.yml/badge.svg)](https://github.com/shrimp-software/eoka-tools/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/eoka-cli.svg?label=eoka-cli)](https://crates.io/crates/eoka-cli)
+[![npm](https://img.shields.io/npm/v/@cbxss/eoka/beta.svg?label=%40cbxss%2Feoka)](https://www.npmjs.com/package/@cbxss/eoka)
+[![Go Reference](https://pkg.go.dev/badge/github.com/shrimp-software/eoka-tools/clients/go.svg)](https://pkg.go.dev/github.com/shrimp-software/eoka-tools/clients/go)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Browser automation for AI agents, built on [eoka](https://github.com/shrimp-software/eoka), a low-level CDP library for real Chrome.
 
 One shared engine drives every interface: a CLI with an agent skill, an MCP server, Node, Go and Rust SDKs, and a YAML runner. Actions are verified and durable. Each one gets an operation ID, waits for its expected outcome, and survives a lost response.
+
+```mermaid
+flowchart LR
+    agent["AI agent"] --> cli["eoka CLI + skill"]
+    agent --> mcp["eoka-mcp"]
+    code["Your code"] --> node["Node SDK"]
+    code --> go["Go client"]
+    code --> rust["Rust SDK"]
+    code --> runner["YAML runner"]
+    node -- "sidecar protocol" --> server["eoka-server engine"]
+    go -- "sidecar protocol" --> server
+    cli --> server
+    mcp --> server
+    rust -- "session daemon" --> cli
+    runner --> server
+    server -- "CDP" --> chrome["Chrome"]
+    solvers["eoka-solvers (optional)"] -.-> server
+```
 
 ## Install
 
@@ -86,7 +110,6 @@ actions:
 | [**eoka-runner**](crates/eoka-runner) | Declarative YAML automation runner |
 | [**eoka-solvers**](crates/eoka-solvers) | Optional CAPTCHA plugins: Anti-Captcha provider and local DataDome slider |
 | [**eoka-email**](crates/eoka-email) | IMAP helpers for OTP and verification-link flows |
-| [**eoka-proxy**](crates/eoka-proxy) | Shared proxy parsing and configuration |
 
 ## Plugins
 

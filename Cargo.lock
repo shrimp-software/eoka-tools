@@ -686,7 +686,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-cli"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -743,7 +743,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-protocol"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "eoka",
  "schemars",
@@ -754,22 +754,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "eoka-proxy"
-version = "0.2.0"
-dependencies = [
- "percent-encoding",
- "url",
-]
-
-[[package]]
 name = "eoka-runner"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "clap",
  "eoka",
  "eoka-email",
  "eoka-protocol",
- "eoka-proxy",
  "eoka-server",
  "regex",
  "serde",
@@ -784,7 +775,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-sdk"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "anyhow",
  "eoka",
@@ -797,20 +788,20 @@ dependencies = [
 
 [[package]]
 name = "eoka-server"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
  "dirs",
  "eoka",
  "eoka-protocol",
- "eoka-proxy",
  "eoka-solvers",
  "fs2",
  "futures-util",
  "hmac",
  "libc",
  "parking_lot 0.13.0",
+ "percent-encoding",
  "reqwest",
  "rusqlite",
  "serde",

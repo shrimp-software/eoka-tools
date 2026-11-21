@@ -1,7 +1,7 @@
 use serde_json::{json, Value};
 
+use crate::proxy::ProxyConfig;
 use eoka::Browser;
-use eoka_proxy::ProxyConfig;
 
 use super::{parse_params, PageIdParams};
 use crate::state::AppState;
@@ -149,7 +149,7 @@ async fn initialize_browser(
 fn resolve_proxy(params: Option<ProxyParams>) -> Result<Option<ProxyConfig>, ServerError> {
     params
         .map(|params| {
-            eoka_proxy::parse_server(&params.server, params.username, params.password)
+            crate::proxy::parse_server(&params.server, params.username, params.password)
                 .map_err(|error| ServerError::invalid_params(error.to_string()))
         })
         .transpose()
