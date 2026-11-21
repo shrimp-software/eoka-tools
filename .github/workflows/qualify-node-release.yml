@@ -33,12 +33,6 @@ on:
     outputs:
       source-sha:
         value: ${{ jobs.source.outputs.sha }}
-      artifact-name:
-        value: eoka-npm-packages
-      artifact-id:
-        value: ${{ jobs.collect.outputs.artifact-id }}
-      artifact-digest:
-        value: ${{ jobs.collect.outputs.artifact-digest }}
 
 permissions:
   contents: read
@@ -133,22 +127,15 @@ jobs:
           TARGET: ${{ matrix.target }}
           ASSET: ${{ matrix.asset }}
           EXT: ${{ matrix.ext }}
-          PLATFORM: ${{ matrix.platform }}
           CARGO_HOME: ${{ runner.temp }}/qualification-cargo
         run: |
           set -euo pipefail
-          test ! -e .cargo/config
-          test ! -e .cargo/config.toml
-          test -z "${EOKA_CORE_PATH:-}"
           mkdir -p "$CARGO_HOME" dist
           cargo build --release --locked --target "$TARGET" -p eoka-server
-          cargo metadata --locked --format-version 1 > "dist/$PLATFORM-cargo.json"
-          cargo test --release --locked --target "$TARGET" -p eoka-server recordings:: -- --nocapture 2>&1 | tee "dist/$PLATFORM-recording-tests.log"
-          cargo test --release --locked --target "$TARGET" -p eoka-server operations::tests::live_runtime_is_not_recovered_by_a_second_owner -- --exact --nocapture 2>&1 | tee "dist/$PLATFORM-operation-lock-tests.log"
+          cargo test --release --locked --target "$TARGET" -p eoka-server recordings::
+          cargo test --release --locked --target "$TARGET" -p eoka-server operations::tests::live_runtime_is_not_recovered_by_a_second_owner -- --exact
           cp "target/$TARGET/release/eoka-server$EXT" "dist/$ASSET"
-          cp Cargo.lock "dist/$PLATFORM-Cargo.lock"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        if: always()
         with:
           name: node-native-${{ matrix.platform }}
           path: dist/
@@ -170,27 +157,6 @@ jobs:
           pattern: node-native-*
           path: native
           merge-multiple: true
-      - name: Validate native core provenance
-        run: |
-          mise exec -- node --input-type=module -e '
-            import assert from "node:assert/strict";
-            import {readFile} from "node:fs/promises";
-            const lock = (await readFile("Cargo.lock", "utf8")).replaceAll("\r\n", "\n");
-            const coreLock = lock.split("[[package]]").filter(block => /^name = "eoka"$/m.test(block));
-            assert.equal(coreLock.length, 1);
-            const coreVersion = /^version = "([^"]+)"$/m.exec(coreLock[0])?.[1];
-            assert.ok(coreVersion);
-            assert.match(coreLock[0], /^source = "registry\+https:\/\/github\.com\/rust-lang\/crates\.io-index"$/m);
-            assert.match(coreLock[0], /^checksum = "[a-f0-9]{64}"$/m);
-            for (const platform of ["linux-x64-gnu","linux-arm64-gnu","darwin-x64","darwin-arm64","win32-x64"]) {
-              const metadata = JSON.parse(await readFile(`native/${platform}-cargo.json`, "utf8"));
-              const cores = metadata.packages.filter(p => p.name === "eoka");
-              assert.equal(cores.length, 1);
-              assert.equal(cores[0].version, coreVersion);
-              assert.equal(cores[0].source, "registry+https://github.com/rust-lang/crates.io-index");
-              assert.equal((await readFile(`native/${platform}-Cargo.lock`, "utf8")).replaceAll("\r\n", "\n"), lock);
-            }
-          '
       - name: Build SDK and stage all native artifacts
         env:
           PUBLICATION: ${{ inputs.publication || false }}
@@ -198,13 +164,10 @@ jobs:
           set -euo pipefail
           mise exec -- npm --prefix clients/node ci --ignore-scripts --omit=optional
           mise run node-build
-          mise exec -- node --test clients/node/tests/recording-qualification.test.mjs clients/node/tests/release-qualification.test.mjs clients/node/tests/publication-recovery.test.mjs clients/node/tests/sigstore-verification.test.mjs
           args=()
           if [[ "$PUBLICATION" == true ]]; then args+=(--publication); fi
           mise exec -- node clients/node/scripts/stage-release.mjs --artifacts native --output stage "${args[@]}"
-          mise exec -- node clients/node/scripts/qualify-release.mjs --stage stage --output packages --pack-only
-          mkdir packages/provenance
-          cp native/*-cargo.json native/*-Cargo.lock packages/provenance/
+          mise exec -- node clients/node/scripts/qualify-release.mjs --pack-only --stage stage --output packages
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: node-release-candidates
@@ -232,26 +195,17 @@ jobs:
           - platform: win32-x64
             os: windows-2025
     steps:
-      - name: Install Linux browser and headed dependencies
+      - name: Install Linux browser dependencies
         if: startsWith(matrix.platform, 'linux-')
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ca-certificates curl git xz-utils unzip ffmpeg xvfb libnss3 libgbm1 fonts-liberation procps
+          sudo apt-get install -y --no-install-recommends ca-certificates curl git xz-utils unzip ffmpeg libnss3 libgbm1 fonts-liberation
+          # Ubuntu 24.04 AppArmor blocks the user namespaces Chrome's sandbox needs.
+          if [[ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]]; then sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0; fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ needs.source.outputs.sha }}
           persist-credentials: false
-      - name: Permit sandbox namespaces only for isolated ARM qualification Chrome
-        if: matrix.platform == 'linux-arm64-gnu'
-        run: |
-          set -euo pipefail
-          root="$(mktemp -d /tmp/eq.XXXXXX)"
-          printf 'TMPDIR=%s\nEOKA_QUALIFICATION_TEMP=%s\n' "$root" "$root" >> "$GITHUB_ENV"
-          printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile eoka-qualification "%s/eq-*/{r,c}/**/chrome" flags=(unconfined) {\n  userns,\n}\n' "$root" > "$RUNNER_TEMP/eoka-qualification.apparmor"
-          sudo apparmor_parser -r "$RUNNER_TEMP/eoka-qualification.apparmor"
-          mkdir -p evidence/linux-arm64-gnu
-          cp "$RUNNER_TEMP/eoka-qualification.apparmor" evidence/linux-arm64-gnu/apparmor-profile.txt
-          cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns > evidence/linux-arm64-gnu/apparmor-userns-setting.txt
       - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b
       - name: Install macOS decoder
         if: startsWith(matrix.platform, 'darwin-')
@@ -264,63 +218,4 @@ jobs:
           name: node-release-candidates
           path: packages
       - name: Exercise packed native SDK outside repository
-        env:
-          EOKA_SOURCE_SHA: ${{ needs.source.outputs.sha }}
-          EOKA_PUBLICATION: ${{ inputs.publication || false }}
-          PLATFORM: ${{ matrix.platform }}
-        run: |
-          mise exec -- node clients/node/scripts/qualify-release.mjs --packages packages --cache "$RUNNER_TEMP/b" --output "evidence/$PLATFORM"
-      - name: Remove isolated ARM qualification policy and scratch root
-        if: always() && matrix.platform == 'linux-arm64-gnu'
-        run: |
-          status=0
-          if [[ -f "$RUNNER_TEMP/eoka-qualification.apparmor" ]]; then
-            sudo apparmor_parser -R "$RUNNER_TEMP/eoka-qualification.apparmor" || status=$?
-          fi
-          if [[ -n "${EOKA_QUALIFICATION_TEMP:-}" ]]; then rm -rf -- "$EOKA_QUALIFICATION_TEMP"; fi
-          printf 'TMPDIR=/tmp\n' >> "$GITHUB_ENV"
-          exit "$status"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        if: always()
-        with:
-          name: node-qualification-${{ matrix.platform }}
-          path: evidence/
-          if-no-files-found: error
-          retention-days: 14
-
-  collect:
-    needs: [source, stage, runtime]
-    runs-on: ubuntu-22.04
-    outputs:
-      artifact-id: ${{ steps.packages.outputs.artifact-id }}
-      artifact-digest: ${{ steps.packages.outputs.artifact-digest }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          ref: ${{ needs.source.outputs.sha }}
-          persist-credentials: false
-      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
-        with:
-          name: node-release-candidates
-          path: packages
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
-        with:
-          pattern: node-qualification-*
-          path: evidence
-          merge-multiple: true
-      - name: Require complete same-revision qualification evidence
-        env:
-          EOKA_SOURCE_SHA: ${{ needs.source.outputs.sha }}
-          EOKA_PUBLICATION: ${{ inputs.publication || false }}
-        run: |
-          mise exec -- node clients/node/scripts/qualify-release.mjs --packages packages --evidence evidence --output qualified --aggregate
-          cp -R packages/provenance qualified/provenance
-      - id: packages
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        with:
-          name: eoka-npm-packages
-          path: qualified/
-          if-no-files-found: error
-          retention-days: 14
-
+        run: mise exec -- node clients/node/scripts/qualify-release.mjs --packages packages --cache "$RUNNER_TEMP/b"

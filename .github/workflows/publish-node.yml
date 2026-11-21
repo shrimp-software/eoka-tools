@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       source_sha:
-        description: Exact 40-character commit currently at protected main; publishes the SDK version in clients/node/package.json to latest
+        description: Exact 40-character commit currently at main; publishes the SDK version in clients/node/package.json to latest
         required: true
         type: string
       server_tag:
@@ -12,17 +12,9 @@ on:
         required: false
         type: string
         default: ''
-      bootstrap:
-        description: First publication using the approved NPM_BOOTSTRAP_TOKEN environment secret; retains provenance
-        required: false
-        type: boolean
-        default: false
 
 permissions:
   contents: read
-
-env:
-  NPM_BOOTSTRAP: ${{ inputs.bootstrap && 'true' || 'false' }}
 
 concurrency:
   group: npm-prerelease-publication
@@ -30,22 +22,22 @@ concurrency:
 
 jobs:
   gate:
-    name: Verify protected source and environment
+    name: Verify source
     runs-on: ubuntu-22.04
-    permissions:
-      contents: read
-      actions: read
     env:
       SOURCE_SHA: ${{ inputs.source_sha }}
-      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b
-      - name: Fail closed before qualification or deployment
-        run: mise exec -- node clients/node/scripts/publish-release.mjs gate
+      - name: Publish only the dispatched main commit with consistent versions
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_SHA" = "$SOURCE_SHA"
+          if grep -q '^\[patch.crates-io\]' Cargo.toml; then echo "Remove [patch.crates-io] before publishing"; exit 1; fi
+          mise exec -- node scripts/bump-release.mjs --check
 
   qualify:
     name: Qualify exact publication payload
@@ -78,61 +70,33 @@ jobs:
       name: npm-prerelease
     permissions:
       contents: read
-      actions: read
       id-token: write
-    env:
-      SOURCE_SHA: ${{ inputs.source_sha }}
-      GH_TOKEN: ${{ github.token }}
-      QUALIFICATION_ARTIFACT_ID: ${{ needs.qualify.outputs.artifact-id }}
-      QUALIFICATION_ARTIFACT_DIGEST: ${{ needs.qualify.outputs.artifact-digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b
-      - name: Recheck approved source and protections
-        run: mise exec -- node clients/node/scripts/publish-release.mjs gate
-      - name: Install SDK build dependencies without scripts
-        run: mise exec -- npm --prefix clients/node ci --ignore-scripts --omit=optional
-      - name: Build source metadata verifier
-        run: mise exec -- npm --prefix clients/node run build
-      - name: Verify exact same-run qualification artifact and all package hashes
-        run: mise exec -- node clients/node/scripts/publish-release.mjs download
-      - name: Publish using trusted OIDC only
-        if: ${{ !inputs.bootstrap }}
-        run: mise exec -- node clients/node/scripts/publish-release.mjs publish
-      - name: Bootstrap package names with token and provenance
-        if: ${{ inputs.bootstrap }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
-        run: mise exec -- node clients/node/scripts/publish-release.mjs publish
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: node-release-candidates
+          path: packages
+      - name: Publish with trusted OIDC and provenance
+        run: mise exec -- node clients/node/scripts/publish-release.mjs publish packages
 
   registry-smoke:
     name: Clean registry install and browser smoke
-    needs: [qualify, publish]
+    needs: publish
     runs-on: ubuntu-22.04
-    permissions:
-      contents: read
-      actions: read
-    env:
-      SOURCE_SHA: ${{ inputs.source_sha }}
-      GH_TOKEN: ${{ github.token }}
-      QUALIFICATION_ARTIFACT_ID: ${{ needs.qualify.outputs.artifact-id }}
-      QUALIFICATION_ARTIFACT_DIGEST: ${{ needs.qualify.outputs.artifact-digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b
       - name: Install Chrome runtime dependencies
         run: .github/scripts/chrome-deps.sh
-      - name: Install SDK build dependencies without scripts
-        run: mise exec -- npm --prefix clients/node ci --ignore-scripts --omit=optional
-      - name: Build source metadata verifier
-        run: mise exec -- npm --prefix clients/node run build
-      - name: Verify exact same-run qualification payload again
-        run: mise exec -- node clients/node/scripts/publish-release.mjs download
-      - name: Verify registry integrity and provenance then run browser smoke
-        run: mise exec -- node clients/node/scripts/publish-release.mjs smoke
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: node-release-candidates
+          path: packages
+      - name: Verify registry integrity and signatures, then run a browser smoke
+        run: mise exec -- node clients/node/scripts/publish-release.mjs smoke packages

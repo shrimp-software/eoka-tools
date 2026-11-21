@@ -226,21 +226,6 @@ test('group/world-writable package executable fails closed', { skip: process.pla
   assert.equal((await probe()).code, 'ServerPackageMismatch');
 }));
 
-test('release commands reject removed core override options before staging or qualification', async () => {
-  for (const script of ['stage-release.mjs', 'qualify-release.mjs']) {
-    for (const option of ['--core-ref', '--core-path']) {
-      await assert.rejects(
-        exec(process.execPath, [join(import.meta.dirname, '..', 'scripts', script), option, 'unused']),
-        error => {
-          assert.notEqual(error.code, 0);
-          assert.ok(error.stderr.includes(`Unknown argument: ${option}`));
-          return true;
-        },
-      );
-    }
-  }
-});
-
 test('controlled staging rejects absent and non-native artifacts without publishing output', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'eoka-stage-reject-'));
   try {

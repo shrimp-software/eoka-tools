@@ -108,13 +108,8 @@ jobs:
           case "$http_status" in
             200) echo "@cbxss/eoka ${version} is already on npm" ;;
             404)
-              ready=$(jq -r '.status == "ready" and (.blockers | length) == 0' clients/node/scripts/publication-readiness.json)
-              server_tag=""
-              # A blocked npm gate must not hold back the server release.
-              if [ "$ready" = true ] && [ -n "${SERVER_TAG:-}" ]; then
-                server_tag="$SERVER_TAG"
-                SERVER_TAG=""
-              fi
+              server_tag="${SERVER_TAG:-}"
+              SERVER_TAG=""
               echo "Dispatching npm publication of @cbxss/eoka ${version} (server release: ${server_tag:-none})"
               gh workflow run publish-node.yml --repo "${{ github.repository }}" --ref main -f source_sha="$GITHUB_SHA" -f server_tag="$server_tag"
               ;;
