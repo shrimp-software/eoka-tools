@@ -34,6 +34,6 @@ published artifact; failures preserve stage, code, retained private partial path
 and uncertain-cleanup evidence. Recovery is live-session-scoped, never automatic
 restart. Method/capability negotiation does not guarantee a browser encoder.
 The Node contracts and bundled schemas are generated from this module. See
-[the wire protocol](../../PROTOCOL.md#file-artifacts-and-native-recording) for
+[the wire protocol](../../docs/protocol.md#file-artifacts-and-native-recording) for
 transition, retry, cancellation and file-publication semantics.
 

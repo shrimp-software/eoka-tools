@@ -10,7 +10,7 @@ needed, restructure or rename instead.
 This applies to all crates and modules in this repo, not just new code —
 when you touch a file, strip comments you find in the code you're editing.
 
-Markdown docs (README.md, PROTOCOL.md, this file) are not code comments and
+Markdown docs (README.md, docs/protocol.md, this file) are not code comments and
 are unaffected by this rule.
 
 ## Tool protocol source of truth

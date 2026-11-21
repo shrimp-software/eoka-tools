@@ -107,7 +107,7 @@ Action steps accept `operation_id` and `timeout_ms`. Click, type and key input
 require an `expect` condition that is false before the action. Match the examples
 to your application; locators are strict. Whole-workflow retries with more than
 one attempt are rejected. Use the operation ID to inspect an uncertain result.
-See [OPERATIONS.md](../../OPERATIONS.md) for the canonical `perform` request and
+See [docs/operations.md](../../docs/operations.md) for the canonical `perform` request and
 recovery commands.
 
 ## Action Types

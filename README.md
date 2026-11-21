@@ -6,16 +6,13 @@ For existing AI agents, use `eoka view` and `eoka step` (MCP `agent_observe` /
 `agent_step`, Tack `eoka.agent.observe` / `eoka.agent.step`). They combine compact
 page state, stable control references, one durable action and fresh observations.
 Exploratory input reports uncertainty without claiming task completion.
-See [AGENT-BROWSING.md](AGENT-BROWSING.md) for the contract and examples.
+See [docs/agent-browsing.md](docs/agent-browsing.md) for the contract and examples.
 
-See [RELIABILITY-MIGRATION.md](RELIABILITY-MIGRATION.md) for the breaking protocol 2 session, input, JavaScript and completion contracts.
-The [validation report](RELIABILITY-VALIDATION.md) records local proof and the remaining macOS and publication gates.
-
-## Durable actions (core 0.8 / CLI 0.7)
+## Durable actions
 
 High-level actions now return durable operation records. Click and key actions
 require an explicit expected outcome. Generate an operation UUID before sending,
-then inspect `operations get/wait` after a lost response. See [OPERATIONS.md](OPERATIONS.md)
+then inspect `operations get/wait` after a lost response. See [docs/operations.md](docs/operations.md)
 for CLI, MCP, Rust/Go and runner migration, retention and download recovery.
 
 ## Components
@@ -103,7 +100,7 @@ before its deadline is stopped and reported as `navigation_timeout`, leaving the
 tab on its previous page. While one command runs, another waits at most 5 s and
 is then refused with `daemon_busy`, naming the running command. `eoka status`
 reports what a session is running and what blocks its tab. MCP tools and Tack
-receive the same codes. See [agent browsing](AGENT-BROWSING.md#blocked-and-busy-sessions).
+receive the same codes. See [agent browsing](docs/agent-browsing.md#blocked-and-busy-sessions).
 
 ## Browser downloads and bounded fetch
 
@@ -300,7 +297,7 @@ mise run sidecar-check
 ```
 
 The sidecar registry is separate from the CLI tool catalog. See
-[PROTOCOL.md](PROTOCOL.md) for negotiation, message bounds, shutdown and action
+[docs/protocol.md](docs/protocol.md) for negotiation, message bounds, shutdown and action
 outcome guarantees.
 
 See the package README for release staging, managed/explicit launch, offline and
@@ -396,7 +393,7 @@ eoka tack 'return await tools.invoke({ path: "eoka.info", input: {} });'
 - [eoka CLI skill](crates/eoka-cli/skill/SKILL.md)
 - [eoka-runner](crates/eoka-runner/README.md)
 - [Go client](clients/go/README.md)
-- [server protocol](PROTOCOL.md)
+- [server protocol](docs/protocol.md)
 
 Install the skill from the binary, without Node. With no directory it writes
 `~/.agents/skills/eoka`, which Codex and other agents that read
