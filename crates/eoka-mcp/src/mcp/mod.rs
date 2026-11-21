@@ -897,7 +897,7 @@ impl EokaServer {
         &self,
         req: Parameters<SolveCaptchaRequest>,
     ) -> Result<CallToolResult, ErrorData> {
-        let solver = ::captcha::AntiCaptcha::new(req.0.api_key);
+        let solver = ::eoka_captcha::AntiCaptcha::new(req.0.api_key);
 
         let solution = match req.0.captcha_type.to_lowercase().as_str() {
             "hcaptcha" => solver.solve_hcaptcha(&req.0.website_url, &req.0.website_key).await,

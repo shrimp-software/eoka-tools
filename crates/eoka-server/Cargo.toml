@@ -1,13 +1,12 @@
 [package]
 name = "eoka-server"
-version = "0.11.4"
+version = "0.11.5"
 edition.workspace = true
 license.workspace = true
 description = "Shared browser runtime and sidecar process for eoka browser automation"
 keywords = ["browser", "automation", "sidecar", "json-rpc"]
 categories = ["web-programming", "development-tools"]
 repository.workspace = true
-homepage.workspace = true
 authors.workspace = true
 
 [[bin]]
@@ -28,7 +27,7 @@ base64 = "0.23"
 anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-captcha = { workspace = true }
+eoka-captcha = { workspace = true }
 eoka-datadome = { workspace = true }
 time = { version = "0.3", features = ["formatting", "macros"] }
 

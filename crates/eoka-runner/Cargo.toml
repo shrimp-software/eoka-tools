@@ -7,7 +7,6 @@ description = "Config-based browser automation — define actions in YAML, execu
 keywords = ["browser", "automation", "yaml", "scripting", "cli"]
 categories = ["web-programming", "development-tools", "command-line-utilities"]
 repository.workspace = true
-homepage.workspace = true
 documentation = "https://docs.rs/eoka-runner"
 readme = "README.md"
 authors.workspace = true

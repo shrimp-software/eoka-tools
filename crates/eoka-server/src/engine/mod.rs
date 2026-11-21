@@ -30,7 +30,7 @@ use std::collections::HashMap;
 use std::fmt::Write as FmtWrite;
 
 use crate::{annotate, observe, snapshot};
-use ::captcha::{build_captcha_inject_js, parse_captcha_inject_kind};
+use ::eoka_captcha::{build_captcha_inject_js, parse_captcha_inject_kind};
 use base64::Engine as _;
 use eoka::cdp::{
     transport::{CommandDispatch, RequestPause},
