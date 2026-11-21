@@ -25,41 +25,51 @@ use error::{internal, invalid, is_transport_error_msg, AgentError};
 use helpers::{element_list, resolve_js, text_ok};
 use types::*;
 
-const MCP_PROTOCOL_TOOL_ROUTES: &[(&str, &str)] = &[
-    ("agent_observe", "agent_observe"),
-    ("agent_step", "agent_step"),
-    ("action_perform", "action_perform"),
-    ("operation_get", "operation_get"),
-    ("operation_list", "operation_list"),
-    ("operation_wait", "operation_wait"),
-    ("operation_cancel", "operation_cancel"),
-    ("download_start", "download_start"),
-    ("download_list", "download_list"),
-    ("download_get", "download_get"),
-    ("download_wait", "download_wait"),
-    ("download_cancel", "download_cancel"),
-    ("fetch", "fetch"),
-    ("snapshot", "snapshot"),
-    ("observe", "observe"),
-    ("click", "click"),
-    ("fill", "fill"),
-    ("select", "select"),
-    ("hover", "hover"),
-    ("type_key", "key"),
-    ("mouse_down", "mouse_down"),
-    ("mouse_move", "mouse_move"),
-    ("mouse_up", "mouse_up"),
-    ("key_down", "key_down"),
-    ("key_up", "key_up"),
-    ("release_all_inputs", "release_all_inputs"),
-    ("scroll", "scroll"),
-    ("find_text", "find"),
-    ("new_tab", "tab_new"),
-    ("switch_tab", "tab_switch"),
-    ("close_tab", "tab_close"),
-    ("spa_navigate", "spa_navigate"),
-    ("save_state", "save_state"),
-    ("captcha_turnstile", "captcha_turnstile"),
+#[derive(Clone, Copy, PartialEq)]
+enum Via {
+    Custom,
+    Engine,
+    Launched,
+    Browser,
+    Envelope,
+    Action,
+}
+
+const MCP_PROTOCOL_TOOLS: &[(&str, &str, Via)] = &[
+    ("agent_observe", "agent_observe", Via::Envelope),
+    ("agent_step", "agent_step", Via::Custom),
+    ("action_perform", "action_perform", Via::Custom),
+    ("operation_get", "operation_get", Via::Custom),
+    ("operation_list", "operation_list", Via::Custom),
+    ("operation_wait", "operation_wait", Via::Custom),
+    ("operation_cancel", "operation_cancel", Via::Custom),
+    ("download_start", "download_start", Via::Custom),
+    ("download_list", "download_list", Via::Custom),
+    ("download_get", "download_get", Via::Custom),
+    ("download_wait", "download_wait", Via::Custom),
+    ("download_cancel", "download_cancel", Via::Custom),
+    ("fetch", "fetch", Via::Engine),
+    ("snapshot", "snapshot", Via::Launched),
+    ("observe", "observe", Via::Custom),
+    ("click", "click", Via::Action),
+    ("fill", "fill", Via::Action),
+    ("select", "select", Via::Action),
+    ("hover", "hover", Via::Action),
+    ("type_key", "key", Via::Action),
+    ("mouse_down", "mouse_down", Via::Launched),
+    ("mouse_move", "mouse_move", Via::Launched),
+    ("mouse_up", "mouse_up", Via::Launched),
+    ("key_down", "key_down", Via::Launched),
+    ("key_up", "key_up", Via::Launched),
+    ("release_all_inputs", "release_all_inputs", Via::Engine),
+    ("scroll", "scroll", Via::Engine),
+    ("find_text", "find", Via::Engine),
+    ("new_tab", "tab_new", Via::Custom),
+    ("switch_tab", "tab_switch", Via::Browser),
+    ("close_tab", "tab_close", Via::Browser),
+    ("spa_navigate", "spa_navigate", Via::Engine),
+    ("save_state", "save_state", Via::Engine),
+    ("captcha_turnstile", "captcha_turnstile", Via::Launched),
 ];
 
 const MCP_OWN_TOOL_COMMANDS: &[(&str, &str)] = &[
@@ -76,11 +86,58 @@ const MCP_OWN_TOOL_COMMANDS: &[(&str, &str)] = &[
     ("inject_captcha_token", "captcha_inject"),
 ];
 
+fn annotations(operation: &eoka_protocol::OperationSpec) -> ToolAnnotations {
+    ToolAnnotations::new()
+        .read_only(operation.read_only)
+        .destructive(operation.destructive)
+}
+
+fn add_route(
+    router: &mut ToolRouter<EokaServer>,
+    name: String,
+    operation: &'static eoka_protocol::OperationSpec,
+    via: Via,
+) {
+    let mut tool = Tool::new(
+        name.clone(),
+        operation.description,
+        rmcp::model::object(input_schema_for_cmd(operation.cmd)),
+    );
+    tool.annotations = Some(annotations(operation));
+    router.add_route(rmcp::handler::server::router::tool::ToolRoute::new_dyn(
+        tool,
+        move |context: rmcp::handler::server::tool::ToolCallContext<'_, EokaServer>| {
+            let name = name.clone();
+            Box::pin(async move {
+                context
+                    .service
+                    .catalog_tool(&name, operation, via, context.arguments)
+                    .await
+                    .map(Into::into)
+            })
+        },
+    ));
+}
+
 fn add_catalog_tools(router: &mut ToolRouter<EokaServer>, include_opt_in: bool) {
-    let covered: std::collections::HashSet<&str> = MCP_PROTOCOL_TOOL_ROUTES
+    for (name, command, via) in MCP_PROTOCOL_TOOLS {
+        let operation = operation_by_cmd(command).expect("MCP route must use a cataloged command");
+        if *via != Via::Custom {
+            add_route(router, (*name).to_owned(), operation, *via);
+            continue;
+        }
+        let route = router
+            .map
+            .get_mut(*name)
+            .expect("custom MCP route must be registered");
+        route.attr.description = Some(operation.description.into());
+        route.attr.input_schema = rmcp::model::object(input_schema_for_cmd(operation.cmd)).into();
+        route.attr.annotations = Some(annotations(operation));
+    }
+    let covered: std::collections::HashSet<&str> = MCP_PROTOCOL_TOOLS
         .iter()
-        .chain(MCP_OWN_TOOL_COMMANDS)
-        .map(|(_, command)| *command)
+        .map(|(_, command, _)| *command)
+        .chain(MCP_OWN_TOOL_COMMANDS.iter().map(|(_, command)| *command))
         .collect();
     for operation in eoka_protocol::sidecar::page_operations() {
         let name = operation.name.replace('.', "_");
@@ -93,47 +150,7 @@ fn add_catalog_tools(router: &mut ToolRouter<EokaServer>, include_opt_in: bool) 
         {
             continue;
         }
-        let spoken = name.clone();
-        let mut tool = Tool::new(
-            name,
-            operation.description,
-            rmcp::model::object(input_schema_for_cmd(operation.cmd)),
-        );
-        tool.annotations = Some(
-            ToolAnnotations::new()
-                .read_only(operation.read_only)
-                .destructive(operation.destructive),
-        );
-        router.add_route(rmcp::handler::server::router::tool::ToolRoute::new_dyn(
-            tool,
-            move |context: rmcp::handler::server::tool::ToolCallContext<'_, EokaServer>| {
-                let spoken = spoken.clone();
-                Box::pin(async move {
-                    context
-                        .service
-                        .catalog_tool(operation, &spoken, context.arguments)
-                        .await
-                        .map(Into::into)
-                })
-            },
-        ));
-    }
-}
-
-fn apply_protocol_tool_metadata(router: &mut ToolRouter<EokaServer>) {
-    for (route_name, command) in MCP_PROTOCOL_TOOL_ROUTES {
-        let operation = operation_by_cmd(command).expect("MCP route must use a cataloged command");
-        let route = router
-            .map
-            .get_mut(*route_name)
-            .expect("MCP protocol route must be registered");
-        route.attr.description = Some(operation.description.into());
-        route.attr.input_schema = rmcp::model::object(input_schema_for_cmd(operation.cmd)).into();
-        route.attr.annotations = Some(
-            ToolAnnotations::new()
-                .read_only(operation.read_only)
-                .destructive(operation.destructive),
-        );
+        add_route(router, name, operation, Via::Engine);
     }
 }
 
@@ -163,16 +180,27 @@ impl EokaServer {
 
     async fn catalog_tool(
         &self,
+        tool: &str,
         operation: &'static eoka_protocol::OperationSpec,
-        spoken: &str,
+        via: Via,
         arguments: Option<JsonObject>,
     ) -> Result<CallToolResult, ErrorData> {
-        let request = eoka_protocol::request_from_cmd(
-            operation.cmd,
-            Value::Object(arguments.unwrap_or_default()),
-        )
-        .map_err(invalid)?;
-        self.engine_tool(spoken, request).await
+        let arguments = Value::Object(arguments.unwrap_or_default());
+        let request = match eoka_protocol::request_from_cmd(operation.cmd, arguments.clone()) {
+            Ok(request) => request,
+            Err(error) => {
+                return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
+                    "failed to deserialize parameters: {error}"
+                ))]))
+            }
+        };
+        match via {
+            Via::Action => self.action_tool(tool, operation.cmd, arguments).await,
+            Via::Launched => self.launched_tool(tool, request).await,
+            Via::Browser => self.unwrapped(tool, request, Needs::Browser).await,
+            Via::Envelope => self.envelope_tool(tool, request, Needs::Page).await,
+            _ => self.engine_tool(tool, request).await,
+        }
     }
 
     async fn respond(
@@ -414,7 +442,6 @@ impl EokaServer {
             .map(|v| v != "false" && v != "0")
             .unwrap_or(true);
         let mut tool_router = Self::tool_router();
-        apply_protocol_tool_metadata(&mut tool_router);
         add_catalog_tools(&mut tool_router, include_opt_in);
         if !eoka_server::features::built("anti-captcha") {
             tool_router.remove_route("solve_captcha");
@@ -433,15 +460,6 @@ impl EokaServer {
             headless,
             tool_router,
         }
-    }
-
-    #[tool]
-    async fn agent_observe(
-        &self,
-        req: Parameters<eoka_protocol::AgentObserveArgs>,
-    ) -> Result<CallToolResult, ErrorData> {
-        self.envelope_tool("agent_observe", Operation::AgentObserve(req.0), Needs::Page)
-            .await
     }
 
     #[tool]
@@ -622,18 +640,6 @@ impl EokaServer {
             .await
     }
 
-    #[tool(description = "Switch to a different browser tab by ID. Get IDs from list_tabs.")]
-    async fn switch_tab(&self, req: Parameters<TabIdRequest>) -> Result<CallToolResult, ErrorData> {
-        self.unwrapped("switch_tab", Operation::TabSwitch(req.0), Needs::Browser)
-            .await
-    }
-
-    #[tool(description = "Close a browser tab by ID. Cannot close the last remaining tab.")]
-    async fn close_tab(&self, req: Parameters<TabIdRequest>) -> Result<CallToolResult, ErrorData> {
-        self.unwrapped("close_tab", Operation::TabClose(req.0), Needs::Browser)
-            .await
-    }
-
     #[tool(
         description = "Navigate to a URL and return a durable operation record. operation_id is optional and is generated when omitted. Launches browser on first call. \
         Optional: headers (e.g. CVE-2025-29927 bypass), user_agent override, bypass_csp."
@@ -689,111 +695,6 @@ impl EokaServer {
         ]))
     }
 
-    #[tool]
-    async fn snapshot(
-        &self,
-        req: Parameters<SnapshotRequest>,
-    ) -> Result<CallToolResult, ErrorData> {
-        self.launched_tool("snapshot", Operation::Snapshot(req.0))
-            .await
-    }
-
-    #[tool]
-    async fn click(&self, req: Parameters<TargetRequest>) -> Result<CallToolResult, ErrorData> {
-        self.action_tool(
-            "click",
-            "click",
-            serde_json::to_value(req.0).map_err(internal)?,
-        )
-        .await
-    }
-
-    #[tool]
-    async fn fill(&self, req: Parameters<FillRequest>) -> Result<CallToolResult, ErrorData> {
-        self.action_tool(
-            "fill",
-            "fill",
-            serde_json::to_value(req.0).map_err(internal)?,
-        )
-        .await
-    }
-
-    #[tool]
-    async fn select(&self, req: Parameters<SelectRequest>) -> Result<CallToolResult, ErrorData> {
-        self.action_tool(
-            "select",
-            "select",
-            serde_json::to_value(req.0).map_err(internal)?,
-        )
-        .await
-    }
-
-    #[tool]
-    async fn hover(&self, req: Parameters<TargetRequest>) -> Result<CallToolResult, ErrorData> {
-        self.action_tool(
-            "hover",
-            "hover",
-            serde_json::to_value(req.0).map_err(internal)?,
-        )
-        .await
-    }
-
-    #[tool(
-        description = "Press keyboard key. Common: Enter, Tab, Escape, ArrowDown, ArrowUp, Backspace, Space."
-    )]
-    async fn type_key(&self, req: Parameters<TypeKeyRequest>) -> Result<CallToolResult, ErrorData> {
-        self.action_tool(
-            "type_key",
-            "key",
-            serde_json::to_value(req.0).map_err(internal)?,
-        )
-        .await
-    }
-
-    #[tool]
-    async fn mouse_down(
-        &self,
-        req: Parameters<MouseButtonRequest>,
-    ) -> Result<CallToolResult, ErrorData> {
-        self.launched_tool("mouse_down", Operation::MouseDown(req.0))
-            .await
-    }
-
-    #[tool]
-    async fn mouse_move(
-        &self,
-        req: Parameters<MouseMoveRequest>,
-    ) -> Result<CallToolResult, ErrorData> {
-        self.launched_tool("mouse_move", Operation::MouseMove(req.0))
-            .await
-    }
-
-    #[tool]
-    async fn mouse_up(
-        &self,
-        req: Parameters<MouseButtonRequest>,
-    ) -> Result<CallToolResult, ErrorData> {
-        self.launched_tool("mouse_up", Operation::MouseUp(req.0))
-            .await
-    }
-
-    #[tool]
-    async fn key_down(&self, req: Parameters<TypeKeyRequest>) -> Result<CallToolResult, ErrorData> {
-        self.launched_tool("key_down", Operation::KeyDown(req.0))
-            .await
-    }
-
-    #[tool]
-    async fn key_up(&self, req: Parameters<TypeKeyRequest>) -> Result<CallToolResult, ErrorData> {
-        self.launched_tool("key_up", Operation::KeyUp(req.0)).await
-    }
-
-    #[tool]
-    async fn release_all_inputs(&self) -> Result<CallToolResult, ErrorData> {
-        self.engine_tool("release_all_inputs", Operation::ReleaseAllInputs)
-            .await
-    }
-
     #[tool(
         description = "Execute durable actions in sequence. Each action supplies its own operation_id, action and options. Stops on an uncertain or failed outcome; completed records remain inspectable."
     )]
@@ -832,21 +733,6 @@ impl EokaServer {
         ))
     }
 
-    #[tool]
-    async fn scroll(&self, req: Parameters<ScrollRequest>) -> Result<CallToolResult, ErrorData> {
-        self.engine_tool("scroll", Operation::Scroll(req.0)).await
-    }
-
-    #[tool(
-        description = "Find elements by text content (case-insensitive). Returns matching elements with indices."
-    )]
-    async fn find_text(
-        &self,
-        req: Parameters<FindTextRequest>,
-    ) -> Result<CallToolResult, ErrorData> {
-        self.engine_tool("find_text", Operation::Find(req.0)).await
-    }
-
     #[tool(
         description = "Run JavaScript in the page and return its awaited JSON result. code (or file) may be a function, called once with arguments, such as (sel) => document.querySelector(sel).textContent; an expression, such as document.title; or statements, run as an async function body where return gives the value. The code runs exactly once. raw=true sends the code to CDP unchanged."
     )]
@@ -860,15 +746,6 @@ impl EokaServer {
     )]
     async fn exec(&self, req: Parameters<JsRequest>) -> Result<CallToolResult, ErrorData> {
         self.engine_tool("exec", Operation::Exec(req.0)).await
-    }
-
-    #[tool(
-        description = "Make an HTTP request from inside the browser session. Uses the browser's real cookies, TLS fingerprint, and Cloudflare clearance — bypasses bot detection that blocks curl. \
-        Returns status, headers, and body. Use instead of Bash(curl) for any target protected by Cloudflare or requiring authentication. \
-        Set redirect='manual' to capture redirect URLs without following (useful for OAuth redirect_uri testing)."
-    )]
-    async fn fetch(&self, req: Parameters<FetchRequest>) -> Result<CallToolResult, ErrorData> {
-        self.engine_tool("fetch", Operation::Fetch(req.0)).await
     }
 
     #[tool(
@@ -914,17 +791,6 @@ impl EokaServer {
     )]
     async fn spa_info(&self) -> Result<CallToolResult, ErrorData> {
         self.engine_tool("spa_info", Operation::SpaInfo).await
-    }
-
-    #[tool(
-        description = "Navigate SPA to a new path without page reload. Uses the detected router (React Router, Next.js, Vue Router, etc.) or falls back to History API. Much faster than full page navigation for SPAs."
-    )]
-    async fn spa_navigate(
-        &self,
-        req: Parameters<SpaNavigateRequest>,
-    ) -> Result<CallToolResult, ErrorData> {
-        self.engine_tool("spa_navigate", Operation::SpaNavigate(req.0))
-            .await
     }
 
     #[tool(
@@ -975,15 +841,6 @@ impl EokaServer {
         req: Parameters<SolveCaptchaRequest>,
     ) -> Result<CallToolResult, ErrorData> {
         solve_with_anti_captcha(req).await
-    }
-
-    #[tool]
-    async fn captcha_turnstile(
-        &self,
-        req: Parameters<eoka_protocol::CaptchaTurnstileArgs>,
-    ) -> Result<CallToolResult, ErrorData> {
-        self.launched_tool("captcha_turnstile", Operation::CaptchaTurnstile(req.0))
-            .await
     }
 
     #[tool(
@@ -1208,17 +1065,6 @@ impl EokaServer {
     }
 
     #[tool(
-        description = "Save browser auth state (cookies + localStorage + sessionStorage) to a JSON file. Use after login to persist sessions across restarts. Captures httpOnly cookies via CDP for full fidelity. The path must end in .json and can only replace an empty file or an earlier state file."
-    )]
-    async fn save_state(
-        &self,
-        req: Parameters<SaveStateRequest>,
-    ) -> Result<CallToolResult, ErrorData> {
-        self.engine_tool("save_state", Operation::SaveState(req.0))
-            .await
-    }
-
-    #[tool(
         description = "Load browser auth state (cookies + localStorage + sessionStorage) from a JSON file. Restores a previously saved session — avoids re-login, 2FA, etc. By default navigates to the saved URL first."
     )]
     async fn load_state(
@@ -1410,28 +1256,28 @@ mod tests {
 
     #[test]
     fn every_catalog_operation_is_an_mcp_tool() {
-        let router = {
-            let mut router = EokaServer::tool_router();
-            apply_protocol_tool_metadata(&mut router);
-            add_catalog_tools(&mut router, true);
-            router
-        };
-        for (tool, command) in MCP_OWN_TOOL_COMMANDS.iter().chain(MCP_PROTOCOL_TOOL_ROUTES) {
-            assert!(router.map.contains_key(*tool), "{tool} is not registered");
+        let mut router = EokaServer::tool_router();
+        add_catalog_tools(&mut router, true);
+        let routes = MCP_PROTOCOL_TOOLS
+            .iter()
+            .map(|(tool, command, _)| (*tool, *command))
+            .chain(MCP_OWN_TOOL_COMMANDS.iter().copied());
+        for (tool, command) in routes {
+            assert!(router.map.contains_key(tool), "{tool} is not registered");
             assert!(
                 operation_by_cmd(command).is_some(),
                 "{command} is not cataloged"
             );
         }
-        let covered: std::collections::HashSet<&str> = MCP_PROTOCOL_TOOL_ROUTES
-            .iter()
-            .chain(MCP_OWN_TOOL_COMMANDS)
-            .map(|(_, command)| *command)
-            .collect();
         for operation in eoka_protocol::sidecar::page_operations() {
             let name = operation.name.replace('.', "_");
+            let covered = MCP_PROTOCOL_TOOLS
+                .iter()
+                .map(|(_, command, _)| *command)
+                .chain(MCP_OWN_TOOL_COMMANDS.iter().map(|(_, command)| *command))
+                .any(|command| command == operation.cmd);
             assert!(
-                covered.contains(operation.cmd)
+                covered
                     || router.map.contains_key(name.as_str())
                     || !eoka_server::features::operation_built(operation),
                 "catalog operation {} has no MCP tool",
@@ -1457,7 +1303,7 @@ mod tests {
     fn mcp_protocol_descriptors_match_catalog() {
         let server = EokaServer::new();
 
-        for (route_name, command) in MCP_PROTOCOL_TOOL_ROUTES {
+        for (route_name, command, _) in MCP_PROTOCOL_TOOLS {
             let operation = operation_by_cmd(command).unwrap();
             let route = server.tool_router.get(route_name).unwrap();
             assert_eq!(route.description.as_deref(), Some(operation.description));

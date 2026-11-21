@@ -330,6 +330,16 @@ async fn main() {
                 arguments: serde_json::json!({"expect":settings.expect,"timeout_ms":settings.timeout_ms}),
             });
         }
+        _ if settings.operation_id.is_some()
+            || settings.expect.is_some()
+            || settings.timeout_ms.is_some() =>
+        {
+            eprintln!(
+                "{} does not take --expect, --operation-id or --action-timeout-ms",
+                request.cmd()
+            );
+            std::process::exit(2)
+        }
         _ => {}
     }
     let request_cmd = request.cmd();

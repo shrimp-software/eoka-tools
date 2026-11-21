@@ -7,12 +7,12 @@ use crate::session;
 use eoka_protocol::{
     read_msg, write_msg, CaptchaDatadomeArgs, CaptchaInjectArgs, CaptchaTurnstileArgs,
     ClearFlagArgs, CloneFromArgs, ConsoleArgs, DeleteCookieArgs, DomainArgs, EmulateArgs,
-    FakeCameraArgs, FetchArgs, FillArgs, FrameEvalArgs, HeadersArgs, IdArgs, InterceptAddArgs,
-    KeyArgs, LoadStateArgs, ModeArgs, MouseButtonArgs, MouseMoveArgs, NetworkExportArgs,
-    NetworkLogArgs, NetworkRecordStartArgs, NetworkShowArgs, NetworkWaitArgs, ObserveArgs,
-    OpenArgs, PathArgs, PathStringArgs, Request, Response, ScreenshotArgs, ScriptArgs, SelectArgs,
-    SetCookieArgs, SetStorageArgs, SnapshotArgs, StorageArgs, TabIdArgs, TabNewArgs, TargetArgs,
-    TextArgs, WaitArgs, WasmFindArgs, WasmReadArgs, WasmWriteArgs,
+    FakeCameraArgs, FetchArgs, FillArgs, FrameEvalArgs, HeadersArgs, HeldKeyArgs, IdArgs,
+    InterceptAddArgs, KeyArgs, LoadStateArgs, ModeArgs, MouseButtonArgs, MouseMoveArgs,
+    NetworkExportArgs, NetworkLogArgs, NetworkRecordStartArgs, NetworkShowArgs, NetworkWaitArgs,
+    ObserveArgs, OpenArgs, PathArgs, PathStringArgs, Request, Response, ScreenshotArgs, ScriptArgs,
+    SelectArgs, SetCookieArgs, SetStorageArgs, SnapshotArgs, StorageArgs, TabIdArgs, TabNewArgs,
+    TargetArgs, TextArgs, WaitArgs, WasmFindArgs, WasmReadArgs, WasmWriteArgs,
 };
 
 macro_rules! forward_requests {
@@ -110,8 +110,8 @@ impl EokaClient {
         fn mouse_down(args: MouseButtonArgs) => MouseDown;
         fn mouse_move(args: MouseMoveArgs) => MouseMove;
         fn mouse_up(args: MouseButtonArgs) => MouseUp;
-        fn key_down(args: KeyArgs) => KeyDown;
-        fn key_up(args: KeyArgs) => KeyUp;
+        fn key_down(args: HeldKeyArgs) => KeyDown;
+        fn key_up(args: HeldKeyArgs) => KeyUp;
         fn release_all_inputs() => ReleaseAllInputs;
         fn scroll(args: TargetArgs) => Scroll;
         fn eval(args: ScriptArgs) => Eval;

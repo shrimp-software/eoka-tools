@@ -152,6 +152,12 @@ pub struct KeyArgs {
     pub key: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct HeldKeyArgs {
+    #[schemars(description = "Key to hold or release, for example Shift, Control, or a.")]
+    pub key: String,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum MouseButton {

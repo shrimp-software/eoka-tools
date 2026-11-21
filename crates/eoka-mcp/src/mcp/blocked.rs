@@ -5,7 +5,7 @@ use eoka_server::eoka::Page;
 use rmcp::model::{CallToolResponse, CallToolResult, ContentBlock, ErrorData};
 use serde_json::Value;
 
-use super::{EokaServer, MCP_OWN_TOOL_COMMANDS, MCP_PROTOCOL_TOOL_ROUTES};
+use super::{EokaServer, MCP_OWN_TOOL_COMMANDS, MCP_PROTOCOL_TOOLS};
 
 pub(super) const BUSY_LIMIT: Duration = Duration::from_secs(60);
 
@@ -16,9 +16,10 @@ pub(super) fn command_for_tool(tool: &str) -> &str {
         "wait_ms" | "wait_for_text" | "wait_for_network_idle" => "wait",
         "session_storage_get" => "storage",
         "session_storage_set" => "set_storage",
-        tool => MCP_PROTOCOL_TOOL_ROUTES
+        tool => MCP_PROTOCOL_TOOLS
             .iter()
-            .chain(MCP_OWN_TOOL_COMMANDS)
+            .map(|(name, command, _)| (*name, *command))
+            .chain(MCP_OWN_TOOL_COMMANDS.iter().copied())
             .find(|(name, _)| *name == tool)
             .map_or(tool, |(_, command)| command),
     }

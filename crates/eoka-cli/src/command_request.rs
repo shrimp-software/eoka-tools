@@ -5,10 +5,10 @@ use crate::cli::{CaptchaAction, Command, JsAction, TabAction, WasmAction};
 use crate::protocol::{
     CaptchaDatadomeArgs, CaptchaTurnstileArgs, ClearFlagArgs, CloneFromArgs, ConsoleArgs,
     DeleteCookieArgs, DomainArgs, EmulateArgs, FakeCameraArgs, FetchArgs, FillArgs, FrameEvalArgs,
-    HeadersArgs, KeyArgs, LoadStateArgs, ModeArgs, MouseButton, MouseButtonArgs, MouseMoveArgs,
-    ObserveArgs, OpenArgs, PathArgs, PathStringArgs, Request, ScreenshotArgs, ScriptArgs,
-    SelectArgs, SetCookieArgs, SetStorageArgs, SnapshotArgs, StorageArgs, TabIdArgs, TabNewArgs,
-    TargetArgs, TextArgs, WaitArgs, WasmFindArgs, WasmReadArgs, WasmWriteArgs,
+    HeadersArgs, HeldKeyArgs, KeyArgs, LoadStateArgs, ModeArgs, MouseButton, MouseButtonArgs,
+    MouseMoveArgs, ObserveArgs, OpenArgs, PathArgs, PathStringArgs, Request, ScreenshotArgs,
+    ScriptArgs, SelectArgs, SetCookieArgs, SetStorageArgs, SnapshotArgs, StorageArgs, TabIdArgs,
+    TabNewArgs, TargetArgs, TextArgs, WaitArgs, WasmFindArgs, WasmReadArgs, WasmWriteArgs,
 };
 use network::network_action_to_request;
 
@@ -253,14 +253,8 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
             y,
             button: parse_mouse_button(&button),
         }),
-        Command::KeyDown { key } => Request::KeyDown(KeyArgs {
-            operation: Default::default(),
-            key,
-        }),
-        Command::KeyUp { key } => Request::KeyUp(KeyArgs {
-            operation: Default::default(),
-            key,
-        }),
+        Command::KeyDown { key } => Request::KeyDown(HeldKeyArgs { key }),
+        Command::KeyUp { key } => Request::KeyUp(HeldKeyArgs { key }),
         Command::ReleaseAllInputs => Request::ReleaseAllInputs,
         Command::Scroll { target } => Request::Scroll(TargetArgs {
             operation: Default::default(),

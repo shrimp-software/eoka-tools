@@ -127,9 +127,7 @@ jobs:
           persist-credentials: false
       - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b
       - name: Install Chrome runtime dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libasound2 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libgbm1 libgtk-3-0 libnss3 libx11-xcb1 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 fonts-liberation
+        run: .github/scripts/chrome-deps.sh
       - name: Install SDK build dependencies without scripts
         run: mise exec -- npm --prefix clients/node ci --ignore-scripts --omit=optional
       - name: Build source metadata verifier

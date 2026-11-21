@@ -66,11 +66,7 @@ jobs:
           mise install "node@$exact"
           echo "NODE_EXACT=$exact" | tee -a "$GITHUB_ENV"
       - name: Install Chrome runtime dependencies
-        run: |
-          set -euo pipefail
-          apt=(sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30)
-          "${apt[@]}" update
-          "${apt[@]}" install -y --no-install-recommends libasound2 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libgbm1 libgtk-3-0 libnss3 libx11-xcb1 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 fonts-liberation
+        run: .github/scripts/chrome-deps.sh
       # Ubuntu AppArmor blocks unprivileged user namespaces; Chrome's sandbox needs them.
       - name: Permit Chrome sandbox namespaces
         run: |
