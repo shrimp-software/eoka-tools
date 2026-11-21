@@ -43,10 +43,6 @@ manifest = manifest
   .replace(`"version": "${current.server.version}"`, `"version": "${server}"`);
 await writeFile(path('release-manifest.json'), manifest);
 
-const readiness = JSON.parse(await readFile(path('scripts/publication-readiness.json'), 'utf8'));
-readiness.sdkVersion = sdk;
-await writeJson('scripts/publication-readiness.json', readiness);
-
 await writeRepoPins();
 
 const drift = [...(await versionDrift(root)), ...(await repoVersionDrift())];

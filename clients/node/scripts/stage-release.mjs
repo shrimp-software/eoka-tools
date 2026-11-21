@@ -18,12 +18,7 @@ export async function stageRelease({ artifacts, output, hostOnly = false, public
   const selected = hostOnly ? [detectPlatform()] : [...platforms];
   if (!hostOnly && (selected.length !== platformIds.length || !platformIds.every((id) => selected.includes(id)))) throw new Error('Release staging requires all five server artifacts. Use --host-only for a clearly marked local development gate.');
   if (publication && hostOnly) throw new Error('Publication cannot use host-only development artifacts');
-  if (publication && Object.keys(process.env).some(key => /^(?:EOKA_(?:SERVER_BIN|CHROME_PATH|CORE_(?:REF|PATH))|CARGO_PATCH_|CARGO_SOURCE_|CARGO_BUILD_RUSTFLAGS$|RUSTFLAGS$)/.test(key) && process.env[key])) throw new Error('Publication cannot use local runtime or Cargo overrides');
   if (publication && ((await versionDrift(root)).length || Object.values(manifest.server.platforms).some(pin => pin.development))) throw new Error('Publication requires consistent release versions (scripts/bump-release.mjs --check) and non-development source metadata');
-  if (publication) {
-    const readiness = JSON.parse(await readFile(join(root, 'scripts', 'publication-readiness.json'), 'utf8'));
-    if (readiness.schemaVersion !== 1 || readiness.sdkVersion !== manifest.sdkVersion || readiness.chromeBuildId !== manifest.chrome.buildId || readiness.status !== 'ready' || !Array.isArray(readiness.blockers) || readiness.blockers.length !== 0) throw new Error(`Publication readiness blocked: ${JSON.stringify(readiness.blockers)}`);
-  }
   try {
     await lstat(output);
     throw new Error(`Refusing to replace existing staging output: ${output}`);

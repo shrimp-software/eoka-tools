@@ -1,7 +1,7 @@
 // Release version sources of truth: the SDK version in clients/node/package.json,
 // the server version in crates/eoka-server/Cargo.toml and the eoka version in
-// the root Cargo.toml [workspace.dependencies]. The Node manifest, lockfile and
-// readiness file, the eoka-server eoka pin and the Go server download repeat
+// the root Cargo.toml [workspace.dependencies]. The Node manifest and lockfile,
+// the eoka-server eoka pin and the Go server download repeat
 // them; scripts/bump-release.mjs writes them, versionDrift() checks the Node
 // files and repoVersionDrift() checks the rest.
 import { readFile, writeFile } from 'node:fs/promises';
@@ -26,17 +26,14 @@ export async function versionDrift(root = sdkRoot) {
   const read = async file => JSON.parse(await readFile(join(root, file), 'utf8'));
   const manifest = await read('release-manifest.json');
   const lock = await read('package-lock.json');
-  const readiness = await read('scripts/publication-readiness.json');
   const found = {
     'release-manifest.json sdkVersion': manifest.sdkVersion,
     ...Object.fromEntries(Object.entries(manifest.server.platforms).map(([id, pin]) => [`release-manifest.json ${id} packageVersion`, pin.packageVersion])),
     'package-lock.json version': lock.version,
     'package-lock.json root package version': lock.packages?.['']?.version,
-    'publication-readiness.json sdkVersion': readiness.sdkVersion,
   };
   const drift = Object.entries(found).filter(([, value]) => value !== sdk).map(([where, value]) => `${where} is ${value}, package.json is ${sdk}`);
   if (manifest.server.version !== server) drift.push(`release-manifest.json server.version is ${manifest.server.version}, eoka-server crate is ${server}`);
-  if (readiness.chromeBuildId !== manifest.chrome.buildId) drift.push(`publication-readiness.json chromeBuildId is ${readiness.chromeBuildId}, manifest pins ${manifest.chrome.buildId}`);
   return drift;
 }
 

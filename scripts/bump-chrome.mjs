@@ -3,11 +3,10 @@
 // Run it by hand when updating Chrome; CI and qualification then test the bump.
 //
 // Rewrites the build id, download URLs and sha256 digests in the release
-// manifest (hashing each platform archive as it streams) and the build id in
-// the publication readiness file. Prints `updated=<bool>` and `version=<id>`
-// in GITHUB_OUTPUT format.
+// manifest, hashing each platform archive as it streams. Prints
+// `updated=<bool>` and `version=<id>` in GITHUB_OUTPUT format.
 //
-//   node scripts/bump-chrome.mjs [--version <build>] [--manifest <path>] [--readiness <path>]
+//   node scripts/bump-chrome.mjs [--version <build>] [--manifest <path>]
 import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
@@ -16,7 +15,6 @@ const { values: args } = parseArgs({
   options: {
     version: { type: 'string' },
     manifest: { type: 'string', default: 'clients/node/release-manifest.json' },
-    readiness: { type: 'string', default: 'clients/node/scripts/publication-readiness.json' },
   },
 });
 
@@ -58,9 +56,6 @@ text = text.replaceAll(current, target);
 const updated = JSON.parse(text);
 if (updated.chrome.buildId !== target) throw new Error('Manifest rewrite failed');
 await writeFile(args.manifest, text);
-
-const readiness = await readFile(args.readiness, 'utf8');
-await writeFile(args.readiness, readiness.replaceAll(current, target));
 
 console.log('updated=true');
 console.log(`version=${target}`);
