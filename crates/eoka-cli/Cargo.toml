@@ -1,6 +1,6 @@
 [package]
 name = "eoka-cli"
-version = "0.14.7"
+version = "0.15.0"
 edition.workspace = true
 license.workspace = true
 description = "Browser automation CLI for AI agents and pentesting"
@@ -11,16 +11,22 @@ authors.workspace = true
 name = "eoka"
 path = "src/main.rs"
 
+[features]
+default = ["anti-captcha", "datadome", "tack"]
+anti-captcha = ["eoka-server/anti-captcha", "eoka-solvers/anti-captcha"]
+datadome = ["eoka-server/datadome"]
+tack = ["dep:eoka-tack", "dep:tack-core", "dep:tack-runtime-quickjs"]
+
 [dependencies]
 uuid = { version = "1", features = ["v4"] }
 eoka-protocol = { workspace = true }
 eoka-server = { workspace = true }
 eoka-sdk = { workspace = true }
-eoka-tack = { workspace = true }
-eoka-captcha = { workspace = true }
+eoka-tack = { workspace = true, optional = true }
+eoka-solvers = { workspace = true }
 eoka = { workspace = true }
-tack-core = { workspace = true }
-tack-runtime-quickjs = { workspace = true }
+tack-core = { workspace = true, optional = true }
+tack-runtime-quickjs = { workspace = true, optional = true }
 clap = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
@@ -34,4 +40,4 @@ tar = "0.4"
 [dev-dependencies]
 tempfile = "3"
 shlex = "2.0"
-eoka-datadome = { workspace = true, features = ["test-fixtures"] }
+eoka-solvers = { workspace = true, features = ["test-fixtures"] }

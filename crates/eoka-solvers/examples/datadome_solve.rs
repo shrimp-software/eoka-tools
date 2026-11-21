@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use click::click_visible;
 use eoka::{Browser, Page};
-use eoka_datadome::{DataDomeSolver, SolveOutcome};
+use eoka_solvers::datadome::{DataDomeSolver, SolveOutcome};
 use options::Options;
 
 type RunResult = Result<(), Box<dyn std::error::Error>>;
@@ -170,7 +170,7 @@ async fn main() -> RunResult {
         tracing_subscriber::fmt()
             .with_env_filter(
                 tracing_subscriber::EnvFilter::try_from_default_env()
-                    .unwrap_or_else(|_| "eoka_datadome=info".into()),
+                    .unwrap_or_else(|_| "eoka_solvers=info".into()),
             )
             .init();
     }

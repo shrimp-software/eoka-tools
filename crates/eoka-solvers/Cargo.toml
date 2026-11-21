@@ -1,0 +1,40 @@
+[package]
+name = "eoka-solvers"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Optional CAPTCHA solvers for eoka: Anti-Captcha provider, local DataDome slider and token injection"
+repository.workspace = true
+readme = "README.md"
+
+[features]
+default = ["anti-captcha", "datadome"]
+anti-captcha = ["dep:ureq", "dep:serde", "dep:tokio", "dep:url"]
+datadome = ["dep:eoka", "dep:image", "dep:base64", "dep:serde", "dep:tokio", "dep:url", "dep:tracing"]
+test-fixtures = ["datadome", "tokio/net", "tokio/io-util"]
+
+[dependencies]
+serde_json = "1"
+ureq = { version = "3", default-features = false, features = ["rustls", "json", "platform-verifier"], optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+tokio = { version = "1", features = ["time", "rt", "sync"], optional = true }
+url = { version = "2", optional = true }
+eoka = { workspace = true, optional = true }
+image = { version = "0.25", default-features = false, features = ["png"], optional = true }
+base64 = { version = "0.23", optional = true }
+tracing = { version = "0.1", optional = true }
+
+[dev-dependencies]
+libc = "0.2"
+zeroize = "1"
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[[example]]
+name = "datadome_solve"
+required-features = ["datadome"]
+
+[[test]]
+name = "nested_fixture"
+required-features = ["test-fixtures"]

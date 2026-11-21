@@ -2,7 +2,7 @@ mod support {
     pub mod fixture;
 }
 use eoka::Browser;
-use eoka_datadome::{DataDomeSolver, SolveOutcome};
+use eoka_solvers::datadome::{DataDomeSolver, SolveOutcome};
 use std::time::Duration;
 use support::fixture::Fixture;
 
@@ -54,7 +54,7 @@ async fn nested_local_slider_and_block_notice() {
                 })
                 .await;
             assert!(
-                matches!(failed,Err(eoka_datadome::SolveError::Browser(eoka::Error::Io(error))) if error.to_string()=="fixture input failure")
+                matches!(failed,Err(eoka_solvers::datadome::SolveError::Browser(eoka::Error::Io(error))) if error.to_string()=="fixture input failure")
             );
         }
         let outcome = if simple {
@@ -135,7 +135,7 @@ async fn adversarial_fixture(mode: &str) {
     .expect("bounded fixture solve");
     if ["mirrored", "many-images", "shadow-open", "shadow-closed"].contains(&mode) {
         assert!(
-            matches!(&outcome, Err(eoka_datadome::SolveError::Puzzle(message)) if message == if mode == "many-images" { "image element limit exceeded" } else { "unsupported image placement" }),
+            matches!(&outcome, Err(eoka_solvers::datadome::SolveError::Puzzle(message)) if message == if mode == "many-images" { "image element limit exceeded" } else { "unsupported image placement" }),
             "{mode}: {outcome:?}"
         );
         assert!(!page

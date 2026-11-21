@@ -135,7 +135,7 @@ additional seconds for cleanup. JSON output is available through `--json`.
 successful no-op. Blocks, bans, failed clearance and errors exit nonzero. No
 session is launched/restarted and no preceding application action is replayed.
 Use the same session/connection flags as before; an older daemon must be upgraded
-explicitly. See [the DataDome guide](../crates/eoka-datadome/README.md) for details.
+explicitly. See [the DataDome guide](../crates/eoka-solvers/DATADOME.md) for details.
 
 ## Local safety defaults
 

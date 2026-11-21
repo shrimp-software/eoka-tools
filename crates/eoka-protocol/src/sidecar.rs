@@ -1587,6 +1587,13 @@ fn catalog_params_schema(operation: &crate::OperationSpec) -> Value {
     input
 }
 
+pub fn method_feature(method: &str) -> Option<&'static str> {
+    match method {
+        "page.solve_captcha" => Some("anti-captcha"),
+        _ => catalog_operation(method).and_then(|operation| operation.feature),
+    }
+}
+
 pub fn method_names() -> Vec<&'static str> {
     METHODS
         .iter()

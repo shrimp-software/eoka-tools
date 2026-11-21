@@ -84,10 +84,26 @@ actions:
 | [**eoka-tack**](crates/eoka-tack) | Tack `ToolSet` adapter generated from the Eoka protocol catalog |
 | [**@cbxss/eoka**](clients/node) | Node/TypeScript SDK for private sidecar sessions; npm beta: `npm install @cbxss/eoka` |
 | [**eoka-runner**](crates/eoka-runner) | Declarative YAML automation runner |
-| [**eoka-captcha**](crates/eoka-captcha) | Optional Anti-Captcha integrations |
-| [**eoka-datadome**](crates/eoka-datadome) | Experimental local DataDome slider solver |
+| [**eoka-solvers**](crates/eoka-solvers) | Optional CAPTCHA plugins: Anti-Captcha provider and local DataDome slider |
 | [**eoka-email**](crates/eoka-email) | IMAP helpers for OTP and verification-link flows |
 | [**eoka-proxy**](crates/eoka-proxy) | Shared proxy parsing and configuration |
+
+## Plugins
+
+CAPTCHA solving and Tack scripting are cargo features. The released binaries include all of them; leave them out for a smaller build:
+
+| Feature | Adds | Crates |
+|---|---|---|
+| `anti-captcha` | `eoka captcha solve`, MCP `solve_captcha`, sidecar `page.solve_captcha` | eoka-cli, eoka-mcp, eoka-server |
+| `datadome` | `eoka captcha datadome`, `captcha.datadome` | eoka-cli, eoka-mcp, eoka-server |
+| `tack` | `eoka tack` | eoka-cli |
+
+```sh
+cargo install eoka-cli --no-default-features
+cargo install eoka-cli --no-default-features --features datadome
+```
+
+A build without a plugin leaves its operations out of `server.hello`, the MCP tool list and `eoka tools manifest`, and answers `feature_unavailable` if one is called anyway. Turnstile clicking, CAPTCHA detection and token injection need no extra crates and are always built in.
 
 ## Documentation
 

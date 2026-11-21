@@ -685,28 +685,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "eoka-captcha"
-version = "0.1.3"
-dependencies = [
- "serde",
- "serde_json",
- "tokio",
- "ureq",
- "url",
-]
-
-[[package]]
 name = "eoka-cli"
-version = "0.14.7"
+version = "0.15.0"
 dependencies = [
  "anyhow",
  "clap",
  "eoka",
- "eoka-captcha",
- "eoka-datadome",
  "eoka-protocol",
  "eoka-sdk",
  "eoka-server",
+ "eoka-solvers",
  "eoka-tack",
  "flate2",
  "libc",
@@ -720,24 +708,6 @@ dependencies = [
  "tokio",
  "ureq",
  "uuid",
-]
-
-[[package]]
-name = "eoka-datadome"
-version = "0.6.3"
-dependencies = [
- "base64 0.23.1",
- "eoka",
- "image",
- "libc",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "url",
- "zeroize",
 ]
 
 [[package]]
@@ -756,13 +726,13 @@ dependencies = [
 
 [[package]]
 name = "eoka-mcp"
-version = "0.11.4"
+version = "0.12.0"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
- "eoka-captcha",
  "eoka-protocol",
  "eoka-server",
+ "eoka-solvers",
  "rmcp",
  "schemars",
  "serde",
@@ -773,7 +743,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-protocol"
-version = "0.10.3"
+version = "0.11.0"
 dependencies = [
  "eoka",
  "schemars",
@@ -793,7 +763,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-runner"
-version = "0.7.11"
+version = "0.8.0"
 dependencies = [
  "clap",
  "eoka",
@@ -814,7 +784,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-sdk"
-version = "0.10.9"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "eoka",
@@ -827,16 +797,15 @@ dependencies = [
 
 [[package]]
 name = "eoka-server"
-version = "0.11.5"
+version = "0.12.0"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
  "dirs",
  "eoka",
- "eoka-captcha",
- "eoka-datadome",
  "eoka-protocol",
  "eoka-proxy",
+ "eoka-solvers",
  "fs2",
  "futures-util",
  "hmac",
@@ -859,8 +828,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "eoka-solvers"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "eoka",
+ "image",
+ "libc",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "ureq",
+ "url",
+ "zeroize",
+]
+
+[[package]]
 name = "eoka-tack"
-version = "0.9.7"
+version = "0.10.0"
 dependencies = [
  "async-trait",
  "eoka-protocol",

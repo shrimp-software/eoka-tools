@@ -9,6 +9,7 @@ pub mod cloudflare;
 pub mod dispatch;
 pub mod downloads;
 pub mod engine;
+pub mod features;
 mod file_publication;
 mod methods;
 pub mod observe;

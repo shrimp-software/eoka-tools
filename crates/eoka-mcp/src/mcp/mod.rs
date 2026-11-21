@@ -86,7 +86,11 @@ fn add_catalog_tools(router: &mut ToolRouter<EokaServer>, include_opt_in: bool) 
         let name = operation.name.replace('.', "_");
         let hidden =
             operation.exposure == eoka_protocol::OperationExposure::OptIn && !include_opt_in;
-        if hidden || covered.contains(operation.cmd) || router.map.contains_key(name.as_str()) {
+        if hidden
+            || !eoka_server::features::operation_built(operation)
+            || covered.contains(operation.cmd)
+            || router.map.contains_key(name.as_str())
+        {
             continue;
         }
         let spoken = name.clone();
@@ -325,6 +329,77 @@ impl EokaServer {
     }
 }
 
+#[cfg(feature = "anti-captcha")]
+async fn solve_with_anti_captcha(
+    req: Parameters<SolveCaptchaRequest>,
+) -> Result<CallToolResult, ErrorData> {
+    let solver = ::eoka_solvers::AntiCaptcha::new(req.0.api_key);
+
+    let solution = match req.0.captcha_type.to_lowercase().as_str() {
+            "hcaptcha" => solver.solve_hcaptcha(&req.0.website_url, &req.0.website_key).await,
+            "recaptcha_v2" => solver.solve_recaptcha_v2(&req.0.website_url, &req.0.website_key).await,
+            "recaptcha_v2_enterprise" => solver
+                .solve_recaptcha_v2_enterprise(
+                    &req.0.website_url,
+                    &req.0.website_key,
+                    req.0.enterprise_payload,
+                    req.0.api_domain.as_deref(),
+                )
+                .await,
+            "recaptcha_v3" => {
+                let page_action = req.0.page_action.unwrap_or_else(|| "submit".to_string());
+                let min_score = req.0.min_score.unwrap_or(0.3);
+                solver
+                    .solve_recaptcha_v3(
+                        &req.0.website_url,
+                        &req.0.website_key,
+                        &page_action,
+                        min_score,
+                    )
+                    .await
+            }
+            "amazon_waf" => {
+                let iv = req.0.iv.as_deref().ok_or_else(|| internal("amazon_waf requires iv"))?;
+                let context = req.0.context.as_deref().ok_or_else(|| internal("amazon_waf requires context"))?;
+                solver.solve_amazon_waf(
+                    &req.0.website_url, &req.0.website_key, iv, context,
+                    req.0.captcha_script.as_deref(), req.0.challenge_script.as_deref(),
+                ).await
+            }
+            _ => {
+                return Err(internal(format!(
+                    "Unknown captcha type: {}. Use 'hcaptcha', 'recaptcha_v2', 'recaptcha_v2_enterprise', 'recaptcha_v3', or 'amazon_waf'",
+                    req.0.captcha_type
+                )))
+            }
+        };
+
+    match solution {
+        Ok(solution) => {
+            let token = solution
+                .token()
+                .ok_or_else(|| internal("Captcha solution contained no token"))?;
+            text_ok(
+                serde_json::json!({
+                    "token": token,
+                    "user_agent": solution.user_agent,
+                })
+                .to_string(),
+            )
+        }
+        Err(e) => Err(internal(format!("Failed to solve captcha: {}", e))),
+    }
+}
+
+#[cfg(not(feature = "anti-captcha"))]
+async fn solve_with_anti_captcha(
+    _req: Parameters<SolveCaptchaRequest>,
+) -> Result<CallToolResult, ErrorData> {
+    Err(internal(eoka_server::features::unavailable_message(
+        "anti-captcha",
+    )))
+}
+
 #[tool_router]
 impl EokaServer {
     pub fn new() -> Self {
@@ -341,6 +416,9 @@ impl EokaServer {
         let mut tool_router = Self::tool_router();
         apply_protocol_tool_metadata(&mut tool_router);
         add_catalog_tools(&mut tool_router, include_opt_in);
+        if !eoka_server::features::built("anti-captcha") {
+            tool_router.remove_route("solve_captcha");
+        }
         eoka_server::engine::blockers::set_surface(eoka_server::engine::blockers::Surface::Mcp);
         let mut engine = eoka_server::engine::Engine::new("mcp", launch_spec(headless, None));
         engine.patch_binary(true);
@@ -896,62 +974,7 @@ impl EokaServer {
         &self,
         req: Parameters<SolveCaptchaRequest>,
     ) -> Result<CallToolResult, ErrorData> {
-        let solver = ::eoka_captcha::AntiCaptcha::new(req.0.api_key);
-
-        let solution = match req.0.captcha_type.to_lowercase().as_str() {
-            "hcaptcha" => solver.solve_hcaptcha(&req.0.website_url, &req.0.website_key).await,
-            "recaptcha_v2" => solver.solve_recaptcha_v2(&req.0.website_url, &req.0.website_key).await,
-            "recaptcha_v2_enterprise" => solver
-                .solve_recaptcha_v2_enterprise(
-                    &req.0.website_url,
-                    &req.0.website_key,
-                    req.0.enterprise_payload,
-                    req.0.api_domain.as_deref(),
-                )
-                .await,
-            "recaptcha_v3" => {
-                let page_action = req.0.page_action.unwrap_or_else(|| "submit".to_string());
-                let min_score = req.0.min_score.unwrap_or(0.3);
-                solver
-                    .solve_recaptcha_v3(
-                        &req.0.website_url,
-                        &req.0.website_key,
-                        &page_action,
-                        min_score,
-                    )
-                    .await
-            }
-            "amazon_waf" => {
-                let iv = req.0.iv.as_deref().ok_or_else(|| internal("amazon_waf requires iv"))?;
-                let context = req.0.context.as_deref().ok_or_else(|| internal("amazon_waf requires context"))?;
-                solver.solve_amazon_waf(
-                    &req.0.website_url, &req.0.website_key, iv, context,
-                    req.0.captcha_script.as_deref(), req.0.challenge_script.as_deref(),
-                ).await
-            }
-            _ => {
-                return Err(internal(format!(
-                    "Unknown captcha type: {}. Use 'hcaptcha', 'recaptcha_v2', 'recaptcha_v2_enterprise', 'recaptcha_v3', or 'amazon_waf'",
-                    req.0.captcha_type
-                )))
-            }
-        };
-
-        match solution {
-            Ok(solution) => {
-                let token = solution
-                    .token()
-                    .ok_or_else(|| internal("Captcha solution contained no token"))?;
-                text_ok(
-                    serde_json::json!({
-                        "token": token,
-                        "user_agent": solution.user_agent,
-                    })
-                    .to_string(),
-                )
-            }
-            Err(e) => Err(internal(format!("Failed to solve captcha: {}", e))),
-        }
+        solve_with_anti_captcha(req).await
     }
 
     #[tool]
@@ -1408,7 +1431,9 @@ mod tests {
         for operation in eoka_protocol::sidecar::page_operations() {
             let name = operation.name.replace('.', "_");
             assert!(
-                covered.contains(operation.cmd) || router.map.contains_key(name.as_str()),
+                covered.contains(operation.cmd)
+                    || router.map.contains_key(name.as_str())
+                    || !eoka_server::features::operation_built(operation),
                 "catalog operation {} has no MCP tool",
                 operation.cmd
             );

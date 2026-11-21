@@ -13,7 +13,7 @@ import (
 	"strings"
 )
 
-const serverReleaseVersion = "0.11.5"
+const serverReleaseVersion = "0.12.0"
 
 const defaultReleaseBaseURL = "https://github.com/shrimp-software/eoka-tools/releases/download"
 

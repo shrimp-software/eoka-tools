@@ -1,14 +1,15 @@
 use base64::Engine;
-use eoka_captcha::{build_captcha_inject_js, AntiCaptcha, CaptchaInjectionKind};
 use eoka_protocol::sidecar::{
     AttributeResult, BoundedFetchParams, BoundedFetchResult, CaptureStateResult, ClickShadowParams,
     ClickShadowResult, ContentResult, ErrorCode, EvaluateResult, ExistsResult, FetchParams,
     FetchResult, FrameInfo, FrameJsParams, FramesParams, GetAttributeParams, HeldKeyParams,
     JsParams, MouseButtonParams, MouseMoveParams, RawJsParams, RestoreStateParams,
     ScreenshotParams, ScreenshotToFileParams, SelectorParams, ServerError, SetViewportParams,
-    SolveCaptchaParams, SolveCaptchaResult, SolveTurnstileParams, SolveTurnstileResult, TextResult,
-    TitleResult, UrlResult, WaitForParams, WaitForTextParams,
+    SolveTurnstileParams, SolveTurnstileResult, TextResult, TitleResult, UrlResult, WaitForParams,
+    WaitForTextParams,
 };
+#[cfg(feature = "anti-captcha")]
+use eoka_solvers::{build_captcha_inject_js, CaptchaInjectionKind};
 use serde_json::{json, Value};
 
 use super::browser::close_tab_impl;
@@ -428,8 +429,9 @@ pub async fn release_all_inputs(state: &AppState, params: Value) -> Result<Value
     Ok(json!({}))
 }
 
+#[cfg(feature = "anti-captcha")]
 pub async fn solve_captcha(state: &AppState, params: Value) -> Result<Value, ServerError> {
-    let params: SolveCaptchaParams = parse_params(params)?;
+    let params: eoka_protocol::sidecar::SolveCaptchaParams = parse_params(params)?;
     if params.captcha_mode != "anti_captcha_proxyless" {
         return Err(ServerError::invalid_params(
             "captchaMode must explicitly be anti_captcha_proxyless; proxy-backed and manual modes belong to the caller",
@@ -437,7 +439,7 @@ pub async fn solve_captcha(state: &AppState, params: Value) -> Result<Value, Ser
     }
     let solution = match params.captcha_type.as_str() {
         "recaptcha_v2_enterprise" => {
-            AntiCaptcha::new(params.api_key)
+            eoka_solvers::AntiCaptcha::new(params.api_key)
                 .solve_recaptcha_v2_enterprise(
                     &params.website_url,
                     &params.website_key,
@@ -483,11 +485,13 @@ pub async fn solve_captcha(state: &AppState, params: Value) -> Result<Value, Ser
     if let Some(user_agent) = solver_user_agent {
         result["solverUserAgent"] = Value::String(user_agent);
     }
-    let result: SolveCaptchaResult = serde_json::from_value(json!({ "injection": result }))
-        .map_err(|error| ServerError::internal(format!("invalid CAPTCHA result: {error}")))?;
+    let result: eoka_protocol::sidecar::SolveCaptchaResult =
+        serde_json::from_value(json!({ "injection": result }))
+            .map_err(|error| ServerError::internal(format!("invalid CAPTCHA result: {error}")))?;
     encode(result)
 }
 
+#[cfg(feature = "anti-captcha")]
 async fn captcha_injection_result(page: &eoka::Page, script: &str) -> Result<Value, ServerError> {
     let result: String = page.evaluate(script).await?;
     serde_json::from_str(&result).map_err(|error| {

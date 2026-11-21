@@ -45,7 +45,7 @@ async fn delayed_idle_file_operation_keeps_commands_and_shutdown_serviceable() {
                 }
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
-            let fixture = eoka_datadome::fixture::Fixture::scenario("absent").await;
+            let fixture = eoka_solvers::datadome::fixture::Fixture::scenario("absent").await;
             let local_url = fixture.url.replace("app.test", "127.0.0.1");
             assert!(command(&name, "open", json!({"url":local_url})).await.ok);
             let files = tempfile::tempdir().unwrap();

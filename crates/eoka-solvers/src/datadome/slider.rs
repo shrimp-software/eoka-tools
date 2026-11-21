@@ -2,9 +2,9 @@ use eoka::Page;
 
 use serde::Deserialize;
 
-use crate::extract::{ExtractedPuzzle, Rect};
-use crate::solve::GapMatch;
-use crate::{SliderDrag, SolveError};
+use crate::datadome::extract::{ExtractedPuzzle, Rect};
+use crate::datadome::solve::GapMatch;
+use crate::datadome::{SliderDrag, SolveError};
 
 #[derive(Deserialize)]
 struct SimpleSlider {

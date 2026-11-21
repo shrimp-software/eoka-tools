@@ -1,5 +1,5 @@
 #[cfg(feature = "test-fixtures")]
-#[path = "../tests/support/fixture.rs"]
+#[path = "../../tests/support/fixture.rs"]
 pub mod fixture;
 
 mod detect;

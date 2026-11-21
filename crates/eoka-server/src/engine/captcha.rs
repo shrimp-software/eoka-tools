@@ -1,19 +1,24 @@
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(feature = "datadome")]
+use std::time::Instant;
 
-use eoka_datadome::{DataDomeSolver, SolveError, SolveOutcome};
-use eoka_protocol::{
-    CaptchaDatadomeArgs, CaptchaDatadomeResult, CaptchaTurnstileArgs, CaptchaTurnstileResult,
-    DataDomeOutcome, ErrorDetail, Response,
-};
+use eoka_protocol::{CaptchaDatadomeArgs, CaptchaTurnstileArgs, CaptchaTurnstileResult, Response};
+#[cfg(feature = "datadome")]
+use eoka_protocol::{CaptchaDatadomeResult, DataDomeOutcome, ErrorDetail};
+#[cfg(feature = "datadome")]
+use eoka_solvers::datadome::{DataDomeSolver, SolveError, SolveOutcome};
+#[cfg(feature = "datadome")]
 use serde_json::Value;
 
 use super::Engine;
 use super::EngineError;
 
+#[cfg(feature = "datadome")]
 fn failure(code: &str, message: &str) -> Response {
     Response::err_detail(ErrorDetail::new(code, message).retryable(false))
 }
 
+#[cfg(feature = "datadome")]
 fn outcome_response(outcome: SolveOutcome, tab_id: String, elapsed_ms: u64) -> Response {
     let (outcome, mut response) = match outcome {
         SolveOutcome::ChallengeCleared => {
@@ -76,6 +81,12 @@ impl Engine {
         ))
     }
 
+    #[cfg(not(feature = "datadome"))]
+    pub(super) async fn cmd_captcha_datadome(&mut self, _args: CaptchaDatadomeArgs) -> Response {
+        crate::features::unavailable("datadome")
+    }
+
+    #[cfg(feature = "datadome")]
     pub(super) async fn cmd_captcha_datadome(&mut self, args: CaptchaDatadomeArgs) -> Response {
         let started = Instant::now();
         let prior_failures = self
@@ -162,7 +173,7 @@ impl Engine {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "datadome"))]
 mod tests {
     use super::*;
 

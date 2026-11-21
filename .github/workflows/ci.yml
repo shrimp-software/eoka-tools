@@ -72,6 +72,12 @@ jobs:
         run: cargo fmt --all -- --check
       - if: env.RUST == 'true'
         run: cargo clippy --workspace --all-features --all-targets --locked -- -D warnings
+      - name: Builds without plugins
+        if: env.RUST == 'true'
+        run: |
+          for package in eoka-solvers eoka-server eoka-mcp eoka-cli; do
+            cargo clippy --locked -p "$package" --all-targets --no-default-features -- -D warnings
+          done
       - name: Crate versions
         if: env.RUST == 'true'
         run: bash scripts/check-crate-versions.sh
@@ -101,8 +107,8 @@ jobs:
           # and do not build on Windows; test the crates that ship there.
           - os: windows-2025
             packages: >-
-              -p eoka-server -p eoka-runner -p eoka-captcha
-              -p eoka-datadome -p eoka-proxy -p eoka-email
+              -p eoka-server -p eoka-runner -p eoka-solvers
+              -p eoka-proxy -p eoka-email
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: shrimp-software/eoka/.github/actions/rust@e6662c5f7faf03b5f6c2979903367003c426b5d4
