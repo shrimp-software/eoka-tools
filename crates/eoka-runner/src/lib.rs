@@ -388,15 +388,15 @@ actions:
         let config = Config::parse(yaml).unwrap();
 
         if let Action::WaitForNetworkIdle(a) = &config.actions[0] {
-            assert_eq!(a.idle_ms, 500); // default
-            assert_eq!(a.timeout_ms, 10000); // default
+            assert_eq!(a.idle_ms, 500);
+            assert_eq!(a.timeout_ms, 10000);
         } else {
             panic!("Expected WaitForNetworkIdle");
         }
 
         if let Action::Click(a) = &config.actions[1] {
-            assert!(!a.human); // default false
-            assert!(!a.scroll_into_view); // default false
+            assert!(!a.human);
+            assert!(!a.scroll_into_view);
         } else {
             panic!("Expected Click");
         }

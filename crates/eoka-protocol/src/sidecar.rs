@@ -17,8 +17,6 @@ pub const CAPABILITY_SCREENSHOT_OPTIONS: &str = "screenshotOptions";
 pub const CAPABILITY_SCREENSHOT_FILE: &str = "screenshotFile";
 pub const CAPABILITY_NATIVE_RECORDING: &str = "nativeRecording";
 pub const CAPABILITY_CLOUDFLARE_AUTO_SOLVE: &str = "cloudflareAutoSolve";
-/// Catalog operations are callable as sidecar methods named by their catalog
-/// path, with a `pageId` added to the operation's input.
 pub const CAPABILITY_OPERATION_CATALOG: &str = "operationCatalog";
 pub const CAPABILITY_PAGE_BLOCKERS: &str = "pageBlockers";
 
@@ -386,9 +384,6 @@ impl std::fmt::Display for ServerError {
 }
 impl std::error::Error for ServerError {}
 
-/// Catalog `ErrorDetail` codes for errors raised by the core library. Catalog
-/// operations report these so a sidecar client sees the same error kind it
-/// would from a registered method.
 const CORE_ERROR_DETAIL_CODES: &[(ErrorCode, &str)] = &[
     (ErrorCode::ElementNotFound, "element_not_found"),
     (ErrorCode::ElementNotVisible, "element_not_visible"),
@@ -1459,26 +1454,15 @@ dto!(GetAttributeParams {
     name: String
 });
 
-/// Why a hand-registered sidecar method exists next to the operation catalog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MethodRole {
-    /// Server, browser and tab lifecycle, which only the sidecar owns.
     Lifecycle,
-    /// Registered under the same name as its catalog operation, with the
-    /// sidecar's typed contract.
     Shared,
-    /// A typed convenience over `actions.perform`.
     Action,
-    /// Duplicates the named catalog operation. Kept until catalog results are
-    /// typed, then removed in the next protocol major.
     ReplacedBy(&'static str),
-    /// No catalog equivalent yet, for the stated reason.
     Distinct(&'static str),
 }
 
-/// The role of every method in `METHODS`. A method added without an entry here
-/// fails `every_registered_method_declares_its_role`, so a sidecar-only
-/// capability cannot be introduced silently.
 pub fn method_role(method: &str) -> Option<MethodRole> {
     use MethodRole::*;
     Some(match method {
@@ -1537,18 +1521,11 @@ pub fn method_role(method: &str) -> Option<MethodRole> {
     })
 }
 
-/// Catalog operations served through the sidecar under their catalog path.
-///
-/// Session lifecycle and tab management stay with the sidecar's own
-/// `server.*` and `browser.*` methods, and a path that already names a sidecar
-/// method keeps that method's contract.
 pub fn catalog_operations() -> impl Iterator<Item = &'static crate::OperationSpec> {
     page_operations()
         .filter(|operation| !METHODS.iter().any(|method| method.name == operation.path))
 }
 
-/// Catalog operations that act on one page of an existing session: everything
-/// except session lifecycle and tab management, which each adapter owns.
 pub fn page_operations() -> impl Iterator<Item = &'static crate::OperationSpec> {
     crate::all_operations().iter().filter(|operation| {
         operation.exposure != crate::OperationExposure::Lifecycle
@@ -1561,8 +1538,6 @@ pub fn catalog_operation(method: &str) -> Option<&'static crate::OperationSpec> 
     catalog_operations().find(|operation| operation.path == method)
 }
 
-/// Split catalog method params into the target `pageId` and the operation's
-/// own typed input.
 pub fn catalog_request(
     operation: &crate::OperationSpec,
     params: &Value,
@@ -1573,8 +1548,6 @@ pub fn catalog_request(
         .and_then(|object| object.remove("pageId"))
         .and_then(|value| value.as_str().map(str::to_owned))
         .ok_or_else(|| ServerError::invalid_params("missing string field `pageId`"))?;
-    // Catalog inputs tolerate unknown fields for CLI compatibility. Over the
-    // wire a misspelt or camelCase field would be silently ignored, so name it.
     let schema = crate::input_schema_for_operation(operation);
     if let (Some(known), Some(given)) = (schema["properties"].as_object(), input.as_object()) {
         if let Some(unknown) = given.keys().find(|key| !known.contains_key(*key)) {
@@ -1643,7 +1616,6 @@ pub fn schema_bundle() -> Value {
                 json!({"params": (method.params_schema)(), "result": (method.result_schema)()}),
             )
         })
-        // Catalog results are the operation's `data`, not yet typed.
         .chain(catalog_operations().map(|operation| {
             (
                 operation.path,
@@ -1677,7 +1649,6 @@ pub fn schema_bundle() -> Value {
             "RecordingFailure": schema::<RecordingFailure>(), "RecordingFailureStage": schema::<RecordingFailureStage>()
         }
     });
-    // Registered methods that duplicate a catalog operation, and its path.
     bundle["replacedMethods"] = METHODS
         .iter()
         .filter_map(|method| match method_role(method.name)? {
@@ -1780,8 +1751,6 @@ mod tests {
         let unique: std::collections::BTreeSet<_> = names.iter().collect();
         assert_eq!(unique.len(), names.len(), "method names must be unique");
 
-        // Every catalog operation is either projected or deliberately served
-        // by a sidecar method of its own.
         for operation in crate::all_operations() {
             let projected = catalog_operation(operation.path).is_some();
             let own_method = METHODS.iter().any(|method| method.name == operation.path);

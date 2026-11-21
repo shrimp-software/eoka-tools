@@ -44,7 +44,7 @@ jobs:
           files=$(git diff --name-only "$BASE_SHA" HEAD)
           area() { grep -qE "$1|^\.github/(workflows/ci\.yml|scripts/)|^(deny\.toml|\.config/)" <<<"$files" && echo true || echo false; }
           {
-            echo "rust=$(area '^(crates/|tools/sketchy/|scripts/|Cargo\.(toml|lock)$)')"
+            echo "rust=$(area '^(crates/|scripts/|Cargo\.(toml|lock)$)')"
             echo "go=$(area '^clients/go/')"
             # The clients' generated catalog access comes from eoka-protocol, so a
             # catalog change must rerun the generated-file check in the Node job.
@@ -80,9 +80,6 @@ jobs:
       - name: CLI does not depend on eoka-mcp
         if: env.RUST == 'true'
         run: "! cargo tree -p eoka-cli -e normal --depth 1 | grep -q eoka-mcp"
-      - name: Lesson and media helpers
-        if: env.RUST == 'true'
-        run: python3 -m unittest discover -s tools/sketchy -p 'test_*.py'
       - name: Dependency policy
         if: env.RUST == 'true'
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1

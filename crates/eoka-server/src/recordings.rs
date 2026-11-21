@@ -373,7 +373,6 @@ impl RecordingManager {
         Ok(entry.wait(false).await)
     }
 
-    /// Whether any recording has not reached a terminal state.
     pub fn is_active(&self) -> bool {
         self.history
             .lock()

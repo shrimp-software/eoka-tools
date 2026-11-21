@@ -140,10 +140,6 @@ struct JarCookie {
     path: String,
 }
 
-/// Delete the cookies a saved state replaces, in this page's browser context: those
-/// on a domain the state holds cookies for or on its URL's host, including parent
-/// domains and subdomains. Related domains go together so that a leftover session on
-/// `auth.app.test` can't mix with a restored one on `app.test`. Unrelated sites stay.
 pub async fn clear_covered_cookies<'a>(
     page: &eoka::Page,
     url: &str,
@@ -157,8 +153,6 @@ pub async fn clear_covered_cookies<'a>(
             &serde_json::json!({"targetId": page.target_id()}),
         )
         .await?;
-    // Without a named context, Storage.getCookies reads the default context, even
-    // from a session in a different one.
     let jar: JarCookies = transport
         .send(
             "Storage.getCookies",

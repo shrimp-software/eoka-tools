@@ -387,9 +387,6 @@ fn network_record_exports_local_fetch_to_har() {
         "network log did not include api request: {log_json}"
     );
 
-    // The network log can list the request before its response has finished
-    // loading, and the HAR only includes finished entries; export again until
-    // the request lands.
     let mut entry = None;
     for _ in 0..20 {
         let _ = std::fs::remove_file(&har_path);

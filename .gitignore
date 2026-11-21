@@ -12,12 +12,7 @@
 .DS_Store
 Thumbs.db
 
-# Test artifacts
-*.png
-!examples/*.png
-
 # GitHub Actions local testing
 .act
 
 /clients/node/node_modules
-/tools/sketchy/__pycache__/

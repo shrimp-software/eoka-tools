@@ -77,7 +77,7 @@ async fn solve_captcha(action: &CaptchaAction) -> Result<serde_json::Value, Stri
     let api_key = api_key
         .as_deref()
         .ok_or("Anti-Captcha key required: use --api-key or ANTI_CAPTCHA_KEY")?;
-    let solver = captcha::AntiCaptcha::new(api_key);
+    let solver = eoka_captcha::AntiCaptcha::new(api_key);
     let solution = match captcha_type.to_lowercase().as_str() {
         "hcaptcha" => solver.solve_hcaptcha(website_url, website_key).await,
         "recaptcha_v2" => solver.solve_recaptcha_v2(website_url, website_key).await,

@@ -1,11 +1,10 @@
 [package]
 name = "eoka-protocol"
-version = "0.10.2"
+version = "0.10.3"
 edition.workspace = true
 license.workspace = true
 description = "Protocol and tool catalog definitions for eoka browser automation"
 repository.workspace = true
-homepage.workspace = true
 documentation = "https://docs.rs/eoka-protocol"
 readme = "README.md"
 authors.workspace = true

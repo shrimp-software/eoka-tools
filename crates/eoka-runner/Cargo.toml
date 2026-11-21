@@ -1,13 +1,12 @@
 [package]
 name = "eoka-runner"
-version = "0.7.10"
+version = "0.7.11"
 edition.workspace = true
 license.workspace = true
 description = "Config-based browser automation — define actions in YAML, execute deterministically"
 keywords = ["browser", "automation", "yaml", "scripting", "cli"]
 categories = ["web-programming", "development-tools", "command-line-utilities"]
 repository.workspace = true
-homepage.workspace = true
 documentation = "https://docs.rs/eoka-runner"
 readme = "README.md"
 authors.workspace = true

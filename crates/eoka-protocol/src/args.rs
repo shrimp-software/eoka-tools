@@ -314,18 +314,18 @@ pub struct WaitArgs {
     pub timeout: Option<u64>,
 }
 
-/// The condition a `wait` selector must reach.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema,
 )]
 #[serde(rename_all = "lowercase")]
+#[schemars(description = "The condition a `wait` selector must reach.")]
 pub enum WaitSelectorState {
-    /// Present in the DOM, rendered or not.
+    #[schemars(description = "Present in the DOM, rendered or not.")]
     Attached,
-    /// Rendered with visible CSS and a nonzero box.
+    #[schemars(description = "Rendered with visible CSS and a nonzero box.")]
     #[default]
     Visible,
-    /// Absent or no longer rendered.
+    #[schemars(description = "Absent or no longer rendered.")]
     Hidden,
 }
 

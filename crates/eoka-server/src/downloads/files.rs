@@ -314,7 +314,6 @@ mod tests {
         );
     }
 
-    // Downloads are Unix-only (ensure_space rejects other platforms).
     #[cfg(unix)]
     #[test]
     fn publication_verifies_size_and_never_replaces_existing_files() {

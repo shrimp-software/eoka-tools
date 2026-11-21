@@ -16,7 +16,6 @@ pub(super) static FILE_READ_STARTED: tokio::sync::Notify = tokio::sync::Notify::
 fn open_regular(path: &Path, write: bool) -> std::io::Result<std::fs::File> {
     let mut options = std::fs::OpenOptions::new();
     options.read(!write).write(write).create(write);
-    // Never block on a FIFO or adopt a terminal named as an interception file.
     #[cfg(unix)]
     options.custom_flags(libc::O_NONBLOCK | libc::O_NOCTTY);
     let file = options.open(path)?;

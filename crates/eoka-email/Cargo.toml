@@ -8,7 +8,6 @@ description = "IMAP helpers for email-based automation (OTP codes, verification 
 keywords = ["imap", "email", "automation", "otp", "browser"]
 categories = ["web-programming", "development-tools", "email"]
 documentation = "https://docs.rs/eoka-email"
-homepage.workspace = true
 authors.workspace = true
 
 [dependencies]

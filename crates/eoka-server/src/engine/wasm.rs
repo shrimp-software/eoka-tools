@@ -1,5 +1,3 @@
-//! `wasm` subcommand group: read/write/find/info against WebAssembly linear memory.
-
 use eoka_protocol::{WasmFindArgs, WasmReadArgs, WasmWriteArgs};
 use serde_json::Value;
 

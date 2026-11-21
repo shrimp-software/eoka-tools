@@ -1,7 +1,3 @@
-//! NoScript-style per-domain JS policy: a default mode (block everything or
-//! allow everything) plus an exception list, applied on navigation via
-//! `Page::set_javascript_enabled`.
-
 use eoka_protocol::{DomainArgs, ModeArgs};
 use serde_json::{json, Value};
 
@@ -19,11 +15,6 @@ pub struct ScriptPolicyState {
     mode: ScriptPolicyMode,
     allow: Vec<String>,
     block: Vec<String>,
-    /// Sticky: once we've ever told Chrome to disable JS, `is_active` must
-    /// keep returning true even if the policy later becomes fully
-    /// permissive again — `Emulation.setScriptExecutionDisabled` doesn't
-    /// reset itself, so skipping the "reapply" step once a tab has actually
-    /// been disabled would leave it stuck disabled forever.
     ever_disabled: bool,
 }
 
@@ -37,8 +28,6 @@ impl ScriptPolicyState {
         }
     }
 
-    /// Whether JS should run on `host`, given the current mode and
-    /// exception lists.
     pub fn resolve(&self, host: &str) -> bool {
         match self.mode {
             ScriptPolicyMode::BlockAll => self.allow.iter().any(|entry| host_matches(entry, host)),
@@ -46,11 +35,6 @@ impl ScriptPolicyState {
         }
     }
 
-    /// True if this policy could disable JS for a navigation right now, or
-    /// has ever done so before — lets `cmd_open`/`cmd_reload` skip the extra
-    /// CDP round-trip entirely for sessions that never touch this feature,
-    /// while still correctly re-enabling JS once it's actually been
-    /// disabled on a tab.
     pub fn is_active(&self) -> bool {
         self.mode == ScriptPolicyMode::BlockAll
             || !self.allow.is_empty()
@@ -58,8 +42,6 @@ impl ScriptPolicyState {
             || self.ever_disabled
     }
 
-    /// Record what was actually applied to a tab, so `is_active` stays
-    /// truthful even after the policy is relaxed back to fully permissive.
     pub fn note_applied(&mut self, enabled: bool) {
         if !enabled {
             self.ever_disabled = true;
@@ -82,8 +64,6 @@ impl ScriptPolicyState {
         }
     }
 
-    /// Remove `domain` from whichever list(s) it's in. Returns false if it
-    /// wasn't in either.
     pub fn remove(&mut self, domain: &str) -> bool {
         let before = self.allow.len() + self.block.len();
         self.allow.retain(|d| !d.eq_ignore_ascii_case(domain));
@@ -109,9 +89,6 @@ impl Default for ScriptPolicyState {
     }
 }
 
-/// Real hostname match: exact, or `host` is a subdomain of `entry`. Not a
-/// substring match — this gates real script execution, so `example.com`
-/// must not match `evil-example.com.attacker.net`.
 fn host_matches(entry: &str, host: &str) -> bool {
     let entry = entry.to_ascii_lowercase();
     let host = host.to_ascii_lowercase();
@@ -217,12 +194,6 @@ mod tests {
 
     #[test]
     fn ever_disabled_keeps_policy_active_after_reverting_to_default() {
-        // Regression: Emulation.setScriptExecutionDisabled is sticky on the
-        // Chrome side. If a tab has actually had JS disabled, cmd_open must
-        // keep re-evaluating (and re-enabling) even after the policy itself
-        // is relaxed back to fully permissive — otherwise the tab stays
-        // stuck disabled forever since we'd stop calling
-        // set_javascript_enabled at all once is_active() looked inactive.
         let mut policy = ScriptPolicyState::default();
         assert!(!policy.is_active());
         policy.note_applied(false);
@@ -236,9 +207,6 @@ mod tests {
 
     #[test]
     fn empty_host_falls_through_to_mode_default_not_silently_allowed() {
-        // Regression: hostless navigations (data:, about:blank, ...) must
-        // never bypass block-all just because there's nothing to check
-        // against the allow list.
         let block_all = ScriptPolicyState::new(ScriptPolicyMode::BlockAll, vec![], vec![]);
         assert!(!block_all.resolve(""));
 

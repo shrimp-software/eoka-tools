@@ -6,15 +6,14 @@ members = ["crates/*"]
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/shrimp-software/eoka-tools"
-homepage = "https://github.com/shrimp-software/eoka-tools"
 authors = ["cbxss"]
 
 [workspace.dependencies]
 # eoka and the workspace crates, versioned once here. eoka-server pins eoka
 # exactly in its own manifest so its release binaries match qualification.
 eoka = "0.10.2"
-captcha = { package = "eoka-captcha", version = "0.1.1", path = "crates/captcha" }
-eoka-datadome = { version = "0.6.0", path = "crates/datadome" }
+eoka-captcha = { version = "0.1.1", path = "crates/eoka-captcha" }
+eoka-datadome = { version = "0.6.0", path = "crates/eoka-datadome" }
 eoka-email = { version = "0.2.0", path = "crates/eoka-email" }
 eoka-protocol = { version = "0.10.2", path = "crates/eoka-protocol" }
 eoka-proxy = { version = "0.2.0", path = "crates/eoka-proxy" }

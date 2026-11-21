@@ -1,5 +1,5 @@
 use base64::Engine;
-use captcha::{build_captcha_inject_js, AntiCaptcha, CaptchaInjectionKind};
+use eoka_captcha::{build_captcha_inject_js, AntiCaptcha, CaptchaInjectionKind};
 use eoka_protocol::sidecar::{
     AttributeResult, BoundedFetchParams, BoundedFetchResult, CaptureStateResult, ClickShadowParams,
     ClickShadowResult, ContentResult, ErrorCode, EvaluateResult, ExistsResult, FetchParams,

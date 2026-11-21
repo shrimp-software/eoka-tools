@@ -1,5 +1,3 @@
-//! State save/load and console capture.
-
 use std::collections::HashMap;
 
 use crate::saved_state::StorageRestoreReport;
@@ -8,10 +6,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::state::TabState;
-
-// ---------------------------------------------------------------------------
-// Saved state types
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SavedState {
@@ -70,11 +64,6 @@ impl SavedCookie {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Capture / Restore
-// ---------------------------------------------------------------------------
-
-/// Capture full browser state: cookies (via CDP), localStorage, sessionStorage, URL, UA.
 pub async fn capture_state(page: &Page) -> Result<SavedState, String> {
     let cookies: Vec<SavedCookie> = page
         .cookies()
@@ -125,8 +114,6 @@ pub async fn capture_state(page: &Page) -> Result<SavedState, String> {
     })
 }
 
-/// Restore browser state: replace the covered sites' cookies, then clear + set
-/// localStorage/sessionStorage.
 pub async fn restore_state(
     page: &Page,
     state: &SavedState,
@@ -142,8 +129,6 @@ pub async fn restore_state(
     .map_err(|e| e.to_string())
 }
 
-/// Replace the cookies of the sites this state covers, including their parent domains
-/// and subdomains, leaving unrelated sites' alone.
 pub async fn restore_cookies(page: &Page, state: &SavedState) -> Result<(), String> {
     crate::saved_state::clear_covered_cookies(
         page,
@@ -165,9 +150,6 @@ pub async fn restore_cookies(page: &Page, state: &SavedState) -> Result<(), Stri
     Ok(())
 }
 
-/// Connect to a running Chrome (port number or ws:// URL), capture its
-/// front-tab state via CDP, and disconnect. The `Browser::disconnect()` call
-/// leaves the user's Chrome running.
 pub async fn clone_state_from_source(source: &str) -> Result<SavedState, String> {
     use eoka_protocol::launch_spec::resolve_cdp_spec;
 
@@ -177,7 +159,6 @@ pub async fn clone_state_from_source(source: &str) -> Result<SavedState, String>
         .map_err(|e| format!("connect: {}", e))?;
 
     let tabs = browser.tabs().await.map_err(|e| e.to_string())?;
-    // Skip DevTools/extension targets — we want a real user page.
     let target = tabs
         .iter()
         .find(|t| !t.url.starts_with("devtools://") && !t.url.starts_with("chrome-extension://"))
@@ -198,13 +179,8 @@ pub async fn clone_state_from_source(source: &str) -> Result<SavedState, String>
     Ok(state)
 }
 
-// ---------------------------------------------------------------------------
-// Console capture
-// ---------------------------------------------------------------------------
-
 const CONSOLE_CAPTURE_JS: &str = include_str!("js/console_capture.js");
 
-/// Inject console capture into the current page and register for future navigations.
 pub async fn ensure_console_capture(tab: &mut TabState) -> Result<(), String> {
     if tab.console_injected {
         return Ok(());
@@ -217,10 +193,6 @@ pub async fn ensure_console_capture(tab: &mut TabState) -> Result<(), String> {
         )
         .await
         .map_err(|e| e.to_string())?;
-    // Best-effort: this IIFE has no return value, so evaluate_sync::<String>
-    // routinely "fails" to deserialize a String even when the injection
-    // itself succeeded. The addScriptToEvaluateOnNewDocument call above is
-    // what actually needs to succeed; this just seeds the *current* page too.
     let _: String = tab
         .page
         .evaluate_sync(CONSOLE_CAPTURE_JS)
@@ -301,7 +273,6 @@ mod tests {
         cookies.sort();
         assert_eq!(cookies, [("session", "saved"), ("sso", "keep-me")]);
 
-        // A page in another browser context restores into its own cookies.
         let transport = page.session().transport();
         let context: Value = transport
             .send("Target.createBrowserContext", &json!({}))

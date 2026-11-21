@@ -501,9 +501,6 @@ async fn accepted_request_finishes_after_cli_disconnect_without_replay() {
         .stderr(std::process::Stdio::piped())
         .spawn()
         .unwrap();
-    // Wait for the solver's press for as long as the command itself may run.
-    // A busy runner can take more than 10 s to get there; an early exit is a
-    // real failure and reports the command's output.
     tokio::select! {
         _ = fixture.started.notified() => {}
         status = child.wait() => {

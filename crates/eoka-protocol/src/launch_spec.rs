@@ -123,7 +123,6 @@ pub fn auto_connect() -> Result<(u16, String), String> {
         .ok_or_else(|| "No running Chrome found on ports 9222-9229".to_string())
 }
 
-/// Durable Chrome profile directory for a persisted session.
 pub fn profile_dir(session: &str) -> PathBuf {
     if let Ok(base) = std::env::var("EOKA_PROFILE_DIR") {
         return PathBuf::from(base).join(session);
