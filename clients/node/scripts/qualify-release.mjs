@@ -128,7 +128,7 @@ if (options.packOnly) {
   assert.ok(sdk && native);
   const base = process.platform === 'win32' ? resolve(process.env.SystemDrive || 'C:', '/q') : tmpdir();
   await mkdir(base, { recursive: true });
-  const scratch = await mkdtemp(join(base, 'eq-'));
+  const scratch = await realpath(await mkdtemp(join(base, 'eq-')));
   const env = { ...process.env, CARGO_HOME: join(scratch, 'no-cargo') };
   for (const key of ['EOKA_SERVER_BIN', 'EOKA_CHROME_PATH', 'EOKA_RUNTIME_DIR']) delete env[key];
   const pathKey = Object.keys(env).find(key => key.toLowerCase() === 'path') ?? 'PATH';
