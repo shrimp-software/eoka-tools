@@ -89,6 +89,7 @@ pub(super) fn assert_locked(name: &str, actual: &str) {
     );
 }
 
+#[cfg(all(feature = "anti-captcha", feature = "datadome"))]
 fn tool_lines(tools: &[Tool]) -> Vec<String> {
     let mut lines: Vec<String> = tools
         .iter()
@@ -105,6 +106,7 @@ async fn listed(include_opt_in: bool) -> Vec<Tool> {
     tools
 }
 
+#[cfg(all(feature = "anti-captcha", feature = "datadome"))]
 #[tokio::test]
 async fn the_tool_list_a_client_sees_is_locked() {
     let every = tool_lines(&listed(true).await);
@@ -119,6 +121,15 @@ async fn the_tool_list_a_client_sees_is_locked() {
     let mut names: Vec<&str> = default.iter().map(|tool| tool.name.as_ref()).collect();
     names.sort_unstable();
     assert_locked("tools.default.txt", &(names.join("\n") + "\n"));
+}
+
+#[tokio::test]
+async fn tools_from_plugins_left_out_of_the_build_are_not_listed() {
+    let every = listed(true).await;
+    let listed_as = |name: &str| every.iter().any(|tool| tool.name == name);
+    assert_eq!(listed_as("solve_captcha"), cfg!(feature = "anti-captcha"));
+    assert_eq!(listed_as("captcha_datadome"), cfg!(feature = "datadome"));
+    assert!(listed_as("captcha_turnstile"));
 }
 
 const PAGE: &str = "<!doctype html><title>Fixture</title><h1 id=\"h\">Heading</h1><p>Body text</p><a href=\"/next\">Next</a><button id=\"b\">Press</button><input id=\"i\" placeholder=\"Name\"><select id=\"s\"><option>a</option><option>b</option></select><script>localStorage.setItem('k','v');sessionStorage.setItem('s','t');document.cookie='c=1; path=/';console.log('hello');</script>";

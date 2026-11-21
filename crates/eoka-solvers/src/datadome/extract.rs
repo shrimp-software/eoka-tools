@@ -3,7 +3,7 @@ use eoka::Page;
 use image::RgbaImage;
 use serde::Deserialize;
 
-use crate::SolveError;
+use crate::datadome::SolveError;
 
 type Result<T> = std::result::Result<T, SolveError>;
 

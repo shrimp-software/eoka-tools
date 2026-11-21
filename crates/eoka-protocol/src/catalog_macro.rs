@@ -12,6 +12,7 @@ macro_rules! define_operations {
                 destructive: $destructive:literal
                 $(, input: $input:ty)?
                 $(, cli: $cli:literal)?
+                $(, feature: $feature:literal)?
                 $(,)?
             }
         ),+ $(,)?
@@ -32,6 +33,7 @@ macro_rules! define_operations {
             pub exposure: OperationExposure,
             pub read_only: bool,
             pub destructive: bool,
+            pub feature: Option<&'static str>,
         }
 
         #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -54,6 +56,7 @@ macro_rules! define_operations {
                 exposure: OperationExposure::$exposure,
                 read_only: $read_only,
                 destructive: $destructive,
+                feature: define_operations!(@feature $($feature)?),
             }),+
         ];
         impl OperationSpec {
@@ -198,6 +201,14 @@ macro_rules! define_operations {
 
     (@match_variant $variant:path) => {
         $variant
+    };
+
+    (@feature $feature:literal) => {
+        Some($feature)
+    };
+
+    (@feature) => {
+        None
     };
 
     (@cli $cli:literal) => {

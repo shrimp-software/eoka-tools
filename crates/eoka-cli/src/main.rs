@@ -2,6 +2,7 @@ mod batch;
 mod captcha_cmd;
 mod cli;
 mod client;
+#[cfg(feature = "tack")]
 mod code;
 mod command_request;
 mod daemon;
@@ -21,7 +22,10 @@ mod update;
 
 use clap::Parser;
 use cli::{CaptchaAction, Cli, Command, ToolsAction};
-use eoka_protocol::{manifest_for_operations, OperationCapability, Response, ResponseMeta};
+#[cfg(feature = "tack")]
+use eoka_protocol::OperationCapability;
+use eoka_protocol::{Response, ResponseMeta, ToolManifestEntry};
+#[cfg(feature = "tack")]
 use eoka_tack::EokaToolFilter;
 use launch_spec::LaunchSpec;
 use serde_json::json;
@@ -177,6 +181,20 @@ async fn main() {
             }
             return;
         }
+        #[cfg(not(feature = "tack"))]
+        Command::Tack { raw_json, .. } => {
+            let response = Response::err_detail(
+                eoka_protocol::ErrorDetail::new(
+                    "feature_unavailable",
+                    eoka_server::features::unavailable_message("tack"),
+                )
+                .retryable(false),
+            )
+            .with_meta(response_meta(&effective_session, "tack"));
+            output::print_response(&response, json_mode || *raw_json);
+            std::process::exit(1);
+        }
+        #[cfg(feature = "tack")]
         Command::Tack {
             code,
             file,
@@ -345,6 +363,7 @@ fn response_meta(session: &str, cmd: &str) -> ResponseMeta {
     }
 }
 
+#[cfg(feature = "tack")]
 fn tack_filter(all_tools: bool, capabilities: &[String]) -> Result<EokaToolFilter, String> {
     if all_tools {
         return Ok(EokaToolFilter::all_non_lifecycle());
@@ -401,10 +420,10 @@ async fn doctor_response(session: &str, spec: &LaunchSpec) -> Response {
         "log_exists": log.exists(),
         "launch": cdp,
         "chrome_9222": chrome_9222,
-        "tack_runtime": "quickjs",
+        "tack_runtime": cfg!(feature = "tack").then_some("quickjs"),
         "tools": {
-            "default": manifest_for_operations("eoka", false).len(),
-            "including_opt_in": manifest_for_operations("eoka", true).len(),
+            "default": built_manifest(false).len(),
+            "including_opt_in": built_manifest(true).len(),
         }
     }))
     .with_meta(response_meta(session, "doctor"))
@@ -418,8 +437,15 @@ fn parse_port_from_ws(ws_url: &str) -> Option<u16> {
     host_port.rsplit(':').next()?.parse().ok()
 }
 
+fn built_manifest(include_opt_in: bool) -> Vec<ToolManifestEntry> {
+    eoka_protocol::exposed_operations(include_opt_in)
+        .filter(|operation| eoka_server::features::operation_built(operation))
+        .map(|operation| eoka_protocol::manifest_entry_for_operation("eoka", operation))
+        .collect()
+}
+
 fn print_tools_manifest(include_opt_in: bool, json_mode: bool) {
-    let manifest = manifest_for_operations("eoka", include_opt_in);
+    let manifest = built_manifest(include_opt_in);
     if json_mode {
         println!(
             "{}",

@@ -41,7 +41,7 @@ fn supported(name: &str) -> bool {
 
 pub fn validate_environment() -> Result<(), &'static str> {
     if env::vars_os().any(|(name, _)| !supported(&name.to_string_lossy())) {
-        return Err("unsupported EOKA_TEST option: old diagnostic flags were retired; see crates/eoka-datadome/README.md");
+        return Err("unsupported EOKA_TEST option: old diagnostic flags were retired; see crates/eoka-solvers/DATADOME.md");
     }
     Ok(())
 }

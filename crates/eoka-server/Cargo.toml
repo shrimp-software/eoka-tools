@@ -1,6 +1,6 @@
 [package]
 name = "eoka-server"
-version = "0.11.5"
+version = "0.12.0"
 edition.workspace = true
 license.workspace = true
 description = "Shared browser runtime and sidecar process for eoka browser automation"
@@ -12,6 +12,11 @@ authors.workspace = true
 [[bin]]
 name = "eoka-server"
 path = "src/main.rs"
+
+[features]
+default = ["anti-captcha", "datadome"]
+anti-captcha = ["eoka-solvers/anti-captcha"]
+datadome = ["eoka-solvers/datadome"]
 
 [dependencies]
 eoka = "=0.10.2"
@@ -27,8 +32,7 @@ base64 = "0.23"
 anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-eoka-captcha = { workspace = true }
-eoka-datadome = { workspace = true }
+eoka-solvers = { workspace = true }
 time = { version = "0.3", features = ["formatting", "macros"] }
 
 rusqlite = { version = "0.42", features = ["bundled", "fallible_uint"] }
@@ -46,4 +50,4 @@ dirs = "7"
 reqwest = { version = "0.13", features = ["json"] }
 futures-util = { version = "0.3", features = ["sink"] }
 tokio-tungstenite = "0.30"
-eoka-datadome = { workspace = true, features = ["test-fixtures"] }
+eoka-solvers = { workspace = true, features = ["test-fixtures"] }

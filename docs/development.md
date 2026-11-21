@@ -42,6 +42,18 @@ Run Tack TypeScript against the active browser session:
 eoka tack 'return await tools.invoke({ path: "eoka.info", input: {} });'
 ```
 
+## Builds without plugins
+
+CI checks that each plugin crate still builds with its features off:
+
+```sh
+for package in eoka-solvers eoka-server eoka-mcp eoka-cli; do
+  cargo clippy -p "$package" --all-targets --no-default-features -- -D warnings
+done
+```
+
+Check one package at a time: a workspace build turns on every feature any member asks for and hides a broken slim build. The lock tests describe the default build and only run with every plugin on.
+
 ## Node SDK
 
 ```sh

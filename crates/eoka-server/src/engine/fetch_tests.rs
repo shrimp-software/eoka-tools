@@ -260,7 +260,7 @@ async fn idle_file_failure_during_datadome_entry_cannot_become_a_clean_baseline(
     })
     .await
     .unwrap();
-    let fixture = eoka_datadome::fixture::Fixture::scenario("simple").await;
+    let fixture = eoka_solvers::datadome::fixture::Fixture::scenario("simple").await;
     let page = browser.new_page(&fixture.url).await.unwrap();
     let ws_url = eoka::cdp::discover_browser_ws("127.0.0.1", port).unwrap();
     let mut handler = Engine::new("entry-integrity", LaunchSpec::Connect { ws_url });

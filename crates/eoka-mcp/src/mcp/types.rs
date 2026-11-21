@@ -64,6 +64,7 @@ pub struct HistoryGoRequest {
 pub type BatchRequest = eoka_protocol::ActionBatchArgs;
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[cfg_attr(not(feature = "anti-captcha"), allow(dead_code))]
 pub struct SolveCaptchaRequest {
     #[schemars(description = "Anti-captcha.com API key")]
     pub api_key: String,

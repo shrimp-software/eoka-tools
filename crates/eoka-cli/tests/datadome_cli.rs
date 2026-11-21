@@ -1,4 +1,4 @@
-use eoka_datadome::fixture::Fixture;
+use eoka_solvers::datadome::fixture::Fixture;
 use serde_json::Value;
 use std::{path::PathBuf, time::Duration};
 use tokio::process::Command;

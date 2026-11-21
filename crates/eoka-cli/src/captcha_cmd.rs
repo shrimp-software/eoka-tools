@@ -1,4 +1,4 @@
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use crate::cli::{CaptchaAction, SolveArgs};
 use crate::launch_spec::LaunchSpec;
@@ -53,6 +53,12 @@ pub(crate) async fn solve_captcha_command(
     Ok(protocol::Response::ok(value))
 }
 
+#[cfg(not(feature = "anti-captcha"))]
+async fn solve_captcha(_action: &CaptchaAction) -> Result<serde_json::Value, String> {
+    Err(eoka_server::features::unavailable_message("anti-captcha"))
+}
+
+#[cfg(feature = "anti-captcha")]
 async fn solve_captcha(action: &CaptchaAction) -> Result<serde_json::Value, String> {
     let CaptchaAction::Solve(args) = action else {
         unreachable!("only solve actions reach solve_captcha")
@@ -77,7 +83,7 @@ async fn solve_captcha(action: &CaptchaAction) -> Result<serde_json::Value, Stri
     let api_key = api_key
         .as_deref()
         .ok_or("Anti-Captcha key required: use --api-key or ANTI_CAPTCHA_KEY")?;
-    let solver = eoka_captcha::AntiCaptcha::new(api_key);
+    let solver = eoka_solvers::AntiCaptcha::new(api_key);
     let solution = match captcha_type.to_lowercase().as_str() {
         "hcaptcha" => solver.solve_hcaptcha(website_url, website_key).await,
         "recaptcha_v2" => solver.solve_recaptcha_v2(website_url, website_key).await,
@@ -107,7 +113,7 @@ async fn solve_captcha(action: &CaptchaAction) -> Result<serde_json::Value, Stri
         ).await,
         _ => return Err(format!("Unknown CAPTCHA type '{captcha_type}'. Use hcaptcha, recaptcha_v2, recaptcha_v2_enterprise, recaptcha_v3, or amazon_waf.")),
     }.map_err(|e| e.to_string())?;
-    Ok(json!({ "token": solution.token(), "user_agent": solution.user_agent }))
+    Ok(serde_json::json!({ "token": solution.token(), "user_agent": solution.user_agent }))
 }
 
 fn captcha_solution_token(value: &Value) -> Result<&str, String> {
@@ -147,6 +153,7 @@ mod tests {
     use super::*;
     use crate::cli::test_support::parsed_command;
     use crate::cli::Command;
+    use serde_json::json;
 
     #[test]
     fn captcha_solve_accepts_inject_flags() {

@@ -1,4 +1,4 @@
-# eoka-datadome (experimental)
+# DataDome solver (experimental)
 
 A local slider solver. **No AI/ML model, Python/OpenCV runtime or paid solving
 service is required.** Simple sliders use visible geometry and native mouse
@@ -75,7 +75,7 @@ solver. Existing paid `captcha solve` and token injection commands are unchanged
 ## Library
 
 ```rust
-use eoka_datadome::{DataDomeSolver, SolveOutcome};
+use eoka_solvers::datadome::{DataDomeSolver, SolveOutcome};
 
 let outcome = DataDomeSolver::new().solve(&page).await?;
 println!("Challenge cleared: {}", outcome == SolveOutcome::ChallengeCleared);
@@ -110,7 +110,7 @@ non-challenge URLs. Inspection errors cannot establish clearance.
 ## Bounded example
 
 ```sh
-mise exec -- cargo run -p eoka-datadome --example datadome_solve -- TARGET_URL
+mise exec -- cargo run -p eoka-solvers --example datadome_solve -- TARGET_URL
 ```
 
 One solver attempt, 90 seconds of browser work, and owned-browser cleanup on
@@ -200,10 +200,10 @@ material; authentication persistence after restart has not been verified.
 ## Tests
 
 ```sh
-mise exec -- cargo test -p eoka-datadome --all-targets --all-features
-mise exec -- cargo test -p eoka-datadome --test nested_fixture -- --ignored
-mise exec -- cargo test -p eoka-datadome --example datadome_solve -- --ignored
-mise exec -- cargo clippy -p eoka-datadome --all-targets --all-features -- -D warnings
+mise exec -- cargo test -p eoka-solvers --all-targets --all-features
+mise exec -- cargo test -p eoka-solvers --test nested_fixture -- --ignored
+mise exec -- cargo test -p eoka-solvers --example datadome_solve -- --ignored
+mise exec -- cargo clippy -p eoka-solvers --all-targets --all-features -- -D warnings
 mise exec -- cargo test -p eoka-cli --test datadome_cli -- --ignored
 mise run drift
 mise run release-check

@@ -984,6 +984,7 @@ define_operations! {
         read_only: false,
         destructive: true,
         input: CaptchaDatadomeArgs,
+        feature: "datadome",
     },
     CaptchaTurnstile {
         path: "captcha.turnstile",

@@ -24,6 +24,14 @@ pub async fn dispatch_shared(
     params: Value,
 ) -> Result<Value, ServerError> {
     validate_safe_numbers(&params)?;
+    if let Some(feature) = eoka_protocol::sidecar::method_feature(method)
+        .filter(|feature| !crate::features::built(feature))
+    {
+        return Err(ServerError::new(
+            ErrorCode::UnknownMethod,
+            crate::features::unavailable_message(feature),
+        ));
+    }
     if method == "server.hello" {
         return hello(params);
     }
@@ -183,6 +191,7 @@ async fn route(state: &AppState, method: &str, params: Value) -> Result<Value, S
         "page.key_down" => page::key_down(state, params).await,
         "page.key_up" => page::key_up(state, params).await,
         "page.release_all_inputs" => page::release_all_inputs(state, params).await,
+        #[cfg(feature = "anti-captcha")]
         "page.solve_captcha" => page::solve_captcha(state, params).await,
         "page.close" => page::close(state, params).await,
 
@@ -217,7 +226,11 @@ pub fn negotiate(params: Value) -> Result<(ProtocolVersion, Value), ServerError>
         protocol: PROTOCOL_VERSION,
         server_version: env!("CARGO_PKG_VERSION").to_owned(),
         core_version: env!("EOKA_CORE_VERSION").to_owned(),
-        methods: method_names().into_iter().map(str::to_owned).collect(),
+        methods: method_names()
+            .into_iter()
+            .filter(|method| crate::features::method_built(method))
+            .map(str::to_owned)
+            .collect(),
         capabilities: vec![
             "durableActions".to_owned(),
             "operationCancellation".to_owned(),

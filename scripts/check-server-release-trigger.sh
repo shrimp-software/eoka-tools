@@ -10,7 +10,7 @@ grep -Fqx '  workflow_dispatch:' "$release_workflow"
 grep -Fqx '  workflow_dispatch:' "$cli_workflow"
 grep -Fqx '    tags: ["eoka-cli-v*"]' "$cli_workflow"
 grep -Fqx '      - "eoka-server-v*"' "$release_workflow"
-grep -Fqx '          for crate in captcha eoka-proxy eoka-protocol eoka-sdk eoka-email eoka-server eoka-runner eoka-mcp eoka-tack datadome eoka-cli; do' "$publish_workflow"
+grep -Fqx '          for crate in eoka-solvers eoka-proxy eoka-protocol eoka-sdk eoka-email eoka-server eoka-runner eoka-mcp eoka-tack eoka-cli; do' "$publish_workflow"
 
 awk '
   /if \[ "\$http_status" = "200" \]; then/ { published_status = 1 }

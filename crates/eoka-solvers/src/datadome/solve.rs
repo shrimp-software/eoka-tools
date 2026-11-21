@@ -3,7 +3,7 @@ use std::sync::{
     Arc,
 };
 
-use crate::{extract::ExtractedPuzzle, SolveError};
+use crate::datadome::{extract::ExtractedPuzzle, SolveError};
 use image::RgbaImage;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -202,7 +202,7 @@ mod tests {
             ])
         });
         let piece = image::imageops::crop_imm(&background, 0, 0, 400, 300).to_image();
-        let rect = crate::extract::Rect {
+        let rect = crate::datadome::extract::Rect {
             x: 0.0,
             y: 0.0,
             width: 1024.0,
