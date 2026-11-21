@@ -14,7 +14,7 @@ async fn delayed_idle_file_operation_keeps_commands_and_shutdown_serviceable() {
                         .unwrap();
                 let request = eoka_sdk::request_from_cmd(cmd, args).unwrap();
                 let mut wire = serde_json::to_value(request).unwrap();
-                wire["protocol_major"] = json!(2);
+                wire["protocol_major"] = json!(eoka_protocol::sidecar::PROTOCOL_VERSION.major);
                 eoka_sdk::write_msg(&mut socket, &wire).await.unwrap();
                 tokio::time::timeout(Duration::from_secs(3), eoka_sdk::read_msg(&mut socket))
                     .await
