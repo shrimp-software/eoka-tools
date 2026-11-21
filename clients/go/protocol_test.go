@@ -18,11 +18,8 @@ func TestHelloAcceptsCompatibleMinorAndNegotiatesLimits(t *testing.T) {
 		if method != "server.hello" {
 			return nil, &rpcError{Code: ErrCodeUnknownMethod, Message: method}
 		}
-		var request struct {
-			Protocol    ProtocolVersion `json:"protocol"`
-			Understands ProtocolVersion `json:"understands"`
-		}
-		if err := json.Unmarshal(params, &request); err != nil || request.Protocol != (ProtocolVersion{Major: 2, Minor: 0}) || request.Understands != (ProtocolVersion{Major: 2, Minor: 2}) {
+		var request map[string]json.RawMessage
+		if err := json.Unmarshal(params, &request); err != nil || string(request["protocol"]) != `{"major":3,"minor":0}` || len(request) != 1 {
 			t.Errorf("hello params = %s, error = %v", params, err)
 		}
 		return info, nil
@@ -95,8 +92,8 @@ func TestHelloNeverRaisesLocalTransportCeilings(t *testing.T) {
 
 func TestHelloRejectsIncompatibleOrIncompleteServers(t *testing.T) {
 	cases := map[string]func(*ServerInfo){
-		"major mismatch":          func(info *ServerInfo) { info.Protocol.Major = 3 },
-		"old major":               func(info *ServerInfo) { info.Protocol.Major = 1 },
+		"major mismatch":          func(info *ServerInfo) { info.Protocol.Major = 4 },
+		"old major":               func(info *ServerInfo) { info.Protocol.Major = 2 },
 		"no server version":       func(info *ServerInfo) { info.ServerVersion = "" },
 		"no core version":         func(info *ServerInfo) { info.CoreVersion = "" },
 		"invalid message bound":   func(info *ServerInfo) { info.Limits.MaxMessageBytes = 0 },
@@ -317,15 +314,9 @@ func TestBlockedPageErrorsKeepTheirCodeAndBlockerData(t *testing.T) {
 		ErrCodeNavigationPending: json.RawMessage(`{"detail":{"code":"navigation_pending","message":"waiting"},"blocker":{"kind":"navigation","url":"https://slow.test/hang","elapsedMs":6500}}`),
 		ErrCodePageUnresponsive:  json.RawMessage(`{"detail":{"code":"page_unresponsive","message":"frozen"}}`),
 	}
-	codes := map[string]string{"page.title": ErrCodeDialogOpen, "page.url": ErrCodeNavigationPending, "page.text": ErrCodePageUnresponsive}
+	codes := map[string]string{"info": ErrCodeDialogOpen, "content": ErrCodeNavigationPending, "text": ErrCodePageUnresponsive}
 	tr := newFakeTransport(t, func(id int64, method string, params json.RawMessage) (any, *rpcError) {
 		if method == "server.hello" {
-			var request struct {
-				Understands ProtocolVersion `json:"understands"`
-			}
-			if err := json.Unmarshal(params, &request); err != nil || request.Understands != (ProtocolVersion{Major: 2, Minor: 2}) {
-				t.Errorf("hello params = %s, error = %v", params, err)
-			}
 			return info, nil
 		}
 		code, known := codes[method]

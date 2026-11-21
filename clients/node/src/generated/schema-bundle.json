@@ -3417,7 +3417,31 @@
         "title": "CaptchaTurnstileArgs",
         "type": "object"
       },
-      "result": {}
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "clicks": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "elapsed_ms": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "tab_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tab_id",
+          "clicks",
+          "elapsed_ms"
+        ],
+        "title": "CaptchaTurnstileResult",
+        "type": "object"
+      }
     },
     "clear_cookies": {
       "params": {
@@ -3926,7 +3950,33 @@
         "title": "ClickShadowArgs",
         "type": "object"
       },
-      "result": {}
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "frame_id": {
+            "type": "string"
+          },
+          "selector": {
+            "type": "string"
+          },
+          "x": {
+            "format": "double",
+            "type": "number"
+          },
+          "y": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "frame_id",
+          "selector",
+          "x",
+          "y"
+        ],
+        "title": "ShadowClick",
+        "type": "object"
+      }
     },
     "clone_from": {
       "params": {
@@ -3993,7 +4043,11 @@
         ],
         "type": "object"
       },
-      "result": {}
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "string",
+        "type": "string"
+      }
     },
     "cookies": {
       "params": {
@@ -4868,7 +4922,19 @@
         "title": "SelectorArgs",
         "type": "object"
       },
-      "result": {}
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "exists": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "exists"
+        ],
+        "title": "Existence",
+        "type": "object"
+      }
     },
     "fake_camera": {
       "params": {
@@ -5496,7 +5562,11 @@
         "title": "FrameEvalArgs",
         "type": "object"
       },
-      "result": {}
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "string",
+        "type": "string"
+      }
     },
     "frames": {
       "params": {
@@ -5511,7 +5581,37 @@
         ],
         "type": "object"
       },
-      "result": {}
+      "result": {
+        "$defs": {
+          "FrameSummary": {
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "url"
+            ],
+            "type": "object"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "items": {
+          "$ref": "#/$defs/FrameSummary"
+        },
+        "title": "Array_of_FrameSummary",
+        "type": "array"
+      }
     },
     "get_attribute": {
       "params": {
@@ -5537,7 +5637,19 @@
         "title": "AttributeArgs",
         "type": "object"
       },
-      "result": {}
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "value": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "title": "AttributeValue",
+        "type": "object"
+      }
     },
     "get_text": {
       "params": {
@@ -5558,7 +5670,11 @@
         "title": "SelectorArgs",
         "type": "object"
       },
-      "result": {}
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "string",
+        "type": "string"
+      }
     },
     "headers": {
       "params": {
@@ -6051,7 +6167,23 @@
         ],
         "type": "object"
       },
-      "result": {}
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "title"
+        ],
+        "title": "PageInfo",
+        "type": "object"
+      }
     },
     "intercept.add": {
       "params": {
@@ -7156,7 +7288,11 @@
         "title": "KeyArgs",
         "type": "object"
       },
-      "result": {}
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "string",
+        "type": "string"
+      }
     },
     "key.up": {
       "params": {
@@ -7614,7 +7750,11 @@
         "title": "KeyArgs",
         "type": "object"
       },
-      "result": {}
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "string",
+        "type": "string"
+      }
     },
     "load_state": {
       "params": {
@@ -7683,7 +7823,11 @@
         "title": "MouseButtonArgs",
         "type": "object"
       },
-      "result": {}
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "string",
+        "type": "string"
+      }
     },
     "mouse.move": {
       "params": {
@@ -7711,7 +7855,11 @@
         "title": "MouseMoveArgs",
         "type": "object"
       },
-      "result": {}
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "string",
+        "type": "string"
+      }
     },
     "mouse.up": {
       "params": {
@@ -7756,7 +7904,11 @@
         "title": "MouseButtonArgs",
         "type": "object"
       },
-      "result": {}
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "string",
+        "type": "string"
+      }
     },
     "network.clear": {
       "params": {
@@ -11023,65 +11175,6 @@
         "type": "object"
       }
     },
-    "page.click_shadow": {
-      "params": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {
-          "frameId": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "pageId": {
-            "type": "string"
-          },
-          "selector": {
-            "type": "string"
-          },
-          "timeoutMs": {
-            "default": 10000,
-            "format": "uint64",
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "type": "integer"
-          }
-        },
-        "required": [
-          "pageId",
-          "selector"
-        ],
-        "title": "ClickShadowParams",
-        "type": "object"
-      },
-      "result": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {
-          "frameId": {
-            "type": "string"
-          },
-          "selector": {
-            "type": "string"
-          },
-          "x": {
-            "format": "double",
-            "type": "number"
-          },
-          "y": {
-            "format": "double",
-            "type": "number"
-          }
-        },
-        "required": [
-          "frameId",
-          "selector",
-          "x",
-          "y"
-        ],
-        "title": "ClickShadowResult",
-        "type": "object"
-      }
-    },
     "page.click_text": {
       "params": {
         "$defs": {
@@ -11957,34 +12050,6 @@
         "type": "object"
       }
     },
-    "page.content": {
-      "params": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {
-          "pageId": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "pageId"
-        ],
-        "title": "PageIdParams",
-        "type": "object"
-      },
-      "result": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {
-          "html": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "html"
-        ],
-        "title": "ContentResult",
-        "type": "object"
-      }
-    },
     "page.evaluate": {
       "params": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -12006,41 +12071,6 @@
           "function"
         ],
         "title": "JsParams",
-        "type": "object"
-      },
-      "result": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {
-          "result": true
-        },
-        "required": [
-          "result"
-        ],
-        "title": "EvaluateResult",
-        "type": "object"
-      }
-    },
-    "page.evaluate_in_frame": {
-      "params": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {
-          "frameId": {
-            "type": "string"
-          },
-          "js": {
-            "description": "JavaScript expression evaluated in the frame's isolated world. Frame IDs come from `page.frames`; detached or unrelated IDs are rejected.",
-            "type": "string"
-          },
-          "pageId": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "pageId",
-          "frameId",
-          "js"
-        ],
-        "title": "FrameJsParams",
         "type": "object"
       },
       "result": {
@@ -12137,38 +12167,6 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": false,
         "title": "Empty",
-        "type": "object"
-      }
-    },
-    "page.exists": {
-      "params": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {
-          "pageId": {
-            "type": "string"
-          },
-          "selector": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "pageId",
-          "selector"
-        ],
-        "title": "SelectorParams",
-        "type": "object"
-      },
-      "result": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {
-          "exists": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "exists"
-        ],
-        "title": "ExistsResult",
         "type": "object"
       }
     },
@@ -13232,120 +13230,6 @@
           "started_at_ms"
         ],
         "title": "OperationRecord",
-        "type": "object"
-      }
-    },
-    "page.frames": {
-      "params": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {
-          "pageId": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "pageId"
-        ],
-        "title": "FramesParams",
-        "type": "object"
-      },
-      "result": {
-        "$defs": {
-          "FrameInfo": {
-            "properties": {
-              "id": {
-                "type": "string"
-              },
-              "name": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "url": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "id",
-              "url"
-            ],
-            "type": "object"
-          }
-        },
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "items": {
-          "$ref": "#/$defs/FrameInfo"
-        },
-        "title": "Array_of_FrameInfo",
-        "type": "array"
-      }
-    },
-    "page.get_attribute": {
-      "params": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {
-          "name": {
-            "type": "string"
-          },
-          "pageId": {
-            "type": "string"
-          },
-          "selector": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "pageId",
-          "selector",
-          "name"
-        ],
-        "title": "GetAttributeParams",
-        "type": "object"
-      },
-      "result": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {
-          "value": {
-            "type": [
-              "string",
-              "null"
-            ]
-          }
-        },
-        "title": "AttributeResult",
-        "type": "object"
-      }
-    },
-    "page.get_text": {
-      "params": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {
-          "pageId": {
-            "type": "string"
-          },
-          "selector": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "pageId",
-          "selector"
-        ],
-        "title": "SelectorParams",
-        "type": "object"
-      },
-      "result": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {
-          "text": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "text"
-        ],
-        "title": "TextResult",
         "type": "object"
       }
     },
@@ -17642,1065 +17526,6 @@
         "type": "object"
       }
     },
-    "page.key_down": {
-      "params": {
-        "$defs": {
-          "Expectation": {
-            "description": "An observable completion condition. Values are not copied into receipts, and\n`Debug` prints only the kind.",
-            "oneOf": [
-              {
-                "description": "Wait for the document to be interactive or complete, without claiming application readiness.",
-                "properties": {
-                  "kind": {
-                    "const": "document_ready",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "kind"
-                ],
-                "type": "object"
-              },
-              {
-                "description": "Require every supplied condition in the same observation pass.",
-                "properties": {
-                  "conditions": {
-                    "description": "Conditions that must all hold.",
-                    "items": {
-                      "$ref": "#/$defs/Expectation"
-                    },
-                    "type": "array"
-                  },
-                  "kind": {
-                    "const": "all",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "conditions"
-                ],
-                "type": "object"
-              },
-              {
-                "description": "Wait for a visible control to become enabled or disabled.",
-                "properties": {
-                  "enabled": {
-                    "description": "Required enabled state.",
-                    "type": "boolean"
-                  },
-                  "kind": {
-                    "const": "enabled",
-                    "type": "string"
-                  },
-                  "target": {
-                    "$ref": "#/$defs/LocatorSpec",
-                    "description": "Control to inspect."
-                  }
-                },
-                "required": [
-                  "kind",
-                  "target",
-                  "enabled"
-                ],
-                "type": "object"
-              },
-              {
-                "description": "Observe a new native download originating from this page.",
-                "properties": {
-                  "kind": {
-                    "const": "download_started",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "kind"
-                ],
-                "type": "object"
-              },
-              {
-                "description": "Wait for a target to hold focus.",
-                "properties": {
-                  "kind": {
-                    "const": "focused",
-                    "type": "string"
-                  },
-                  "target": {
-                    "$ref": "#/$defs/LocatorSpec",
-                    "description": "Target that must receive focus."
-                  }
-                },
-                "required": [
-                  "kind",
-                  "target"
-                ],
-                "type": "object"
-              },
-              {
-                "description": "Wait for the page URL.",
-                "properties": {
-                  "contains": {
-                    "default": false,
-                    "description": "Accept a substring instead of an exact match.",
-                    "type": "boolean"
-                  },
-                  "kind": {
-                    "const": "url",
-                    "type": "string"
-                  },
-                  "value": {
-                    "description": "Expected or requested value.",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "value"
-                ],
-                "type": "object"
-              },
-              {
-                "description": "Wait for a rendered target.",
-                "properties": {
-                  "kind": {
-                    "const": "visible",
-                    "type": "string"
-                  },
-                  "target": {
-                    "$ref": "#/$defs/LocatorSpec",
-                    "description": "Locator resolved at execution time."
-                  }
-                },
-                "required": [
-                  "kind",
-                  "target"
-                ],
-                "type": "object"
-              },
-              {
-                "description": "Wait for a target to disappear or stop rendering.",
-                "properties": {
-                  "kind": {
-                    "const": "hidden",
-                    "type": "string"
-                  },
-                  "target": {
-                    "$ref": "#/$defs/LocatorSpec",
-                    "description": "Locator resolved at execution time."
-                  }
-                },
-                "required": [
-                  "kind",
-                  "target"
-                ],
-                "type": "object"
-              },
-              {
-                "description": "Match element text.",
-                "properties": {
-                  "contains": {
-                    "default": false,
-                    "description": "Accept a substring instead of an exact match.",
-                    "type": "boolean"
-                  },
-                  "kind": {
-                    "const": "text",
-                    "type": "string"
-                  },
-                  "target": {
-                    "$ref": "#/$defs/LocatorSpec",
-                    "description": "Locator resolved at execution time."
-                  },
-                  "value": {
-                    "description": "Expected or requested value.",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "target",
-                  "value"
-                ],
-                "type": "object"
-              },
-              {
-                "description": "Wait for a form value.",
-                "properties": {
-                  "kind": {
-                    "const": "value",
-                    "type": "string"
-                  },
-                  "target": {
-                    "$ref": "#/$defs/LocatorSpec",
-                    "description": "Locator resolved at execution time."
-                  },
-                  "value": {
-                    "description": "Expected or requested value.",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "target",
-                  "value"
-                ],
-                "type": "object"
-              },
-              {
-                "description": "Wait for a checked state.",
-                "properties": {
-                  "checked": {
-                    "description": "Expected checked state.",
-                    "type": "boolean"
-                  },
-                  "kind": {
-                    "const": "checked",
-                    "type": "string"
-                  },
-                  "target": {
-                    "$ref": "#/$defs/LocatorSpec",
-                    "description": "Locator resolved at execution time."
-                  }
-                },
-                "required": [
-                  "kind",
-                  "target",
-                  "checked"
-                ],
-                "type": "object"
-              },
-              {
-                "description": "Wait for selected option values.",
-                "properties": {
-                  "kind": {
-                    "const": "selected",
-                    "type": "string"
-                  },
-                  "target": {
-                    "$ref": "#/$defs/LocatorSpec",
-                    "description": "Locator resolved at execution time."
-                  },
-                  "values": {
-                    "description": "Requested option values.",
-                    "items": {
-                      "type": "string"
-                    },
-                    "type": "array"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "target",
-                  "values"
-                ],
-                "type": "object"
-              }
-            ]
-          },
-          "LocatorQuery": {
-            "description": "A query evaluated afresh immediately before an action.",
-            "oneOf": [
-              {
-                "description": "Resolve a pinned frontend node from an Element handle.",
-                "properties": {
-                  "id": {
-                    "description": "Chrome DOM node identifier for the original document.",
-                    "format": "int32",
-                    "maximum": 2147483647,
-                    "minimum": -2147483648,
-                    "type": "integer"
-                  },
-                  "kind": {
-                    "const": "node",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "id"
-                ],
-                "type": "object"
-              },
-              {
-                "description": "Match a CSS selector.",
-                "properties": {
-                  "kind": {
-                    "const": "css",
-                    "type": "string"
-                  },
-                  "selector": {
-                    "description": "CSS selector evaluated when the action runs.",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "selector"
-                ],
-                "type": "object"
-              },
-              {
-                "description": "Match element text.",
-                "properties": {
-                  "exact": {
-                    "default": false,
-                    "description": "Require an exact, trimmed text match.",
-                    "type": "boolean"
-                  },
-                  "kind": {
-                    "const": "text",
-                    "type": "string"
-                  },
-                  "text": {
-                    "description": "Text to match or insert.",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "text"
-                ],
-                "type": "object"
-              },
-              {
-                "description": "Match an exact placeholder attribute.",
-                "properties": {
-                  "kind": {
-                    "const": "placeholder",
-                    "type": "string"
-                  },
-                  "text": {
-                    "description": "Text to match or insert.",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "text"
-                ],
-                "type": "object"
-              },
-              {
-                "description": "Match an explicit ARIA role.",
-                "properties": {
-                  "kind": {
-                    "const": "role",
-                    "type": "string"
-                  },
-                  "role": {
-                    "description": "Explicit ARIA role to match.",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "role"
-                ],
-                "type": "object"
-              },
-              {
-                "description": "Resolve a pinned node without retargeting a replacement.",
-                "properties": {
-                  "id": {
-                    "description": "Pinned Chrome backend node identifier.",
-                    "format": "int64",
-                    "maximum": 9007199254740991,
-                    "minimum": -9007199254740991,
-                    "type": "integer"
-                  },
-                  "kind": {
-                    "const": "backend_node",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "id"
-                ],
-                "type": "object"
-              }
-            ]
-          },
-          "LocatorSpec": {
-            "description": "A serializable locator. Frame identifiers and backend nodes are pinned identities.",
-            "properties": {
-              "frame_id": {
-                "default": null,
-                "description": "Pinned frame identifier, or the main frame when absent.",
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "index": {
-                "default": null,
-                "description": "Explicit zero-based match index; absence requires a unique match.",
-                "format": "uint",
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": [
-                  "integer",
-                  "null"
-                ]
-              },
-              "query": {
-                "$ref": "#/$defs/LocatorQuery",
-                "description": "Query used to resolve the target."
-              }
-            },
-            "required": [
-              "query"
-            ],
-            "type": "object"
-          }
-        },
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {
-          "expect": {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/Expectation"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "A condition that is false now and true after the action, for example {\"kind\":\"url\",\"value\":\"/submit\",\"contains\":true}. A wrong guess fails after the action has already run."
-          },
-          "key": {
-            "description": "Key to press, for example Enter, Tab, Escape, ArrowDown, or Backspace.",
-            "type": "string"
-          },
-          "operation_id": {
-            "description": "Optional UUID. Generated when omitted and returned as id. Send your own to retry safely after a lost response.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "pageId": {
-            "type": "string"
-          },
-          "timeout_ms": {
-            "format": "uint64",
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "type": [
-              "integer",
-              "null"
-            ]
-          }
-        },
-        "required": [
-          "pageId",
-          "key"
-        ],
-        "title": "HeldKeyParams",
-        "type": "object"
-      },
-      "result": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "additionalProperties": false,
-        "title": "Empty",
-        "type": "object"
-      }
-    },
-    "page.key_up": {
-      "params": {
-        "$defs": {
-          "Expectation": {
-            "description": "An observable completion condition. Values are not copied into receipts, and\n`Debug` prints only the kind.",
-            "oneOf": [
-              {
-                "description": "Wait for the document to be interactive or complete, without claiming application readiness.",
-                "properties": {
-                  "kind": {
-                    "const": "document_ready",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "kind"
-                ],
-                "type": "object"
-              },
-              {
-                "description": "Require every supplied condition in the same observation pass.",
-                "properties": {
-                  "conditions": {
-                    "description": "Conditions that must all hold.",
-                    "items": {
-                      "$ref": "#/$defs/Expectation"
-                    },
-                    "type": "array"
-                  },
-                  "kind": {
-                    "const": "all",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "conditions"
-                ],
-                "type": "object"
-              },
-              {
-                "description": "Wait for a visible control to become enabled or disabled.",
-                "properties": {
-                  "enabled": {
-                    "description": "Required enabled state.",
-                    "type": "boolean"
-                  },
-                  "kind": {
-                    "const": "enabled",
-                    "type": "string"
-                  },
-                  "target": {
-                    "$ref": "#/$defs/LocatorSpec",
-                    "description": "Control to inspect."
-                  }
-                },
-                "required": [
-                  "kind",
-                  "target",
-                  "enabled"
-                ],
-                "type": "object"
-              },
-              {
-                "description": "Observe a new native download originating from this page.",
-                "properties": {
-                  "kind": {
-                    "const": "download_started",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "kind"
-                ],
-                "type": "object"
-              },
-              {
-                "description": "Wait for a target to hold focus.",
-                "properties": {
-                  "kind": {
-                    "const": "focused",
-                    "type": "string"
-                  },
-                  "target": {
-                    "$ref": "#/$defs/LocatorSpec",
-                    "description": "Target that must receive focus."
-                  }
-                },
-                "required": [
-                  "kind",
-                  "target"
-                ],
-                "type": "object"
-              },
-              {
-                "description": "Wait for the page URL.",
-                "properties": {
-                  "contains": {
-                    "default": false,
-                    "description": "Accept a substring instead of an exact match.",
-                    "type": "boolean"
-                  },
-                  "kind": {
-                    "const": "url",
-                    "type": "string"
-                  },
-                  "value": {
-                    "description": "Expected or requested value.",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "value"
-                ],
-                "type": "object"
-              },
-              {
-                "description": "Wait for a rendered target.",
-                "properties": {
-                  "kind": {
-                    "const": "visible",
-                    "type": "string"
-                  },
-                  "target": {
-                    "$ref": "#/$defs/LocatorSpec",
-                    "description": "Locator resolved at execution time."
-                  }
-                },
-                "required": [
-                  "kind",
-                  "target"
-                ],
-                "type": "object"
-              },
-              {
-                "description": "Wait for a target to disappear or stop rendering.",
-                "properties": {
-                  "kind": {
-                    "const": "hidden",
-                    "type": "string"
-                  },
-                  "target": {
-                    "$ref": "#/$defs/LocatorSpec",
-                    "description": "Locator resolved at execution time."
-                  }
-                },
-                "required": [
-                  "kind",
-                  "target"
-                ],
-                "type": "object"
-              },
-              {
-                "description": "Match element text.",
-                "properties": {
-                  "contains": {
-                    "default": false,
-                    "description": "Accept a substring instead of an exact match.",
-                    "type": "boolean"
-                  },
-                  "kind": {
-                    "const": "text",
-                    "type": "string"
-                  },
-                  "target": {
-                    "$ref": "#/$defs/LocatorSpec",
-                    "description": "Locator resolved at execution time."
-                  },
-                  "value": {
-                    "description": "Expected or requested value.",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "target",
-                  "value"
-                ],
-                "type": "object"
-              },
-              {
-                "description": "Wait for a form value.",
-                "properties": {
-                  "kind": {
-                    "const": "value",
-                    "type": "string"
-                  },
-                  "target": {
-                    "$ref": "#/$defs/LocatorSpec",
-                    "description": "Locator resolved at execution time."
-                  },
-                  "value": {
-                    "description": "Expected or requested value.",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "target",
-                  "value"
-                ],
-                "type": "object"
-              },
-              {
-                "description": "Wait for a checked state.",
-                "properties": {
-                  "checked": {
-                    "description": "Expected checked state.",
-                    "type": "boolean"
-                  },
-                  "kind": {
-                    "const": "checked",
-                    "type": "string"
-                  },
-                  "target": {
-                    "$ref": "#/$defs/LocatorSpec",
-                    "description": "Locator resolved at execution time."
-                  }
-                },
-                "required": [
-                  "kind",
-                  "target",
-                  "checked"
-                ],
-                "type": "object"
-              },
-              {
-                "description": "Wait for selected option values.",
-                "properties": {
-                  "kind": {
-                    "const": "selected",
-                    "type": "string"
-                  },
-                  "target": {
-                    "$ref": "#/$defs/LocatorSpec",
-                    "description": "Locator resolved at execution time."
-                  },
-                  "values": {
-                    "description": "Requested option values.",
-                    "items": {
-                      "type": "string"
-                    },
-                    "type": "array"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "target",
-                  "values"
-                ],
-                "type": "object"
-              }
-            ]
-          },
-          "LocatorQuery": {
-            "description": "A query evaluated afresh immediately before an action.",
-            "oneOf": [
-              {
-                "description": "Resolve a pinned frontend node from an Element handle.",
-                "properties": {
-                  "id": {
-                    "description": "Chrome DOM node identifier for the original document.",
-                    "format": "int32",
-                    "maximum": 2147483647,
-                    "minimum": -2147483648,
-                    "type": "integer"
-                  },
-                  "kind": {
-                    "const": "node",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "id"
-                ],
-                "type": "object"
-              },
-              {
-                "description": "Match a CSS selector.",
-                "properties": {
-                  "kind": {
-                    "const": "css",
-                    "type": "string"
-                  },
-                  "selector": {
-                    "description": "CSS selector evaluated when the action runs.",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "selector"
-                ],
-                "type": "object"
-              },
-              {
-                "description": "Match element text.",
-                "properties": {
-                  "exact": {
-                    "default": false,
-                    "description": "Require an exact, trimmed text match.",
-                    "type": "boolean"
-                  },
-                  "kind": {
-                    "const": "text",
-                    "type": "string"
-                  },
-                  "text": {
-                    "description": "Text to match or insert.",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "text"
-                ],
-                "type": "object"
-              },
-              {
-                "description": "Match an exact placeholder attribute.",
-                "properties": {
-                  "kind": {
-                    "const": "placeholder",
-                    "type": "string"
-                  },
-                  "text": {
-                    "description": "Text to match or insert.",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "text"
-                ],
-                "type": "object"
-              },
-              {
-                "description": "Match an explicit ARIA role.",
-                "properties": {
-                  "kind": {
-                    "const": "role",
-                    "type": "string"
-                  },
-                  "role": {
-                    "description": "Explicit ARIA role to match.",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "role"
-                ],
-                "type": "object"
-              },
-              {
-                "description": "Resolve a pinned node without retargeting a replacement.",
-                "properties": {
-                  "id": {
-                    "description": "Pinned Chrome backend node identifier.",
-                    "format": "int64",
-                    "maximum": 9007199254740991,
-                    "minimum": -9007199254740991,
-                    "type": "integer"
-                  },
-                  "kind": {
-                    "const": "backend_node",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "id"
-                ],
-                "type": "object"
-              }
-            ]
-          },
-          "LocatorSpec": {
-            "description": "A serializable locator. Frame identifiers and backend nodes are pinned identities.",
-            "properties": {
-              "frame_id": {
-                "default": null,
-                "description": "Pinned frame identifier, or the main frame when absent.",
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "index": {
-                "default": null,
-                "description": "Explicit zero-based match index; absence requires a unique match.",
-                "format": "uint",
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": [
-                  "integer",
-                  "null"
-                ]
-              },
-              "query": {
-                "$ref": "#/$defs/LocatorQuery",
-                "description": "Query used to resolve the target."
-              }
-            },
-            "required": [
-              "query"
-            ],
-            "type": "object"
-          }
-        },
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {
-          "expect": {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/Expectation"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "A condition that is false now and true after the action, for example {\"kind\":\"url\",\"value\":\"/submit\",\"contains\":true}. A wrong guess fails after the action has already run."
-          },
-          "key": {
-            "description": "Key to press, for example Enter, Tab, Escape, ArrowDown, or Backspace.",
-            "type": "string"
-          },
-          "operation_id": {
-            "description": "Optional UUID. Generated when omitted and returned as id. Send your own to retry safely after a lost response.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "pageId": {
-            "type": "string"
-          },
-          "timeout_ms": {
-            "format": "uint64",
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "type": [
-              "integer",
-              "null"
-            ]
-          }
-        },
-        "required": [
-          "pageId",
-          "key"
-        ],
-        "title": "HeldKeyParams",
-        "type": "object"
-      },
-      "result": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "additionalProperties": false,
-        "title": "Empty",
-        "type": "object"
-      }
-    },
-    "page.mouse_down": {
-      "params": {
-        "$defs": {
-          "MouseButton": {
-            "enum": [
-              "left",
-              "middle",
-              "right",
-              "back",
-              "forward"
-            ],
-            "type": "string"
-          }
-        },
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {
-          "button": {
-            "$ref": "#/$defs/MouseButton",
-            "description": "Mouse button to hold or release."
-          },
-          "pageId": {
-            "type": "string"
-          },
-          "x": {
-            "description": "Viewport horizontal coordinate in CSS pixels.",
-            "format": "double",
-            "type": "number"
-          },
-          "y": {
-            "description": "Viewport vertical coordinate in CSS pixels.",
-            "format": "double",
-            "type": "number"
-          }
-        },
-        "required": [
-          "pageId",
-          "x",
-          "y",
-          "button"
-        ],
-        "title": "MouseButtonParams",
-        "type": "object"
-      },
-      "result": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "additionalProperties": false,
-        "title": "Empty",
-        "type": "object"
-      }
-    },
-    "page.mouse_move": {
-      "params": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {
-          "pageId": {
-            "type": "string"
-          },
-          "x": {
-            "description": "Viewport horizontal coordinate in CSS pixels.",
-            "format": "double",
-            "type": "number"
-          },
-          "y": {
-            "description": "Viewport vertical coordinate in CSS pixels.",
-            "format": "double",
-            "type": "number"
-          }
-        },
-        "required": [
-          "pageId",
-          "x",
-          "y"
-        ],
-        "title": "MouseMoveParams",
-        "type": "object"
-      },
-      "result": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "additionalProperties": false,
-        "title": "Empty",
-        "type": "object"
-      }
-    },
-    "page.mouse_up": {
-      "params": {
-        "$defs": {
-          "MouseButton": {
-            "enum": [
-              "left",
-              "middle",
-              "right",
-              "back",
-              "forward"
-            ],
-            "type": "string"
-          }
-        },
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {
-          "button": {
-            "$ref": "#/$defs/MouseButton",
-            "description": "Mouse button to hold or release."
-          },
-          "pageId": {
-            "type": "string"
-          },
-          "x": {
-            "description": "Viewport horizontal coordinate in CSS pixels.",
-            "format": "double",
-            "type": "number"
-          },
-          "y": {
-            "description": "Viewport vertical coordinate in CSS pixels.",
-            "format": "double",
-            "type": "number"
-          }
-        },
-        "required": [
-          "pageId",
-          "x",
-          "y",
-          "button"
-        ],
-        "title": "MouseButtonParams",
-        "type": "object"
-      },
-      "result": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "additionalProperties": false,
-        "title": "Empty",
-        "type": "object"
-      }
-    },
     "page.press_key": {
       "params": {
         "$defs": {
@@ -19552,27 +18377,6 @@
           "started_at_ms"
         ],
         "title": "OperationRecord",
-        "type": "object"
-      }
-    },
-    "page.release_all_inputs": {
-      "params": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {
-          "pageId": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "pageId"
-        ],
-        "title": "PageIdParams",
-        "type": "object"
-      },
-      "result": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "additionalProperties": false,
-        "title": "Empty",
         "type": "object"
       }
     },
@@ -20972,107 +19776,6 @@
         "type": "object"
       }
     },
-    "page.solve_turnstile": {
-      "params": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {
-          "pageId": {
-            "type": "string"
-          },
-          "timeoutMs": {
-            "default": 30000,
-            "format": "uint64",
-            "maximum": 120000,
-            "minimum": 1,
-            "type": "integer"
-          }
-        },
-        "required": [
-          "pageId"
-        ],
-        "title": "SolveTurnstileParams",
-        "type": "object"
-      },
-      "result": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {
-          "clicks": {
-            "format": "uint32",
-            "maximum": 4294967295,
-            "minimum": 0,
-            "type": "integer"
-          },
-          "elapsedMs": {
-            "format": "uint64",
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "type": "integer"
-          }
-        },
-        "required": [
-          "clicks",
-          "elapsedMs"
-        ],
-        "title": "SolveTurnstileResult",
-        "type": "object"
-      }
-    },
-    "page.text": {
-      "params": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {
-          "pageId": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "pageId"
-        ],
-        "title": "PageIdParams",
-        "type": "object"
-      },
-      "result": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {
-          "text": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "text"
-        ],
-        "title": "TextResult",
-        "type": "object"
-      }
-    },
-    "page.title": {
-      "params": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {
-          "pageId": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "pageId"
-        ],
-        "title": "PageIdParams",
-        "type": "object"
-      },
-      "result": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {
-          "title": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "title"
-        ],
-        "title": "TitleResult",
-        "type": "object"
-      }
-    },
     "page.type_into": {
       "params": {
         "$defs": {
@@ -21950,130 +20653,6 @@
         "type": "object"
       }
     },
-    "page.url": {
-      "params": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {
-          "pageId": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "pageId"
-        ],
-        "title": "PageIdParams",
-        "type": "object"
-      },
-      "result": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {
-          "url": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "url"
-        ],
-        "title": "UrlResult",
-        "type": "object"
-      }
-    },
-    "page.wait_for": {
-      "params": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {
-          "pageId": {
-            "type": "string"
-          },
-          "selector": {
-            "type": "string"
-          },
-          "timeoutMs": {
-            "format": "uint64",
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "type": "integer"
-          }
-        },
-        "required": [
-          "pageId",
-          "selector",
-          "timeoutMs"
-        ],
-        "title": "WaitForParams",
-        "type": "object"
-      },
-      "result": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "additionalProperties": false,
-        "title": "Empty",
-        "type": "object"
-      }
-    },
-    "page.wait_for_text": {
-      "params": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {
-          "pageId": {
-            "type": "string"
-          },
-          "text": {
-            "type": "string"
-          },
-          "timeoutMs": {
-            "format": "uint64",
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "type": "integer"
-          }
-        },
-        "required": [
-          "pageId",
-          "text",
-          "timeoutMs"
-        ],
-        "title": "WaitForTextParams",
-        "type": "object"
-      },
-      "result": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "additionalProperties": false,
-        "title": "Empty",
-        "type": "object"
-      }
-    },
-    "page.wait_for_visible": {
-      "params": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {
-          "pageId": {
-            "type": "string"
-          },
-          "selector": {
-            "type": "string"
-          },
-          "timeoutMs": {
-            "format": "uint64",
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "type": "integer"
-          }
-        },
-        "required": [
-          "pageId",
-          "selector",
-          "timeoutMs"
-        ],
-        "title": "WaitForParams",
-        "type": "object"
-      },
-      "result": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "additionalProperties": false,
-        "title": "Empty",
-        "type": "object"
-      }
-    },
     "recording.cancel": {
       "params": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -22947,7 +21526,11 @@
         ],
         "type": "object"
       },
-      "result": {}
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "string",
+        "type": "string"
+      }
     },
     "reload": {
       "params": {
@@ -24040,16 +22623,6 @@
         "properties": {
           "protocol": {
             "$ref": "#/$defs/ProtocolVersion"
-          },
-          "understands": {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/ProtocolVersion"
-              },
-              {
-                "type": "null"
-              }
-            ]
           }
         },
         "required": [
@@ -24319,7 +22892,11 @@
         ],
         "type": "object"
       },
-      "result": {}
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "string",
+        "type": "string"
+      }
     },
     "wait": {
       "params": {
@@ -24832,7 +23409,11 @@
         "title": "WaitArgs",
         "type": "object"
       },
-      "result": {}
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "string",
+        "type": "string"
+      }
     },
     "wasm.find": {
       "params": {
@@ -24959,30 +23540,8 @@
     }
   },
   "protocolVersion": {
-    "major": 2,
-    "minor": 2
-  },
-  "replacedMethods": {
-    "page.click_shadow": "click_shadow",
-    "page.content": "content",
-    "page.evaluate_in_frame": "frame_eval",
-    "page.exists": "exists",
-    "page.frames": "frames",
-    "page.get_attribute": "get_attribute",
-    "page.get_text": "get_text",
-    "page.key_down": "key.down",
-    "page.key_up": "key.up",
-    "page.mouse_down": "mouse.down",
-    "page.mouse_move": "mouse.move",
-    "page.mouse_up": "mouse.up",
-    "page.release_all_inputs": "release_all_inputs",
-    "page.solve_turnstile": "captcha.turnstile",
-    "page.text": "text",
-    "page.title": "info",
-    "page.url": "info",
-    "page.wait_for": "wait",
-    "page.wait_for_text": "wait",
-    "page.wait_for_visible": "wait"
+    "major": 3,
+    "minor": 0
   },
   "types": {
     "Action": {
@@ -28703,16 +27262,6 @@
       "properties": {
         "protocol": {
           "$ref": "#/$defs/ProtocolVersion"
-        },
-        "understands": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ProtocolVersion"
-            },
-            {
-              "type": "null"
-            }
-          ]
         }
       },
       "required": [

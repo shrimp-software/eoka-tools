@@ -106,6 +106,7 @@ define_operations! {
         exposure: DefaultAgent,
         read_only: true,
         destructive: false,
+        result: PageInfo,
     },
     Text {
         path: "text",
@@ -116,6 +117,7 @@ define_operations! {
         exposure: DefaultAgent,
         read_only: true,
         destructive: false,
+        result: String,
     },
     Find {
         path: "find",
@@ -137,6 +139,7 @@ define_operations! {
         exposure: DefaultAgent,
         read_only: true,
         destructive: false,
+        result: String,
     },
     GetText {
         path: "get_text",
@@ -148,6 +151,7 @@ define_operations! {
         read_only: true,
         destructive: false,
         input: SelectorArgs,
+        result: String,
     },
     GetAttribute {
         path: "get_attribute",
@@ -159,6 +163,7 @@ define_operations! {
         read_only: true,
         destructive: false,
         input: AttributeArgs,
+        result: AttributeValue,
     },
     Exists {
         path: "exists",
@@ -170,6 +175,7 @@ define_operations! {
         read_only: true,
         destructive: false,
         input: SelectorArgs,
+        result: Existence,
     },
     ClickShadow {
         path: "click_shadow",
@@ -181,6 +187,7 @@ define_operations! {
         read_only: false,
         destructive: false,
         input: ClickShadowArgs,
+        result: ShadowClick,
     },
     RecordingStart {
         path: "recording.start",
@@ -305,6 +312,7 @@ define_operations! {
         destructive: true,
         input: MouseButtonArgs,
         cli: "mouse-down",
+        result: String,
     },
     MouseMove {
         path: "mouse.move",
@@ -317,6 +325,7 @@ define_operations! {
         destructive: false,
         input: MouseMoveArgs,
         cli: "mouse-move",
+        result: String,
     },
     MouseUp {
         path: "mouse.up",
@@ -329,6 +338,7 @@ define_operations! {
         destructive: true,
         input: MouseButtonArgs,
         cli: "mouse-up",
+        result: String,
     },
     KeyDown {
         path: "key.down",
@@ -341,6 +351,7 @@ define_operations! {
         destructive: true,
         input: KeyArgs,
         cli: "key-down",
+        result: String,
     },
     KeyUp {
         path: "key.up",
@@ -353,6 +364,7 @@ define_operations! {
         destructive: true,
         input: KeyArgs,
         cli: "key-up",
+        result: String,
     },
     ReleaseAllInputs {
         path: "release_all_inputs",
@@ -363,6 +375,7 @@ define_operations! {
         exposure: DefaultAgent,
         read_only: false,
         destructive: true,
+        result: String,
     },
     Scroll {
         path: "scroll",
@@ -406,6 +419,7 @@ define_operations! {
         exposure: DefaultAgent,
         read_only: true,
         destructive: false,
+        result: Vec<FrameSummary>,
     },
     FrameEval {
         path: "frame_eval",
@@ -417,6 +431,7 @@ define_operations! {
         read_only: false,
         destructive: false,
         input: FrameEvalArgs,
+        result: String,
     },
     DownloadStart {
         path: "download.start",
@@ -689,6 +704,7 @@ define_operations! {
         read_only: true,
         destructive: false,
         input: WaitArgs,
+        result: String,
     },
     SpaInfo {
         path: "spa.info",
@@ -996,6 +1012,7 @@ define_operations! {
         read_only: false,
         destructive: true,
         input: CaptchaTurnstileArgs,
+        result: CaptchaTurnstileResult,
     },
     DialogAccept {
         path: "dialog.accept",

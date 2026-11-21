@@ -21,13 +21,13 @@ import eoka "github.com/shrimp-software/eoka-tools/clients/go"
 ## Prerequisites
 
 You need a Chrome/Chromium install and an `eoka-server` binary implementing
-sidecar protocol **2.0** or a newer compatible 2.x minor. The client locates the binary in this order:
+sidecar protocol **3.0**. The client locates the binary in this order:
 
 1. `eoka.WithServerPath("/path/to/eoka-server")` passed to `Launch` or `Connect`, if given.
 2. The `EOKA_SERVER_BIN` environment variable, if set.
 3. `eoka-server` on `PATH`.
 4. A prebuilt binary downloaded from this repo's GitHub Releases, pinned to
-   [`eoka-server-v0.12.0`](https://github.com/shrimp-software/eoka-tools/releases/tag/eoka-server-v0.12.0).
+   [`eoka-server-v0.13.0`](https://github.com/shrimp-software/eoka-tools/releases/tag/eoka-server-v0.13.0).
    Assets are available for linux/amd64, linux/arm64, darwin/amd64, darwin/arm64
    and windows/amd64. The binary is cached under `os.UserCacheDir()/eoka/` and
    verified against the release's published SHA-256 checksums before installation.
@@ -45,8 +45,8 @@ the resulting server.
 
 ## Action migration
 
-`Launch` and `Connect` send `server.hello` with protocol 2.0 before creating
-a browser session. The client requires major 2 and accepts any 2.x minor; server/core
+`Launch` and `Connect` send `server.hello` with protocol 3.0 before creating
+a browser session. The client requires major 3; server/core
 package versions are diagnostic information, not substitutes for protocol
 compatibility. `Browser.ServerInfo()` returns the negotiated versions, supported
 methods, capabilities and server limits. Missing required launch or connect support,
@@ -55,7 +55,6 @@ Every convenience API requires its method to be advertised before transmission.
 Optional capabilities are interpreted: durable actions/recovery require
 `durableActions`; explicit operation cancellation requires `operationCancellation`.
 
-Protocol 2.0 servers provide these conveniences:
 `Page.Screenshot(ctx)` still requests default PNG and decodes the unchanged
 `{dataBase64}` result. The server bounds raw screenshots at 16 MiB and returns
 `ErrCodeScreenshotTooLarge` with direct-file guidance. Typed screenshot options,
@@ -65,9 +64,8 @@ terminal record, failure stage, retained partial path and cleanup uncertainty;
 stable recording/file error constants are available for classification.
 
 `Page.Invoke(ctx, method, params, &result)` calls any page-scoped server method
-by name and adds the page ID. Protocol 2.1 servers (capability
-`operationCatalog`) serve every `eoka` CLI operation this way under its catalog
-name. The generated `Op*` constants name them (`OpConsole`, `OpCookies`,
+by name and adds the page ID. The server serves every `eoka` CLI operation this
+way under its catalog name. The generated `Op*` constants name them (`OpConsole`, `OpCookies`,
 `OpNetworkRecordStart`), and `CatalogMethods` lists them all.
 
 Click/type/key methods accept `ActionOptions{Expect: ...}` and require a fresh
@@ -247,8 +245,7 @@ response, and `PageUnresponsive` (`ErrCodePageUnresponsive`) when the page
 answers nothing and neither is known. For the first two, `Data` carries
 `blocker`: `{"kind":"dialog","dialogType","message","url","elapsedMs"}` or
 `{"kind":"navigation","url","elapsedMs"}`, next to the `detail` that names the
-remedy. The client asks for these codes by sending `understands` 2.2 in
-`server.hello`; an older server ignores it and keeps its own behaviour.
+remedy.
 
 Transport-level failures (the server process died, its pipes closed, an invalid
 response, unknown/duplicate response ID or mid-message EOF) fail the transport and

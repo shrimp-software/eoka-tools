@@ -820,7 +820,7 @@ async fn disconnected_clients_do_not_cancel_and_large_files_stay_out_of_daemon_m
     let mut stream = tokio::net::UnixStream::connect(&socket).await.unwrap();
     eoka_sdk::write_msg(
         &mut stream,
-        &serde_json::json!({"protocol_major":2,"cmd":"download_start","args":eoka_protocol::DownloadStartArgs {
+        &serde_json::json!({"protocol_major": eoka_protocol::sidecar::PROTOCOL_VERSION.major,"cmd":"download_start","args":eoka_protocol::DownloadStartArgs {
             operation_id: None,
             click: Some("css:#slow".into()),
             url: None,
@@ -950,7 +950,7 @@ async fn durable_actions_survive_client_disconnect_and_completed_downloads_survi
     cli.ok(&["eval", "document.body.insertAdjacentHTML('beforeend','<button id=operation>Run</button><p id=operation-result>pending</p>');window.operationHits=0;document.getElementById('operation').onclick=()=>{window.operationHits++;setTimeout(()=>document.getElementById('operation-result').textContent='done',300)};true"]).await;
     let id = "6d098ba0-d7d5-4d08-940a-438a0d6a5375";
     let expect=serde_json::json!({"kind":"text","target":{"query":{"kind":"css","selector":"#operation-result"}},"value":"done"}).to_string();
-    let request = serde_json::json!({"protocol_major":2,"cmd":"action_command","args":{"operation_id":id,"command":"click","arguments":{"target":"css:#operation","expect":serde_json::from_str::<Value>(&expect).unwrap()}}});
+    let request = serde_json::json!({"protocol_major": eoka_protocol::sidecar::PROTOCOL_VERSION.major,"cmd":"action_command","args":{"operation_id":id,"command":"click","arguments":{"target":"css:#operation","expect":serde_json::from_str::<Value>(&expect).unwrap()}}});
     let mut stream = UnixStream::connect(eoka_sdk::session::socket_path(&cli.session))
         .await
         .unwrap();

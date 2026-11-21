@@ -263,7 +263,7 @@ func TestTransportBoundsMessages(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		done := make(chan error, 1)
-		go func() { done <- tr.call(ctx, "page.content", map[string]any{}, nil) }()
+		go func() { done <- tr.call(ctx, "content", map[string]any{}, nil) }()
 		_ = wireRequest(t, requests)
 		chunk := strings.Repeat("x", 256*1024)
 		for i := 0; i < maxMessageBytes/len(chunk); i++ {

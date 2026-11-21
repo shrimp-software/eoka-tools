@@ -48,6 +48,8 @@ export interface AgentStepOptions extends AgentObserveOptions {
   actionTimeoutMs?: number;
 }
 
+export interface ShadowClickResult { frameId: string; selector: string; x: number; y: number }
+export interface TurnstileResult { clicks: number; elapsedMs: number }
 export type FetchOptions = Pick<MethodParams['page.fetch'], 'method' | 'headers' | 'body' | 'redirect'>;
 export type BoundedFetchOptions = Pick<MethodParams['page.fetch_bounded'], 'method' | 'headers' | 'body' | 'redirect' | 'maxBytes'>;
 export type ViewportOptions = Pick<MethodParams['page.set_viewport'], 'width' | 'height' | 'deviceScaleFactor'>;
@@ -216,46 +218,46 @@ export class Page implements InvokeClient {
   }
 
   async text(options?: CallOptions): Promise<string> {
-    return (await this.invoke('page.text', { pageId: this.id }, options)).text;
+    return this.invoke('text', { pageId: this.id }, options);
   }
 
   async content(options?: CallOptions): Promise<string> {
-    return (await this.invoke('page.content', { pageId: this.id }, options)).html;
+    return this.invoke('content', { pageId: this.id }, options);
   }
 
   async title(options?: CallOptions): Promise<string> {
-    return (await this.invoke('page.title', { pageId: this.id }, options)).title;
+    return (await this.invoke('info', { pageId: this.id }, options)).title;
   }
 
   async url(options?: CallOptions): Promise<string> {
-    return (await this.invoke('page.url', { pageId: this.id }, options)).url;
+    return (await this.invoke('info', { pageId: this.id }, options)).url;
   }
 
   async getText(selector: string, options?: CallOptions): Promise<string> {
-    return (await this.invoke('page.get_text', { pageId: this.id, selector }, options)).text;
+    return this.invoke('get_text', { pageId: this.id, selector }, options);
   }
 
   async getAttribute(selector: string, name: string, options?: CallOptions): Promise<string | null> {
-    return (await this.invoke('page.get_attribute', { pageId: this.id, selector, name }, options)).value ?? null;
+    return (await this.invoke('get_attribute', { pageId: this.id, selector, name }, options)).value ?? null;
   }
 
   async exists(selector: string, options?: CallOptions): Promise<boolean> {
-    return (await this.invoke('page.exists', { pageId: this.id, selector }, options)).exists;
+    return (await this.invoke('exists', { pageId: this.id, selector }, options)).exists;
   }
 
   async waitFor(selector: string, options: PageWaitOptions = {}): Promise<void> {
     const { waitTimeoutMs = 30_000, ...localOptions } = options;
-    await this.invoke('page.wait_for', { pageId: this.id, selector, timeoutMs: waitTimeoutMs }, localOptions);
+    await this.invoke('wait', { pageId: this.id, selector, state: 'attached', timeout: waitTimeoutMs }, localOptions);
   }
 
   async waitForVisible(selector: string, options: PageWaitOptions = {}): Promise<void> {
     const { waitTimeoutMs = 30_000, ...localOptions } = options;
-    await this.invoke('page.wait_for_visible', { pageId: this.id, selector, timeoutMs: waitTimeoutMs }, localOptions);
+    await this.invoke('wait', { pageId: this.id, selector, state: 'visible', timeout: waitTimeoutMs }, localOptions);
   }
 
   async waitForText(text: string, options: PageWaitOptions = {}): Promise<void> {
     const { waitTimeoutMs = 30_000, ...localOptions } = options;
-    await this.invoke('page.wait_for_text', { pageId: this.id, text, timeoutMs: waitTimeoutMs }, localOptions);
+    await this.invoke('wait', { pageId: this.id, text, timeout: waitTimeoutMs }, localOptions);
   }
 
   evaluate<R>(fn: PageFunction<R>, args?: unknown[], options?: CallOptions): Promise<Awaited<R>>;
@@ -276,45 +278,31 @@ export class Page implements InvokeClient {
     await this.invoke('page.execute_raw', { pageId: this.id, js }, options);
   }
 
-  /** List every frame in the page, including cross-origin OOPIFs. */
-  async frames(options?: CallOptions): Promise<MethodResults['page.frames']> {
-    return this.invoke('page.frames', { pageId: this.id }, options);
+  async frames(options?: CallOptions): Promise<MethodResults['frames']> {
+    return this.invoke('frames', { pageId: this.id }, options);
   }
 
-  /**
-   * Click an element inside a closed shadow root in the top frame or a child
-   * frame. `frameId` comes from `frames()`. The selector is searched through
-   * the frame's light DOM and every shadow root; the node's center is mapped
-   * to viewport coordinates and clicked with human-like movement.
-   */
   async clickShadow(
     selector: string,
     options: { frameId?: string; resolveTimeoutMs?: number } & CallOptions = {},
-  ): Promise<MethodResults['page.click_shadow']> {
+  ): Promise<ShadowClickResult> {
     const { frameId, resolveTimeoutMs, ...callOptions } = options;
-    // `CallOptions.timeoutMs` is the RPC deadline; `resolveTimeoutMs` is the
-    // server-side resolution deadline. Derive an RPC deadline that cannot
-    // outlive a long resolution when the caller did not set one explicitly.
     if (callOptions.timeoutMs === undefined && resolveTimeoutMs !== undefined) {
       callOptions.timeoutMs = resolveTimeoutMs + serverGraceMs;
     }
-    return this.invoke('page.click_shadow', {
+    const click = await this.invoke('click_shadow', {
       pageId: this.id,
       selector,
-      ...(frameId === undefined ? {} : { frameId }),
-      ...(resolveTimeoutMs === undefined ? {} : { timeoutMs: resolveTimeoutMs }),
+      ...(frameId === undefined ? {} : { frame_id: frameId }),
+      ...(resolveTimeoutMs === undefined ? {} : { timeout_ms: resolveTimeoutMs }),
     }, callOptions);
+    return { frameId: click.frame_id, selector: click.selector, x: click.x, y: click.y };
   }
 
-  /**
-   * Best-effort helper for interactive Cloudflare challenge pages: the server
-   * clicks the Turnstile checkbox through its closed shadow root until the page
-   * leaves the challenge. Resolves with zero clicks on a normal page.
-   */
-  solveTurnstile(options: { timeoutMs?: number } & CallOptions = {}): Promise<MethodResults['page.solve_turnstile']> {
+  async solveTurnstile(options: { timeoutMs?: number } & CallOptions = {}): Promise<TurnstileResult> {
     const { timeoutMs = 30_000, ...callOptions } = options;
-    // The local deadline outlasts the server's solve deadline so its error wins.
-    return this.invoke('page.solve_turnstile', { pageId: this.id, timeoutMs }, { ...callOptions, timeoutMs: timeoutMs + serverGraceMs });
+    const solved = await this.invoke('captcha.turnstile', { pageId: this.id, timeout_ms: timeoutMs }, { ...callOptions, timeoutMs: timeoutMs + serverGraceMs });
+    return { clicks: solved.clicks, elapsedMs: solved.elapsed_ms };
   }
 
   async captureState(options?: CallOptions): Promise<BrowserState> {

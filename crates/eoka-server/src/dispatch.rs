@@ -4,8 +4,8 @@ use crate::methods::{blocked, browser, page};
 use crate::state::AppState;
 use eoka_protocol::sidecar::{
     catalog_operation, catalog_request, method_names, validate_params, validate_safe_numbers,
-    AgentObserveParams, AgentStepParams, ErrorCode, HelloParams, HelloResult, ProtocolVersion,
-    ServerError, TransportLimits, CAPABILITY_CLOUDFLARE_AUTO_SOLVE, CAPABILITY_NATIVE_RECORDING,
+    AgentObserveParams, AgentStepParams, ErrorCode, HelloParams, HelloResult, ServerError,
+    TransportLimits, CAPABILITY_CLOUDFLARE_AUTO_SOLVE, CAPABILITY_NATIVE_RECORDING,
     CAPABILITY_OPERATION_CATALOG, CAPABILITY_PAGE_BLOCKERS, CAPABILITY_SCREENSHOT_FILE,
     CAPABILITY_SCREENSHOT_OPTIONS, MAX_IN_FLIGHT, MAX_MESSAGE_BYTES, PROTOCOL_VERSION,
 };
@@ -151,24 +151,10 @@ async fn route(state: &AppState, method: &str, params: Value) -> Result<Value, S
         "browser.close_tab" => browser::close_tab(state, params).await,
         "browser.close" => browser::close(state, params).await,
 
-        "page.text" => page::text(state, params).await,
-        "page.content" => page::content(state, params).await,
-        "page.title" => page::title(state, params).await,
-        "page.url" => page::url(state, params).await,
-        "page.get_text" => page::get_text(state, params).await,
-        "page.get_attribute" => page::get_attribute(state, params).await,
-        "page.exists" => page::exists(state, params).await,
-        "page.wait_for" => page::wait_for(state, params).await,
-        "page.wait_for_visible" => page::wait_for_visible(state, params).await,
-        "page.wait_for_text" => page::wait_for_text(state, params).await,
         "page.evaluate" => page::evaluate(state, params).await,
         "page.execute" => page::execute(state, params).await,
         "page.evaluate_raw" => page::evaluate_raw(state, params).await,
         "page.execute_raw" => page::execute_raw(state, params).await,
-        "page.frames" => page::frames(state, params).await,
-        "page.evaluate_in_frame" => page::evaluate_in_frame(state, params).await,
-        "page.click_shadow" => page::click_shadow(state, params).await,
-        "page.solve_turnstile" => page::solve_turnstile(state, params).await,
         "page.fetch" => page::fetch(state, params).await,
         "page.fetch_bounded" => page::fetch_bounded(state, params).await,
         "page.capture_state" => page::capture_state(state, params).await,
@@ -185,12 +171,6 @@ async fn route(state: &AppState, method: &str, params: Value) -> Result<Value, S
         }
         "page.set_viewport" => page::set_viewport(state, params).await,
         "page.reset_viewport" => page::reset_viewport(state, params).await,
-        "page.mouse_down" => page::mouse_down(state, params).await,
-        "page.mouse_move" => page::mouse_move(state, params).await,
-        "page.mouse_up" => page::mouse_up(state, params).await,
-        "page.key_down" => page::key_down(state, params).await,
-        "page.key_up" => page::key_up(state, params).await,
-        "page.release_all_inputs" => page::release_all_inputs(state, params).await,
         #[cfg(feature = "anti-captcha")]
         "page.solve_captcha" => page::solve_captcha(state, params).await,
         "page.close" => page::close(state, params).await,
@@ -200,14 +180,9 @@ async fn route(state: &AppState, method: &str, params: Value) -> Result<Value, S
 }
 
 pub fn hello(params: Value) -> Result<Value, ServerError> {
-    negotiate(params).map(|(_, greeting)| greeting)
-}
-
-pub fn negotiate(params: Value) -> Result<(ProtocolVersion, Value), ServerError> {
     validate_safe_numbers(&params)?;
     let params: HelloParams = serde_json::from_value(params)
         .map_err(|error| ServerError::invalid_params(error.to_string()))?;
-    let spoken = params.spoken();
     if params.protocol.major != PROTOCOL_VERSION.major
         || params.protocol.minor > PROTOCOL_VERSION.minor
     {
@@ -253,7 +228,6 @@ pub fn negotiate(params: Value) -> Result<(ProtocolVersion, Value), ServerError>
             max_in_flight: MAX_IN_FLIGHT,
         },
     })
-    .map(|greeting| (spoken, greeting))
     .map_err(|error| ServerError::internal(error.to_string()))
 }
 
@@ -280,7 +254,7 @@ mod stack_tests {
     #[test]
     fn a_call_is_small_enough_to_run_on_a_worker_thread_stack() {
         let state = AppState::new();
-        let sidecar = dispatch_shared(&state, "page.text", Value::Null);
+        let sidecar = dispatch_shared(&state, "text", Value::Null);
         assert!(std::mem::size_of_val(&sidecar) < 16 * 1024);
         let catalog = state.catalog("page", eoka_protocol::Request::Info, None);
         assert!(std::mem::size_of_val(&catalog) < 16 * 1024);

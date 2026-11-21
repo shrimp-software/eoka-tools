@@ -11,7 +11,7 @@ pub(crate) async fn print_sessions(json_mode: bool) {
             .filter(|r| r.ok)
             .and_then(|r| r.data)
             .unwrap_or_default();
-        rows.push(json!({"session":name,"running":client::is_daemon_running(&name),"socket":session::socket_path(&name).to_string_lossy(),"mode":details["mode"],"daemon_version":details["daemon_version"],"protocol_major":details["protocol_major"],"legacy_name":name.ends_with("-headed") || name.ends_with("-live")}));
+        rows.push(json!({"session":name,"running":client::is_daemon_running(&name),"socket":session::socket_path(&name).to_string_lossy(),"mode":details["mode"],"daemon_version":details["daemon_version"],"protocol_major":details["protocol_major"]}));
     }
     if json_mode {
         output::print_response(&protocol::Response::ok(json!({"sessions":rows})), true);

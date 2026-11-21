@@ -243,7 +243,7 @@ test('rejected calls carry the frame of the code that made them', async t => {
       return call;
     }],
     ['Configuration', () => late.invoke('page.evaluate', { pageId: 'page' })],
-    ['Action', () => failing.invoke('page.title', { pageId: 'page' })],
+    ['Action', () => failing.invoke('info', { pageId: 'page' })],
   ];
   for (const [code, call] of cases) {
     const error = await settled(call());
@@ -320,8 +320,8 @@ test('the default deadline never undercuts a requested server-side wait and skip
   watch('explicit wait', transport.invoke('operations.wait', { id: operationId, timeout_ms: 500 }));
   watch('schema default wait', transport.invoke('operations.wait', { id: operationId }));
   watch('nested action wait', transport.invoke('actions.perform', { pageId: 'page', operation_id: operationId, action: { kind: 'reload' }, options: { timeout_ms: 6_000 } }));
-  watch('page wait', transport.invoke('page.wait_for', { pageId: 'page', selector: '#late', timeoutMs: 3_000 }));
-  watch('no wait', transport.invoke('page.title', { pageId: 'page' }));
+  watch('page wait', transport.invoke('wait', { pageId: 'page', selector: '#late', timeout: 3_000 }));
+  watch('no wait', transport.invoke('info', { pageId: 'page' }));
   let elapsed = 0;
   const settledAt = async time => {
     t.mock.timers.tick(time - elapsed);
@@ -338,7 +338,7 @@ test('the default deadline never undercuts a requested server-side wait and skip
   assert.deepEqual(await settledAt(39_000), ['no wait', 'explicit wait', 'page wait', 'nested action wait']);
   assert.deepEqual(await settledAt(40_010), ['no wait', 'explicit wait', 'page wait', 'nested action wait', 'schema default wait']);
   assert.deepEqual([...new Set([...outcomes.values()].map(error => error.code))], ['DeadlineExceeded']);
-  assert.match(outcomes.get('no wait').message, /page\.title exceeded the 40 ms default deadline \(defaultTimeoutMs\)/);
+  assert.match(outcomes.get('no wait').message, /info exceeded the 40 ms default deadline \(defaultTimeoutMs\)/);
   assert.match(outcomes.get('explicit wait').message, /operations\.wait exceeded the 10500 ms default deadline \(its server-side wait plus 10000 ms\)/);
   void transport.invoke('browser.close', {}).catch(() => {});
   const terminal = [...transport.pending.values()].find(entry => entry.method === 'browser.close');
@@ -348,7 +348,7 @@ test('the default deadline never undercuts a requested server-side wait and skip
 
 test('the default deadline can be disabled and rejects unusable values', async t => {
   const transport = await start(t, 'silent', {}, { defaultTimeoutMs: null });
-  void transport.invoke('page.title', { pageId: 'page' }).catch(() => {});
+  void transport.invoke('info', { pageId: 'page' }).catch(() => {});
   assert.equal([...transport.pending.values()][0].timer, undefined);
   for (const defaultTimeoutMs of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
     await assert.rejects(SidecarTransport.start({ serverPath, defaultTimeoutMs }), error => error instanceof ConfigurationError && error.requestState === 'not_sent' && /defaultTimeoutMs/.test(error.message));

@@ -1,12 +1,8 @@
 use base64::Engine;
 use eoka_protocol::sidecar::{
-    AttributeResult, BoundedFetchParams, BoundedFetchResult, CaptureStateResult, ClickShadowParams,
-    ClickShadowResult, ContentResult, ErrorCode, EvaluateResult, ExistsResult, FetchParams,
-    FetchResult, FrameInfo, FrameJsParams, FramesParams, GetAttributeParams, HeldKeyParams,
-    JsParams, MouseButtonParams, MouseMoveParams, RawJsParams, RestoreStateParams,
-    ScreenshotParams, ScreenshotToFileParams, SelectorParams, ServerError, SetViewportParams,
-    SolveTurnstileParams, SolveTurnstileResult, TextResult, TitleResult, UrlResult, WaitForParams,
-    WaitForTextParams,
+    BoundedFetchParams, BoundedFetchResult, CaptureStateResult, ErrorCode, EvaluateResult,
+    FetchParams, FetchResult, JsParams, RawJsParams, RestoreStateParams, ScreenshotParams,
+    ScreenshotToFileParams, ServerError, SetViewportParams,
 };
 #[cfg(feature = "anti-captcha")]
 use eoka_solvers::{build_captcha_inject_js, CaptchaInjectionKind};
@@ -15,16 +11,6 @@ use serde_json::{json, Value};
 use super::browser::close_tab_impl;
 use super::{parse_params, PageIdParams};
 use crate::state::AppState;
-
-fn core_mouse_button(button: eoka_protocol::MouseButton) -> eoka::MouseButton {
-    match button {
-        eoka_protocol::MouseButton::Left => eoka::MouseButton::Left,
-        eoka_protocol::MouseButton::Middle => eoka::MouseButton::Middle,
-        eoka_protocol::MouseButton::Right => eoka::MouseButton::Right,
-        eoka_protocol::MouseButton::Back => eoka::MouseButton::Back,
-        eoka_protocol::MouseButton::Forward => eoka::MouseButton::Forward,
-    }
-}
 
 fn encode(value: impl serde::Serialize) -> Result<Value, ServerError> {
     serde_json::to_value(value).map_err(|error| ServerError::internal(error.to_string()))
@@ -79,79 +65,6 @@ pub async fn fetch_bounded(state: &AppState, params: Value) -> Result<Value, Ser
     })
 }
 
-pub async fn text(state: &AppState, params: Value) -> Result<Value, ServerError> {
-    let params: PageIdParams = parse_params(params)?;
-    let text = state.page(&params.page_id)?.text().await?;
-    encode(TextResult { text })
-}
-
-pub async fn content(state: &AppState, params: Value) -> Result<Value, ServerError> {
-    let params: PageIdParams = parse_params(params)?;
-    let html = state.page(&params.page_id)?.content().await?;
-    encode(ContentResult { html })
-}
-
-pub async fn title(state: &AppState, params: Value) -> Result<Value, ServerError> {
-    let params: PageIdParams = parse_params(params)?;
-    let title = state.page(&params.page_id)?.title().await?;
-    encode(TitleResult { title })
-}
-
-pub async fn url(state: &AppState, params: Value) -> Result<Value, ServerError> {
-    let params: PageIdParams = parse_params(params)?;
-    let url = state.page(&params.page_id)?.url().await?;
-    encode(UrlResult { url })
-}
-
-pub async fn get_text(state: &AppState, params: Value) -> Result<Value, ServerError> {
-    let params: SelectorParams = parse_params(params)?;
-    let page = state.page(&params.page_id)?;
-    let element = page.find(&params.selector).await?;
-    let text = element.text().await?;
-    encode(TextResult { text })
-}
-
-pub async fn get_attribute(state: &AppState, params: Value) -> Result<Value, ServerError> {
-    let params: GetAttributeParams = parse_params(params)?;
-    let page = state.page(&params.page_id)?;
-    let element = page.find(&params.selector).await?;
-    let value = element.get_attribute(&params.name).await?;
-    encode(AttributeResult { value })
-}
-
-pub async fn exists(state: &AppState, params: Value) -> Result<Value, ServerError> {
-    let params: SelectorParams = parse_params(params)?;
-    let exists = state.page(&params.page_id)?.exists(&params.selector).await;
-    encode(ExistsResult { exists })
-}
-
-pub async fn wait_for(state: &AppState, params: Value) -> Result<Value, ServerError> {
-    let params: WaitForParams = parse_params(params)?;
-    state
-        .page(&params.page_id)?
-        .wait_for(&params.selector, params.timeout_ms)
-        .await?;
-    Ok(json!({}))
-}
-
-pub async fn wait_for_visible(state: &AppState, params: Value) -> Result<Value, ServerError> {
-    let params: WaitForParams = parse_params(params)?;
-    state
-        .page(&params.page_id)?
-        .wait_for_visible(&params.selector, params.timeout_ms)
-        .await?;
-    Ok(json!({}))
-}
-
-pub async fn wait_for_text(state: &AppState, params: Value) -> Result<Value, ServerError> {
-    let params: WaitForTextParams = parse_params(params)?;
-    state
-        .page(&params.page_id)?
-        .wait_for_text(&params.text, params.timeout_ms)
-        .await?;
-    Ok(json!({}))
-}
-
 pub async fn evaluate(state: &AppState, params: Value) -> Result<Value, ServerError> {
     let params: JsParams = parse_params(params)?;
     let result = state
@@ -183,64 +96,6 @@ pub async fn execute_raw(state: &AppState, params: Value) -> Result<Value, Serve
     let params: RawJsParams = parse_params(params)?;
     state.page(&params.page_id)?.execute(&params.js).await?;
     Ok(json!({}))
-}
-
-pub async fn frames(state: &AppState, params: Value) -> Result<Value, ServerError> {
-    let params: FramesParams = parse_params(params)?;
-    let frames: Vec<FrameInfo> = state
-        .page(&params.page_id)?
-        .frames()
-        .await?
-        .into_iter()
-        .map(|frame| FrameInfo {
-            id: frame.id,
-            url: frame.url,
-            name: frame.name,
-        })
-        .collect();
-    encode(frames)
-}
-
-pub async fn evaluate_in_frame(state: &AppState, params: Value) -> Result<Value, ServerError> {
-    let params: FrameJsParams = parse_params(params)?;
-    let result = state
-        .page(&params.page_id)?
-        .evaluate_json_in_frame_id(&params.frame_id, &params.js, MAX_EVALUATION_BYTES)
-        .await?;
-    encode(EvaluateResult { result })
-}
-
-pub async fn click_shadow(state: &AppState, params: Value) -> Result<Value, ServerError> {
-    let params: ClickShadowParams = parse_params(params)?;
-    let page = state.page(&params.page_id)?;
-    let receipt = crate::capture::painting(
-        &page,
-        page.click_shadow_with_timeout(
-            params.frame_id.as_deref(),
-            &params.selector,
-            std::time::Duration::from_millis(params.timeout_ms),
-        ),
-    )
-    .await?;
-    encode(ClickShadowResult {
-        frame_id: receipt.frame_id,
-        selector: receipt.selector,
-        x: receipt.x,
-        y: receipt.y,
-    })
-}
-
-pub async fn solve_turnstile(state: &AppState, params: Value) -> Result<Value, ServerError> {
-    let params: SolveTurnstileParams = parse_params(params)?;
-    let receipt = crate::cloudflare::solve_turnstile(
-        &state.page(&params.page_id)?,
-        std::time::Duration::from_millis(params.timeout_ms),
-    )
-    .await?;
-    encode(SolveTurnstileResult {
-        clicks: receipt.clicks,
-        elapsed_ms: receipt.elapsed.as_millis() as u64,
-    })
 }
 
 const MAX_EVALUATION_BYTES: usize = 16 * 1024 * 1024 - 4096;
@@ -373,60 +228,6 @@ pub async fn screenshot_to_file(state: &AppState, params: Value) -> Result<Value
         .map_err(|error| ServerError::internal(error.to_string()))?
         .map_err(|error| error.server_error())?;
     encode(artifact)
-}
-
-pub async fn mouse_down(state: &AppState, params: Value) -> Result<Value, ServerError> {
-    let params: MouseButtonParams = parse_params(params)?;
-    state
-        .page(&params.page_id)?
-        .mouse_down(
-            params.mouse.x,
-            params.mouse.y,
-            core_mouse_button(params.mouse.button),
-        )
-        .await?;
-    Ok(json!({}))
-}
-
-pub async fn mouse_move(state: &AppState, params: Value) -> Result<Value, ServerError> {
-    let params: MouseMoveParams = parse_params(params)?;
-    let page = state.page(&params.page_id)?;
-    crate::capture::painting(&page, page.mouse_move(params.mouse.x, params.mouse.y)).await?;
-    Ok(json!({}))
-}
-
-pub async fn mouse_up(state: &AppState, params: Value) -> Result<Value, ServerError> {
-    let params: MouseButtonParams = parse_params(params)?;
-    state
-        .page(&params.page_id)?
-        .mouse_up(
-            params.mouse.x,
-            params.mouse.y,
-            core_mouse_button(params.mouse.button),
-        )
-        .await?;
-    Ok(json!({}))
-}
-
-pub async fn key_down(state: &AppState, params: Value) -> Result<Value, ServerError> {
-    let params: HeldKeyParams = parse_params(params)?;
-    state
-        .page(&params.page_id)?
-        .key_down(&params.key.key)
-        .await?;
-    Ok(json!({}))
-}
-
-pub async fn key_up(state: &AppState, params: Value) -> Result<Value, ServerError> {
-    let params: HeldKeyParams = parse_params(params)?;
-    state.page(&params.page_id)?.key_up(&params.key.key).await?;
-    Ok(json!({}))
-}
-
-pub async fn release_all_inputs(state: &AppState, params: Value) -> Result<Value, ServerError> {
-    let params: PageIdParams = parse_params(params)?;
-    state.page(&params.page_id)?.release_all_inputs().await?;
-    Ok(json!({}))
 }
 
 #[cfg(feature = "anti-captcha")]

@@ -71,7 +71,7 @@ func TestTransportContextTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	err := tr.call(ctx, "page.wait_for", map[string]any{"pageId": "p1", "selector": "#x", "timeoutMs": int64(1000)}, nil)
+	err := tr.call(ctx, "wait", map[string]any{"pageId": "p1", "selector": "#x", "timeout": int64(1000)}, nil)
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("expected context.DeadlineExceeded, got %v", err)
 	}
@@ -98,7 +98,7 @@ func TestTransportLargePayload(t *testing.T) {
 	var res struct {
 		HTML string `json:"html"`
 	}
-	if err := tr.call(ctx, "page.content", map[string]any{"pageId": "p1"}, &res); err != nil {
+	if err := tr.call(ctx, "content", map[string]any{"pageId": "p1"}, &res); err != nil {
 		t.Fatalf("call: %v", err)
 	}
 	if len(res.HTML) != size {

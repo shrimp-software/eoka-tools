@@ -683,7 +683,7 @@ async fn failed_interception_files_suppress_clearance_and_idle_special_files_do_
             .unwrap();
     eoka_sdk::write_msg(
         &mut socket,
-        &serde_json::json!({"cmd":"shutdown","protocol_major":2}),
+        &serde_json::json!({"cmd":"shutdown","protocol_major": eoka_protocol::sidecar::PROTOCOL_VERSION.major}),
     )
     .await
     .unwrap();

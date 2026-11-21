@@ -729,7 +729,7 @@ test('read wrappers decode canonical state and PNG bytes while raw invoke remain
   const page = new Page({ supports: () => true, hasCapability: name => name === 'screenshotOptions', invoke: async (method) => {
     if (method === 'page.capture_state') return { state };
     if (method === 'page.screenshot') return { dataBase64: png.toString('base64') };
-    if (method === 'page.get_attribute') return { value: null };
+    if (method === 'get_attribute') return { value: null };
     if (method === 'operations.list') return [completed()];
     throw new Error(`unexpected method ${method}`);
   } }, 'tab');
@@ -750,7 +750,8 @@ test('page waits keep the server wait timeout distinct from local cancellation a
     await page[method](value, { waitTimeoutMs: 25, timeoutMs: 10, signal: controller.signal });
   }
   for (const call of observed) {
-    assert.equal(call.params.timeoutMs, 25);
+    assert.equal(call.method, 'wait');
+    assert.equal(call.params.timeout, 25);
     assert.equal(call.options.timeoutMs, 10);
     assert.equal(call.options.signal, controller.signal);
     assert.equal(Object.hasOwn(call.params, 'signal'), false);

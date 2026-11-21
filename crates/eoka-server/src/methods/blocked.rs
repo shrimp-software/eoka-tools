@@ -9,7 +9,6 @@ use serde_json::Value;
 use crate::engine::blockers::{self, Blocker, Policy, Remedies, Stage};
 use crate::operations::OperationManager;
 
-const WAIT_MARGIN: Duration = Duration::from_secs(2);
 const BLOCKER_MESSAGE_LIMIT: usize = 4096;
 
 pub(crate) struct Call {
@@ -28,18 +27,9 @@ fn navigates(action: &Value) -> bool {
 
 pub(crate) fn policy(method: &str, params: &Value) -> Policy {
     match method {
-        "page.title" | "page.url" | "page.text" | "page.content" | "page.get_text"
-        | "page.get_attribute" | "page.exists" | "page.frames" | "page.capture_state" => {
-            Policy::Read
-        }
-        "page.wait_for" | "page.wait_for_visible" | "page.wait_for_text" => Policy::Wait,
-        "page.evaluate"
-        | "page.execute"
-        | "page.evaluate_raw"
-        | "page.execute_raw"
-        | "page.evaluate_in_frame"
-        | "page.fetch"
-        | "page.fetch_bounded" => Policy::Script,
+        "page.capture_state" => Policy::Read,
+        "page.evaluate" | "page.execute" | "page.evaluate_raw" | "page.execute_raw"
+        | "page.fetch" | "page.fetch_bounded" => Policy::Script,
         "page.screenshot" | "page.screenshot_to_file" => Policy::Capture,
         "agent.observe" => Policy::Observe,
         "page.goto" => Policy::Navigate,
@@ -56,24 +46,8 @@ pub(crate) fn policy(method: &str, params: &Value) -> Policy {
         | "page.select"
         | "page.hover"
         | "page.press_key"
-        | "page.click_shadow"
-        | "page.mouse_down"
-        | "page.mouse_move"
-        | "page.mouse_up"
-        | "page.key_down"
-        | "page.key_up"
         | "page.solve_captcha" => Policy::Gate,
         _ => Policy::Free,
-    }
-}
-
-fn limit(policy: Policy, params: &Value) -> Option<Duration> {
-    match policy {
-        Policy::Read => Some(blockers::READ_LIMIT),
-        Policy::Wait => params["timeoutMs"]
-            .as_u64()
-            .map(|timeout| Duration::from_millis(timeout).saturating_add(WAIT_MARGIN)),
-        _ => None,
     }
 }
 
@@ -87,8 +61,22 @@ impl Call {
         Self {
             method: method.to_owned(),
             policy,
-            limit: limit(policy, params),
+            limit: blockers::limit(policy, params),
             ends_itself: ends_itself(method),
+        }
+    }
+
+    pub(crate) fn catalog(request: &eoka_protocol::Request) -> Self {
+        let command = request.cmd();
+        let arguments = request.args_json();
+        let policy = blockers::policy(command, &arguments);
+        Self {
+            method: eoka_protocol::operation_by_cmd(command)
+                .map_or(command, |operation| operation.path)
+                .to_owned(),
+            policy,
+            limit: blockers::limit(policy, &arguments),
+            ends_itself: false,
         }
     }
 }
@@ -206,11 +194,9 @@ mod tests {
             "recording.stop",
             "recording.cancel",
             "page.close",
-            "page.release_all_inputs",
             "page.set_viewport",
             "page.reset_viewport",
             "page.restore_state",
-            "page.solve_turnstile",
         ];
         let registered = eoka_protocol::sidecar::method_names()
             .into_iter()
@@ -240,10 +226,9 @@ mod tests {
             policy("actions.perform", &json!({"action":{"kind":"fill"}})),
             Policy::Gate
         );
-        assert_eq!(policy("page.title", &json!({})), Policy::Read);
+        assert_eq!(policy("page.capture_state", &json!({})), Policy::Read);
         assert_eq!(policy("page.evaluate", &json!({})), Policy::Script);
         assert_eq!(policy("page.screenshot", &json!({})), Policy::Capture);
-        assert_eq!(policy("page.wait_for", &json!({})), Policy::Wait);
         assert_eq!(policy("console", &json!({})), Policy::Free);
     }
 
@@ -260,28 +245,9 @@ mod tests {
         ] {
             assert!(ends_itself(method), "{method}");
         }
-        for method in [
-            "page.title",
-            "page.evaluate",
-            "page.wait_for",
-            "page.screenshot",
-            "page.mouse_up",
-            "page.click_shadow",
-        ] {
+        for method in ["page.capture_state", "page.evaluate", "page.screenshot"] {
             assert!(!ends_itself(method), "{method}");
         }
-    }
-
-    #[test]
-    fn reads_and_waits_are_bounded_and_scripts_are_not() {
-        assert_eq!(limit(Policy::Read, &json!({})), Some(blockers::READ_LIMIT));
-        assert_eq!(
-            limit(Policy::Wait, &json!({"timeoutMs": 1500})),
-            Some(Duration::from_millis(3500))
-        );
-        assert_eq!(limit(Policy::Wait, &json!({})), None);
-        assert_eq!(limit(Policy::Script, &json!({})), None);
-        assert_eq!(limit(Policy::Capture, &json!({})), None);
     }
 
     #[test]
@@ -292,7 +258,7 @@ mod tests {
             url: "https://example.test/".into(),
             since: Instant::now(),
         });
-        let error = blocked(&dialog, "page.title", Stage::NotStarted);
+        let error = blocked(&dialog, "page.evaluate", Stage::NotStarted);
         assert_eq!(error.code, eoka_protocol::sidecar::ErrorCode::DialogOpen);
         assert!(
             error.message.contains("dialog is open"),
@@ -300,7 +266,7 @@ mod tests {
             error.message
         );
         assert!(error.message.contains("are you sure?"), "{}", error.message);
-        assert!(error.message.contains("`page.title` was not started"));
+        assert!(error.message.contains("`page.evaluate` was not started"));
         let data = *error.data.unwrap();
         let detail = data.detail.unwrap();
         assert_eq!(detail.code, "dialog_open");

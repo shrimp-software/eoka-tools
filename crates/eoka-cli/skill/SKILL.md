@@ -6,7 +6,7 @@ description: "Control a real Chrome browser with the Eoka CLI. Use for browser n
 # eoka
 
 Use `eoka` when the task needs a real Chrome browser. This guide targets CLI
-**0.15 / protocol 2**. Check the binary first:
+**0.16 / protocol 3**. Check the binary first:
 
 ```bash
 command -v eoka
@@ -136,9 +136,7 @@ waits, while an action already sent keeps running under its operation ID.
   `--cdp`, creates a browser. `--headed`/`--headless` never switch an existing
   session; omit them on later calls.
 - Do not restart a browser or daemon to make a command work. A blocked or busy
-  session names its own remedy; `kill` loses the page and its login. An
-  incompatible old daemon needs the matching old CLI to inspect or close it
-  deliberately.
+  session names its own remedy; `kill` loses the page and its login.
 - Do not background `eoka` with `&` or wrap it in a shorter `timeout`: a killed
   command prints nothing, and the reason it was slow is in the output you lost.
 - With `--cdp` or `--auto-connect`, eoka uses a browser it does not own. Never

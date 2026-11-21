@@ -9,6 +9,7 @@ mod intercept;
 mod intercept_files;
 mod network;
 mod operations;
+pub mod page_ops;
 mod persist;
 pub mod profile;
 mod proxy_forward;
@@ -18,13 +19,12 @@ mod target;
 mod wasm;
 
 use eoka_protocol::{
-    ActionCommandArgs, AttributeArgs, CaptchaInjectArgs, ClearFlagArgs, ClickShadowArgs,
-    CloneFromArgs, ConsoleArgs, DeleteCookieArgs, EmulateArgs, FakeCameraArgs, FetchArgs,
-    HeadersArgs, IdArgs, InterceptAddArgs, KeyArgs, LoadStateArgs, MouseButtonArgs, MouseMoveArgs,
-    NetworkExportArgs, NetworkLogArgs, NetworkRecordStartArgs, NetworkShowArgs, NetworkWaitArgs,
-    ObserveArgs, OpenArgs, PathArgs, PathStringArgs, RecordingIdArgs, RecordingStartArgs,
-    ScreenshotArgs, SelectorArgs, SetCookieArgs, SetStorageArgs, SnapshotArgs, StorageArgs,
-    TabIdArgs, TabNewArgs, TargetArgs, TextArgs, WaitArgs,
+    ActionCommandArgs, CaptchaInjectArgs, ClearFlagArgs, CloneFromArgs, ConsoleArgs,
+    DeleteCookieArgs, EmulateArgs, FakeCameraArgs, FetchArgs, HeadersArgs, IdArgs,
+    InterceptAddArgs, LoadStateArgs, NetworkExportArgs, NetworkLogArgs, NetworkRecordStartArgs,
+    NetworkShowArgs, NetworkWaitArgs, ObserveArgs, OpenArgs, PathArgs, PathStringArgs,
+    RecordingIdArgs, RecordingStartArgs, ScreenshotArgs, SetCookieArgs, SetStorageArgs,
+    SnapshotArgs, StorageArgs, TabIdArgs, TabNewArgs, TargetArgs, TextArgs,
 };
 use std::collections::HashMap;
 use std::fmt::Write as FmtWrite;
@@ -36,7 +36,6 @@ use eoka::cdp::{
     transport::{CommandDispatch, RequestPause},
     Session as CdpSession,
 };
-use eoka::MouseButton;
 use serde_json::{json, Value};
 
 use eoka_protocol::launch_spec::LaunchSpec;
@@ -104,7 +103,12 @@ impl EngineError {
 
 impl From<eoka::Error> for EngineError {
     fn from(error: eoka::Error) -> Self {
-        let error = eoka_protocol::sidecar::ServerError::from(error);
+        eoka_protocol::sidecar::ServerError::from(error).into()
+    }
+}
+
+impl From<eoka_protocol::sidecar::ServerError> for EngineError {
+    fn from(error: eoka_protocol::sidecar::ServerError) -> Self {
         Self {
             message: error.message,
             kind: Some(error.code),
@@ -565,6 +569,7 @@ impl Engine {
 
     async fn dispatch(&mut self, request: Request) -> Result<Response, EngineError> {
         match request {
+            request @ (page_ops::page_request!()) => self.on_current_page(request).await,
             query @ (Request::DownloadList
             | Request::DownloadGet(_)
             | Request::DownloadWait(_)
@@ -574,11 +579,7 @@ impl Engine {
             Request::Observe(args) => self.cmd_observe(&args).await,
             Request::Screenshot(args) => self.cmd_screenshot(args).await,
             Request::Emulate(args) => self.cmd_emulate(&args).await,
-            Request::Info => self.cmd_info().await,
-            Request::Frames => self.cmd_frames().await,
-            Request::Text => self.cmd_text().await,
             Request::Find(args) => self.cmd_find(&args).await,
-            Request::Content => self.cmd_content().await,
             Request::RecordingStart(args) => self.cmd_recording_start(args).await,
             Request::RecordingGet(args) => self.cmd_recording_control("recording.get", &args).await,
             Request::RecordingStop(args) => {
@@ -587,16 +588,6 @@ impl Engine {
             Request::RecordingCancel(args) => {
                 self.cmd_recording_control("recording.cancel", &args).await
             }
-            Request::GetText(args) => self.cmd_get_text(&args).await,
-            Request::GetAttribute(args) => self.cmd_get_attribute(&args).await,
-            Request::Exists(args) => self.cmd_exists(&args).await,
-            Request::ClickShadow(args) => self.cmd_click_shadow(&args).await,
-            Request::MouseDown(args) => self.cmd_mouse_down(&args).await,
-            Request::MouseMove(args) => self.cmd_mouse_move(&args).await,
-            Request::MouseUp(args) => self.cmd_mouse_up(&args).await,
-            Request::KeyDown(args) => self.cmd_key_down(&args).await,
-            Request::KeyUp(args) => self.cmd_key_up(&args).await,
-            Request::ReleaseAllInputs => self.cmd_release_all_inputs().await,
             Request::Scroll(args) => self.cmd_scroll(&args).await,
             Request::Eval(args) => self.script("eval", eval::Script::Eval(args)).await,
             Request::Exec(args) => self.script("exec", eval::Script::Exec(args)).await,
@@ -608,14 +599,6 @@ impl Engine {
             Request::CaptchaDetect => self.cmd_captcha_detect().await,
             Request::DialogAccept(args) => self.cmd_dialog(Some(args.prompt_text.as_deref())).await,
             Request::DialogDismiss => self.cmd_dialog(None).await,
-            Request::CaptchaTurnstile(args) => {
-                let drain = self.start_fetch_drain();
-                let result = self.cmd_captcha_turnstile(&args).await;
-                if !self.stop_fetch_drain(drain).await {
-                    return Err("Request interception cleanup failed".into());
-                }
-                result
-            }
             Request::Fetch(args) => self.cmd_fetch(args).await,
             Request::Cookies => self.cmd_cookies().await,
             Request::SetCookie(args) => self.cmd_set_cookie(&args).await,
@@ -635,7 +618,6 @@ impl Engine {
             Request::TabClose(args) => self.cmd_tab_close(&args).await,
             Request::TabAttach(args) => self.cmd_tab_attach(&args).await,
             Request::CloneFrom(args) => self.cmd_clone_from(&args).await,
-            Request::Wait(args) => self.cmd_wait(&args).await,
             Request::SpaInfo => self.cmd_spa_info().await,
             Request::SpaNavigate(args) => self.cmd_spa_navigate(&args).await,
             Request::FakeCamera(args) => self.cmd_fake_camera(&args).await,
@@ -687,14 +669,18 @@ impl Engine {
         }
     }
 
-    fn mouse_button(&self, button: eoka_protocol::MouseButton) -> MouseButton {
-        match button {
-            eoka_protocol::MouseButton::Left => MouseButton::Left,
-            eoka_protocol::MouseButton::Middle => MouseButton::Middle,
-            eoka_protocol::MouseButton::Right => MouseButton::Right,
-            eoka_protocol::MouseButton::Back => MouseButton::Back,
-            eoka_protocol::MouseButton::Forward => MouseButton::Forward,
+    async fn on_current_page(&mut self, request: Request) -> Result<Response, EngineError> {
+        let page = self.require_tab()?.page.clone();
+        let drain = match &request {
+            Request::Wait(args) if args.ms.is_none() => self.start_fetch_drain(),
+            Request::CaptchaTurnstile(_) => self.start_fetch_drain(),
+            _ => None,
+        };
+        let result = page_ops::execute(&page, request).await;
+        if !self.stop_fetch_drain(drain).await {
+            return Err("Request interception cleanup failed".into());
         }
+        Ok(result?)
     }
 
     fn tab_with_config(&mut self) -> Result<(&mut TabState, bool), String> {
@@ -1003,19 +989,6 @@ impl Engine {
         })))
     }
 
-    async fn cmd_info(&mut self) -> Result<Response, EngineError> {
-        let tab = self.require_tab()?;
-        let url = tab.page.url().await?;
-        let title = title_nonblocking(&tab.page).await;
-        Ok(Response::ok(json!({ "url": url, "title": title })))
-    }
-
-    async fn cmd_text(&mut self) -> Result<Response, EngineError> {
-        let tab = self.require_tab()?;
-        let text = tab.page.text().await?;
-        Ok(Response::ok_text(text))
-    }
-
     async fn cmd_recording_start(
         &mut self,
         args: RecordingStartArgs,
@@ -1072,52 +1045,6 @@ impl Engine {
         ))
     }
 
-    async fn cmd_content(&mut self) -> Result<Response, EngineError> {
-        let html = self.require_tab()?.page.content().await;
-        Ok(Response::ok_text(html?))
-    }
-
-    async fn cmd_get_text(&mut self, args: &SelectorArgs) -> Result<Response, EngineError> {
-        let selector = args.selector.as_str();
-        let element = self.require_tab()?.page.find(selector).await;
-        let text = element?.text().await;
-        Ok(Response::ok_text(text?))
-    }
-
-    async fn cmd_get_attribute(&mut self, args: &AttributeArgs) -> Result<Response, EngineError> {
-        let selector = args.selector.as_str();
-        let name = args.name.as_str();
-        let element = self.require_tab()?.page.find(selector).await;
-        let value = element?.get_attribute(name).await;
-        Ok(Response::ok(json!({"value": value?})))
-    }
-
-    async fn cmd_exists(&mut self, args: &SelectorArgs) -> Result<Response, EngineError> {
-        let selector = args.selector.as_str();
-        let exists = self.require_tab()?.page.exists(selector).await;
-        Ok(Response::ok(json!({"exists": exists})))
-    }
-
-    async fn cmd_click_shadow(&mut self, args: &ClickShadowArgs) -> Result<Response, EngineError> {
-        let page = &self.require_tab()?.page;
-        let receipt = crate::capture::painting(
-            page,
-            page.click_shadow_with_timeout(
-                args.frame_id.as_deref(),
-                &args.selector,
-                std::time::Duration::from_millis(args.timeout_ms),
-            ),
-        )
-        .await?;
-        self.require_tab_mut()?.invalidate();
-        Ok(Response::ok(json!({
-            "frame_id": receipt.frame_id,
-            "selector": receipt.selector,
-            "x": receipt.x,
-            "y": receipt.y,
-        })))
-    }
-
     async fn cmd_find(&mut self, args: &TextArgs) -> Result<Response, EngineError> {
         let text = args.text.as_str();
         let (tab, viewport_only) = self.tab_with_config()?;
@@ -1147,49 +1074,6 @@ impl Engine {
             let out: String = matches.iter().map(|e| format!("{}\n", e)).collect();
             Ok(Response::ok_text(out))
         }
-    }
-
-    async fn cmd_mouse_down(&mut self, args: &MouseButtonArgs) -> Result<Response, EngineError> {
-        let button = self.mouse_button(args.button);
-        self.require_tab()?
-            .page
-            .mouse_down(args.x, args.y, button)
-            .await?;
-        Ok(Response::ok_text("Mouse button held"))
-    }
-
-    async fn cmd_mouse_move(&mut self, args: &MouseMoveArgs) -> Result<Response, EngineError> {
-        let x = args.x;
-        let y = args.y;
-        let page = &self.require_tab()?.page;
-        crate::capture::painting(page, page.mouse_move(x, y)).await?;
-        Ok(Response::ok_text("Mouse moved"))
-    }
-
-    async fn cmd_mouse_up(&mut self, args: &MouseButtonArgs) -> Result<Response, EngineError> {
-        let button = self.mouse_button(args.button);
-        self.require_tab()?
-            .page
-            .mouse_up(args.x, args.y, button)
-            .await?;
-        Ok(Response::ok_text("Mouse button released"))
-    }
-
-    async fn cmd_key_down(&mut self, args: &KeyArgs) -> Result<Response, EngineError> {
-        let key = args.key.as_str();
-        self.require_tab()?.page.key_down(key).await?;
-        Ok(Response::ok_text(format!("Held {key}")))
-    }
-
-    async fn cmd_key_up(&mut self, args: &KeyArgs) -> Result<Response, EngineError> {
-        let key = args.key.as_str();
-        self.require_tab()?.page.key_up(key).await?;
-        Ok(Response::ok_text(format!("Released {key}")))
-    }
-
-    async fn cmd_release_all_inputs(&mut self) -> Result<Response, EngineError> {
-        self.require_tab()?.page.release_all_inputs().await?;
-        Ok(Response::ok_text("Released all held inputs"))
     }
 
     async fn cmd_scroll(&mut self, args: &TargetArgs) -> Result<Response, EngineError> {
@@ -1661,57 +1545,6 @@ impl Engine {
         }
         self.sync_current_target_features().await?;
         Ok(Response::ok_text(format!("Closed tab [{}]", tab_id)))
-    }
-
-    async fn cmd_wait(&mut self, args: &WaitArgs) -> Result<Response, EngineError> {
-        if let Some(ms) = args.ms {
-            let ms = ms.min(30_000);
-            tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
-            return Ok(Response::ok_text(format!("Waited {}ms", ms)));
-        }
-        let timeout = args.timeout.unwrap_or(10_000);
-        let page = self.require_tab()?.page.clone();
-        let drain = self.start_fetch_drain();
-
-        let result = async {
-            if let Some(expect) = args.expect.as_ref() {
-                page.wait_for_expectation(expect, timeout).await?;
-                return Ok(Response::ok_text("Readiness condition satisfied"));
-            }
-            if let Some(text) = args.text.as_deref() {
-                page.wait_for_text(text, timeout).await?;
-                return Ok(Response::ok_text(format!("Text \"{}\" appeared", text)));
-            }
-            if let Some(url_pat) = args.url.as_deref() {
-                page.wait_for_url_contains(url_pat, timeout).await?;
-                return Ok(Response::ok_text(format!("URL matched \"{}\"", url_pat)));
-            }
-            if let Some(selector) = args.selector.as_deref() {
-                let (wait, outcome) = match args.state.unwrap_or_default() {
-                    eoka_protocol::WaitSelectorState::Attached => (
-                        page.wait_for(selector, timeout).await.map(|_| ()),
-                        "attached",
-                    ),
-                    eoka_protocol::WaitSelectorState::Visible => (
-                        page.wait_for_visible(selector, timeout).await.map(|_| ()),
-                        "visible",
-                    ),
-                    eoka_protocol::WaitSelectorState::Hidden => {
-                        (page.wait_for_hidden(selector, timeout).await, "hidden")
-                    }
-                };
-                wait?;
-                return Ok(Response::ok_text(format!("\"{selector}\" is {outcome}")));
-            }
-            if args.load.as_deref().is_some() {
-                page.wait_for_network_idle(500, timeout).await?;
-                return Ok(Response::ok_text("Network idle"));
-            }
-            Err("Provide ms, --text, --url, --selector, or --load".into())
-        }
-        .await;
-        self.stop_fetch_drain(drain).await;
-        result
     }
 
     async fn cmd_spa_info(&mut self) -> Result<Response, EngineError> {

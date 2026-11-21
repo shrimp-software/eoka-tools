@@ -370,7 +370,10 @@ mod tests {
     use super::*;
 
     fn board() -> Arc<Board> {
-        Board::new("work", json!({"protocol_major":2,"mode":"headless"}))
+        Board::new(
+            "work",
+            json!({"protocol_major": eoka_protocol::sidecar::PROTOCOL_VERSION.major,"mode":"headless"}),
+        )
     }
 
     #[tokio::test]
@@ -379,7 +382,10 @@ mod tests {
         assert!(board.hello().await["activity"]["busy"].is_null());
         board.started("action_command", &json!({"command":"reload"}));
         let hello = board.hello().await;
-        assert_eq!(hello["protocol_major"], 2);
+        assert_eq!(
+            hello["protocol_major"],
+            eoka_protocol::sidecar::PROTOCOL_VERSION.major
+        );
         assert_eq!(hello["activity"]["busy"]["cmd"], "reload");
         assert_eq!(hello["activity"]["queued"], 0);
         board.finished(None);

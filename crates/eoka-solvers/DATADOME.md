@@ -12,8 +12,7 @@ Image-puzzle matching remains synthetic-test-only.
 ## CLI: continue in the existing session
 
 Install the updated CLI with `mise run install-cli`. This crate requires published
-Eoka 0.5.13 or later; no sibling checkout is needed. Older daemons must be upgraded
-explicitly.
+Eoka 0.5.13 or later; no sibling checkout is needed.
 
 ```sh
 eoka --session demo open https://example.com/protected

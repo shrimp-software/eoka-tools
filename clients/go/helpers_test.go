@@ -53,20 +53,19 @@ func newFakeBrowser(t *testing.T, handle fakeHandler) *Browser {
 
 func fakeServerInfo() ServerInfo {
 	return ServerInfo{
-		Protocol:      ProtocolVersion{Major: 2, Minor: 0},
+		Protocol:      ProtocolVersion{Major: 3, Minor: 0},
 		ServerVersion: "test-server",
 		CoreVersion:   "test-core",
 		Methods: []string{
 			"server.hello", "server.shutdown", "browser.launch", "browser.connect", "browser.close",
 			"browser.new_page", "browser.tabs", "browser.close_tab",
 			"actions.perform", "operations.get", "operations.wait", "operations.cancel",
-			"agent.observe", "agent.step", "page.text", "page.content", "page.title",
-			"page.url", "page.get_text", "page.get_attribute", "page.exists",
-			"page.wait_for", "page.wait_for_visible", "page.wait_for_text",
-			"page.evaluate", "page.execute", "page.fetch", "page.solve_captcha", "page.solve_turnstile",
+			"agent.observe", "agent.step", "text", "content", "info",
+			"get_text", "get_attribute", "exists", "wait",
+			"page.evaluate", "page.execute", "page.fetch", "page.solve_captcha", "captcha.turnstile",
 			"page.capture_state", "page.restore_state", "page.screenshot",
-			"page.mouse_down", "page.mouse_move", "page.mouse_up",
-			"page.key_down", "page.key_up", "page.release_all_inputs", "page.close",
+			"mouse.down", "mouse.move", "mouse.up",
+			"key.down", "key.up", "release_all_inputs", "page.close",
 			"page.set_viewport", "page.reset_viewport",
 		},
 		Capabilities: []string{"durableActions", "operationCancellation", "gracefulShutdown",

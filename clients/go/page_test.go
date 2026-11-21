@@ -66,19 +66,19 @@ func TestPageNoResultMethods(t *testing.T) {
 		{"page.fill", func() error { return page.Fill(ctx, "#user", "bob") }},
 		{"page.fill", func() error { return page.HumanFill(ctx, "#user", "bob") }},
 		{"page.type_into", func() error { return page.TypeInto(ctx, "#user", "bob") }},
-		{"page.wait_for", func() error { return page.WaitFor(ctx, "#go", time.Second) }},
-		{"page.wait_for_visible", func() error { return page.WaitForVisible(ctx, "#go", time.Second) }},
-		{"page.wait_for_text", func() error { return page.WaitForText(ctx, "hello", time.Second) }},
+		{"wait", func() error { return page.WaitFor(ctx, "#go", time.Second) }},
+		{"wait", func() error { return page.WaitForVisible(ctx, "#go", time.Second) }},
+		{"wait", func() error { return page.WaitForText(ctx, "hello", time.Second) }},
 		{"page.execute", func() error { return page.Execute(ctx, "1+1") }},
 		{"page.select", func() error { return page.Select(ctx, "#opt", "a") }},
 		{"page.hover", func() error { return page.Hover(ctx, "#go") }},
 		{"page.press_key", func() error { return page.PressKey(ctx, "Enter") }},
-		{"page.mouse_down", func() error { return page.MouseDown(ctx, 10, 20, MouseButtonLeft) }},
-		{"page.mouse_move", func() error { return page.MouseMove(ctx, 20, 30) }},
-		{"page.mouse_up", func() error { return page.MouseUp(ctx, 20, 30, MouseButtonLeft) }},
-		{"page.key_down", func() error { return page.KeyDown(ctx, "Shift") }},
-		{"page.key_up", func() error { return page.KeyUp(ctx, "Shift") }},
-		{"page.release_all_inputs", func() error { return page.ReleaseAllInputs(ctx) }},
+		{"mouse.down", func() error { return page.MouseDown(ctx, 10, 20, MouseButtonLeft) }},
+		{"mouse.move", func() error { return page.MouseMove(ctx, 20, 30) }},
+		{"mouse.up", func() error { return page.MouseUp(ctx, 20, 30, MouseButtonLeft) }},
+		{"key.down", func() error { return page.KeyDown(ctx, "Shift") }},
+		{"key.up", func() error { return page.KeyUp(ctx, "Shift") }},
+		{"release_all_inputs", func() error { return page.ReleaseAllInputs(ctx) }},
 		{"page.close", func() error { return page.Close(ctx) }},
 	}
 
@@ -95,17 +95,15 @@ func TestPageNoResultMethods(t *testing.T) {
 func TestPageGetters(t *testing.T) {
 	page := newFakePage(t, func(id int64, method string, params json.RawMessage) (any, *rpcError) {
 		switch method {
-		case "page.text":
-			return map[string]any{"text": "hello world"}, nil
-		case "page.content":
-			return map[string]any{"html": "<html></html>"}, nil
-		case "page.title":
-			return map[string]any{"title": "Example Domain"}, nil
-		case "page.url":
-			return map[string]any{"url": "https://example.com/"}, nil
-		case "page.get_text":
-			return map[string]any{"text": "Click me"}, nil
-		case "page.exists":
+		case "text":
+			return "hello world", nil
+		case "content":
+			return "<html></html>", nil
+		case "info":
+			return map[string]any{"title": "Example Domain", "url": "https://example.com/"}, nil
+		case "get_text":
+			return "Click me", nil
+		case "exists":
 			return map[string]any{"exists": true}, nil
 		}
 		return nil, &rpcError{Code: ErrCodeUnknownMethod, Message: method}
@@ -228,11 +226,11 @@ func TestPageFetch(t *testing.T) {
 func TestPageSolveTurnstileSendsTimeoutAndReturnsReceipt(t *testing.T) {
 	var sent map[string]any
 	page := newFakePage(t, func(id int64, method string, params json.RawMessage) (any, *rpcError) {
-		if method != "page.solve_turnstile" {
+		if method != "captcha.turnstile" {
 			return nil, &rpcError{Code: ErrCodeUnknownMethod, Message: method}
 		}
 		_ = json.Unmarshal(params, &sent)
-		return map[string]any{"clicks": 2, "elapsedMs": 1800}, nil
+		return map[string]any{"clicks": 2, "elapsed_ms": 1800, "tab_id": "t"}, nil
 	})
 
 	result, err := page.SolveTurnstile(context.Background(), 5*time.Second)
@@ -242,7 +240,7 @@ func TestPageSolveTurnstileSendsTimeoutAndReturnsReceipt(t *testing.T) {
 	if result != (TurnstileResult{Clicks: 2, ElapsedMs: 1800}) {
 		t.Fatalf("result = %#v", result)
 	}
-	if sent["timeoutMs"] != float64(5000) || sent["pageId"] == nil {
+	if sent["timeout_ms"] != float64(5000) || sent["pageId"] == nil {
 		t.Fatalf("params = %#v", sent)
 	}
 	if _, err := page.SolveTurnstile(context.Background(), 3*time.Minute); err == nil {

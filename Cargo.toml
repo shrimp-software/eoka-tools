@@ -14,11 +14,11 @@ authors = ["cbxss"]
 eoka = "0.10.2"
 eoka-solvers = { version = "0.1.0", path = "crates/eoka-solvers", default-features = false }
 eoka-email = { version = "0.2.0", path = "crates/eoka-email" }
-eoka-protocol = { version = "0.11.0", path = "crates/eoka-protocol" }
+eoka-protocol = { version = "0.12.0", path = "crates/eoka-protocol" }
 eoka-proxy = { version = "0.2.0", path = "crates/eoka-proxy" }
-eoka-sdk = { version = "0.11.0", path = "crates/eoka-sdk" }
-eoka-server = { version = "0.12.0", path = "crates/eoka-server", default-features = false }
-eoka-tack = { version = "0.10.0", path = "crates/eoka-tack" }
+eoka-sdk = { version = "0.12.0", path = "crates/eoka-sdk" }
+eoka-server = { version = "0.13.0", path = "crates/eoka-server", default-features = false }
+eoka-tack = { version = "0.11.0", path = "crates/eoka-tack" }
 anyhow = "1"
 async-trait = "0.1"
 clap = { version = "4", features = ["derive", "env"] }

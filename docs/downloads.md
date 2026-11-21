@@ -19,8 +19,7 @@ may run per session. Closing the session cancels unfinished work. Jobs remain in
 durable SQLite storage; daemon restart preserves job history. Recovery can reconcile
 provably completed files. There is no
 resume, queue or fallback HTTP downloader. Borrowed/remote `--cdp` browsers are
-rejected. Existing old daemons need an explicit restart to gain these operations;
-requests never upgrade or replay automatically.
+rejected. Requests never replay automatically.
 
 `--click` accepts normal observation refs, text and CSS targets. `--url` accepts an
 HTTP(S) attachment and uses a temporary tab in the same browser context, preserving
