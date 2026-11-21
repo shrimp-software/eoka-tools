@@ -27,7 +27,7 @@ fn every_cli_command_and_arg_has_help() {
     undocumented(&Cli::command(), "", &mut gaps);
     assert!(
         gaps.is_empty(),
-        "add help text in crates/eoka-cli/src/cli.rs for:\n{}",
+        "add help text in crates/eoka-cli/src/cli/ for:\n{}",
         gaps.iter()
             .map(|gap| format!("  {gap}"))
             .collect::<Vec<_>>()
