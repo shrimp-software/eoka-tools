@@ -1,4 +1,4 @@
-use super::{repair, REPAIRABLE_MP4, VALID_MP4};
+use super::{repair, MediaSummary, REPAIRABLE_MP4, VALID_MP4};
 use std::io::{ErrorKind, SeekFrom};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
@@ -165,7 +165,7 @@ fn strict_dts(dts: &[u64]) -> bool {
     dts.windows(2).all(|pair| pair[0] < pair[1])
 }
 
-async fn apply(bytes: &[u8]) -> (std::io::Result<()>, Vec<u8>) {
+async fn apply(bytes: &[u8]) -> (std::io::Result<MediaSummary>, Vec<u8>) {
     let directory = tempfile::tempdir().unwrap();
     let mut file = tokio::fs::OpenOptions::new()
         .read(true)
@@ -181,6 +181,20 @@ async fn apply(bytes: &[u8]) -> (std::io::Result<()>, Vec<u8>) {
     let mut output = Vec::new();
     file.read_to_end(&mut output).await.unwrap();
     (result, output)
+}
+
+#[tokio::test]
+async fn repair_reports_frames_and_duration() {
+    for bytes in [VALID_MP4, REPAIRABLE_MP4] {
+        let (result, _) = apply(bytes).await;
+        assert_eq!(
+            result.unwrap(),
+            MediaSummary {
+                frames: 3,
+                duration_ms: 49,
+            }
+        );
+    }
 }
 
 async fn unchanged_error(bytes: &[u8]) {

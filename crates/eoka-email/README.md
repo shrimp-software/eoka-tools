@@ -16,7 +16,7 @@ regex = "1" # for code extraction patterns
 ## Example: verification link + eoka
 
 ```rust
-use chrono::Duration;
+use std::time::Duration;
 use eoka::Browser;
 use eoka_email::{
     extract_first_link, ImapClient, ImapConfig, LinkFilter, SearchCriteria, WaitOptions,
@@ -41,7 +41,7 @@ async fn main() -> anyhow::Result<()> {
         .unseen_only(true)
         .since_minutes(10);
 
-    let options = WaitOptions::new(Duration::minutes(2), Duration::seconds(2));
+    let options = WaitOptions::new(Duration::from_secs(120), Duration::from_secs(2));
 
     let mut client = ImapClient::connect(&config)?;
     let msg = client.wait_for_message(&criteria, &options)?;
@@ -59,7 +59,7 @@ async fn main() -> anyhow::Result<()> {
 ## Example: OTP code + eoka
 
 ```rust
-use chrono::Duration;
+use std::time::Duration;
 use eoka::Browser;
 use eoka_email::{extract_code, ImapClient, ImapConfig, SearchCriteria, WaitOptions};
 use regex::Regex;
@@ -76,7 +76,7 @@ async fn main() -> anyhow::Result<()> {
         .subject_contains("Your verification code")
         .unseen_only(true)
         .since_minutes(10);
-    let options = WaitOptions::new(Duration::minutes(2), Duration::seconds(2));
+    let options = WaitOptions::new(Duration::from_secs(120), Duration::from_secs(2));
 
     let mut client = ImapClient::connect(&config)?;
     let msg = client.wait_for_message(&criteria, &options)?;
@@ -99,7 +99,7 @@ eoka-email = { path = "../eoka-tools/crates/eoka-email", features = ["async"] }
 ```
 
 ```rust
-use chrono::Duration;
+use std::time::Duration;
 use eoka_email::{AsyncImapClient, ImapConfig, SearchCriteria, WaitOptions};
 
 #[tokio::main]
@@ -109,7 +109,7 @@ async fn main() -> anyhow::Result<()> {
         .subject_contains("Your verification code")
         .unseen_only(true)
         .since_minutes(10);
-    let options = WaitOptions::new(Duration::minutes(2), Duration::seconds(2));
+    let options = WaitOptions::new(Duration::from_secs(120), Duration::from_secs(2));
 
     let mut client = AsyncImapClient::connect(&config).await?;
     let msg = client.wait_for_message(&criteria, &options).await?;

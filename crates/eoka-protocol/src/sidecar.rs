@@ -876,6 +876,8 @@ dto!(RecordingRecord {
     path: String,
     #[serde(skip_serializing_if = "Option::is_none")] artifact: Option<Artifact>,
     #[serde(skip_serializing_if = "Option::is_none")] failure: Option<RecordingFailure>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] frames: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] duration_ms: Option<u64>,
 });
 
 impl RecordingRecord {
@@ -896,9 +898,9 @@ impl RecordingRecord {
                     "completed recording requires its destination MP4 artifact and no failure",
                 ));
             }
-        } else if self.artifact.is_some() {
+        } else if self.artifact.is_some() || self.frames.is_some() || self.duration_ms.is_some() {
             return Err(ServerError::invalid_params(
-                "only completed recordings may contain an artifact",
+                "only completed recordings may contain an artifact, frames or duration",
             ));
         }
         if self.state == RecordingState::Failed && self.failure.is_none() {
@@ -1890,8 +1892,13 @@ mod tests {
             path: "/tmp/capture.mp4".into(),
             artifact: None,
             failure: None,
+            frames: None,
+            duration_ms: None,
         };
         assert!(record.validate().is_ok());
+        record.frames = Some(3);
+        assert!(record.validate().is_err());
+        record.frames = None;
         record.state = RecordingState::Completed;
         assert!(record.validate().is_err());
         record.artifact = Some(Artifact {

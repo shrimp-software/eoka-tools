@@ -64,6 +64,7 @@ batch([
 - `click`, double click and `type_key` can omit `expect` in MCP. They then run unverified and return `status: outcome_unknown` with a `note`, so read the page next and do not repeat the action blindly. The CLI and SDKs still require `expect`.
 - `fill` and `select` find fields by label through the accessibility tree. Several matches return `ambiguous_target` instead of a guess.
 - `agent_step` accepts the same live targets as `click` and `fill`, as well as refs.
+- `extract` and `exec` accept a function, an expression or statements without `raw`. Syntax is checked in the page before the code runs, so it runs exactly once.
 
 ## Auto-retry
 
@@ -103,8 +104,8 @@ The server maintains `BrowserState` with:
 - `history_go` — browser history navigation (delta: -1=back, 1=forward)
 
 **JavaScript Execution:**
-- `extract` — run JS, return result as JSON. `js=` inline or `file=` absolute path
-- `exec` — run JS for side effects, no return. `js=` inline or `file=` absolute path
+- `extract` — run JS, return result as JSON. `code=` inline or `file=` absolute path: a function (called with `arguments`), an expression, or statements (async body, `return` for a value). Runs exactly once
+- `exec` — run JS for side effects, no return. Accepts the same code forms as `extract`
 
 **Console/Errors:**
 - `console` — read captured console output (log/warn/error/info/debug). Auto-injects capture on first call. `clear?`, `level?`

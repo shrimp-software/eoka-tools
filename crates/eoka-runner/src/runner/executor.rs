@@ -4,7 +4,6 @@ use crate::config::actions::{
 };
 use crate::config::{Action, Config, Params};
 use crate::{Error, Result};
-use chrono::Duration as ChronoDuration;
 use eoka::Page;
 use eoka_email::{
     extract_code, extract_first_link, AsyncImapClient, ImapConfig, LinkFilter, SearchCriteria,
@@ -257,8 +256,8 @@ async fn wait_for_email(page: &Page, action: &WaitForEmailAction) -> Result<()> 
     let criteria = build_email_criteria(&action.filter);
 
     let options = WaitOptions::new(
-        ChronoDuration::milliseconds(action.timeout_ms as i64),
-        ChronoDuration::milliseconds(action.poll_interval_ms as i64),
+        std::time::Duration::from_millis(action.timeout_ms),
+        std::time::Duration::from_millis(action.poll_interval_ms),
     );
 
     let mut client = AsyncImapClient::connect(&imap)

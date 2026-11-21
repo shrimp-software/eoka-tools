@@ -332,6 +332,62 @@ async fn mcp_observation_and_download_failures_share_page_context() {
 }
 
 #[tokio::test]
+#[ignore = "requires Chrome; MCP scripts accept functions, expressions and statements once"]
+async fn mcp_scripts_run_expressions_and_statements_exactly_once() {
+    let client = connect(EokaServer::listing(false)).await;
+    done(&client, "navigate", json!({"url": "about:blank"})).await;
+    done(
+        &client,
+        "exec",
+        json!({"code": "(() => { window.runs = (window.runs || 0) + 1 })()"}),
+    )
+    .await;
+    done(
+        &client,
+        "exec",
+        json!({"code": "const step = 1;\nwindow.runs += step;"}),
+    )
+    .await;
+    failed(
+        &client,
+        "exec",
+        json!({"code": "(window.runs += 1, JSON.parse('{'))"}),
+    )
+    .await;
+    for (code, expected) in [
+        ("window.runs", json!(3)),
+        ("window.runs * 2;", json!(6)),
+        ("const n = window.runs;\nreturn n + 1", json!(4)),
+        ("await Promise.resolve({a: [1]})", json!({"a": [1]})),
+    ] {
+        let value = data(&done(&client, "extract", json!({"code": code})).await);
+        assert_eq!(value, expected, "{code}");
+    }
+    let sum = data(
+        &done(
+            &client,
+            "extract",
+            json!({"code": "(a, b) => a + b", "arguments": [2, 3]}),
+        )
+        .await,
+    );
+    assert_eq!(sum, json!(5));
+    let arguments = failed(
+        &client,
+        "extract",
+        json!({"code": "const x = 1;", "arguments": [1]}),
+    )
+    .await;
+    assert!(
+        arguments.contains("arguments need code that is a function"),
+        "{arguments}"
+    );
+    let syntax = failed(&client, "extract", json!({"code": "const = 1"})).await;
+    assert!(syntax.contains("does not parse"), "{syntax}");
+    finish(client).await;
+}
+
+#[tokio::test]
 #[ignore = "requires Chrome; MCP function execution contract"]
 async fn mcp_functions_preserve_arguments_exceptions_and_limits() {
     let client = connect(EokaServer::listing(false)).await;

@@ -1,6 +1,7 @@
-use chrono::{Duration, Utc};
 use mailparse::MailHeaderMap;
 use regex::Regex;
+use std::time::{Duration, Instant};
+use time::OffsetDateTime;
 
 #[derive(Debug, Clone)]
 pub struct ImapConfig {
@@ -160,11 +161,10 @@ impl ImapClient {
         criteria: &SearchCriteria,
         options: &WaitOptions,
     ) -> Result<EmailMessage> {
-        let start = Utc::now();
-        let deadline = start + options.timeout;
+        let deadline = Instant::now() + options.timeout;
 
         loop {
-            if Utc::now() > deadline {
+            if Instant::now() > deadline {
                 return Err(Error::Timeout);
             }
 
@@ -172,7 +172,7 @@ impl ImapClient {
                 return Ok(msg);
             }
 
-            std::thread::sleep(options.poll_interval.to_std().unwrap_or_default());
+            std::thread::sleep(options.poll_interval);
         }
     }
 
@@ -212,9 +212,10 @@ fn build_search_query(criteria: &SearchCriteria) -> String {
     }
 
     if let Some(minutes) = criteria.since_minutes {
-        let since = Utc::now() - Duration::minutes(minutes);
-        let date = since.format("%d-%b-%Y").to_string();
-        parts.push(format!("SINCE {}", date));
+        parts.push(format!(
+            "SINCE {}",
+            imap_date(OffsetDateTime::now_utc(), minutes)
+        ));
     }
 
     if parts.is_empty() {
@@ -222,6 +223,15 @@ fn build_search_query(criteria: &SearchCriteria) -> String {
     } else {
         parts.join(" ")
     }
+}
+
+fn imap_date(now: OffsetDateTime, minutes_ago: i64) -> String {
+    let since = now - time::Duration::minutes(minutes_ago);
+    since
+        .format(time::macros::format_description!(
+            "[day]-[month repr:short]-[year]"
+        ))
+        .unwrap_or_default()
 }
 
 fn escape_imap(s: &str) -> String {
@@ -348,17 +358,15 @@ pub mod async_client {
             })
         }
 
-        /// Poll for a matching message with async sleep between attempts.
-        /// Unlike the sync version, this releases the mutex between polls.
         pub async fn wait_for_message(
             &mut self,
             criteria: &SearchCriteria,
             options: &WaitOptions,
         ) -> Result<EmailMessage> {
-            let deadline = Utc::now() + options.timeout;
+            let deadline = Instant::now() + options.timeout;
 
             loop {
-                if Utc::now() > deadline {
+                if Instant::now() > deadline {
                     return Err(Error::Timeout);
                 }
 
@@ -366,8 +374,7 @@ pub mod async_client {
                     return Ok(msg);
                 }
 
-                let sleep_ms = options.poll_interval.num_milliseconds().max(100) as u64;
-                tokio::time::sleep(std::time::Duration::from_millis(sleep_ms)).await;
+                tokio::time::sleep(options.poll_interval.max(Duration::from_millis(100))).await;
             }
         }
 
@@ -405,8 +412,6 @@ mod tests {
             raw: Vec::new(),
         }
     }
-
-    // --- extract_first_link ---
 
     #[test]
     fn extract_link_from_html() {
@@ -467,8 +472,6 @@ mod tests {
         assert!(extract_first_link(&msg, &LinkFilter::default()).is_none());
     }
 
-    // --- extract_code ---
-
     #[test]
     fn extract_6digit_code() {
         let msg = make_msg(Some("Your code is 482913. Please enter it."), None);
@@ -508,8 +511,6 @@ mod tests {
         assert!(extract_code(&msg, &re).is_none());
     }
 
-    // --- build_search_query ---
-
     #[test]
     fn search_query_all() {
         let criteria = SearchCriteria::new().unseen_only(false);
@@ -535,13 +536,18 @@ mod tests {
     }
 
     #[test]
+    fn imap_date_uses_day_short_month_and_year() {
+        let now = time::macros::datetime!(2026-11-05 00:05 UTC);
+        assert_eq!(imap_date(now, 10), "04-Nov-2026");
+        assert_eq!(imap_date(now, 0), "05-Nov-2026");
+    }
+
+    #[test]
     fn search_query_since() {
         let criteria = SearchCriteria::new().unseen_only(false).since_minutes(10);
         let q = build_search_query(&criteria);
         assert!(q.starts_with("SINCE "));
     }
-
-    // --- escape_imap ---
 
     #[test]
     fn escape_imap_quotes_and_backslash() {
@@ -553,8 +559,6 @@ mod tests {
     fn escape_imap_strips_control_chars() {
         assert_eq!(escape_imap("hello\x00world\nok"), "helloworldok");
     }
-
-    // --- parse_message ---
 
     #[test]
     fn parse_plain_text_message() {

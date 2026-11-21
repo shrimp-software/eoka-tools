@@ -490,8 +490,10 @@ frame-rate ceiling rather than a deterministic playback rate. Capture requires a
 ready active page and allows one recorder per target. Unsupported native
 commands or encoders return `RecordingUnsupported`, never another recorder.
 
-Every record contains `{recordingId,pageId,state,path,artifact?,failure?}`.
-States are `running`, `finalizing`, `completed`, `cancelled` and `failed`.
+Every record contains `{recordingId,pageId,state,path,artifact?,failure?,frames?,durationMs?}`.
+`frames` and `durationMs` appear only on completed records and come from the
+validated MP4 timeline: the sample count and the span from the first decode
+timestamp to the end of the last sample, in whole milliseconds. States are `running`, `finalizing`, `completed`, `cancelled` and `failed`.
 Successful start is returned only after native start; failed native admission
 retains a failed record. Same-ID retries return the existing record only for
 equivalent start parameters; a mismatch returns `RecordingConflict` without

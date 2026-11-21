@@ -456,7 +456,7 @@ pub enum Command {
     },
     #[command(
         about = "Execute JavaScript and return result",
-        long_about = "Execute a JavaScript function and return its JSON result.\n\nCODE is a function, also when loaded with --file. It runs once in a fresh scope, promises are awaited and exceptions fail the command. The result must be JSON: undefined, cycles, non-finite numbers and non-JSON objects are rejected. Source, arguments and result are each bounded to 1 MiB. --raw instead evaluates source in global scope and returns display text, not typed JSON."
+        long_about = "Execute JavaScript and return its JSON result.\n\nCODE, also when loaded with --file, is a function called with --args, an expression such as document.title, or statements run as an async function body where return gives the value. Syntax is checked before anything runs, so the code runs exactly once, in a fresh scope; promises are awaited and exceptions fail the command. The result must be JSON: undefined, cycles, non-finite numbers and non-JSON objects are rejected. Source, arguments and result are each bounded to 1 MiB. --raw instead evaluates source in global scope and returns display text, not typed JSON."
     )]
     Eval {
         #[arg(
@@ -465,7 +465,10 @@ pub enum Command {
             help = "JSON array of arguments passed to the function"
         )]
         args: String,
-        #[arg(long, help = "Treat CODE as an expression, not a function")]
+        #[arg(
+            long,
+            help = "Evaluate CODE unchanged in global scope and return display text"
+        )]
         raw: bool,
         #[arg(help = CODE)]
         code: Option<String>,
@@ -497,7 +500,10 @@ pub enum Command {
         #[arg(short, long, help = "Read JavaScript from a file")]
         file: Option<PathBuf>,
     },
-    #[command(about = "Execute JavaScript without returning a value")]
+    #[command(
+        about = "Execute JavaScript without returning a value",
+        long_about = "Execute JavaScript without returning a value.\n\nCODE, also when loaded with --file, is a function called with --args, an expression such as an IIFE, or statements run as an async function body. Syntax is checked before anything runs, so the code runs exactly once; promises are awaited and exceptions fail the command. --raw runs the source unchanged in global scope."
+    )]
     Exec {
         #[arg(
             long,
@@ -505,7 +511,7 @@ pub enum Command {
             help = "JSON array of arguments passed to the function"
         )]
         args: String,
-        #[arg(long, help = "Treat CODE as an expression, not a function")]
+        #[arg(long, help = "Run CODE unchanged in global scope")]
         raw: bool,
         #[arg(help = CODE)]
         code: Option<String>,

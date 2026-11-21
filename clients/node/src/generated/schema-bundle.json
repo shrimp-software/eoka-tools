@@ -22229,6 +22229,15 @@
               }
             ]
           },
+          "durationMs": {
+            "format": "uint64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "failure": {
             "anyOf": [
               {
@@ -22237,6 +22246,15 @@
               {
                 "type": "null"
               }
+            ]
+          },
+          "frames": {
+            "format": "uint64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
             ]
           },
           "pageId": {
@@ -22417,6 +22435,15 @@
               }
             ]
           },
+          "durationMs": {
+            "format": "uint64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "failure": {
             "anyOf": [
               {
@@ -22425,6 +22452,15 @@
               {
                 "type": "null"
               }
+            ]
+          },
+          "frames": {
+            "format": "uint64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
             ]
           },
           "pageId": {
@@ -22641,6 +22677,15 @@
               }
             ]
           },
+          "durationMs": {
+            "format": "uint64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "failure": {
             "anyOf": [
               {
@@ -22649,6 +22694,15 @@
               {
                 "type": "null"
               }
+            ]
+          },
+          "frames": {
+            "format": "uint64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
             ]
           },
           "pageId": {
@@ -22829,6 +22883,15 @@
               }
             ]
           },
+          "durationMs": {
+            "format": "uint64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "failure": {
             "anyOf": [
               {
@@ -22837,6 +22900,15 @@
               {
                 "type": "null"
               }
+            ]
+          },
+          "frames": {
+            "format": "uint64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
             ]
           },
           "pageId": {
@@ -27880,6 +27952,15 @@
                 }
               ]
             },
+            "durationMs": {
+              "format": "uint64",
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "failure": {
               "anyOf": [
                 {
@@ -27888,6 +27969,15 @@
                 {
                   "type": "null"
                 }
+              ]
+            },
+            "frames": {
+              "format": "uint64",
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
               ]
             },
             "pageId": {
@@ -29720,6 +29810,15 @@
             }
           ]
         },
+        "durationMs": {
+          "format": "uint64",
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "failure": {
           "anyOf": [
             {
@@ -29728,6 +29827,15 @@
             {
               "type": "null"
             }
+          ]
+        },
+        "frames": {
+          "format": "uint64",
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
           ]
         },
         "pageId": {
@@ -30401,6 +30509,15 @@
                 }
               ]
             },
+            "durationMs": {
+              "format": "uint64",
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "failure": {
               "anyOf": [
                 {
@@ -30409,6 +30526,15 @@
                 {
                   "type": "null"
                 }
+              ]
+            },
+            "frames": {
+              "format": "uint64",
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
               ]
             },
             "pageId": {
@@ -31305,6 +31431,15 @@
                 }
               ]
             },
+            "durationMs": {
+              "format": "uint64",
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "failure": {
               "anyOf": [
                 {
@@ -31313,6 +31448,15 @@
                 {
                   "type": "null"
                 }
+              ]
+            },
+            "frames": {
+              "format": "uint64",
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
               ]
             },
             "pageId": {

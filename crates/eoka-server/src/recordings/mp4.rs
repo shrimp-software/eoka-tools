@@ -369,6 +369,7 @@ struct Sample {
 
 #[derive(Default)]
 struct Timeline {
+    first_dts: Option<u64>,
     last: Option<Sample>,
     last_dts: Option<u64>,
     zero_count: u64,
@@ -384,6 +385,7 @@ impl Timeline {
     fn sample(&mut self, mut sample: Sample) -> Result<Option<u32>> {
         self.samples = add(self.samples, 1)?;
         sample.ordinal = self.samples;
+        self.first_dts.get_or_insert(sample.dts);
         add(sample.dts, u64::from(sample.duration))?;
         if sample.composition >= 0 {
             add(sample.dts, sample.composition as u64)?;
@@ -876,7 +878,13 @@ async fn inspect_index(
     require(tfra_seen && mfro_seen, "Incomplete MP4 fragment index")
 }
 
-pub(super) async fn repair(file: &mut File) -> Result<()> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct MediaSummary {
+    pub frames: u64,
+    pub duration_ms: u64,
+}
+
+pub(super) async fn repair(file: &mut File) -> Result<MediaSummary> {
     let length = file.metadata().await?.len();
     let mut reader = Reader {
         file,
@@ -958,6 +966,20 @@ pub(super) async fn repair(file: &mut File) -> Result<()> {
         timeline.zero_count == 0,
         "Unterminated zero MP4 duration run",
     )?;
+    let summary = {
+        let last = timeline.last.unwrap();
+        let timescale = track
+            .as_ref()
+            .unwrap()
+            .timescale
+            .ok_or_else(|| invalid("Missing MP4 timescale"))?;
+        let ticks = add(last.dts, u64::from(last.duration))?
+            .saturating_sub(timeline.first_dts.unwrap_or(0));
+        MediaSummary {
+            frames: timeline.samples,
+            duration_ms: (u128::from(ticks) * 1000 / u128::from(timescale)) as u64,
+        }
+    };
     if timeline.zero_runs || timeline.boundary.is_some() {
         let track = track.as_ref().unwrap();
         require(
@@ -1015,7 +1037,7 @@ pub(super) async fn repair(file: &mut File) -> Result<()> {
             index.write(reader.file).await?;
         }
     }
-    Ok(())
+    Ok(summary)
 }
 
 #[cfg(test)]

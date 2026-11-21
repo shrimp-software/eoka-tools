@@ -1,6 +1,6 @@
 [package]
 name = "eoka-server"
-version = "0.11.3"
+version = "0.11.4"
 edition.workspace = true
 license.workspace = true
 description = "Shared browser runtime and sidecar process for eoka browser automation"
@@ -30,7 +30,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 captcha = { workspace = true }
 eoka-datadome = { workspace = true }
-chrono = "0.4"
+time = { version = "0.3", features = ["formatting", "macros"] }
 
 rusqlite = { version = "0.42", features = ["bundled", "fallible_uint"] }
 uuid = { version = "1", features = ["v4"] }
