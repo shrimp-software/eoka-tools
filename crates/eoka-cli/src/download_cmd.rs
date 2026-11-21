@@ -180,7 +180,7 @@ mod tests {
         ));
         eoka_protocol::write_msg(
             &mut stream,
-            &Response::ok(serde_json::json!({"protocol_major":2,"mode":"headless"})),
+            &Response::ok(serde_json::json!({"protocol_major": eoka_protocol::sidecar::PROTOCOL_VERSION.major,"mode":"headless"})),
         )
         .await
         .unwrap();

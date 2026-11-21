@@ -188,7 +188,7 @@ mod wire_tests {
     const ID: &str = "11111111-1111-4111-8111-111111111111";
 
     fn sent_by_the_cli(cmd: &str, args: serde_json::Value) -> serde_json::Value {
-        json!({"cmd": cmd, "args": args, "operation_id": ID, "protocol_major": 2})
+        json!({"cmd": cmd, "args": args, "operation_id": ID, "protocol_major": eoka_protocol::sidecar::PROTOCOL_VERSION.major})
     }
 
     fn action(command: &str, arguments: serde_json::Value) -> serde_json::Value {
@@ -285,7 +285,7 @@ mod wire_tests {
             engine_request(&timed, request).args_json()["options"]["timeout_ms"],
             900
         );
-        let bare = json!({"cmd": "text", "protocol_major": 2});
+        let bare = json!({"cmd": "text", "protocol_major": eoka_protocol::sidecar::PROTOCOL_VERSION.major});
         let request: Request = serde_json::from_value(bare.clone()).unwrap();
         assert_eq!(engine_request(&bare, request).args_json(), json!({}));
     }

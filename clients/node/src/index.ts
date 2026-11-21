@@ -29,6 +29,8 @@ export type {
   ScreenshotOptions,
   ScreenshotFileOptions,
   RecordOptions,
+  ShadowClickResult,
+  TurnstileResult,
 } from "./page.js";
 export { Operation, OperationError } from "./operations.js";
 export type { WaitOptions } from "./operations.js";

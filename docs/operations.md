@@ -66,9 +66,8 @@ The Rust SDK exposes `perform`, `operation`, `wait_operation` and
 `cancel_operation`. The Go client exposes `Page.Perform` and
 `Browser.Operation/WaitOperation/CancelOperation`; existing Go action methods
 accept `ActionOptions`. Client-generated IDs remain in transport errors.
-New clients send a distinct action command, including for download starts, so
-older daemons reject unsupported durable requests before input. Restart daemons
-explicitly after upgrading.
+Clients send a distinct action command, including for download starts. A daemon
+from another protocol version refuses the connection before any input.
 
 The stdio sidecar negotiates its own protocol with `server.hello`; its method
 list is not the CLI tool catalog. Ordinary requests run one at a time per page
@@ -142,8 +141,8 @@ staged artifact or reconcile the same previously linked inode. An unrelated
 destination, altered digest or missing completion proof is never accepted.
 Partial or uncertain artifacts are retained for inspection and no click is
 replayed. Completed files/history remain available after daemon restart.
-Download status/list/wait can start a history daemon when the old daemon is gone;
-these queries do not launch Chrome.
+Download status/list/wait can start a history daemon when the session daemon is
+gone; these queries do not launch Chrome.
 
 ## Sidecar capture and recording
 

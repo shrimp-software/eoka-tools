@@ -8,8 +8,7 @@ pub use crate::{OperationIdArgs, OperationListArgs, OperationWaitArgs};
 pub const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 pub const MAX_MESSAGE_BYTES: usize = 32 * 1024 * 1024;
 pub const MAX_IN_FLIGHT: usize = 128;
-pub const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion { major: 2, minor: 2 };
-pub const BLOCKER_ERRORS_SINCE: ProtocolVersion = ProtocolVersion { major: 2, minor: 2 };
+pub const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion { major: 3, minor: 0 };
 pub const MAX_BOUNDED_FETCH_BYTES: usize = 1024 * 1024;
 pub const MAX_SCREENSHOT_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_RECORDING_FPS: u32 = 120;
@@ -29,34 +28,6 @@ pub struct ProtocolVersion {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct HelloParams {
     pub protocol: ProtocolVersion,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub understands: Option<ProtocolVersion>,
-}
-
-impl HelloParams {
-    pub fn spoken(&self) -> ProtocolVersion {
-        let understood = self
-            .understands
-            .filter(|understood| understood.major == self.protocol.major)
-            .map_or(self.protocol.minor, |understood| {
-                understood.minor.max(self.protocol.minor)
-            });
-        ProtocolVersion {
-            major: PROTOCOL_VERSION.major,
-            minor: understood.min(PROTOCOL_VERSION.minor),
-        }
-    }
-}
-
-impl ProtocolVersion {
-    pub const BASELINE: ProtocolVersion = ProtocolVersion {
-        major: PROTOCOL_VERSION.major,
-        minor: 0,
-    };
-
-    pub fn at_least(self, other: ProtocolVersion) -> bool {
-        self.major == other.major && self.minor >= other.minor
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -336,44 +307,6 @@ impl ServerError {
             blocker,
             ..Default::default()
         })
-    }
-
-    pub fn spoken_to(mut self, spoken: ProtocolVersion) -> Self {
-        if spoken.at_least(BLOCKER_ERRORS_SINCE) {
-            return self;
-        }
-        if let Some(detail_code) = self.code.blocker_detail_code() {
-            self.code = ErrorCode::Operation;
-            let data = self.data.get_or_insert_with(Default::default);
-            data.blocker = None;
-            if data.detail.is_none() {
-                data.detail = Some(crate::ErrorDetail::new(detail_code, self.message.clone()));
-            }
-        }
-        if let Some(data) = self.data.as_mut() {
-            data.blocker = None;
-            if let Some(source) = data.source.take() {
-                data.source = Some(Box::new(source.spoken_to(spoken)));
-            }
-            if let Some(failure) = data
-                .recording
-                .as_mut()
-                .and_then(|recording| recording.failure.as_mut())
-            {
-                failure.code = failure.code.spoken_to(spoken);
-            }
-        }
-        self
-    }
-}
-
-impl ErrorCode {
-    pub fn spoken_to(self, spoken: ProtocolVersion) -> Self {
-        if self.blocker_detail_code().is_some() && !spoken.at_least(BLOCKER_ERRORS_SINCE) {
-            ErrorCode::Operation
-        } else {
-            self
-        }
     }
 }
 
@@ -924,65 +857,6 @@ impl RecordingRecord {
     }
 }
 dto!(PageIdParams { page_id: String });
-dto!(FramesParams { page_id: String });
-dto!(FrameJsParams {
-    page_id: String,
-    frame_id: String,
-    #[schemars(
-        description = "JavaScript expression evaluated in the frame's isolated world. Frame IDs come from `page.frames`; detached or unrelated IDs are rejected."
-    )]
-    js: String,
-});
-dto!(FrameInfo {
-    id: String,
-    url: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")] name: Option<String>,
-});
-dto!(ClickShadowParams {
-    page_id: String,
-    selector: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")] frame_id: Option<String>,
-    #[serde(default = "default_shadow_timeout_ms")] timeout_ms: u64,
-});
-impl ClickShadowParams {
-    pub fn validate(&self) -> Result<(), ServerError> {
-        if self.selector.trim().is_empty() || self.selector.len() > 4096 {
-            return Err(ServerError::invalid_params(
-                "selector must be 1..=4096 characters",
-            ));
-        }
-        if self.timeout_ms == 0 || self.timeout_ms > 60_000 {
-            return Err(ServerError::invalid_params(
-                "timeoutMs must be between 1 and 60000",
-            ));
-        }
-        Ok(())
-    }
-}
-dto!(ClickShadowResult {
-    frame_id: String,
-    selector: String,
-    x: f64,
-    y: f64,
-});
-fn default_shadow_timeout_ms() -> u64 {
-    10_000
-}
-dto!(SolveTurnstileParams {
-    page_id: String,
-    #[serde(default = "default_turnstile_timeout_ms")]
-    #[schemars(range(min = 1, max = 120000))]
-    timeout_ms: u64,
-});
-impl SolveTurnstileParams {
-    pub fn validate(&self) -> Result<(), ServerError> {
-        validate_turnstile_timeout(self.timeout_ms)
-    }
-}
-dto!(SolveTurnstileResult {
-    clicks: u32,
-    elapsed_ms: u64
-});
 dto!(CloudflareAutoSolve {
     #[serde(default = "default_cloudflare_interval_ms")]
     #[schemars(range(min = 100, max = 60000))]
@@ -1015,20 +889,6 @@ fn default_turnstile_timeout_ms() -> u64 {
 fn default_cloudflare_interval_ms() -> u64 {
     500
 }
-dto!(SelectorParams {
-    page_id: String,
-    selector: String
-});
-dto!(WaitForParams {
-    page_id: String,
-    selector: String,
-    timeout_ms: u64
-});
-dto!(WaitForTextParams {
-    page_id: String,
-    text: String,
-    timeout_ms: u64
-});
 dto!(JsParams {
     page_id: String,
     function: String,
@@ -1084,21 +944,6 @@ fn default_fetch_method() -> String {
 fn default_fetch_redirect() -> String {
     "follow".into()
 }
-dto!(MouseButtonParams {
-    page_id: String,
-    #[serde(flatten)]
-    mouse: crate::MouseButtonArgs
-});
-dto!(MouseMoveParams {
-    page_id: String,
-    #[serde(flatten)]
-    mouse: crate::MouseMoveArgs
-});
-dto!(HeldKeyParams {
-    page_id: String,
-    #[serde(flatten)]
-    key: crate::KeyArgs
-});
 dto!(RestoreStateParams {
     page_id: String,
     state: BrowserState
@@ -1189,12 +1034,6 @@ dto!(Tab {
 });
 dto!(TabsResult { tabs: Vec<Tab> });
 dto!(CloseTabResult { #[serde(skip_serializing_if = "Option::is_none")] cleanup_error: Option<String> });
-dto!(TextResult { text: String });
-dto!(ContentResult { html: String });
-dto!(TitleResult { title: String });
-dto!(UrlResult { url: String });
-dto!(AttributeResult { value: Option<String> });
-dto!(ExistsResult { exists: bool });
 dto!(EvaluateResult { result: Value });
 dto!(CaptureStateResult {
     state: BrowserState
@@ -1407,24 +1246,10 @@ methods! {
     "page.select" => FillParams => crate::OperationRecord,
     "page.hover" => ClickParams => crate::OperationRecord,
     "page.press_key" => PressKeyParams => crate::OperationRecord,
-    "page.text" => PageIdParams => TextResult,
-    "page.content" => PageIdParams => ContentResult,
-    "page.title" => PageIdParams => TitleResult,
-    "page.url" => PageIdParams => UrlResult,
-    "page.get_text" => SelectorParams => TextResult,
-    "page.get_attribute" => GetAttributeParams => AttributeResult,
-    "page.exists" => SelectorParams => ExistsResult,
-    "page.wait_for" => WaitForParams => Empty,
-    "page.wait_for_visible" => WaitForParams => Empty,
-    "page.wait_for_text" => WaitForTextParams => Empty,
     "page.evaluate" => JsParams => EvaluateResult,
     "page.execute" => JsParams => Empty,
     "page.evaluate_raw" => RawJsParams => EvaluateResult,
     "page.execute_raw" => RawJsParams => Empty,
-    "page.frames" => FramesParams => Vec<FrameInfo>,
-    "page.evaluate_in_frame" => FrameJsParams => EvaluateResult,
-    "page.click_shadow" => ClickShadowParams, ClickShadowParams::validate => ClickShadowResult,
-    "page.solve_turnstile" => SolveTurnstileParams, SolveTurnstileParams::validate => SolveTurnstileResult,
     "page.fetch" => FetchParams => FetchResult,
     "page.fetch_bounded" => BoundedFetchParams, BoundedFetchParams::validate => BoundedFetchResult,
     "page.capture_state" => PageIdParams => CaptureStateResult,
@@ -1439,27 +1264,15 @@ methods! {
         validate_viewport(params.width, params.height, params.device_scale_factor)
     } => Empty,
     "page.reset_viewport" => PageIdParams => Empty,
-    "page.mouse_down" => MouseButtonParams => Empty,
-    "page.mouse_move" => MouseMoveParams => Empty,
-    "page.mouse_up" => MouseButtonParams => Empty,
-    "page.key_down" => HeldKeyParams => Empty,
-    "page.key_up" => HeldKeyParams => Empty,
-    "page.release_all_inputs" => PageIdParams => Empty,
     "page.solve_captcha" => SolveCaptchaParams => SolveCaptchaResult,
     "page.close" => PageIdParams => Empty,
 }
-dto!(GetAttributeParams {
-    page_id: String,
-    selector: String,
-    name: String
-});
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MethodRole {
     Lifecycle,
     Shared,
     Action,
-    ReplacedBy(&'static str),
     Distinct(&'static str),
 }
 
@@ -1483,32 +1296,15 @@ pub fn method_role(method: &str) -> Option<MethodRole> {
         | "page.select"
         | "page.hover"
         | "page.press_key" => Action,
-        "page.text" => ReplacedBy("text"),
-        "page.content" => ReplacedBy("content"),
-        "page.title" | "page.url" => ReplacedBy("info"),
-        "page.get_text" => ReplacedBy("get_text"),
-        "page.get_attribute" => ReplacedBy("get_attribute"),
-        "page.exists" => ReplacedBy("exists"),
-        "page.wait_for" | "page.wait_for_visible" | "page.wait_for_text" => ReplacedBy("wait"),
         "page.evaluate" | "page.evaluate_raw" | "page.execute" | "page.execute_raw" => {
             Distinct("bounded function evaluation with typed results; eval and exec take a script")
         }
-        "page.frames" => ReplacedBy("frames"),
-        "page.evaluate_in_frame" => ReplacedBy("frame_eval"),
-        "page.click_shadow" => ReplacedBy("click_shadow"),
-        "page.solve_turnstile" => ReplacedBy("captcha.turnstile"),
         "page.fetch" | "page.fetch_bounded" => {
             Distinct("typed response and streaming byte bound; catalog fetch truncates text")
         }
         "page.set_viewport" | "page.reset_viewport" => {
             Distinct("plain viewport metrics; emulate also turns on mobile and touch emulation")
         }
-        "page.mouse_down" => ReplacedBy("mouse.down"),
-        "page.mouse_move" => ReplacedBy("mouse.move"),
-        "page.mouse_up" => ReplacedBy("mouse.up"),
-        "page.key_down" => ReplacedBy("key.down"),
-        "page.key_up" => ReplacedBy("key.up"),
-        "page.release_all_inputs" => ReplacedBy("release_all_inputs"),
         "page.screenshot" => Distinct("returns image bytes; catalog screenshot writes a file"),
         "page.screenshot_to_file" => {
             Distinct("atomic publication with partial-file evidence on failure")
@@ -1626,7 +1422,7 @@ pub fn schema_bundle() -> Value {
         .chain(catalog_operations().map(|operation| {
             (
                 operation.path,
-                json!({"params": catalog_params_schema(operation), "result": {}}),
+                json!({"params": catalog_params_schema(operation), "result": crate::result_schema_for_cmd(operation.cmd)}),
             )
         }))
         .collect();
@@ -1656,14 +1452,6 @@ pub fn schema_bundle() -> Value {
             "RecordingFailure": schema::<RecordingFailure>(), "RecordingFailureStage": schema::<RecordingFailureStage>()
         }
     });
-    bundle["replacedMethods"] = METHODS
-        .iter()
-        .filter_map(|method| match method_role(method.name)? {
-            MethodRole::ReplacedBy(path) => Some((method.name.to_owned(), json!(path))),
-            _ => None,
-        })
-        .collect::<serde_json::Map<_, _>>()
-        .into();
     bundle["catalogMethods"] = catalog_operations()
         .map(|operation| operation.path)
         .collect();
@@ -1738,11 +1526,6 @@ mod tests {
                 MethodRole::Shared => assert!(
                     crate::operation_by_path(method.name).is_some(),
                     "{} is Shared but is not a catalog path",
-                    method.name
-                ),
-                MethodRole::ReplacedBy(path) => assert!(
-                    catalog_operation(path).is_some(),
-                    "{} names {path}, which is not a projected catalog operation",
                     method.name
                 ),
                 MethodRole::Distinct(reason) => assert!(!reason.is_empty()),
@@ -2021,152 +1804,12 @@ mod tests {
     }
 
     #[test]
-    fn a_client_older_than_the_blocker_codes_receives_an_operation_error() {
-        let current = PROTOCOL_VERSION;
-        let older = [
-            ProtocolVersion::BASELINE,
-            ProtocolVersion { major: 2, minor: 1 },
-        ];
-        let blocker = PageBlocker::Navigation {
-            url: Some("https://slow.test/".into()),
-            elapsed_ms: 7000,
-        };
-        for (code, detail) in [
-            (ErrorCode::DialogOpen, "dialog_open"),
-            (ErrorCode::NavigationPending, "navigation_pending"),
-            (ErrorCode::PageUnresponsive, "page_unresponsive"),
-        ] {
-            let error = ServerError::blocked(
-                crate::ErrorDetail::new(detail, "blocked").hint("do something"),
-                Some(blocker.clone()),
-            );
-            assert_eq!(error.code, code);
-            let kept = error.clone().spoken_to(current);
-            assert_eq!(kept.code, code);
-            assert_eq!(kept.data.unwrap().blocker, Some(blocker.clone()));
-            for spoken in older {
-                let lowered = error.clone().spoken_to(spoken);
-                assert_eq!(lowered.code, ErrorCode::Operation);
-                assert_eq!(lowered.message, "blocked");
-                let data = lowered.data.unwrap();
-                assert!(data.blocker.is_none());
-                let kept = data.detail.unwrap();
-                assert_eq!(kept.code, detail);
-                assert_eq!(kept.hint.as_deref(), Some("do something"));
-                assert_eq!(code.spoken_to(spoken), ErrorCode::Operation);
-            }
-            let bare = ServerError::new(code, "bare").spoken_to(ProtocolVersion::BASELINE);
-            assert_eq!(bare.code, ErrorCode::Operation);
-            assert_eq!(bare.data.unwrap().detail.unwrap().code, detail);
-            assert_eq!(code.spoken_to(current), code);
-        }
-        let nested = ServerError::new(ErrorCode::Action, "outer").with_data(ErrorData {
-            source: Some(Box::new(ServerError::new(ErrorCode::DialogOpen, "inner"))),
-            ..Default::default()
-        });
-        let lowered = nested.spoken_to(ProtocolVersion::BASELINE);
-        assert_eq!(lowered.code, ErrorCode::Action);
-        assert_eq!(
-            lowered.data.unwrap().source.unwrap().code,
-            ErrorCode::Operation
-        );
-        let untouched =
-            ServerError::new(ErrorCode::Timeout, "slow").spoken_to(ProtocolVersion::BASELINE);
-        assert_eq!(untouched.code, ErrorCode::Timeout);
-        assert!(untouched.data.is_none());
-        let old_enum: Vec<Value> = serde_json::from_value(json!([
-            "ElementNotFound",
-            "ElementNotVisible",
-            "Timeout",
-            "RetryExhausted",
-            "Cdp",
-            "InvalidPage",
-            "InvalidParams",
-            "UnknownMethod",
-            "Internal",
-            "ProtocolMismatch",
-            "MessageTooLarge",
-            "ServerBusy",
-            "ShuttingDown",
-            "Cancelled",
-            "Action",
-            "Operation",
-            "ScreenshotTooLarge",
-            "FileOutput",
-            "RecordingUnsupported",
-            "RecordingNotFound",
-            "RecordingConflict",
-            "RecordingAlreadyActive",
-            "RecordingInvalidState",
-            "RecordingFailed"
-        ]))
-        .unwrap();
-        for code in [
-            ErrorCode::DialogOpen,
-            ErrorCode::NavigationPending,
-            ErrorCode::PageUnresponsive,
-            ErrorCode::Timeout,
-            ErrorCode::Operation,
-        ] {
-            let lowered = serde_json::to_value(code.spoken_to(ProtocolVersion::BASELINE)).unwrap();
-            assert!(old_enum.contains(&lowered), "{lowered}");
-        }
-    }
-
-    #[test]
-    fn hello_speaks_the_older_of_the_server_and_what_the_client_understands() {
-        let hello = |value: Value| serde_json::from_value::<HelloParams>(value).unwrap();
-        let spoken = |value: Value| hello(value).spoken();
-        assert_eq!(PROTOCOL_VERSION, ProtocolVersion { major: 2, minor: 2 });
-        assert_eq!(
-            spoken(json!({"protocol": {"major": 2, "minor": 0}})),
-            ProtocolVersion { major: 2, minor: 0 }
-        );
-        assert_eq!(
-            spoken(json!({"protocol": {"major": 2, "minor": 1}})),
-            ProtocolVersion { major: 2, minor: 1 }
-        );
-        assert_eq!(
-            spoken(json!({"protocol": PROTOCOL_VERSION})),
-            PROTOCOL_VERSION
-        );
-        assert_eq!(
-            spoken(
-                json!({"protocol": {"major": 2, "minor": 0}, "understands": {"major": 2, "minor": 2}})
-            ),
-            PROTOCOL_VERSION
-        );
-        assert_eq!(
-            spoken(
-                json!({"protocol": {"major": 2, "minor": 0}, "understands": {"major": 2, "minor": 9}})
-            ),
-            PROTOCOL_VERSION
-        );
-        assert_eq!(
-            spoken(
-                json!({"protocol": {"major": 2, "minor": 1}, "understands": {"major": 2, "minor": 0}})
-            ),
-            ProtocolVersion { major: 2, minor: 1 }
-        );
-        assert_eq!(
-            spoken(
-                json!({"protocol": {"major": 2, "minor": 0}, "understands": {"major": 3, "minor": 5}})
-            ),
-            ProtocolVersion { major: 2, minor: 0 }
-        );
-        assert!(
-            !spoken(json!({"protocol": {"major": 2, "minor": 1}})).at_least(BLOCKER_ERRORS_SINCE)
-        );
-        assert!(PROTOCOL_VERSION.at_least(BLOCKER_ERRORS_SINCE));
-        assert_eq!(
-            serde_json::to_value(hello(json!({"protocol": {"major": 2, "minor": 0}}))).unwrap(),
-            json!({"protocol": {"major": 2, "minor": 0}})
-        );
-        assert!(validate_params(
-            "server.hello",
-            &json!({"protocol": {"major": 2, "minor": 0}, "understands": {"major": 2, "minor": 2}})
-        )
-        .is_ok());
+    fn hello_names_one_protocol_version() {
+        assert_eq!(PROTOCOL_VERSION, ProtocolVersion { major: 3, minor: 0 });
+        let hello: HelloParams =
+            serde_json::from_value(json!({"protocol": {"major": 3, "minor": 0}})).unwrap();
+        assert_eq!(hello.protocol, PROTOCOL_VERSION);
+        assert!(validate_params("server.hello", &json!({"protocol": PROTOCOL_VERSION})).is_ok());
     }
 
     #[test]
@@ -2264,28 +1907,29 @@ mod tests {
     }
 
     #[test]
-    fn click_shadow_validates_selector_and_deadline() {
+    fn click_shadow_needs_a_selector() {
         assert!(validate_params(
-            "page.click_shadow",
+            "click_shadow",
             &json!({"pageId":"p","selector":"input[type=\"checkbox\"]"})
         )
         .is_ok());
         assert!(validate_params(
-            "page.click_shadow",
-            &json!({"pageId":"p","selector":"button","frameId":"frame","timeoutMs":1000})
+            "click_shadow",
+            &json!({"pageId":"p","selector":"button","frame_id":"frame","timeout_ms":1000})
         )
         .is_ok());
-        assert!(
-            validate_params("page.click_shadow", &json!({"pageId":"p","selector":""})).is_err()
-        );
+        assert!(validate_params("click_shadow", &json!({"pageId":"p"})).is_err());
+        assert!(validate_params("click_shadow", &json!({"pageId":"p","selector":" "})).is_err());
+        for timeout in [0, 60_001] {
+            assert!(validate_params(
+                "click_shadow",
+                &json!({"pageId":"p","selector":"b","timeout_ms":timeout})
+            )
+            .is_err());
+        }
         assert!(validate_params(
-            "page.click_shadow",
-            &json!({"pageId":"p","selector":"button","timeoutMs":0})
-        )
-        .is_err());
-        assert!(validate_params(
-            "page.click_shadow",
-            &json!({"pageId":"p","selector":"button","timeoutMs":60001})
+            "click_shadow",
+            &json!({"pageId":"p","selector":"b","frameId":"f"})
         )
         .is_err());
     }
@@ -2442,11 +2086,11 @@ mod tests {
 
     #[test]
     fn turnstile_and_cloudflare_auto_solve_validate_deadlines() {
-        assert!(validate_params("page.solve_turnstile", &json!({"pageId":"p"})).is_ok());
+        assert!(validate_params("captcha.turnstile", &json!({"pageId":"p"})).is_ok());
         for timeout in [0, 120_001] {
             assert!(validate_params(
-                "page.solve_turnstile",
-                &json!({"pageId":"p","timeoutMs":timeout})
+                "captcha.turnstile",
+                &json!({"pageId":"p","timeout_ms":timeout})
             )
             .is_err());
         }

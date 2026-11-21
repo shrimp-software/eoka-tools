@@ -1,8 +1,7 @@
-use std::time::Duration;
 #[cfg(feature = "datadome")]
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use eoka_protocol::{CaptchaDatadomeArgs, CaptchaTurnstileArgs, CaptchaTurnstileResult, Response};
+use eoka_protocol::{CaptchaDatadomeArgs, Response};
 #[cfg(feature = "datadome")]
 use eoka_protocol::{CaptchaDatadomeResult, DataDomeOutcome, ErrorDetail};
 #[cfg(feature = "datadome")]
@@ -11,7 +10,6 @@ use eoka_solvers::datadome::{DataDomeSolver, SolveError, SolveOutcome};
 use serde_json::Value;
 
 use super::Engine;
-use super::EngineError;
 
 #[cfg(feature = "datadome")]
 fn failure(code: &str, message: &str) -> Response {
@@ -62,25 +60,6 @@ fn outcome_response(outcome: SolveOutcome, tab_id: String, elapsed_ms: u64) -> R
 }
 
 impl Engine {
-    pub(super) async fn cmd_captcha_turnstile(
-        &mut self,
-        args: &CaptchaTurnstileArgs,
-    ) -> Result<Response, EngineError> {
-        let page = self.require_tab()?.page.clone();
-        let receipt =
-            crate::cloudflare::solve_turnstile(&page, Duration::from_millis(args.timeout_ms))
-                .await
-                .map_err(|error| error.to_string())?;
-        let result = CaptchaTurnstileResult {
-            tab_id: page.target_id().to_string(),
-            clicks: receipt.clicks,
-            elapsed_ms: receipt.elapsed.as_millis() as u64,
-        };
-        Ok(Response::ok(
-            serde_json::to_value(result).map_err(|error| error.to_string())?,
-        ))
-    }
-
     #[cfg(not(feature = "datadome"))]
     pub(super) async fn cmd_captcha_datadome(&mut self, _args: CaptchaDatadomeArgs) -> Response {
         crate::features::unavailable("datadome")

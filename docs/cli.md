@@ -86,7 +86,6 @@ Normal terminal errors show the code, page evidence, known job state/paths and a
 follow-up command. JSON retains its envelope and existing job fields. A lost wait
 response retains the known job ID without claiming a current state. Wait timeouts
 leave jobs running; inspect or wait for the same job instead of starting again.
-Old daemons need an explicit restart to provide the new evidence.
 
 ## Frame evaluation
 
@@ -134,8 +133,7 @@ additional seconds for cleanup. JSON output is available through `--json`.
 `challenge_cleared` is widget clearance, not login proof. `not_present` is a
 successful no-op. Blocks, bans, failed clearance and errors exit nonzero. No
 session is launched/restarted and no preceding application action is replayed.
-Use the same session/connection flags as before; an older daemon must be upgraded
-explicitly. See [the DataDome guide](../crates/eoka-solvers/DATADOME.md) for details.
+See [the DataDome guide](../crates/eoka-solvers/DATADOME.md) for details.
 
 ## Local safety defaults
 

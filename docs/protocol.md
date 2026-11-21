@@ -56,7 +56,7 @@ consume those contracts. The Go client implements the same wire protocol.
 Before launching Chrome, clients send:
 
 ```json
-{"id":1,"method":"server.hello","params":{"protocol":{"major":2,"minor":0}}}
+{"id":1,"method":"server.hello","params":{"protocol":{"major":3,"minor":0}}}
 ```
 
 The result contains:
@@ -71,25 +71,10 @@ The result contains:
 | `limits.maxMessageBytes` | Maximum serialized message size |
 | `limits.maxInFlight` | Maximum in-flight requests |
 
-Protocol major 2 through minor 2 is supported; minor 1 adds catalog operations
-and minor 2 adds the blocked-page error codes below. Version 1 clients must
-migrate. A different major or a requested minor newer than the server supports
-returns `ProtocolMismatch` without launching a browser.
-
-`protocol` is the oldest version the client can work with. A client that also
-understands a newer minor says so with the optional `understands` field:
-
-```json
-{"id":1,"method":"server.hello","params":{"protocol":{"major":2,"minor":0},"understands":{"major":2,"minor":2}}}
-```
-
-The server then speaks the older of its own version and the newest version the
-client named in either field, and never sends such a client an error code or
-field introduced after that version. A client that sends no `server.hello` is
-spoken to as protocol 2.0. Servers older than 2.2 ignore `understands`. Existing low-level clients can
-still call compatible methods directly; the Go client requires protocol 2.0
-before launch or attachment and fails explicitly against older servers.
-The Node SDK requires protocol 2.0, including bounded browser fetch and capture contracts.
+The server speaks protocol 3.0. A hello naming another major, or a minor newer
+than the server's, returns `ProtocolMismatch` without launching a browser. There
+is no negotiation and no fallback: the Node and Go SDKs ship pinned to the
+matching server and send exactly `{major: 3, minor: 0}`.
 
 `durableActions`, `operationCancellation` and `gracefulShutdown` describe server
 behavior. `explicitExecutablePath`, `browserAttachment`, `runtimeIsolation`,
@@ -109,13 +94,13 @@ is checked at runtime; no capability implies managed Chrome installation.
 Request:
 
 ```json
-{"id":2,"method":"page.title","params":{"pageId":"ABCD1234"}}
+{"id":2,"method":"info","params":{"pageId":"ABCD1234"}}
 ```
 
 Success:
 
 ```json
-{"id":2,"result":{"title":"Example"}}
+{"id":2,"result":{"url":"https://example.com/","title":"Example"}}
 ```
 
 Error:
@@ -133,13 +118,13 @@ contains structured evidence such as an operation ID, action receipt, original
 protocol error or canonical error detail. Branch on codes and fields, not text.
 An absent receipt is not proof that nothing was dispatched.
 
-### Blocked pages (protocol 2.2)
+### Blocked pages
 
 Chrome answers no page command while a JavaScript dialog is open on the page,
 while the page's main frame waits for a navigation response, or while the
 page's main thread is busy. The `pageBlockers` capability says the server
 detects these states and fails the request promptly instead of at the 30-second
-command deadline. A client spoken to as protocol 2.2 receives:
+command deadline. The request fails with:
 
 | Code | State | `data.blocker` |
 | --- | --- | --- |
@@ -151,10 +136,6 @@ command deadline. A client spoken to as protocol 2.2 receives:
 `navigation_pending` or `page_unresponsive`, the same message, a `hint` naming
 the remedy and, for a request that was not started, `context.action_status`.
 `elapsedMs` is how long the dialog has been open or the navigation has waited.
-
-A client spoken to as protocol 2.0 or 2.1 receives the same failure as an
-`Operation` error: the same message and `data.detail`, without `data.blocker`.
-Its `data.detail.code` still names the state.
 
 Registered page methods and catalog operations report these states the same
 way:
@@ -170,9 +151,8 @@ way:
   `agent.observe`, `agent.step` and action admission stop by themselves and
   return their own evidence: `agent.observe` fails with the same code, and
   `agent.step` and the operation record carry `dialog_open`.
-- Reads (`page.title`, `page.url`, `page.text`, `page.content`,
-  `page.get_text`, `page.get_attribute`, `page.exists`, `page.frames`,
-  `page.capture_state`) that get no answer within 15 seconds end as
+- Reads (`info`, `text`, `content`, `get_text`, `get_attribute`, `exists`,
+  `frames`, `page.capture_state`) that get no answer within 15 seconds end as
   `PageUnresponsive`. Other methods that reach the command deadline are checked
   the same way before their timeout is reported.
 - `dialog.accept` and `dialog.dismiss` answer the dialog directly and work
@@ -208,7 +188,7 @@ The registry has two parts. Methods registered in `eoka-protocol::sidecar`
 `operations.*` and `agent.*` methods) keep their existing wire names and result
 shapes.
 
-### Catalog operations (protocol 2.1)
+### Catalog operations
 
 Servers advertising the `operationCatalog` capability also serve the operation
 catalog used by the CLI daemon, MCP and Tack. Each catalog operation is a method
@@ -218,7 +198,13 @@ daemon. The schema bundle lists them under `catalogMethods`.
 
 - Params are the operation's catalog input plus a required string `pageId`.
   Catalog fields are snake_case. An unknown field is `InvalidParams`, not ignored.
-- The result is the operation's `data` value; results are not yet typed.
+- The result is the operation's `data` value. Operations the SDKs read from
+  (`text`, `content`, `info`, `get_text`, `get_attribute`, `exists`, `frames`,
+  `frame_eval`, `click_shadow`, `wait`, `captcha.turnstile`, `mouse.*`, `key.*`,
+  `release_all_inputs`) have typed results in the schema bundle; the rest are
+  untyped JSON.
+- Page reads, waits, held input, `click_shadow` and `captcha.turnstile` run on
+  their page alone: a slow request on one page never delays them on another.
 - Failures return an `Operation` error carrying the catalog `ErrorDetail`.
 - Actions (`click`, `double_click`, `fill`, `select`, `hover`, `key`, `scroll`,
   `back`, `forward`, `reload`) are durable operations. `operation_id` is
@@ -251,20 +237,8 @@ untrusted input through as method names or file paths.
 
 Every registered method declares a role in `eoka-protocol::sidecar::method_role`:
 lifecycle, shared with a catalog operation of the same name, a typed convenience
-over `actions.perform`, a duplicate of a named catalog operation, or distinct for
-a stated reason. The schema bundle lists the duplicates and their catalog
-operation under `replacedMethods`. They stay available in protocol 2 and are
-removed in the next major, once catalog results are typed.
-
-That major was sized in November 2026 and deferred. It can remove the 20
-duplicates and the 11 typed conveniences, neither of which any SDK action
-needs, for a net of roughly 100 to 400 lines once the SDK adapters are counted.
-Lifecycle, shared and distinct methods (33 in all) stay registered. Before the
-removal the daemon needs its own protocol constant, the replacement operations
-need typed results, page-scoped operations must run on the page's lane without
-moving the session's current page, and catalog failures must keep `data.cdp`,
-`data.receipt` and `data.source`. No method can be removed inside protocol 2,
-including the 13 that neither SDK sends.
+over `actions.perform`, or distinct from the catalog for a stated reason. No
+registered method duplicates a catalog operation.
 
 `page.human_fill` is `page.fill`: the core library's fill has no human-like
 variant, so both send the same action.
@@ -373,9 +347,9 @@ runtime files after SIGKILL. Caller-owned profiles are never cleanup targets.
 All page methods carry `pageId`, an opaque target ID returned by the server.
 Element handles do not cross this wire.
 
-- Reads: `page.text`, `page.content`, `page.title`, `page.url`, `page.get_text`,
-  `page.get_attribute`, `page.exists`.
-- Waits: `page.wait_for`, `page.wait_for_visible`, `page.wait_for_text`.
+- Reads and waits are catalog operations: `text`, `content`, `info`, `get_text`,
+  `get_attribute`, `exists`, `frames` and `wait` (selector `state`, text, URL,
+  load or a fixed `ms`).
 - Evaluation: `page.evaluate` returns `{result: <JSON value>}`;
   `page.execute` discards the result. These accept `function` and JSON `arguments`; raw evaluation uses the explicit
   `page.evaluate_raw` / `page.execute_raw` methods. These are JavaScript primitives,
@@ -567,7 +541,7 @@ No uncertain action is automatically replayed. Local waiter cancellation,
 transport loss and shutdown remain separate from the site's business outcome.
 See [operations.md](operations.md) for deduplication and durable recovery.
 
-Chrome answers no page-level request (`page.title`, `page.url`, evaluation,
+Chrome answers no page-level request (`info`, evaluation,
 element reads) for a page whose main-frame navigation is still waiting for the
 site's response; such a request waits until the navigation commits, fails or is
 stopped, or until its own command deadline (30 seconds, 90 behind a proxy). To keep that from

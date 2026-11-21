@@ -129,15 +129,6 @@ impl Engine {
         Ok(Response::ok_text("Executed successfully"))
     }
 
-    pub(super) async fn cmd_frames(&mut self) -> Result<Response, EngineError> {
-        let page = self.require_tab()?.page.clone();
-        let frames = page.frames().await.map_err(|error| error.to_string())?;
-        Ok(Response::ok(json!(frames
-            .into_iter()
-            .map(|frame| { json!({"id":frame.id,"url":frame.url,"name":frame.name}) })
-            .collect::<Vec<_>>())))
-    }
-
     async fn cmd_frame_eval(&mut self, args: &FrameEvalArgs) -> Result<Response, EngineError> {
         let code = resolve_js(args.file.as_deref(), args.code.as_deref())?;
         let frame = args.frame.as_str();

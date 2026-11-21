@@ -121,50 +121,49 @@ func (p *Page) TypeInto(ctx context.Context, selector, text string, options ...A
 }
 
 func (p *Page) Text(ctx context.Context) (string, error) {
-	var res struct {
-		Text string `json:"text"`
-	}
-	err := p.call(ctx, "page.text", nil, &res)
-	return res.Text, err
+	var text string
+	err := p.call(ctx, "text", nil, &text)
+	return text, err
 }
 
 func (p *Page) Content(ctx context.Context) (string, error) {
-	var res struct {
-		HTML string `json:"html"`
-	}
-	err := p.call(ctx, "page.content", nil, &res)
-	return res.HTML, err
+	var html string
+	err := p.call(ctx, "content", nil, &html)
+	return html, err
 }
 
 func (p *Page) Title(ctx context.Context) (string, error) {
-	var res struct {
-		Title string `json:"title"`
-	}
-	err := p.call(ctx, "page.title", nil, &res)
-	return res.Title, err
+	info, err := p.info(ctx)
+	return info.Title, err
 }
 
 func (p *Page) URL(ctx context.Context) (string, error) {
-	var res struct {
-		URL string `json:"url"`
-	}
-	err := p.call(ctx, "page.url", nil, &res)
-	return res.URL, err
+	info, err := p.info(ctx)
+	return info.URL, err
+}
+
+type pageInfo struct {
+	URL   string `json:"url"`
+	Title string `json:"title"`
+}
+
+func (p *Page) info(ctx context.Context) (pageInfo, error) {
+	var info pageInfo
+	err := p.call(ctx, "info", nil, &info)
+	return info, err
 }
 
 func (p *Page) GetText(ctx context.Context, selector string) (string, error) {
-	var res struct {
-		Text string `json:"text"`
-	}
-	err := p.call(ctx, "page.get_text", map[string]any{"selector": selector}, &res)
-	return res.Text, err
+	var text string
+	err := p.call(ctx, "get_text", map[string]any{"selector": selector}, &text)
+	return text, err
 }
 
 func (p *Page) GetAttribute(ctx context.Context, selector, name string) (value string, ok bool, err error) {
 	var res struct {
 		Value *string `json:"value"`
 	}
-	if err = p.call(ctx, "page.get_attribute", map[string]any{"selector": selector, "name": name}, &res); err != nil {
+	if err = p.call(ctx, "get_attribute", map[string]any{"selector": selector, "name": name}, &res); err != nil {
 		return "", false, err
 	}
 	if res.Value == nil {
@@ -177,20 +176,20 @@ func (p *Page) Exists(ctx context.Context, selector string) (bool, error) {
 	var res struct {
 		Exists bool `json:"exists"`
 	}
-	err := p.call(ctx, "page.exists", map[string]any{"selector": selector}, &res)
+	err := p.call(ctx, "exists", map[string]any{"selector": selector}, &res)
 	return res.Exists, err
 }
 
 func (p *Page) WaitFor(ctx context.Context, selector string, timeout time.Duration) error {
-	return p.call(ctx, "page.wait_for", map[string]any{"selector": selector, "timeoutMs": timeout.Milliseconds()}, nil)
+	return p.call(ctx, "wait", map[string]any{"selector": selector, "state": "attached", "timeout": timeout.Milliseconds()}, nil)
 }
 
 func (p *Page) WaitForVisible(ctx context.Context, selector string, timeout time.Duration) error {
-	return p.call(ctx, "page.wait_for_visible", map[string]any{"selector": selector, "timeoutMs": timeout.Milliseconds()}, nil)
+	return p.call(ctx, "wait", map[string]any{"selector": selector, "state": "visible", "timeout": timeout.Milliseconds()}, nil)
 }
 
 func (p *Page) WaitForText(ctx context.Context, text string, timeout time.Duration) error {
-	return p.call(ctx, "page.wait_for_text", map[string]any{"text": text, "timeoutMs": timeout.Milliseconds()}, nil)
+	return p.call(ctx, "wait", map[string]any{"text": text, "timeout": timeout.Milliseconds()}, nil)
 }
 
 func (p *Page) Evaluate(ctx context.Context, function string, arguments ...any) (json.RawMessage, error) {
@@ -250,11 +249,14 @@ func (p *Page) SolveTurnstile(ctx context.Context, timeout time.Duration) (Turns
 		if err := validateTurnstileTimeout(timeout); err != nil {
 			return TurnstileResult{}, err
 		}
-		params["timeoutMs"] = timeout.Milliseconds()
+		params["timeout_ms"] = timeout.Milliseconds()
 	}
-	var result TurnstileResult
-	err := p.call(ctx, "page.solve_turnstile", params, &result)
-	return result, err
+	var solved struct {
+		Clicks    int   `json:"clicks"`
+		ElapsedMs int64 `json:"elapsed_ms"`
+	}
+	err := p.call(ctx, "captcha.turnstile", params, &solved)
+	return TurnstileResult{Clicks: solved.Clicks, ElapsedMs: solved.ElapsedMs}, err
 }
 
 func (p *Page) SolveCaptcha(ctx context.Context, options CaptchaOptions) (CaptchaInjection, error) {
@@ -324,27 +326,27 @@ func (p *Page) PressKey(ctx context.Context, key string, options ...ActionOption
 }
 
 func (p *Page) MouseDown(ctx context.Context, x, y float64, button MouseButton) error {
-	return p.call(ctx, "page.mouse_down", map[string]any{"x": x, "y": y, "button": button}, nil)
+	return p.call(ctx, "mouse.down", map[string]any{"x": x, "y": y, "button": button}, nil)
 }
 
 func (p *Page) MouseMove(ctx context.Context, x, y float64) error {
-	return p.call(ctx, "page.mouse_move", map[string]any{"x": x, "y": y}, nil)
+	return p.call(ctx, "mouse.move", map[string]any{"x": x, "y": y}, nil)
 }
 
 func (p *Page) MouseUp(ctx context.Context, x, y float64, button MouseButton) error {
-	return p.call(ctx, "page.mouse_up", map[string]any{"x": x, "y": y, "button": button}, nil)
+	return p.call(ctx, "mouse.up", map[string]any{"x": x, "y": y, "button": button}, nil)
 }
 
 func (p *Page) KeyDown(ctx context.Context, key string) error {
-	return p.call(ctx, "page.key_down", map[string]any{"key": key}, nil)
+	return p.call(ctx, "key.down", map[string]any{"key": key}, nil)
 }
 
 func (p *Page) KeyUp(ctx context.Context, key string) error {
-	return p.call(ctx, "page.key_up", map[string]any{"key": key}, nil)
+	return p.call(ctx, "key.up", map[string]any{"key": key}, nil)
 }
 
 func (p *Page) ReleaseAllInputs(ctx context.Context) error {
-	return p.call(ctx, "page.release_all_inputs", nil, nil)
+	return p.call(ctx, "release_all_inputs", nil, nil)
 }
 
 func (p *Page) Close(ctx context.Context) error {

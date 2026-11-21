@@ -46,23 +46,23 @@ func serveLifecycleFixture(mode string) int {
 		switch request.Method {
 		case "server.hello":
 			params, _ := json.Marshal(request.Params)
-			if string(params) != `{"protocol":{"major":2,"minor":0},"understands":{"major":2,"minor":2}}` {
+			if string(params) != `{"protocol":{"major":3,"minor":0}}` {
 				response.Error = &rpcError{Code: ErrCodeInvalidParams, Message: "unexpected hello params"}
 			} else if mode == "legacy" {
 				response.Error = &rpcError{Code: ErrCodeUnknownMethod, Message: "server.hello"}
 			} else {
 				info := fakeServerInfo()
 				if mode == "incompatible" {
-					info.Protocol.Major = 3
+					info.Protocol.Major = 4
 				}
-				if mode == "old-minor" {
-					info.Protocol.Major = 1
+				if mode == "old-major" {
+					info.Protocol.Major = 2
 				}
 				if mode == "no-connect" {
 					info.Methods = []string{"server.hello", "server.shutdown", "browser.launch"}
 				}
 				if mode == "connect-only" {
-					info.Methods = []string{"server.hello", "server.shutdown", "browser.connect", "browser.tabs", "page.text", "page.set_viewport", "page.reset_viewport"}
+					info.Methods = []string{"server.hello", "server.shutdown", "browser.connect", "browser.tabs", "text", "page.set_viewport", "page.reset_viewport"}
 				}
 				result = info
 			}
@@ -120,8 +120,8 @@ func serveLifecycleFixture(mode string) int {
 				_, _ = fmt.Fprintln(os.Stderr, "connect-started")
 				continue
 			}
-		case "page.text":
-			result = map[string]any{"text": "existing tab"}
+		case "text":
+			result = "existing tab"
 		case "page.set_viewport", "page.reset_viewport":
 			params, _ := json.Marshal(request.Params)
 			want := `{"deviceScaleFactor":2,"height":360,"pageId":"P1","width":640}`
@@ -202,7 +202,7 @@ func TestLaunchHandshakesBeforeBrowserAndCloseUsesServerShutdown(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = b.Close(context.Background()) })
-	if b.ServerInfo().Protocol.Major != 2 || b.ServerInfo().ServerVersion != "test-server" {
+	if b.ServerInfo().Protocol.Major != 3 || b.ServerInfo().ServerVersion != "test-server" {
 		t.Fatalf("negotiated server info = %+v", b.ServerInfo())
 	}
 	page, err := b.NewPage(ctx, "")
@@ -240,7 +240,7 @@ func TestLaunchHandshakesBeforeBrowserAndCloseUsesServerShutdown(t *testing.T) {
 }
 
 func TestLaunchRejectsLegacyOrIncompatibleBeforeBrowserCreation(t *testing.T) {
-	for _, mode := range []string{"legacy", "incompatible", "old-minor"} {
+	for _, mode := range []string{"legacy", "incompatible", "old-major"} {
 		t.Run(mode, func(t *testing.T) {
 			binary, log := lifecycleFixture(t, mode)
 			b, err := Launch(callContext(t), WithServerPath(binary))
@@ -499,7 +499,7 @@ func TestConnectSharesHandshakeAndShutdownAndUsesExistingTabs(t *testing.T) {
 			if b.cmd.ProcessState == nil || !b.cmd.ProcessState.Exited() {
 				t.Fatal("Connect Close did not reap private sidecar")
 			}
-			want := "server.hello browser.connect browser.tabs page.text page.set_viewport page.reset_viewport server.shutdown borrowed-disconnect"
+			want := "server.hello browser.connect browser.tabs text page.set_viewport page.reset_viewport server.shutdown borrowed-disconnect"
 			if got := strings.Join(fixtureEvents(t, log), " "); got != want {
 				t.Fatalf("connect lifecycle = %s, want %s", got, want)
 			}

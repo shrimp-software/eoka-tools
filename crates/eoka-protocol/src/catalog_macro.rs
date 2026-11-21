@@ -13,6 +13,7 @@ macro_rules! define_operations {
                 $(, input: $input:ty)?
                 $(, cli: $cli:literal)?
                 $(, feature: $feature:literal)?
+                $(, result: $result:ty)?
                 $(,)?
             }
         ),+ $(,)?
@@ -121,6 +122,15 @@ macro_rules! define_operations {
             }
         }
 
+        pub fn result_schema_for_cmd(cmd: &str) -> serde_json::Value {
+            match cmd {
+                $(
+                    $cmd => define_operations!(@result_schema $( $result )?),
+                )+
+                _ => serde_json::json!({}),
+            }
+        }
+
         pub fn input_schema_for_operation(operation: &OperationSpec) -> serde_json::Value {
             input_schema_for_cmd(operation.cmd)
         }
@@ -189,6 +199,14 @@ macro_rules! define_operations {
 
     (@schema $ty:ty) => {
         schema_for::<$ty>()
+    };
+
+    (@result_schema $ty:ty) => {
+        schema_for::<$ty>()
+    };
+
+    (@result_schema) => {
+        serde_json::json!({})
     };
 
     (@schema) => {

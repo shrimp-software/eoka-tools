@@ -876,7 +876,7 @@ pub enum CaptchaAction {
     Detect,
     #[command(
         about = "Attempt local DataDome clearance on the current tab; keep the session open",
-        long_about = "Attempt local DataDome clearance on the current tab. No API key needed.\n\nRequires an existing session; foregrounds the tab and leaves it open. challenge_cleared is not proof of login; not_present is a no-op; every other outcome exits nonzero. An old daemon is not restarted automatically."
+        long_about = "Attempt local DataDome clearance on the current tab. No API key needed.\n\nRequires an existing session; foregrounds the tab and leaves it open. challenge_cleared is not proof of login; not_present is a no-op; every other outcome exits nonzero."
     )]
     Datadome {
         #[arg(long, default_value_t = eoka_protocol::DATADOME_DEFAULT_ATTEMPTS, value_parser = clap::value_parser!(u32).range(1..=i64::from(eoka_protocol::DATADOME_MAX_ATTEMPTS)), help = "Clearance attempts, 1 through 4")]

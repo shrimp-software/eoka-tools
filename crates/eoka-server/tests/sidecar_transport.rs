@@ -205,7 +205,7 @@ fn hello_negotiates_real_versions_without_launch_and_rejects_mismatch() {
     }
     assert!(!state.exists());
     assert!(server
-        .request(4, "server.hello", json!({"protocol":{"major":2,"minor":0}}))
+        .request(4, "server.hello", json!({"protocol":{"major":3,"minor":0}}))
         .get("result")
         .is_some());
     server.shutdown(5);
@@ -215,7 +215,7 @@ fn hello_negotiates_real_versions_without_launch_and_rejects_mismatch() {
 fn framing_handles_fragmented_utf8_multiple_lines_and_numeric_ids() {
     let (_root, state, scratch) = directories();
     let mut server = Sidecar::start(&state, &scratch);
-    let input = "{\"id\":1,\"method\":\"unknown.é\",\"params\":{}}\n{\"id\":2,\"method\":\"server.hello\",\"params\":{\"protocol\":{\"major\":2,\"minor\":0}}}\n";
+    let input = "{\"id\":1,\"method\":\"unknown.é\",\"params\":{}}\n{\"id\":2,\"method\":\"server.hello\",\"params\":{\"protocol\":{\"major\":3,\"minor\":0}}}\n";
     for byte in input.as_bytes() {
         server.input.as_mut().unwrap().write_all(&[*byte]).unwrap();
         server.input.as_mut().unwrap().flush().unwrap();
@@ -234,7 +234,7 @@ fn framing_handles_fragmented_utf8_multiple_lines_and_numeric_ids() {
         json!(9_007_199_254_740_992_u64),
     ] {
         server.send(
-            json!({"id":id,"method":"server.hello","params":{"protocol":{"major":2,"minor":0}}}),
+            json!({"id":id,"method":"server.hello","params":{"protocol":{"major":3,"minor":0}}}),
         );
         let response = server.reply();
         assert_eq!(response["id"], Value::Null);
@@ -265,7 +265,7 @@ fn oversized_input_is_bounded_and_framing_recovers() {
     assert_eq!(response["error"]["code"], "MessageTooLarge");
     assert_eq!(response["id"], Value::Null);
     assert!(server
-        .request(2, "server.hello", json!({"protocol":{"major":2,"minor":0}}))
+        .request(2, "server.hello", json!({"protocol":{"major":3,"minor":0}}))
         .get("result")
         .is_some());
     server.shutdown(3);
@@ -387,7 +387,7 @@ fn closed_stdout_triggers_cleanup_even_with_stdin_still_open() {
         replies,
     };
     server
-        .send(json!({"id":1,"method":"server.hello","params":{"protocol":{"major":2,"minor":0}}}));
+        .send(json!({"id":1,"method":"server.hello","params":{"protocol":{"major":3,"minor":0}}}));
     let deadline = Instant::now() + Duration::from_secs(30);
     while server.child.try_wait().unwrap().is_none() {
         assert!(
@@ -536,8 +536,8 @@ fn turnstile_solve_and_auto_solve_watcher_stop_with_the_browser() {
         .to_owned();
     let normal = server.request(
         3,
-        "page.solve_turnstile",
-        json!({"pageId":page,"timeoutMs":5_000}),
+        "captcha.turnstile",
+        json!({"pageId":page,"timeout_ms":5_000}),
     );
     assert_eq!(normal["result"]["clicks"], 0, "{normal}");
     let challenge = server.request(
@@ -550,14 +550,14 @@ fn turnstile_solve_and_auto_solve_watcher_stop_with_the_browser() {
         .to_owned();
     let loaded = server.request(
         41,
-        "page.wait_for_text",
-        json!({"pageId":challenge,"text":"checking","timeoutMs":5_000}),
+        "wait",
+        json!({"pageId":challenge,"text":"checking","timeout":5_000}),
     );
     assert!(loaded.get("error").is_none(), "{loaded}");
     let stuck = server.request(
         5,
-        "page.solve_turnstile",
-        json!({"pageId":challenge,"timeoutMs":1_500}),
+        "captcha.turnstile",
+        json!({"pageId":challenge,"timeout_ms":1_500}),
     );
     assert!(
         stuck["error"]["message"]
@@ -597,7 +597,7 @@ fn waits_are_independent_pending_ceiling_is_enforced_and_shutdown_cancels_all() 
         json!({"id":operation,"timeout_ms":30_000}),
     );
     assert_ne!(record["result"]["state"], "running");
-    server.send(json!({"id":5,"method":"page.wait_for_text","params":{"pageId":page,"text":"never present","timeoutMs":600_000}}));
+    server.send(json!({"id":5,"method":"wait","params":{"pageId":page,"text":"never present","timeout":600_000}}));
     std::thread::sleep(Duration::from_millis(50));
     server.send(
         json!({"id":6,"method":"operations.wait","params":{"id":operation,"timeout_ms":30_000}}),
@@ -630,9 +630,9 @@ fn waits_are_independent_pending_ceiling_is_enforced_and_shutdown_cancels_all() 
         }
     }
     for id in 7..=133 {
-        server.send(json!({"id":id,"method":"page.title","params":{"pageId":page}}));
+        server.send(json!({"id":id,"method":"info","params":{"pageId":page}}));
     }
-    server.send(json!({"id":134,"method":"page.title","params":{"pageId":page}}));
+    server.send(json!({"id":134,"method":"info","params":{"pageId":page}}));
     let busy = server.reply();
     assert_eq!(busy["id"], 134);
     assert_eq!(busy["error"]["code"], "ServerBusy");
@@ -673,8 +673,8 @@ fn fresh_operation_controls_preserve_queued_admission_order() {
         referrer: None,
     };
     server.send(json!({
-        "id":3,"method":"page.wait_for_text",
-        "params":{"pageId":page,"text":"never present","timeoutMs":2_000}
+        "id":3,"method":"wait",
+        "params":{"pageId":page,"text":"never present","timeout":2_000}
     }));
     server.send(json!({
         "id":4,"method":"actions.perform",
@@ -790,7 +790,7 @@ fn oversized_evaluation_returns_structured_size_error_and_remains_usable() {
     assert_eq!(value.len(), 15 * 1024 * 1024);
     assert!(value.bytes().all(|byte| byte == b'x'));
     assert!(server
-        .request(7, "page.title", json!({"pageId":page}))
+        .request(7, "info", json!({"pageId":page}))
         .get("result")
         .is_some());
     server.shutdown(8);
@@ -823,7 +823,7 @@ fn catalog_operations_run_on_the_addressed_page_and_report_structured_errors() {
     for (id, page, title) in [(6, &second, "second"), (7, &first, "first")] {
         let response = server.request(id, "info", json!({"pageId":page}));
         assert!(response["result"].to_string().contains(title), "{response}");
-        let legacy = server.request(id + 10, "page.title", json!({"pageId":page}));
+        let legacy = server.request(id + 10, "info", json!({"pageId":page}));
         assert_eq!(legacy["result"]["title"], title, "{legacy}");
     }
 
@@ -906,7 +906,7 @@ fn catalog_operations_run_on_the_addressed_page_and_report_structured_errors() {
     assert_eq!(clicked["result"]["selector"], "button#inner", "{clicked}");
     let mut title = Value::Null;
     for attempt in 0..20 {
-        title = server.request(62 + attempt, "page.title", json!({"pageId":shadow}));
+        title = server.request(62 + attempt, "info", json!({"pageId":shadow}));
         if title["result"]["title"] == "shadow-clicked" {
             break;
         }
@@ -1260,7 +1260,7 @@ fn every_catalog_operation_answers_through_the_sidecar() {
             }
         }
     }
-    let title = server.request(5000, "page.title", json!({"pageId":page}));
+    let title = server.request(5000, "info", json!({"pageId":page}));
     if title["result"]["title"] != "fixture" {
         problems.push(format!("page was lost: {title}"));
     }
@@ -1305,7 +1305,7 @@ fn catalog_open_navigates_the_addressed_page_on_a_borrowed_browser() {
         json!({"pageId":page,"url":format!("{origin}/page")}),
     );
     assert!(opened.get("result").is_some(), "{opened}");
-    let url = borrower.request(5, "page.url", json!({"pageId":page}));
+    let url = borrower.request(5, "info", json!({"pageId":page}));
     assert_eq!(url["result"]["url"], format!("{origin}/page"), "{url}");
     let after = borrower.request(6, "browser.tabs", json!({}))["result"]["tabs"]
         .as_array()
@@ -1659,7 +1659,7 @@ fn connected_external_browser_keeps_tabs_profile_and_releases_held_input() {
                 json!({"ownership":"borrowed","browserVersion":version})
             );
             assert_eq!(
-                borrower.request(2, "page.title", json!({"pageId":original_id}))["result"]["title"],
+                borrower.request(2, "info", json!({"pageId":original_id}))["result"]["title"],
                 "external tab"
             );
             let before: Value = runtime
@@ -1680,7 +1680,7 @@ fn connected_external_browser_keeps_tabs_profile_and_releases_held_input() {
                 .iter()
                 .any(|tab| tab["id"] == later_id));
             assert_eq!(
-                borrower.request(5, "page.title", json!({"pageId":later_id}))["result"]["title"],
+                borrower.request(5, "info", json!({"pageId":later_id}))["result"]["title"],
                 "later tab"
             );
             runtime.block_on(owner.close_tab(later_id)).unwrap();
@@ -1691,7 +1691,7 @@ fn connected_external_browser_keeps_tabs_profile_and_releases_held_input() {
                 .iter()
                 .any(|tab| tab["id"] == later_id));
             assert_eq!(
-                borrower.request(7, "page.title", json!({"pageId":later_id}))["error"]["code"],
+                borrower.request(7, "info", json!({"pageId":later_id}))["error"]["code"],
                 "InvalidPage"
             );
             assert_eq!(
@@ -1706,12 +1706,9 @@ fn connected_external_browser_keeps_tabs_profile_and_releases_held_input() {
             );
             assert_png_dimensions(&mut borrower, 9, &original_id, (1200, 675));
             assert_eq!(
-                borrower.request(
-                    10,
-                    "page.key_down",
-                    json!({"pageId":original_id,"key":"Shift"})
-                )["result"],
-                json!({})
+                borrower.request(10, "key.down", json!({"pageId":original_id,"key":"Shift"}))
+                    ["result"],
+                json!("Held Shift")
             );
             assert!(runtime
                 .block_on(original.evaluate::<bool>("globalThis.sidecarHeld"))
@@ -1845,7 +1842,7 @@ fn pages_run_requests_concurrently_and_each_page_keeps_its_order() {
         json!({"id":13,"method":"page.evaluate","params":{"pageId":first,
         "function":"()=>{(window.seen??=[]).push('fast');return window.seen}"}}),
     );
-    server.send(json!({"id":14,"method":"page.title","params":{"pageId":first}}));
+    server.send(json!({"id":14,"method":"info","params":{"pageId":first}}));
     assert!(inbox.take(&server, 12, Duration::from_secs(20)).is_some());
     let ordered = inbox.take(&server, 13, Duration::from_secs(20)).unwrap();
     assert_eq!(
@@ -1868,7 +1865,7 @@ fn a_page_stuck_in_a_script_does_not_delay_other_pages_or_new_pages() {
     let mut inbox = Inbox::default();
     server.send(json!({"id":10,"method":"page.evaluate","params":{"pageId":stuck,"function":"()=>new Promise(()=>{})"}}));
     std::thread::sleep(Duration::from_millis(200));
-    let (title, elapsed) = inbox.timed(&mut server, 11, "page.title", json!({"pageId":other}));
+    let (title, elapsed) = inbox.timed(&mut server, 11, "info", json!({"pageId":other}));
     assert_eq!(title["result"]["title"], "fixture", "{title}");
     assert!(elapsed < Duration::from_millis(1000), "{elapsed:?}");
     let (created, elapsed) = inbox.timed(&mut server, 12, "browser.new_page", json!({}));
@@ -1898,7 +1895,7 @@ fn a_page_stuck_in_a_script_does_not_delay_other_pages_or_new_pages() {
     );
     assert!(closed.get("result").is_some(), "{closed}");
     assert!(elapsed < Duration::from_millis(3000), "{elapsed:?}");
-    server.send(json!({"id":15,"method":"page.title","params":{"pageId":stuck}}));
+    server.send(json!({"id":15,"method":"info","params":{"pageId":stuck}}));
     assert!(
         inbox
             .take(&server, 15, Duration::from_millis(500))
@@ -1938,15 +1935,15 @@ fn an_unanswered_navigation_is_isolated_then_abandoned_so_the_page_answers_again
     );
     assert_eq!(record["result"]["id"], timed_out, "{record}");
     std::thread::sleep(Duration::from_millis(500));
-    let (title, elapsed) = inbox.timed(&mut server, 11, "page.title", json!({"pageId":other}));
+    let (title, elapsed) = inbox.timed(&mut server, 11, "info", json!({"pageId":other}));
     assert_eq!(title["result"]["title"], "fixture", "{title}");
     assert!(elapsed < Duration::from_millis(1000), "{elapsed:?}");
     let (created, elapsed) = inbox.timed(&mut server, 12, "browser.new_page", json!({}));
     assert!(created["result"]["pageId"].is_string(), "{created}");
     assert!(elapsed < Duration::from_millis(3000), "{elapsed:?}");
     let asked = Instant::now();
-    server.send(json!({"id":13,"method":"page.title","params":{"pageId":stuck}}));
-    let (title, elapsed) = inbox.timed(&mut server, 14, "page.title", json!({"pageId":other}));
+    server.send(json!({"id":13,"method":"info","params":{"pageId":stuck}}));
+    let (title, elapsed) = inbox.timed(&mut server, 14, "info", json!({"pageId":other}));
     assert_eq!(title["result"]["title"], "fixture", "{title}");
     assert!(elapsed < Duration::from_millis(1000), "{elapsed:?}");
     let finished = server_wait(&mut inbox, &mut server, 15, &timed_out);
@@ -1964,7 +1961,7 @@ fn an_unanswered_navigation_is_isolated_then_abandoned_so_the_page_answers_again
         .expect("the read must answer once the unanswered navigation is abandoned");
     assert_eq!(title["result"]["title"], "fixture", "{title}");
     assert!(asked.elapsed() < Duration::from_secs(35));
-    let (url, elapsed) = inbox.timed(&mut server, 16, "page.url", json!({"pageId":stuck}));
+    let (url, elapsed) = inbox.timed(&mut server, 16, "info", json!({"pageId":stuck}));
     assert_eq!(url["result"]["url"], format!("{origin}/"), "{url}");
     assert!(elapsed < Duration::from_millis(1000), "{elapsed:?}");
 
@@ -1994,7 +1991,7 @@ fn an_unanswered_navigation_is_isolated_then_abandoned_so_the_page_answers_again
         finished["result"]["error_code"], "operation_canceled",
         "{finished}"
     );
-    let (title, elapsed) = inbox.timed(&mut server, 102, "page.title", json!({"pageId":stuck}));
+    let (title, elapsed) = inbox.timed(&mut server, 102, "info", json!({"pageId":stuck}));
     assert_eq!(title["result"]["title"], "fixture", "{title}");
     assert!(elapsed < Duration::from_millis(1000), "{elapsed:?}");
     server.shutdown(103);
@@ -2480,7 +2477,7 @@ impl Blocked {
     }
 
     fn title(&mut self, page: &str, within: Duration) {
-        let (reply, elapsed) = self.call("page.title", json!({"pageId":page}));
+        let (reply, elapsed) = self.call("info", json!({"pageId":page}));
         assert_eq!(reply["result"]["title"], "fixture", "{reply}");
         assert!(elapsed < within, "{elapsed:?}");
     }
@@ -2519,10 +2516,10 @@ fn an_open_dialog_is_reported_at_once_and_clearing_it_frees_the_tab() {
     let page = blocked.page();
     blocked.open_alert(&page);
     for (method, params) in [
-        ("page.title", json!({"pageId":page})),
+        ("info", json!({"pageId":page})),
         ("page.evaluate", json!({"pageId":page,"function":"()=>1"})),
-        ("page.get_text", json!({"pageId":page,"selector":"h1"})),
-        ("page.exists", json!({"pageId":page,"selector":"h1"})),
+        ("get_text", json!({"pageId":page,"selector":"h1"})),
+        ("exists", json!({"pageId":page,"selector":"h1"})),
         ("page.screenshot", json!({"pageId":page})),
         ("agent.observe", json!({"pageId":page})),
         ("text", json!({"pageId":page})),
@@ -2635,8 +2632,8 @@ fn a_click_that_opens_a_dialog_ends_its_operation_and_is_sent_once() {
     let (accepted, elapsed) = blocked.call("dialog.accept", json!({"pageId":page}));
     assert_eq!(accepted["result"], "Dialog accepted", "{accepted}");
     assert!(elapsed < QUICK, "{elapsed:?}");
-    let text = blocked.ok("page.get_text", json!({"pageId":page,"selector":"#s"}));
-    assert_eq!(text["text"], "Deleted", "{text}");
+    let text = blocked.ok("get_text", json!({"pageId":page,"selector":"#s"}));
+    assert_eq!(text, "Deleted", "{text}");
     let next = uuid::Uuid::new_v4().to_string();
     blocked.ok(
         "actions.perform",
@@ -2685,14 +2682,14 @@ fn a_navigation_the_page_started_is_named_when_it_stalls_and_a_new_one_recovers_
     let page = blocked.page();
     blocked.stall_navigation(&page);
     std::thread::sleep(Duration::from_millis(500));
-    let (early, elapsed) = blocked.call("page.title", json!({"pageId":page}));
+    let (early, elapsed) = blocked.call("info", json!({"pageId":page}));
     assert_navigation_pending(&early);
     assert!(elapsed < Duration::from_millis(8000), "{elapsed:?}");
     assert!(elapsed > Duration::from_millis(3000), "{elapsed:?}");
     for (method, params) in [
-        ("page.url", json!({"pageId":page})),
+        ("info", json!({"pageId":page})),
         ("page.evaluate", json!({"pageId":page,"function":"()=>1"})),
-        ("page.exists", json!({"pageId":page,"selector":"h1"})),
+        ("exists", json!({"pageId":page,"selector":"h1"})),
         ("text", json!({"pageId":page})),
     ] {
         let (reply, elapsed) = blocked.call(method, params);
@@ -2726,14 +2723,59 @@ fn a_navigation_the_page_started_is_named_when_it_stalls_and_a_new_one_recovers_
 
 #[test]
 #[ignore = "requires Chrome"]
+fn a_slow_operation_on_one_page_does_not_delay_reads_or_input_on_another() {
+    let mut blocked = Blocked::current();
+    let busy = blocked.page();
+    let other = blocked.page();
+    let slow = blocked.send(
+        "eval",
+        json!({"pageId":busy,"code":"async () => { await new Promise(done => setTimeout(done, 4000)); return 1; }"}),
+    );
+    std::thread::sleep(Duration::from_millis(300));
+    for (method, params) in [
+        ("info", json!({"pageId":other})),
+        ("text", json!({"pageId":other})),
+        ("content", json!({"pageId":other})),
+        ("exists", json!({"pageId":other,"selector":"body"})),
+        (
+            "get_attribute",
+            json!({"pageId":other,"selector":"html","name":"lang"}),
+        ),
+        ("frames", json!({"pageId":other})),
+        (
+            "wait",
+            json!({"pageId":other,"selector":"body","state":"attached","timeout":1000}),
+        ),
+        ("mouse.move", json!({"pageId":other,"x":5,"y":5})),
+        ("key.down", json!({"pageId":other,"key":"Shift"})),
+        ("key.up", json!({"pageId":other,"key":"Shift"})),
+        ("release_all_inputs", json!({"pageId":other})),
+    ] {
+        let (reply, elapsed) = blocked.call(method, params);
+        assert!(reply.get("result").is_some(), "{method}: {reply}");
+        assert!(
+            elapsed < QUICK,
+            "{method} waited {elapsed:?} behind another page"
+        );
+    }
+    let finished = blocked
+        .inbox
+        .take(&blocked.server, slow, Duration::from_secs(10))
+        .expect("the slow evaluation must finish");
+    assert!(finished.get("result").is_some(), "{finished}");
+    blocked.finish();
+}
+
+#[test]
+#[ignore = "requires Chrome"]
 fn clearing_a_dialog_and_closing_the_tab_overtake_a_request_stuck_on_that_page() {
     let mut blocked = Blocked::current();
     let other = blocked.page();
     let page = blocked.page();
     blocked.open_alert(&page);
     let stuck = blocked.send(
-        "page.solve_turnstile",
-        json!({"pageId":page,"timeoutMs":20_000}),
+        "captcha.turnstile",
+        json!({"pageId":page,"timeout_ms":20_000}),
     );
     let queued = blocked.send("page.reset_viewport", json!({"pageId":page}));
     std::thread::sleep(Duration::from_millis(300));
@@ -2755,8 +2797,8 @@ fn clearing_a_dialog_and_closing_the_tab_overtake_a_request_stuck_on_that_page()
 
     blocked.open_alert(&page);
     let stuck = blocked.send(
-        "page.solve_turnstile",
-        json!({"pageId":page,"timeoutMs":20_000}),
+        "captcha.turnstile",
+        json!({"pageId":page,"timeout_ms":20_000}),
     );
     std::thread::sleep(Duration::from_millis(300));
     let (closed, elapsed) = blocked.call("page.close", json!({"pageId":page}));
@@ -2777,56 +2819,9 @@ fn clearing_a_dialog_and_closing_the_tab_overtake_a_request_stuck_on_that_page()
         .take(&blocked.server, stuck, Duration::from_secs(40))
         .expect("the request on the closed tab must end");
     assert!(ended.get("error").is_some(), "{ended}");
-    let (gone, _) = blocked.call("page.title", json!({"pageId":page}));
+    let (gone, _) = blocked.call("info", json!({"pageId":page}));
     assert_eq!(gone["error"]["code"], "InvalidPage", "{gone}");
     blocked.finish();
-}
-
-#[test]
-#[ignore = "requires Chrome"]
-fn a_client_that_did_not_ask_for_the_blocker_codes_receives_operation_errors() {
-    for hello in [
-        None,
-        Some(json!({"protocol":{"major":2,"minor":1}})),
-        Some(json!({"protocol":{"major":2,"minor":0}})),
-    ] {
-        let mut blocked = Blocked::start(hello.clone());
-        let page = blocked.page();
-        blocked.open_alert(&page);
-        for (method, params) in [
-            ("page.title", json!({"pageId":page})),
-            ("page.exists", json!({"pageId":page,"selector":"h1"})),
-            ("text", json!({"pageId":page})),
-        ] {
-            let (reply, elapsed) = blocked.call(method, params);
-            assert_eq!(
-                reply["error"]["code"], "Operation",
-                "{hello:?} {method}: {reply}"
-            );
-            assert_eq!(
-                reply["error"]["data"]["detail"]["code"], "dialog_open",
-                "{reply}"
-            );
-            assert!(reply["error"]["data"].get("blocker").is_none(), "{reply}");
-            assert!(reply["error"]["message"]
-                .as_str()
-                .unwrap()
-                .contains("are you sure?"));
-            assert!(elapsed < QUICK, "{elapsed:?}");
-        }
-        blocked.ok("dialog.dismiss", json!({"pageId":page}));
-        blocked.title(&page, QUICK);
-        blocked.finish();
-    }
-    let mut understands = Blocked::start(Some(
-        json!({"protocol":{"major":2,"minor":0},"understands":{"major":2,"minor":2}}),
-    ));
-    let page = understands.page();
-    understands.open_alert(&page);
-    let (reply, _) = understands.call("page.title", json!({"pageId":page}));
-    assert_dialog_open(&reply, "page.title");
-    understands.ok("dialog.dismiss", json!({"pageId":page}));
-    understands.finish();
 }
 
 #[test]
@@ -2840,7 +2835,7 @@ fn a_page_whose_main_thread_is_busy_is_reported_as_unresponsive() {
         json!({"pageId":page,"function":"()=>{setTimeout(()=>{while(true){}},0)}"}),
     );
     std::thread::sleep(Duration::from_millis(300));
-    let (reply, elapsed) = blocked.call("page.title", json!({"pageId":page}));
+    let (reply, elapsed) = blocked.call("info", json!({"pageId":page}));
     assert_eq!(reply["error"]["code"], "PageUnresponsive", "{reply}");
     assert_eq!(
         reply["error"]["data"]["detail"]["code"], "page_unresponsive",
@@ -3070,19 +3065,19 @@ fn pointer_actions_reach_a_tab_behind_another_promptly_and_it_stays_behind() {
         );
     }
     for (method, params) in [
-        ("page.mouse_move", json!({"pageId":behind,"x":40,"y":40})),
+        ("mouse.move", json!({"pageId":behind,"x":40,"y":40})),
         ("mouse.move", json!({"pageId":behind,"x":60,"y":60})),
         (
-            "page.click_shadow",
-            json!({"pageId":behind,"selector":"#go","timeoutMs":8000}),
+            "click_shadow",
+            json!({"pageId":behind,"selector":"#go","timeout_ms":8000}),
         ),
         ("click_shadow", json!({"pageId":behind,"selector":"#go"})),
         (
-            "page.mouse_down",
+            "mouse.down",
             json!({"pageId":behind,"x":40,"y":40,"button":"left"}),
         ),
         (
-            "page.mouse_up",
+            "mouse.up",
             json!({"pageId":behind,"x":40,"y":40,"button":"left"}),
         ),
         (
@@ -3093,8 +3088,8 @@ fn pointer_actions_reach_a_tab_behind_another_promptly_and_it_stays_behind() {
             "mouse.up",
             json!({"pageId":behind,"x":60,"y":60,"button":"left"}),
         ),
-        ("page.key_down", json!({"pageId":behind,"key":"Shift"})),
-        ("page.key_up", json!({"pageId":behind,"key":"Shift"})),
+        ("key.down", json!({"pageId":behind,"key":"Shift"})),
+        ("key.up", json!({"pageId":behind,"key":"Shift"})),
         ("key.down", json!({"pageId":behind,"key":"Shift"})),
         ("key.up", json!({"pageId":behind,"key":"Shift"})),
     ] {
@@ -3301,42 +3296,39 @@ fn hand_written_sidecar_methods_match_the_lock() {
     let shot = scratch.join("shot.png").to_string_lossy().into_owned();
     let p = page.as_str();
     let calls: Vec<(&str, Value)> = vec![
-        ("page.text", json!({"pageId":p})),
-        ("page.text", json!({"pageId":"no-such-page"})),
-        ("page.content", json!({"pageId":p})),
-        ("page.title", json!({"pageId":p})),
-        ("page.url", json!({"pageId":p})),
-        ("page.get_text", json!({"pageId":p,"selector":"h1"})),
-        ("page.get_text", json!({"pageId":p,"selector":"#missing"})),
+        ("text", json!({"pageId":p})),
+        ("text", json!({"pageId":"no-such-page"})),
+        ("content", json!({"pageId":p})),
+        ("info", json!({"pageId":p})),
+        ("info", json!({"pageId":p})),
+        ("get_text", json!({"pageId":p,"selector":"h1"})),
+        ("get_text", json!({"pageId":p,"selector":"#missing"})),
         (
-            "page.get_attribute",
+            "get_attribute",
             json!({"pageId":p,"selector":"#link","name":"href"}),
         ),
         (
-            "page.get_attribute",
+            "get_attribute",
             json!({"pageId":p,"selector":"#link","name":"nope"}),
         ),
-        ("page.exists", json!({"pageId":p,"selector":"h1"})),
-        ("page.exists", json!({"pageId":p,"selector":"#missing"})),
+        ("exists", json!({"pageId":p,"selector":"h1"})),
+        ("exists", json!({"pageId":p,"selector":"#missing"})),
         (
-            "page.wait_for",
-            json!({"pageId":p,"selector":"h1","timeoutMs":2000}),
+            "wait",
+            json!({"pageId":p,"selector":"h1","state":"attached","timeout":2000}),
         ),
         (
-            "page.wait_for",
-            json!({"pageId":p,"selector":"#missing","timeoutMs":300}),
+            "wait",
+            json!({"pageId":p,"selector":"#missing","state":"attached","timeout":300}),
         ),
         (
-            "page.wait_for_visible",
-            json!({"pageId":p,"selector":"h1","timeoutMs":2000}),
+            "wait",
+            json!({"pageId":p,"selector":"h1","state":"visible","timeout":2000}),
         ),
+        ("wait", json!({"pageId":p,"text":"Heading","timeout":2000})),
         (
-            "page.wait_for_text",
-            json!({"pageId":p,"text":"Heading","timeoutMs":2000}),
-        ),
-        (
-            "page.wait_for_text",
-            json!({"pageId":p,"text":"absent words","timeoutMs":300}),
+            "wait",
+            json!({"pageId":p,"text":"absent words","timeout":300}),
         ),
         (
             "page.evaluate",
@@ -3359,16 +3351,16 @@ fn hand_written_sidecar_methods_match_the_lock() {
             json!({"pageId":p,"js":"undefinedName.x"}),
         ),
         ("page.execute_raw", json!({"pageId":p,"js":"void 0"})),
-        ("page.frames", json!({"pageId":p})),
+        ("frames", json!({"pageId":p})),
         (
-            "page.evaluate_in_frame",
-            json!({"pageId":p,"frameId":"no-such-frame","js":"1"}),
+            "frame_eval",
+            json!({"pageId":p,"frame":"id:no-such-frame","code":"1"}),
         ),
         (
-            "page.click_shadow",
-            json!({"pageId":p,"selector":"#missing","timeoutMs":300}),
+            "click_shadow",
+            json!({"pageId":p,"selector":"#missing","timeout_ms":300}),
         ),
-        ("page.solve_turnstile", json!({"pageId":p,"timeoutMs":300})),
+        ("captcha.turnstile", json!({"pageId":p,"timeout_ms":300})),
         (
             "page.fetch",
             json!({"pageId":p,"url":format!("{origin}/data")}),
@@ -3389,18 +3381,18 @@ fn hand_written_sidecar_methods_match_the_lock() {
             json!({"pageId":p,"width":640,"height":360,"deviceScaleFactor":2.0}),
         ),
         ("page.reset_viewport", json!({"pageId":p})),
-        ("page.mouse_move", json!({"pageId":p,"x":10,"y":10})),
+        ("mouse.move", json!({"pageId":p,"x":10,"y":10})),
         (
-            "page.mouse_down",
+            "mouse.down",
             json!({"pageId":p,"x":10,"y":10,"button":"left"}),
         ),
         (
-            "page.mouse_up",
+            "mouse.up",
             json!({"pageId":p,"x":10,"y":10,"button":"left"}),
         ),
-        ("page.key_down", json!({"pageId":p,"key":"Shift"})),
-        ("page.key_up", json!({"pageId":p,"key":"Shift"})),
-        ("page.release_all_inputs", json!({"pageId":p})),
+        ("key.down", json!({"pageId":p,"key":"Shift"})),
+        ("key.up", json!({"pageId":p,"key":"Shift"})),
+        ("release_all_inputs", json!({"pageId":p})),
         (
             "page.solve_captcha",
             json!({"pageId":p,"apiKey":"k","captchaType":"nope","captchaMode":"token","websiteKey":"w","websiteURL":"http://127.0.0.1/"}),
@@ -3504,10 +3496,10 @@ fn dismissing_a_leave_page_dialog_frees_the_tab_for_the_next_click() {
     let (accepted, _) = blocked.call("dialog.accept", json!({"pageId":page}));
     assert_eq!(accepted["result"], "Dialog accepted", "{accepted}");
     blocked.ok(
-        "page.wait_for_text",
-        json!({"pageId":page,"text":"Summary","timeoutMs":5000}),
+        "wait",
+        json!({"pageId":page,"text":"Summary","timeout":5000}),
     );
-    let title = blocked.ok("page.title", json!({"pageId":page}));
+    let title = blocked.ok("info", json!({"pageId":page}));
     assert_eq!(title["title"], "summary", "{title}");
     blocked.finish();
 }

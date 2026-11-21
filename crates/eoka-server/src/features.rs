@@ -37,7 +37,7 @@ mod tests {
             cfg!(feature = "anti-captcha")
         );
         assert!(method_built("captcha.turnstile"));
-        assert!(method_built("page.title"));
+        assert!(method_built("info"));
         assert!(!built("unknown"));
     }
 

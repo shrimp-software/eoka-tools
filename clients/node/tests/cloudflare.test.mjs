@@ -16,11 +16,11 @@ test('resolves defaults and rejects invalid or client-side watcher options', () 
 
 test('solveTurnstile is one server call whose local deadline outlasts the solve', async () => {
   const calls = [];
-  const page = new Page({ invoke: async (method, params, options) => { calls.push({ method, params, options }); return { clicks: 1, elapsedMs: 900 }; } }, 'tab');
+  const page = new Page({ invoke: async (method, params, options) => { calls.push({ method, params, options }); return { clicks: 1, elapsed_ms: 900, tab_id: 'tab' }; } }, 'tab');
   assert.deepEqual(await page.solveTurnstile({ timeoutMs: 5000 }), { clicks: 1, elapsedMs: 900 });
   assert.deepEqual(await page.solveTurnstile(), { clicks: 1, elapsedMs: 900 });
   assert.deepEqual(calls.map(call => [call.method, call.params, call.options.timeoutMs]), [
-    ['page.solve_turnstile', { pageId: 'tab', timeoutMs: 5000 }, 15_000],
-    ['page.solve_turnstile', { pageId: 'tab', timeoutMs: 30_000 }, 40_000],
+    ['captcha.turnstile', { pageId: 'tab', timeout_ms: 5000 }, 15_000],
+    ['captcha.turnstile', { pageId: 'tab', timeout_ms: 30_000 }, 40_000],
   ]);
 });

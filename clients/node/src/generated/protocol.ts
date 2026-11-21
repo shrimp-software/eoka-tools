@@ -86,7 +86,7 @@ export type Expectation = ({ "kind": ("document_ready" & string); [key: string]:
 export type Expectation__LocatorQuery = ({ "id": number; "kind": ("node" & string); [key: string]: unknown; } | { "kind": ("css" & string); "selector": string; [key: string]: unknown; } | { "exact"?: boolean; "kind": ("text" & string); "text": string; [key: string]: unknown; } | { "kind": ("placeholder" & string); "text": string; [key: string]: unknown; } | { "kind": ("role" & string); "role": string; [key: string]: unknown; } | { "id": number; "kind": ("backend_node" & string); [key: string]: unknown; });
 export type Expectation__LocatorSpec = { "frame_id"?: (string | null); "index"?: (number | null); "query": Expectation__LocatorQuery; [key: string]: unknown; };
 
-export type HelloParams = { "protocol": HelloParams__ProtocolVersion; "understands"?: (HelloParams__ProtocolVersion | null); [key: string]: unknown; };
+export type HelloParams = { "protocol": HelloParams__ProtocolVersion; [key: string]: unknown; };
 export type HelloParams__ProtocolVersion = { "major": number; "minor": number; [key: string]: unknown; };
 
 export type HelloResult = { "capabilities": Array<string>; "coreVersion": string; "limits": HelloResult__TransportLimits; "methods": Array<string>; "protocol": HelloResult__ProtocolVersion; "serverVersion": string; [key: string]: unknown; };
@@ -289,7 +289,7 @@ export type MethodCaptchaInjectResult = unknown;
 
 export type MethodCaptchaTurnstileParams = { "pageId": string; "timeout_ms"?: number; };
 
-export type MethodCaptchaTurnstileResult = unknown;
+export type MethodCaptchaTurnstileResult = { "clicks": number; "elapsed_ms": number; "tab_id": string; [key: string]: unknown; };
 
 export type MethodClearCookiesParams = { "pageId": string; };
 
@@ -304,7 +304,7 @@ export type MethodClickResult = unknown;
 
 export type MethodClickShadowParams = { "frame_id"?: (string | null); "pageId": string; "selector": string; "timeout_ms"?: number; [key: string]: unknown; };
 
-export type MethodClickShadowResult = unknown;
+export type MethodClickShadowResult = { "frame_id": string; "selector": string; "x": number; "y": number; [key: string]: unknown; };
 
 export type MethodCloneFromParams = { "pageId": string; "source": string; "to"?: (string | null); [key: string]: unknown; };
 
@@ -316,7 +316,7 @@ export type MethodConsoleResult = unknown;
 
 export type MethodContentParams = { "pageId": string; };
 
-export type MethodContentResult = unknown;
+export type MethodContentResult = string;
 
 export type MethodCookiesParams = { "pageId": string; };
 
@@ -383,7 +383,7 @@ export type MethodExecResult = unknown;
 
 export type MethodExistsParams = { "pageId": string; "selector": string; [key: string]: unknown; };
 
-export type MethodExistsResult = unknown;
+export type MethodExistsResult = { "exists": boolean; [key: string]: unknown; };
 
 export type MethodFakeCameraParams = { "file": string; "loop_video"?: boolean; "pageId": string; [key: string]: unknown; };
 
@@ -411,19 +411,20 @@ export type MethodForwardResult = unknown;
 
 export type MethodFrameEvalParams = { "code"?: (string | null); "file"?: (string | null); "frame": string; "pageId": string; [key: string]: unknown; };
 
-export type MethodFrameEvalResult = unknown;
+export type MethodFrameEvalResult = string;
 
 export type MethodFramesParams = { "pageId": string; };
 
-export type MethodFramesResult = unknown;
+export type MethodFramesResult = Array<MethodFramesResult__FrameSummary>;
+export type MethodFramesResult__FrameSummary = { "id": string; "name"?: (string | null); "url": string; [key: string]: unknown; };
 
 export type MethodGetAttributeParams = { "name": string; "pageId": string; "selector": string; [key: string]: unknown; };
 
-export type MethodGetAttributeResult = unknown;
+export type MethodGetAttributeResult = { "value"?: (string | null); [key: string]: unknown; };
 
 export type MethodGetTextParams = { "pageId": string; "selector": string; [key: string]: unknown; };
 
-export type MethodGetTextResult = unknown;
+export type MethodGetTextResult = string;
 
 export type MethodHeadersParams = { "headers_json": string; "pageId": string; [key: string]: unknown; };
 
@@ -438,7 +439,7 @@ export type MethodHoverResult = unknown;
 
 export type MethodInfoParams = { "pageId": string; };
 
-export type MethodInfoResult = unknown;
+export type MethodInfoResult = { "title": string; "url": string; [key: string]: unknown; };
 
 export type MethodInterceptAddParams = { "capture"?: (string | null); "pageId": string; "respond"?: (string | null); "status"?: number; "url_pattern": string; [key: string]: unknown; };
 
@@ -488,14 +489,14 @@ export type MethodKeyDownParams__Expectation = ({ "kind": ("document_ready" & st
 export type MethodKeyDownParams__LocatorQuery = ({ "id": number; "kind": ("node" & string); [key: string]: unknown; } | { "kind": ("css" & string); "selector": string; [key: string]: unknown; } | { "exact"?: boolean; "kind": ("text" & string); "text": string; [key: string]: unknown; } | { "kind": ("placeholder" & string); "text": string; [key: string]: unknown; } | { "kind": ("role" & string); "role": string; [key: string]: unknown; } | { "id": number; "kind": ("backend_node" & string); [key: string]: unknown; });
 export type MethodKeyDownParams__LocatorSpec = { "frame_id"?: (string | null); "index"?: (number | null); "query": MethodKeyDownParams__LocatorQuery; [key: string]: unknown; };
 
-export type MethodKeyDownResult = unknown;
+export type MethodKeyDownResult = string;
 
 export type MethodKeyUpParams = { "expect"?: (MethodKeyUpParams__Expectation | null); "key": string; "operation_id"?: (string | null); "pageId": string; "timeout_ms"?: (number | null); [key: string]: unknown; };
 export type MethodKeyUpParams__Expectation = ({ "kind": ("document_ready" & string); [key: string]: unknown; } | { "conditions": Array<MethodKeyUpParams__Expectation>; "kind": ("all" & string); [key: string]: unknown; } | { "enabled": boolean; "kind": ("enabled" & string); "target": MethodKeyUpParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("download_started" & string); [key: string]: unknown; } | { "kind": ("focused" & string); "target": MethodKeyUpParams__LocatorSpec; [key: string]: unknown; } | { "contains"?: boolean; "kind": ("url" & string); "value": string; [key: string]: unknown; } | { "kind": ("visible" & string); "target": MethodKeyUpParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("hidden" & string); "target": MethodKeyUpParams__LocatorSpec; [key: string]: unknown; } | { "contains"?: boolean; "kind": ("text" & string); "target": MethodKeyUpParams__LocatorSpec; "value": string; [key: string]: unknown; } | { "kind": ("value" & string); "target": MethodKeyUpParams__LocatorSpec; "value": string; [key: string]: unknown; } | { "checked": boolean; "kind": ("checked" & string); "target": MethodKeyUpParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("selected" & string); "target": MethodKeyUpParams__LocatorSpec; "values": Array<string>; [key: string]: unknown; });
 export type MethodKeyUpParams__LocatorQuery = ({ "id": number; "kind": ("node" & string); [key: string]: unknown; } | { "kind": ("css" & string); "selector": string; [key: string]: unknown; } | { "exact"?: boolean; "kind": ("text" & string); "text": string; [key: string]: unknown; } | { "kind": ("placeholder" & string); "text": string; [key: string]: unknown; } | { "kind": ("role" & string); "role": string; [key: string]: unknown; } | { "id": number; "kind": ("backend_node" & string); [key: string]: unknown; });
 export type MethodKeyUpParams__LocatorSpec = { "frame_id"?: (string | null); "index"?: (number | null); "query": MethodKeyUpParams__LocatorQuery; [key: string]: unknown; };
 
-export type MethodKeyUpResult = unknown;
+export type MethodKeyUpResult = string;
 
 export type MethodLoadStateParams = { "no_navigate"?: boolean; "pageId": string; "path": string; [key: string]: unknown; };
 
@@ -504,16 +505,16 @@ export type MethodLoadStateResult = unknown;
 export type MethodMouseDownParams = { "button": MethodMouseDownParams__MouseButton; "pageId": string; "x": number; "y": number; [key: string]: unknown; };
 export type MethodMouseDownParams__MouseButton = (("left" | "middle" | "right" | "back" | "forward") & string);
 
-export type MethodMouseDownResult = unknown;
+export type MethodMouseDownResult = string;
 
 export type MethodMouseMoveParams = { "pageId": string; "x": number; "y": number; [key: string]: unknown; };
 
-export type MethodMouseMoveResult = unknown;
+export type MethodMouseMoveResult = string;
 
 export type MethodMouseUpParams = { "button": MethodMouseUpParams__MouseButton; "pageId": string; "x": number; "y": number; [key: string]: unknown; };
 export type MethodMouseUpParams__MouseButton = (("left" | "middle" | "right" | "back" | "forward") & string);
 
-export type MethodMouseUpResult = unknown;
+export type MethodMouseUpResult = string;
 
 export type MethodNetworkClearParams = { "pageId": string; };
 
@@ -630,10 +631,6 @@ export type MethodPageClickResult__ErrorDetail = { "code": string; "context"?: (
 export type MethodPageClickResult__OperationState = (("running" | "finished" | "interrupted" | "expired") & string);
 export type MethodPageClickResult__PageContext = { "headings": Array<string>; "messages": Array<string>; "ready_state": string; "tab_id": string; "text_excerpt": string; "title": string; "truncated": boolean; "url": string; [key: string]: unknown; };
 
-export type MethodPageClickShadowParams = { "frameId"?: (string | null); "pageId": string; "selector": string; "timeoutMs"?: number; [key: string]: unknown; };
-
-export type MethodPageClickShadowResult = { "frameId": string; "selector": string; "x": number; "y": number; [key: string]: unknown; };
-
 export type MethodPageClickTextParams = { "operation_id": string; "options"?: MethodPageClickTextParams__ActionOptions; "pageId": string; "text": string; [key: string]: unknown; };
 export type MethodPageClickTextParams__ActionOptions = { "destination"?: MethodPageClickTextParams__Destination; "expect"?: (MethodPageClickTextParams__Expectation | null); "timeout_ms"?: number; "wait_for_target"?: boolean; [key: string]: unknown; };
 export type MethodPageClickTextParams__Destination = (("current" & string) | ("new_tab" & string) | ("current_or_new" & string));
@@ -655,17 +652,9 @@ export type MethodPageCloseParams = { "pageId": string; [key: string]: unknown; 
 
 export type MethodPageCloseResult = Record<string, never>;
 
-export type MethodPageContentParams = { "pageId": string; [key: string]: unknown; };
-
-export type MethodPageContentResult = { "html": string; [key: string]: unknown; };
-
 export type MethodPageEvaluateParams = { "arguments"?: Array<unknown>; "function": string; "pageId": string; [key: string]: unknown; };
 
 export type MethodPageEvaluateResult = { "result": unknown; [key: string]: unknown; };
-
-export type MethodPageEvaluateInFrameParams = { "frameId": string; "js": string; "pageId": string; [key: string]: unknown; };
-
-export type MethodPageEvaluateInFrameResult = { "result": unknown; [key: string]: unknown; };
 
 export type MethodPageEvaluateRawParams = { "js": string; "pageId": string; [key: string]: unknown; };
 
@@ -678,10 +667,6 @@ export type MethodPageExecuteResult = Record<string, never>;
 export type MethodPageExecuteRawParams = { "js": string; "pageId": string; [key: string]: unknown; };
 
 export type MethodPageExecuteRawResult = Record<string, never>;
-
-export type MethodPageExistsParams = { "pageId": string; "selector": string; [key: string]: unknown; };
-
-export type MethodPageExistsResult = { "exists": boolean; [key: string]: unknown; };
 
 export type MethodPageFetchParams = { "body"?: (string | null); "headers"?: Record<string, string>; "method"?: string; "pageId": string; "redirect"?: string; "url": string; [key: string]: unknown; };
 
@@ -708,19 +693,6 @@ export type MethodPageFillResult__ErrorContext = { "action_status"?: (MethodPage
 export type MethodPageFillResult__ErrorDetail = { "code": string; "context"?: (MethodPageFillResult__ErrorContext | null); "hint"?: (string | null); "message": string; "retryable"?: (boolean | null); [key: string]: unknown; };
 export type MethodPageFillResult__OperationState = (("running" | "finished" | "interrupted" | "expired") & string);
 export type MethodPageFillResult__PageContext = { "headings": Array<string>; "messages": Array<string>; "ready_state": string; "tab_id": string; "text_excerpt": string; "title": string; "truncated": boolean; "url": string; [key: string]: unknown; };
-
-export type MethodPageFramesParams = { "pageId": string; [key: string]: unknown; };
-
-export type MethodPageFramesResult = Array<MethodPageFramesResult__FrameInfo>;
-export type MethodPageFramesResult__FrameInfo = { "id": string; "name"?: (string | null); "url": string; [key: string]: unknown; };
-
-export type MethodPageGetAttributeParams = { "name": string; "pageId": string; "selector": string; [key: string]: unknown; };
-
-export type MethodPageGetAttributeResult = { "value"?: (string | null); [key: string]: unknown; };
-
-export type MethodPageGetTextParams = { "pageId": string; "selector": string; [key: string]: unknown; };
-
-export type MethodPageGetTextResult = { "text": string; [key: string]: unknown; };
 
 export type MethodPageGotoParams = { "operation_id": string; "options"?: MethodPageGotoParams__ActionOptions; "pageId": string; "url": string; [key: string]: unknown; };
 export type MethodPageGotoParams__ActionOptions = { "destination"?: MethodPageGotoParams__Destination; "expect"?: (MethodPageGotoParams__Expectation | null); "timeout_ms"?: number; "wait_for_target"?: boolean; [key: string]: unknown; };
@@ -808,34 +780,6 @@ export type MethodPageHumanFillResult__ErrorDetail = { "code": string; "context"
 export type MethodPageHumanFillResult__OperationState = (("running" | "finished" | "interrupted" | "expired") & string);
 export type MethodPageHumanFillResult__PageContext = { "headings": Array<string>; "messages": Array<string>; "ready_state": string; "tab_id": string; "text_excerpt": string; "title": string; "truncated": boolean; "url": string; [key: string]: unknown; };
 
-export type MethodPageKeyDownParams = { "expect"?: (MethodPageKeyDownParams__Expectation | null); "key": string; "operation_id"?: (string | null); "pageId": string; "timeout_ms"?: (number | null); [key: string]: unknown; };
-export type MethodPageKeyDownParams__Expectation = ({ "kind": ("document_ready" & string); [key: string]: unknown; } | { "conditions": Array<MethodPageKeyDownParams__Expectation>; "kind": ("all" & string); [key: string]: unknown; } | { "enabled": boolean; "kind": ("enabled" & string); "target": MethodPageKeyDownParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("download_started" & string); [key: string]: unknown; } | { "kind": ("focused" & string); "target": MethodPageKeyDownParams__LocatorSpec; [key: string]: unknown; } | { "contains"?: boolean; "kind": ("url" & string); "value": string; [key: string]: unknown; } | { "kind": ("visible" & string); "target": MethodPageKeyDownParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("hidden" & string); "target": MethodPageKeyDownParams__LocatorSpec; [key: string]: unknown; } | { "contains"?: boolean; "kind": ("text" & string); "target": MethodPageKeyDownParams__LocatorSpec; "value": string; [key: string]: unknown; } | { "kind": ("value" & string); "target": MethodPageKeyDownParams__LocatorSpec; "value": string; [key: string]: unknown; } | { "checked": boolean; "kind": ("checked" & string); "target": MethodPageKeyDownParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("selected" & string); "target": MethodPageKeyDownParams__LocatorSpec; "values": Array<string>; [key: string]: unknown; });
-export type MethodPageKeyDownParams__LocatorQuery = ({ "id": number; "kind": ("node" & string); [key: string]: unknown; } | { "kind": ("css" & string); "selector": string; [key: string]: unknown; } | { "exact"?: boolean; "kind": ("text" & string); "text": string; [key: string]: unknown; } | { "kind": ("placeholder" & string); "text": string; [key: string]: unknown; } | { "kind": ("role" & string); "role": string; [key: string]: unknown; } | { "id": number; "kind": ("backend_node" & string); [key: string]: unknown; });
-export type MethodPageKeyDownParams__LocatorSpec = { "frame_id"?: (string | null); "index"?: (number | null); "query": MethodPageKeyDownParams__LocatorQuery; [key: string]: unknown; };
-
-export type MethodPageKeyDownResult = Record<string, never>;
-
-export type MethodPageKeyUpParams = { "expect"?: (MethodPageKeyUpParams__Expectation | null); "key": string; "operation_id"?: (string | null); "pageId": string; "timeout_ms"?: (number | null); [key: string]: unknown; };
-export type MethodPageKeyUpParams__Expectation = ({ "kind": ("document_ready" & string); [key: string]: unknown; } | { "conditions": Array<MethodPageKeyUpParams__Expectation>; "kind": ("all" & string); [key: string]: unknown; } | { "enabled": boolean; "kind": ("enabled" & string); "target": MethodPageKeyUpParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("download_started" & string); [key: string]: unknown; } | { "kind": ("focused" & string); "target": MethodPageKeyUpParams__LocatorSpec; [key: string]: unknown; } | { "contains"?: boolean; "kind": ("url" & string); "value": string; [key: string]: unknown; } | { "kind": ("visible" & string); "target": MethodPageKeyUpParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("hidden" & string); "target": MethodPageKeyUpParams__LocatorSpec; [key: string]: unknown; } | { "contains"?: boolean; "kind": ("text" & string); "target": MethodPageKeyUpParams__LocatorSpec; "value": string; [key: string]: unknown; } | { "kind": ("value" & string); "target": MethodPageKeyUpParams__LocatorSpec; "value": string; [key: string]: unknown; } | { "checked": boolean; "kind": ("checked" & string); "target": MethodPageKeyUpParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("selected" & string); "target": MethodPageKeyUpParams__LocatorSpec; "values": Array<string>; [key: string]: unknown; });
-export type MethodPageKeyUpParams__LocatorQuery = ({ "id": number; "kind": ("node" & string); [key: string]: unknown; } | { "kind": ("css" & string); "selector": string; [key: string]: unknown; } | { "exact"?: boolean; "kind": ("text" & string); "text": string; [key: string]: unknown; } | { "kind": ("placeholder" & string); "text": string; [key: string]: unknown; } | { "kind": ("role" & string); "role": string; [key: string]: unknown; } | { "id": number; "kind": ("backend_node" & string); [key: string]: unknown; });
-export type MethodPageKeyUpParams__LocatorSpec = { "frame_id"?: (string | null); "index"?: (number | null); "query": MethodPageKeyUpParams__LocatorQuery; [key: string]: unknown; };
-
-export type MethodPageKeyUpResult = Record<string, never>;
-
-export type MethodPageMouseDownParams = { "button": MethodPageMouseDownParams__MouseButton; "pageId": string; "x": number; "y": number; [key: string]: unknown; };
-export type MethodPageMouseDownParams__MouseButton = (("left" | "middle" | "right" | "back" | "forward") & string);
-
-export type MethodPageMouseDownResult = Record<string, never>;
-
-export type MethodPageMouseMoveParams = { "pageId": string; "x": number; "y": number; [key: string]: unknown; };
-
-export type MethodPageMouseMoveResult = Record<string, never>;
-
-export type MethodPageMouseUpParams = { "button": MethodPageMouseUpParams__MouseButton; "pageId": string; "x": number; "y": number; [key: string]: unknown; };
-export type MethodPageMouseUpParams__MouseButton = (("left" | "middle" | "right" | "back" | "forward") & string);
-
-export type MethodPageMouseUpResult = Record<string, never>;
-
 export type MethodPagePressKeyParams = { "key": string; "operation_id": string; "options"?: MethodPagePressKeyParams__ActionOptions; "pageId": string; [key: string]: unknown; };
 export type MethodPagePressKeyParams__ActionOptions = { "destination"?: MethodPagePressKeyParams__Destination; "expect"?: (MethodPagePressKeyParams__Expectation | null); "timeout_ms"?: number; "wait_for_target"?: boolean; [key: string]: unknown; };
 export type MethodPagePressKeyParams__Destination = (("current" & string) | ("new_tab" & string) | ("current_or_new" & string));
@@ -852,10 +796,6 @@ export type MethodPagePressKeyResult__ErrorContext = { "action_status"?: (Method
 export type MethodPagePressKeyResult__ErrorDetail = { "code": string; "context"?: (MethodPagePressKeyResult__ErrorContext | null); "hint"?: (string | null); "message": string; "retryable"?: (boolean | null); [key: string]: unknown; };
 export type MethodPagePressKeyResult__OperationState = (("running" | "finished" | "interrupted" | "expired") & string);
 export type MethodPagePressKeyResult__PageContext = { "headings": Array<string>; "messages": Array<string>; "ready_state": string; "tab_id": string; "text_excerpt": string; "title": string; "truncated": boolean; "url": string; [key: string]: unknown; };
-
-export type MethodPageReleaseAllInputsParams = { "pageId": string; [key: string]: unknown; };
-
-export type MethodPageReleaseAllInputsResult = Record<string, never>;
 
 export type MethodPageResetViewportParams = { "pageId": string; [key: string]: unknown; };
 
@@ -907,18 +847,6 @@ export type MethodPageSolveCaptchaParams = { "apiDomain"?: (string | null); "api
 export type MethodPageSolveCaptchaResult = { "injection": MethodPageSolveCaptchaResult__CaptchaInjection; [key: string]: unknown; };
 export type MethodPageSolveCaptchaResult__CaptchaInjection = { "callbacks": Array<string>; "created": Array<string>; "errors": Array<string>; "kind": string; "solverUserAgent"?: (string | null); "updated_count": number; [key: string]: unknown; };
 
-export type MethodPageSolveTurnstileParams = { "pageId": string; "timeoutMs"?: number; [key: string]: unknown; };
-
-export type MethodPageSolveTurnstileResult = { "clicks": number; "elapsedMs": number; [key: string]: unknown; };
-
-export type MethodPageTextParams = { "pageId": string; [key: string]: unknown; };
-
-export type MethodPageTextResult = { "text": string; [key: string]: unknown; };
-
-export type MethodPageTitleParams = { "pageId": string; [key: string]: unknown; };
-
-export type MethodPageTitleResult = { "title": string; [key: string]: unknown; };
-
 export type MethodPageTypeIntoParams = { "inputMode"?: MethodPageTypeIntoParams__InputMode; "operation_id": string; "options"?: MethodPageTypeIntoParams__ActionOptions; "pageId": string; "selector": string; "text": string; [key: string]: unknown; };
 export type MethodPageTypeIntoParams__ActionOptions = { "destination"?: MethodPageTypeIntoParams__Destination; "expect"?: (MethodPageTypeIntoParams__Expectation | null); "timeout_ms"?: number; "wait_for_target"?: boolean; [key: string]: unknown; };
 export type MethodPageTypeIntoParams__Destination = (("current" & string) | ("new_tab" & string) | ("current_or_new" & string));
@@ -936,22 +864,6 @@ export type MethodPageTypeIntoResult__ErrorContext = { "action_status"?: (Method
 export type MethodPageTypeIntoResult__ErrorDetail = { "code": string; "context"?: (MethodPageTypeIntoResult__ErrorContext | null); "hint"?: (string | null); "message": string; "retryable"?: (boolean | null); [key: string]: unknown; };
 export type MethodPageTypeIntoResult__OperationState = (("running" | "finished" | "interrupted" | "expired") & string);
 export type MethodPageTypeIntoResult__PageContext = { "headings": Array<string>; "messages": Array<string>; "ready_state": string; "tab_id": string; "text_excerpt": string; "title": string; "truncated": boolean; "url": string; [key: string]: unknown; };
-
-export type MethodPageUrlParams = { "pageId": string; [key: string]: unknown; };
-
-export type MethodPageUrlResult = { "url": string; [key: string]: unknown; };
-
-export type MethodPageWaitForParams = { "pageId": string; "selector": string; "timeoutMs": number; [key: string]: unknown; };
-
-export type MethodPageWaitForResult = Record<string, never>;
-
-export type MethodPageWaitForTextParams = { "pageId": string; "text": string; "timeoutMs": number; [key: string]: unknown; };
-
-export type MethodPageWaitForTextResult = Record<string, never>;
-
-export type MethodPageWaitForVisibleParams = { "pageId": string; "selector": string; "timeoutMs": number; [key: string]: unknown; };
-
-export type MethodPageWaitForVisibleResult = Record<string, never>;
 
 export type MethodRecordingCancelParams = { "recordingId": string; [key: string]: unknown; };
 
@@ -995,7 +907,7 @@ export type MethodRecordingStopResult__RecordingState = (("running" | "finalizin
 
 export type MethodReleaseAllInputsParams = { "pageId": string; };
 
-export type MethodReleaseAllInputsResult = unknown;
+export type MethodReleaseAllInputsResult = string;
 
 export type MethodReloadParams = { "pageId": string; };
 
@@ -1025,7 +937,7 @@ export type MethodSelectParams__LocatorSpec = { "frame_id"?: (string | null); "i
 
 export type MethodSelectResult = unknown;
 
-export type MethodServerHelloParams = { "protocol": MethodServerHelloParams__ProtocolVersion; "understands"?: (MethodServerHelloParams__ProtocolVersion | null); [key: string]: unknown; };
+export type MethodServerHelloParams = { "protocol": MethodServerHelloParams__ProtocolVersion; [key: string]: unknown; };
 export type MethodServerHelloParams__ProtocolVersion = { "major": number; "minor": number; [key: string]: unknown; };
 
 export type MethodServerHelloResult = { "capabilities": Array<string>; "coreVersion": string; "limits": MethodServerHelloResult__TransportLimits; "methods": Array<string>; "protocol": MethodServerHelloResult__ProtocolVersion; "serverVersion": string; [key: string]: unknown; };
@@ -1062,7 +974,7 @@ export type MethodStorageResult = unknown;
 
 export type MethodTextParams = { "pageId": string; };
 
-export type MethodTextResult = unknown;
+export type MethodTextResult = string;
 
 export type MethodWaitParams = { "expect"?: (MethodWaitParams__Expectation | null); "load"?: (string | null); "ms"?: (number | null); "pageId": string; "selector"?: (string | null); "state"?: (MethodWaitParams__WaitSelectorState | null); "text"?: (string | null); "timeout"?: (number | null); "url"?: (string | null); [key: string]: unknown; };
 export type MethodWaitParams__Expectation = ({ "kind": ("document_ready" & string); [key: string]: unknown; } | { "conditions": Array<MethodWaitParams__Expectation>; "kind": ("all" & string); [key: string]: unknown; } | { "enabled": boolean; "kind": ("enabled" & string); "target": MethodWaitParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("download_started" & string); [key: string]: unknown; } | { "kind": ("focused" & string); "target": MethodWaitParams__LocatorSpec; [key: string]: unknown; } | { "contains"?: boolean; "kind": ("url" & string); "value": string; [key: string]: unknown; } | { "kind": ("visible" & string); "target": MethodWaitParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("hidden" & string); "target": MethodWaitParams__LocatorSpec; [key: string]: unknown; } | { "contains"?: boolean; "kind": ("text" & string); "target": MethodWaitParams__LocatorSpec; "value": string; [key: string]: unknown; } | { "kind": ("value" & string); "target": MethodWaitParams__LocatorSpec; "value": string; [key: string]: unknown; } | { "checked": boolean; "kind": ("checked" & string); "target": MethodWaitParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("selected" & string); "target": MethodWaitParams__LocatorSpec; "values": Array<string>; [key: string]: unknown; });
@@ -1070,7 +982,7 @@ export type MethodWaitParams__LocatorQuery = ({ "id": number; "kind": ("node" & 
 export type MethodWaitParams__LocatorSpec = { "frame_id"?: (string | null); "index"?: (number | null); "query": MethodWaitParams__LocatorQuery; [key: string]: unknown; };
 export type MethodWaitParams__WaitSelectorState = (("attached" & string) | ("visible" & string) | ("hidden" & string));
 
-export type MethodWaitResult = unknown;
+export type MethodWaitResult = string;
 
 export type MethodWasmFindParams = { "end"?: (string | null); "max"?: number; "memory"?: (string | null); "pageId": string; "pattern": string; "start"?: (string | null); [key: string]: unknown; };
 
@@ -1169,34 +1081,21 @@ export type MethodParams = {
   "operations.wait": MethodOperationsWaitParams;
   "page.capture_state": MethodPageCaptureStateParams;
   "page.click": MethodPageClickParams;
-  "page.click_shadow": MethodPageClickShadowParams;
   "page.click_text": MethodPageClickTextParams;
   "page.close": MethodPageCloseParams;
-  "page.content": MethodPageContentParams;
   "page.evaluate": MethodPageEvaluateParams;
-  "page.evaluate_in_frame": MethodPageEvaluateInFrameParams;
   "page.evaluate_raw": MethodPageEvaluateRawParams;
   "page.execute": MethodPageExecuteParams;
   "page.execute_raw": MethodPageExecuteRawParams;
-  "page.exists": MethodPageExistsParams;
   "page.fetch": MethodPageFetchParams;
   "page.fetch_bounded": MethodPageFetchBoundedParams;
   "page.fill": MethodPageFillParams;
-  "page.frames": MethodPageFramesParams;
-  "page.get_attribute": MethodPageGetAttributeParams;
-  "page.get_text": MethodPageGetTextParams;
   "page.goto": MethodPageGotoParams;
   "page.hover": MethodPageHoverParams;
   "page.human_click": MethodPageHumanClickParams;
   "page.human_click_text": MethodPageHumanClickTextParams;
   "page.human_fill": MethodPageHumanFillParams;
-  "page.key_down": MethodPageKeyDownParams;
-  "page.key_up": MethodPageKeyUpParams;
-  "page.mouse_down": MethodPageMouseDownParams;
-  "page.mouse_move": MethodPageMouseMoveParams;
-  "page.mouse_up": MethodPageMouseUpParams;
   "page.press_key": MethodPagePressKeyParams;
-  "page.release_all_inputs": MethodPageReleaseAllInputsParams;
   "page.reset_viewport": MethodPageResetViewportParams;
   "page.restore_state": MethodPageRestoreStateParams;
   "page.screenshot": MethodPageScreenshotParams;
@@ -1204,14 +1103,7 @@ export type MethodParams = {
   "page.select": MethodPageSelectParams;
   "page.set_viewport": MethodPageSetViewportParams;
   "page.solve_captcha": MethodPageSolveCaptchaParams;
-  "page.solve_turnstile": MethodPageSolveTurnstileParams;
-  "page.text": MethodPageTextParams;
-  "page.title": MethodPageTitleParams;
   "page.type_into": MethodPageTypeIntoParams;
-  "page.url": MethodPageUrlParams;
-  "page.wait_for": MethodPageWaitForParams;
-  "page.wait_for_text": MethodPageWaitForTextParams;
-  "page.wait_for_visible": MethodPageWaitForVisibleParams;
   "recording.cancel": MethodRecordingCancelParams;
   "recording.get": MethodRecordingGetParams;
   "recording.start": MethodRecordingStartParams;
@@ -1319,34 +1211,21 @@ export type MethodResults = {
   "operations.wait": MethodOperationsWaitResult;
   "page.capture_state": MethodPageCaptureStateResult;
   "page.click": MethodPageClickResult;
-  "page.click_shadow": MethodPageClickShadowResult;
   "page.click_text": MethodPageClickTextResult;
   "page.close": MethodPageCloseResult;
-  "page.content": MethodPageContentResult;
   "page.evaluate": MethodPageEvaluateResult;
-  "page.evaluate_in_frame": MethodPageEvaluateInFrameResult;
   "page.evaluate_raw": MethodPageEvaluateRawResult;
   "page.execute": MethodPageExecuteResult;
   "page.execute_raw": MethodPageExecuteRawResult;
-  "page.exists": MethodPageExistsResult;
   "page.fetch": MethodPageFetchResult;
   "page.fetch_bounded": MethodPageFetchBoundedResult;
   "page.fill": MethodPageFillResult;
-  "page.frames": MethodPageFramesResult;
-  "page.get_attribute": MethodPageGetAttributeResult;
-  "page.get_text": MethodPageGetTextResult;
   "page.goto": MethodPageGotoResult;
   "page.hover": MethodPageHoverResult;
   "page.human_click": MethodPageHumanClickResult;
   "page.human_click_text": MethodPageHumanClickTextResult;
   "page.human_fill": MethodPageHumanFillResult;
-  "page.key_down": MethodPageKeyDownResult;
-  "page.key_up": MethodPageKeyUpResult;
-  "page.mouse_down": MethodPageMouseDownResult;
-  "page.mouse_move": MethodPageMouseMoveResult;
-  "page.mouse_up": MethodPageMouseUpResult;
   "page.press_key": MethodPagePressKeyResult;
-  "page.release_all_inputs": MethodPageReleaseAllInputsResult;
   "page.reset_viewport": MethodPageResetViewportResult;
   "page.restore_state": MethodPageRestoreStateResult;
   "page.screenshot": MethodPageScreenshotResult;
@@ -1354,14 +1233,7 @@ export type MethodResults = {
   "page.select": MethodPageSelectResult;
   "page.set_viewport": MethodPageSetViewportResult;
   "page.solve_captcha": MethodPageSolveCaptchaResult;
-  "page.solve_turnstile": MethodPageSolveTurnstileResult;
-  "page.text": MethodPageTextResult;
-  "page.title": MethodPageTitleResult;
   "page.type_into": MethodPageTypeIntoResult;
-  "page.url": MethodPageUrlResult;
-  "page.wait_for": MethodPageWaitForResult;
-  "page.wait_for_text": MethodPageWaitForTextResult;
-  "page.wait_for_visible": MethodPageWaitForVisibleResult;
   "recording.cancel": MethodRecordingCancelResult;
   "recording.get": MethodRecordingGetResult;
   "recording.start": MethodRecordingStartResult;
@@ -1402,5 +1274,5 @@ export type ProtocolErrorResponse = { id: number | null; error: ServerError; res
 
 export type ProtocolResponse<M extends MethodName = MethodName> = ProtocolSuccessResponse<M> | ProtocolErrorResponse;
 
-export const protocolVersion = {"major":2,"minor":2} as const;
-export const methodNames = ["actions.perform","agent.observe","agent.step","back","browser.close","browser.close_tab","browser.connect","browser.launch","browser.new_page","browser.tabs","captcha.datadome","captcha.detect","captcha.inject","captcha.turnstile","clear_cookies","click","click_shadow","clone_from","console","content","cookies","delete_cookie","dialog.accept","dialog.dismiss","double_click","download.cancel","download.get","download.list","download.start","download.wait","dump_storage","emulate","errors","eval","exec","exists","fake_camera","fetch","fill","find","forward","frame_eval","frames","get_attribute","get_text","headers","hover","info","intercept.add","intercept.list","intercept.log","intercept.remove","js.allow","js.block","js.list","js.mode","js.remove","key","key.down","key.up","load_state","mouse.down","mouse.move","mouse.up","network.clear","network.export","network.log","network.record.start","network.record.status","network.record.stop","network.show","network.wait","observe","open","operations.cancel","operations.get","operations.list","operations.wait","page.capture_state","page.click","page.click_shadow","page.click_text","page.close","page.content","page.evaluate","page.evaluate_in_frame","page.evaluate_raw","page.execute","page.execute_raw","page.exists","page.fetch","page.fetch_bounded","page.fill","page.frames","page.get_attribute","page.get_text","page.goto","page.hover","page.human_click","page.human_click_text","page.human_fill","page.key_down","page.key_up","page.mouse_down","page.mouse_move","page.mouse_up","page.press_key","page.release_all_inputs","page.reset_viewport","page.restore_state","page.screenshot","page.screenshot_to_file","page.select","page.set_viewport","page.solve_captcha","page.solve_turnstile","page.text","page.title","page.type_into","page.url","page.wait_for","page.wait_for_text","page.wait_for_visible","recording.cancel","recording.get","recording.start","recording.stop","release_all_inputs","reload","save_state","screenshot","scroll","select","server.hello","server.shutdown","set_cookie","set_storage","snapshot","spa.info","spa.navigate","storage","text","wait","wasm.find","wasm.info","wasm.read","wasm.write"] as const;
+export const protocolVersion = {"major":3,"minor":0} as const;
+export const methodNames = ["actions.perform","agent.observe","agent.step","back","browser.close","browser.close_tab","browser.connect","browser.launch","browser.new_page","browser.tabs","captcha.datadome","captcha.detect","captcha.inject","captcha.turnstile","clear_cookies","click","click_shadow","clone_from","console","content","cookies","delete_cookie","dialog.accept","dialog.dismiss","double_click","download.cancel","download.get","download.list","download.start","download.wait","dump_storage","emulate","errors","eval","exec","exists","fake_camera","fetch","fill","find","forward","frame_eval","frames","get_attribute","get_text","headers","hover","info","intercept.add","intercept.list","intercept.log","intercept.remove","js.allow","js.block","js.list","js.mode","js.remove","key","key.down","key.up","load_state","mouse.down","mouse.move","mouse.up","network.clear","network.export","network.log","network.record.start","network.record.status","network.record.stop","network.show","network.wait","observe","open","operations.cancel","operations.get","operations.list","operations.wait","page.capture_state","page.click","page.click_text","page.close","page.evaluate","page.evaluate_raw","page.execute","page.execute_raw","page.fetch","page.fetch_bounded","page.fill","page.goto","page.hover","page.human_click","page.human_click_text","page.human_fill","page.press_key","page.reset_viewport","page.restore_state","page.screenshot","page.screenshot_to_file","page.select","page.set_viewport","page.solve_captcha","page.type_into","recording.cancel","recording.get","recording.start","recording.stop","release_all_inputs","reload","save_state","screenshot","scroll","select","server.hello","server.shutdown","set_cookie","set_storage","snapshot","spa.info","spa.navigate","storage","text","wait","wasm.find","wasm.info","wasm.read","wasm.write"] as const;

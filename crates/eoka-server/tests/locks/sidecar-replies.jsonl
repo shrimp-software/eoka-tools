@@ -1,29 +1,29 @@
-{"method":"page.text","params":{"pageId":"<page>"},"reply":{"result":{"text":"Heading\nA\nB\nGo\n\nNext"}}}
-{"method":"page.text","params":{"pageId":"no-such-page"},"reply":{"error":{"code":"InvalidPage","message":"unknown pageId \"no-such-page\""}}}
-{"method":"page.content","params":{"pageId":"<page>"},"reply":{"result":{"html":"<html><head><title>fixture</title></head><body><h1>Heading</h1><input id=\"name\" aria-label=\"Name\"><select id=\"pick\"><option value=\"a\">A</option><option value=\"b\">B</option></select><button id=\"go\" onclick=\"document.getElementById('status').textContent='clicked'\">Go</button><p id=\"status\"></p><a id=\"link\" href=\"/next\">Next</a><iframe id=\"inner\" srcdoc=\"&lt;p&gt;inner&lt;/p&gt;\"></iframe></body></html>"}}}
-{"method":"page.title","params":{"pageId":"<page>"},"reply":{"result":{"title":"fixture"}}}
-{"method":"page.url","params":{"pageId":"<page>"},"reply":{"result":{"url":"<origin>/"}}}
-{"method":"page.get_text","params":{"pageId":"<page>","selector":"h1"},"reply":{"result":{"text":"Heading"}}}
-{"method":"page.get_text","params":{"pageId":"<page>","selector":"#missing"},"reply":{"error":{"code":"ElementNotFound","message":"Element not found: #missing"}}}
-{"method":"page.get_attribute","params":{"name":"href","pageId":"<page>","selector":"#link"},"reply":{"result":{"value":"/next"}}}
-{"method":"page.get_attribute","params":{"name":"nope","pageId":"<page>","selector":"#link"},"reply":{"result":{"value":null}}}
-{"method":"page.exists","params":{"pageId":"<page>","selector":"h1"},"reply":{"result":{"exists":true}}}
-{"method":"page.exists","params":{"pageId":"<page>","selector":"#missing"},"reply":{"result":{"exists":false}}}
-{"method":"page.wait_for","params":{"pageId":"<page>","selector":"h1","timeoutMs":"<volatile>"},"reply":{"result":{}}}
-{"method":"page.wait_for","params":{"pageId":"<page>","selector":"#missing","timeoutMs":"<volatile>"},"reply":{"error":{"code":"Timeout","message":"Timeout: Element '#missing' not found within 300ms"}}}
-{"method":"page.wait_for_visible","params":{"pageId":"<page>","selector":"h1","timeoutMs":"<volatile>"},"reply":{"result":{}}}
-{"method":"page.wait_for_text","params":{"pageId":"<page>","text":"Heading","timeoutMs":"<volatile>"},"reply":{"result":{}}}
-{"method":"page.wait_for_text","params":{"pageId":"<page>","text":"absent words","timeoutMs":"<volatile>"},"reply":{"error":{"code":"Timeout","message":"Timeout: Element with text 'absent words' not found within 300ms"}}}
+{"method":"text","params":{"pageId":"<page>"},"reply":{"result":"Heading\nA\nB\nGo\n\nNext"}}
+{"method":"text","params":{"pageId":"no-such-page"},"reply":{"error":{"code":"InvalidPage","message":"unknown pageId \"no-such-page\""}}}
+{"method":"content","params":{"pageId":"<page>"},"reply":{"result":"<html><head><title>fixture</title></head><body><h1>Heading</h1><input id=\"name\" aria-label=\"Name\"><select id=\"pick\"><option value=\"a\">A</option><option value=\"b\">B</option></select><button id=\"go\" onclick=\"document.getElementById('status').textContent='clicked'\">Go</button><p id=\"status\"></p><a id=\"link\" href=\"/next\">Next</a><iframe id=\"inner\" srcdoc=\"&lt;p&gt;inner&lt;/p&gt;\"></iframe></body></html>"}}
+{"method":"info","params":{"pageId":"<page>"},"reply":{"result":{"title":"fixture","url":"<origin>/"}}}
+{"method":"info","params":{"pageId":"<page>"},"reply":{"result":{"title":"fixture","url":"<origin>/"}}}
+{"method":"get_text","params":{"pageId":"<page>","selector":"h1"},"reply":{"result":"Heading"}}
+{"method":"get_text","params":{"pageId":"<page>","selector":"#missing"},"reply":{"error":{"code":"ElementNotFound","message":"Element not found: #missing"}}}
+{"method":"get_attribute","params":{"name":"href","pageId":"<page>","selector":"#link"},"reply":{"result":{"value":"/next"}}}
+{"method":"get_attribute","params":{"name":"nope","pageId":"<page>","selector":"#link"},"reply":{"result":{"value":null}}}
+{"method":"exists","params":{"pageId":"<page>","selector":"h1"},"reply":{"result":{"exists":true}}}
+{"method":"exists","params":{"pageId":"<page>","selector":"#missing"},"reply":{"result":{"exists":false}}}
+{"method":"wait","params":{"pageId":"<page>","selector":"h1","state":"attached","timeout":2000},"reply":{"result":"\"h1\" is attached"}}
+{"method":"wait","params":{"pageId":"<page>","selector":"#missing","state":"attached","timeout":300},"reply":{"error":{"code":"Timeout","message":"Timeout: Element '#missing' not found within 300ms"}}}
+{"method":"wait","params":{"pageId":"<page>","selector":"h1","state":"visible","timeout":2000},"reply":{"result":"\"h1\" is visible"}}
+{"method":"wait","params":{"pageId":"<page>","text":"Heading","timeout":2000},"reply":{"result":"Text \"Heading\" appeared"}}
+{"method":"wait","params":{"pageId":"<page>","text":"absent words","timeout":300},"reply":{"error":{"code":"Timeout","message":"Timeout: Element with text 'absent words' not found within 300ms"}}}
 {"method":"page.evaluate","params":{"arguments":[2,3],"function":"(a, b) => a + b","pageId":"<page>"},"reply":{"result":{"result":5}}}
 {"method":"page.evaluate","params":{"function":"() => { throw new Error('boom') }","pageId":"<page>"},"reply":{"error":{"code":"Cdp","data":{"cdp":{"code":null,"message":"JavaScript error: Error: boom","method":null}},"message":"CDP error: JavaScript error: Error: boom"}}}
 {"method":"page.execute","params":{"function":"() => { document.title = 'fixture' }","pageId":"<page>"},"reply":{"result":{}}}
 {"method":"page.evaluate_raw","params":{"js":"({a: 1, b: [true, null]})","pageId":"<page>"},"reply":{"result":{"result":{"a":1,"b":[true,null]}}}}
 {"method":"page.evaluate_raw","params":{"js":"undefinedName.x","pageId":"<page>"},"reply":{"error":{"code":"Cdp","data":{"cdp":{"code":null,"message":"JavaScript error: ReferenceError: undefinedName is not defined","method":null}},"message":"CDP error: JavaScript error: ReferenceError: undefinedName is not defined"}}}
 {"method":"page.execute_raw","params":{"js":"void 0","pageId":"<page>"},"reply":{"result":{}}}
-{"method":"page.frames","params":{"pageId":"<page>"},"reply":{"result":[{"id":"<volatile>","url":"<origin>/"},{"id":"<volatile>","name":"inner","url":"about:srcdoc"}]}}
-{"method":"page.evaluate_in_frame","params":{"frameId":"no-such-frame","js":"1","pageId":"<page>"},"reply":{"error":{"code":"Cdp","data":{"cdp":{"code":null,"message":"Frame not in this page: no-such-frame","method":null}},"message":"CDP error: Frame not in this page: no-such-frame"}}}
-{"method":"page.click_shadow","params":{"pageId":"<page>","selector":"#missing","timeoutMs":"<volatile>"},"reply":{"error":{"code":"Timeout","message":"Timeout: Shadow click did not complete within 300ms"}}}
-{"method":"page.solve_turnstile","params":{"pageId":"<page>","timeoutMs":"<volatile>"},"reply":{"result":{"clicks":0,"elapsedMs":"<volatile>"}}}
+{"method":"frames","params":{"pageId":"<page>"},"reply":{"result":[{"id":"<volatile>","name":null,"url":"<origin>/"},{"id":"<volatile>","name":"inner","url":"about:srcdoc"}]}}
+{"method":"frame_eval","params":{"code":"1","frame":"id:no-such-frame","pageId":"<page>"},"reply":{"error":{"code":"Operation","data":{"detail":{"code":"eoka_error","message":"CDP error: Frame not in this page: no-such-frame"}},"message":"CDP error: Frame not in this page: no-such-frame"}}}
+{"method":"click_shadow","params":{"pageId":"<page>","selector":"#missing","timeout_ms":"<volatile>"},"reply":{"error":{"code":"Timeout","message":"Timeout: Shadow click did not complete within 300ms"}}}
+{"method":"captcha.turnstile","params":{"pageId":"<page>","timeout_ms":"<volatile>"},"reply":{"result":{"clicks":0,"elapsed_ms":"<volatile>","tab_id":"<page>"}}}
 {"method":"page.fetch","params":{"pageId":"<page>","url":"<origin>/data"},"reply":{"result":{"body":"ok","headers":{"connection":"close","content-length":"2","content-type":"text/plain"},"ok":true,"status":200,"url":"<origin>/data"}}}
 {"method":"page.fetch_bounded","params":{"maxBytes":1,"pageId":"<page>","url":"<origin>/data"},"reply":{"result":{"body":"o","bodyOmitted":null,"bytesRead":1,"headers":{"connection":"close","content-length":"2","content-type":"text/plain"},"redirected":false,"status":200,"statusText":"OK","truncated":true,"type":"basic","url":"<origin>/data"}}}
 {"method":"page.capture_state","params":{"pageId":"<page>"},"reply":{"result":{"state":{"cookies":[],"localStorage":{},"sessionStorage":{},"url":"<origin>/","userAgent":"<volatile>"}}}}
@@ -32,12 +32,12 @@
 {"method":"page.screenshot_to_file","params":{"pageId":"<page>","path":"<root>/tmp/shot.png"},"reply":{"result":{"bytes":"<volatile>","mimeType":"image/png","path":"<root>/tmp/shot.png"}}}
 {"method":"page.set_viewport","params":{"deviceScaleFactor":2.0,"height":"<volatile>","pageId":"<page>","width":"<volatile>"},"reply":{"result":{}}}
 {"method":"page.reset_viewport","params":{"pageId":"<page>"},"reply":{"result":{}}}
-{"method":"page.mouse_move","params":{"pageId":"<page>","x":10,"y":10},"reply":{"result":{}}}
-{"method":"page.mouse_down","params":{"button":"left","pageId":"<page>","x":10,"y":10},"reply":{"result":{}}}
-{"method":"page.mouse_up","params":{"button":"left","pageId":"<page>","x":10,"y":10},"reply":{"result":{}}}
-{"method":"page.key_down","params":{"key":"Shift","pageId":"<page>"},"reply":{"result":{}}}
-{"method":"page.key_up","params":{"key":"Shift","pageId":"<page>"},"reply":{"result":{}}}
-{"method":"page.release_all_inputs","params":{"pageId":"<page>"},"reply":{"result":{}}}
+{"method":"mouse.move","params":{"pageId":"<page>","x":10,"y":10},"reply":{"result":"Mouse moved"}}
+{"method":"mouse.down","params":{"button":"left","pageId":"<page>","x":10,"y":10},"reply":{"result":"Mouse button held"}}
+{"method":"mouse.up","params":{"button":"left","pageId":"<page>","x":10,"y":10},"reply":{"result":"Mouse button released"}}
+{"method":"key.down","params":{"key":"Shift","pageId":"<page>"},"reply":{"result":"Held Shift"}}
+{"method":"key.up","params":{"key":"Shift","pageId":"<page>"},"reply":{"result":"Released Shift"}}
+{"method":"release_all_inputs","params":{"pageId":"<page>"},"reply":{"result":"Released all held inputs"}}
 {"method":"page.solve_captcha","params":{"apiKey":"k","captchaMode":"token","captchaType":"nope","pageId":"<page>","websiteKey":"w","websiteURL":"http://127.0.0.1/"},"reply":{"error":{"code":"InvalidParams","message":"captchaMode must explicitly be anti_captcha_proxyless; proxy-backed and manual modes belong to the caller"}}}
 {"method":"dialog.accept","params":{"pageId":"<page>"},"reply":{"error":{"code":"Cdp","data":{"cdp":{"code":-32602,"message":"No dialog is showing","method":"Page.handleJavaScriptDialog"}},"message":"CDP error in Page.handleJavaScriptDialog: No dialog is showing (code -32602)"}}}
 {"method":"dialog.dismiss","params":{"pageId":"<page>"},"reply":{"error":{"code":"Cdp","data":{"cdp":{"code":-32602,"message":"No dialog is showing","method":"Page.handleJavaScriptDialog"}},"message":"CDP error in Page.handleJavaScriptDialog: No dialog is showing (code -32602)"}}}

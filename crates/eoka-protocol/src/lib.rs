@@ -12,6 +12,7 @@ pub mod launch_spec;
 mod metadata;
 mod operations;
 mod response;
+mod results;
 pub mod sidecar;
 mod turnstile;
 
@@ -26,6 +27,7 @@ pub use launch_spec::{auto_connect, resolve_cdp_spec, resolve_proxy_spec, Launch
 pub use metadata::{OperationCapability, OperationExposure, ToolManifestEntry};
 pub use operations::*;
 pub use response::{ErrorDetail, Response, ResponseMeta};
+pub use results::*;
 pub use turnstile::*;
 
 #[cfg(test)]

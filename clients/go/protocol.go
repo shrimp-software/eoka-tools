@@ -12,7 +12,7 @@ type ProtocolVersion struct {
 	Minor uint32 `json:"minor"`
 }
 
-var understoodProtocol = ProtocolVersion{Major: 2, Minor: 2}
+var clientProtocol = ProtocolVersion{Major: 3, Minor: 0}
 
 type TransportLimits struct {
 	MaxMessageBytes int `json:"maxMessageBytes"`
@@ -37,11 +37,11 @@ func (b *Browser) ServerInfo() ServerInfo {
 
 func (b *Browser) hello(ctx context.Context, requiredMethods ...string) error {
 	var raw json.RawMessage
-	if err := b.t.call(ctx, "server.hello", map[string]any{"protocol": ProtocolVersion{Major: 2, Minor: 0}, "understands": understoodProtocol}, &raw); err != nil {
+	if err := b.t.call(ctx, "server.hello", map[string]any{"protocol": clientProtocol}, &raw); err != nil {
 		if HasCode(err, ErrCodeUnknownMethod) || HasCode(err, ErrCodeProtocolMismatch) {
 			var serverError *Error
 			errors.As(err, &serverError)
-			return &Error{Code: ErrCodeProtocolMismatch, Data: serverError.Data, Message: fmt.Sprintf("server does not support sidecar protocol 2.0 (%v); provide a compatible eoka-server with WithServerPath or EOKA_SERVER_BIN; the pinned %s download is not upgraded automatically", err, serverReleaseVersion)}
+			return &Error{Code: ErrCodeProtocolMismatch, Data: serverError.Data, Message: fmt.Sprintf("server does not support sidecar protocol 3.0 (%v); provide a compatible eoka-server with WithServerPath or EOKA_SERVER_BIN; the pinned %s download is not upgraded automatically", err, serverReleaseVersion)}
 		}
 		return fmt.Errorf("eoka: server.hello failed before browser session creation: %w", err)
 	}
@@ -58,8 +58,8 @@ func (b *Browser) hello(ctx context.Context, requiredMethods ...string) error {
 	if err := json.Unmarshal(raw, &shape); err != nil || shape.Protocol == nil || shape.Protocol.Major == nil || shape.Protocol.Minor == nil {
 		return &Error{Code: ErrCodeProtocolMismatch, Message: "server.hello omitted its protocol version"}
 	}
-	if info.Protocol.Major != 2 {
-		return &Error{Code: ErrCodeProtocolMismatch, Message: fmt.Sprintf("server protocol %d.%d is incompatible with client protocol 2.0", info.Protocol.Major, info.Protocol.Minor)}
+	if info.Protocol.Major != clientProtocol.Major {
+		return &Error{Code: ErrCodeProtocolMismatch, Message: fmt.Sprintf("server protocol %d.%d is incompatible with client protocol 3.0", info.Protocol.Major, info.Protocol.Minor)}
 	}
 	if info.ServerVersion == "" || info.CoreVersion == "" || info.Limits.MaxMessageBytes <= 0 || info.Limits.MaxInFlight <= 0 || info.Methods == nil || info.Capabilities == nil {
 		return &Error{Code: ErrCodeProtocolMismatch, Message: "server.hello omitted versions, methods, capabilities or positive transport limits"}

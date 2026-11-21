@@ -630,13 +630,6 @@ async fn send_command_once(
                 || (matches!(request, Request::TabAttach(_))
                     && matches!(spec, LaunchSpec::Connect { .. })) =>
         {
-            let legacy = [
-                format!("{session_name}-headed"),
-                format!("{session_name}-live"),
-            ];
-            if legacy.iter().any(|name| is_daemon_running(name)) {
-                return Ok(non_retryable_error("legacy_session_present", "A legacy suffixed session exists. Select it explicitly or migrate it; no replacement browser was created."));
-            }
             launch_daemon(session_name, spec)?;
             wait_for_socket(session_name).await?
         }
@@ -928,7 +921,7 @@ mod tests {
         let (mut reader, mut writer) = stream.into_split();
         let request: Request = read_msg(&mut reader).await.unwrap();
         assert!(matches!(request, Request::SessionHello));
-        let mut hello = serde_json::json!({"protocol_major":2,"mode":"headless","configuration_fingerprint":test_client("fixture").spec.configuration_fingerprint()});
+        let mut hello = serde_json::json!({"protocol_major": eoka_protocol::sidecar::PROTOCOL_VERSION.major,"mode":"headless","configuration_fingerprint":test_client("fixture").spec.configuration_fingerprint()});
         for (key, value) in extra.as_object().into_iter().flatten() {
             hello[key] = value.clone();
         }

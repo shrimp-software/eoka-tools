@@ -354,17 +354,41 @@ pub struct AttributeArgs {
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ClickShadowArgs {
+    #[serde(deserialize_with = "shadow_selector")]
     #[schemars(description = "CSS selector, matched through open and closed shadow roots.")]
     pub selector: String,
     #[serde(default)]
     #[schemars(description = "Frame ID from `frames`; the top frame when omitted.")]
     pub frame_id: Option<String>,
-    #[serde(default = "default_click_shadow_timeout_ms")]
+    #[serde(
+        default = "default_click_shadow_timeout_ms",
+        deserialize_with = "shadow_timeout"
+    )]
     pub timeout_ms: u64,
 }
 
 fn default_click_shadow_timeout_ms() -> u64 {
     10_000
+}
+
+fn shadow_selector<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    let selector = String::deserialize(d)?;
+    if selector.trim().is_empty() || selector.len() > 4096 {
+        return Err(serde::de::Error::custom(
+            "selector must be 1..=4096 characters",
+        ));
+    }
+    Ok(selector)
+}
+
+fn shadow_timeout<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
+    let timeout = u64::deserialize(d)?;
+    if !(1..=60_000).contains(&timeout) {
+        return Err(serde::de::Error::custom(
+            "timeout_ms must be between 1 and 60000",
+        ));
+    }
+    Ok(timeout)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]

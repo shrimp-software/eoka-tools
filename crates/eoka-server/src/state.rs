@@ -138,6 +138,14 @@ impl AppState {
         spoken: Option<&str>,
     ) -> Result<serde_json::Value, ServerError> {
         let page = self.page(page_id)?;
+        if crate::engine::page_ops::runs_on_page(&request) {
+            return Box::pin(crate::engine::page_ops::on_page(
+                &self.operations,
+                &page,
+                request,
+            ))
+            .await;
+        }
         let response = self.respond(page_id, request, spoken).await?;
         catalog_result(response, Some(&page))
     }
