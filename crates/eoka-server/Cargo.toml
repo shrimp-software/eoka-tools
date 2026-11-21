@@ -31,7 +31,7 @@ eoka-captcha = { workspace = true }
 eoka-datadome = { workspace = true }
 time = { version = "0.3", features = ["formatting", "macros"] }
 
-rusqlite = { version = "0.42", features = ["bundled", "fallible_uint"] }
+rusqlite = { version = "0.43", features = ["bundled", "fallible_uint"] }
 uuid = { version = "1", features = ["v4"] }
 sha2 = "0.11"
 hmac = "0.13"
