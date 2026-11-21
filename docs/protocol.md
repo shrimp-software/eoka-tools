@@ -156,9 +156,9 @@ way:
   `PageUnresponsive`. Other methods that reach the command deadline are checked
   the same way before their timeout is reported.
 - `dialog.accept` and `dialog.dismiss` answer the dialog directly and work
-  while any other request is blocked. `page.release_all_inputs`,
+  while any other request is blocked. `release_all_inputs`,
   `page.set_viewport`, `page.reset_viewport`, `page.restore_state`,
-  `page.solve_turnstile`, `recording.*` and tab close are never refused.
+  `captcha.turnstile`, `recording.*` and tab close are never refused.
 - An operation that is running when a dialog opens on its page ends: its record
   is `finished` with `error_code` `dialog_open`, `outcome` `outcome_unknown`
   when input had been dispatched (`not_dispatched` otherwise) and a receipt
@@ -401,13 +401,14 @@ Element handles do not cross this wire.
   native response or transport/session teardown, subject to its own deadline.
   Native capture/reset can refresh Chrome's hidden-tab `outerWidth`/`outerHeight`
   readings without resizing the browser window; Eoka does not mask those values.
-- Held input: `page.mouse_down`, `page.mouse_move`, `page.mouse_up`,
-  `page.key_down`, `page.key_up`, `page.release_all_inputs` are primitives,
-  distinct from verified high-level actions.
-- Cloudflare: `page.solve_turnstile` (`{pageId, timeoutMs?}`, default 30000, at
+- Held input: the catalog operations `mouse.down`, `mouse.move`, `mouse.up`,
+  `key.down`, `key.up` and `release_all_inputs` are primitives, distinct from
+  verified high-level actions.
+- Cloudflare: `captcha.turnstile` (`{pageId, timeout_ms?}`, default 30000, at
   most 120000) clicks the Turnstile checkbox through its closed shadow root until
-  the page leaves the challenge and returns `{clicks, elapsedMs}`; a normal page
-  returns zero clicks. It holds that page's request queue for up to `timeoutMs`.
+  the page leaves the challenge and returns `{tab_id, clicks, elapsed_ms}`; a
+  normal page returns zero clicks. It holds that page's request queue for up to
+  `timeout_ms`.
 - Other implemented methods include `page.solve_captcha` and `page.close`.
 
 JSON results are dynamic data, not statically known application types. Type
@@ -568,8 +569,8 @@ page's `visibilityState` changes or receives `visibilitychange`. The hidden
 page's animation frames, and whatever its scripts and styles drive from them,
 run for the duration of the action and stop within about a second of its end; a
 page can observe that. A visible page is only asked for its visibility. The
-typed action methods, `agent.step`, catalog actions, `page.mouse_move`,
-`page.click_shadow` and `page.solve_turnstile` behave the same, and a page that
+typed action methods, `agent.step`, catalog actions, `mouse.move`,
+`click_shadow` and `captcha.turnstile` behave the same, and a page that
 becomes hidden while its action waits is covered from then on. When a click,
 hover, drag or scroll into view times out in preparation on a page that ran no
 animation frame, `error.message` says so and says whether the tab was hidden.

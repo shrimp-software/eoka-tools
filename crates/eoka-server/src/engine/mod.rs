@@ -90,7 +90,7 @@ pub struct EngineError {
 }
 
 impl EngineError {
-    pub(crate) fn into_response(self) -> Response {
+    fn into_response(self) -> Response {
         match self
             .kind
             .and_then(eoka_protocol::sidecar::core_error_detail_code)
@@ -103,7 +103,12 @@ impl EngineError {
 
 impl From<eoka::Error> for EngineError {
     fn from(error: eoka::Error) -> Self {
-        let error = eoka_protocol::sidecar::ServerError::from(error);
+        eoka_protocol::sidecar::ServerError::from(error).into()
+    }
+}
+
+impl From<eoka_protocol::sidecar::ServerError> for EngineError {
+    fn from(error: eoka_protocol::sidecar::ServerError) -> Self {
         Self {
             message: error.message,
             kind: Some(error.code),
@@ -666,24 +671,16 @@ impl Engine {
 
     async fn on_current_page(&mut self, request: Request) -> Result<Response, EngineError> {
         let page = self.require_tab()?.page.clone();
-        let drains = matches!(request, Request::Wait(_) | Request::CaptchaTurnstile(_));
-        let turnstile = matches!(request, Request::CaptchaTurnstile(_));
-        let clicks = matches!(request, Request::ClickShadow(_));
-        let drain = if drains {
-            self.start_fetch_drain()
-        } else {
-            None
+        let drain = match &request {
+            Request::Wait(args) if args.ms.is_none() => self.start_fetch_drain(),
+            Request::CaptchaTurnstile(_) => self.start_fetch_drain(),
+            _ => None,
         };
-        let result = page_ops::execute(&page, request)
-            .await
-            .map_err(EngineError::from);
-        if !self.stop_fetch_drain(drain).await && turnstile {
+        let result = page_ops::execute(&page, request).await;
+        if !self.stop_fetch_drain(drain).await {
             return Err("Request interception cleanup failed".into());
         }
-        if clicks && result.is_ok() {
-            self.require_tab_mut()?.invalidate();
-        }
-        result
+        Ok(result?)
     }
 
     fn tab_with_config(&mut self) -> Result<(&mut TabState, bool), String> {

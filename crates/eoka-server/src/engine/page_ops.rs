@@ -6,49 +6,9 @@ use eoka_protocol::{
     AttributeValue, CaptchaTurnstileResult, Existence, FrameSummary, PageInfo, Request, Response,
     ShadowClick, WaitArgs, WaitSelectorState,
 };
-use serde_json::{json, Value};
+use serde_json::Value;
 
-use super::blockers::{self, Policy, Remedies, Stage};
-use super::EngineError;
 use crate::operations::OperationManager;
-
-pub enum PageError {
-    Core(eoka::Error),
-    Other(EngineError),
-}
-
-impl From<eoka::Error> for PageError {
-    fn from(error: eoka::Error) -> Self {
-        Self::Core(error)
-    }
-}
-
-impl From<String> for PageError {
-    fn from(message: String) -> Self {
-        Self::Other(message.into())
-    }
-}
-
-impl From<&str> for PageError {
-    fn from(message: &str) -> Self {
-        Self::Other(message.into())
-    }
-}
-
-impl From<serde_json::Error> for PageError {
-    fn from(error: serde_json::Error) -> Self {
-        Self::Other(error.into())
-    }
-}
-
-impl From<PageError> for EngineError {
-    fn from(error: PageError) -> Self {
-        match error {
-            PageError::Core(error) => error.into(),
-            PageError::Other(error) => error,
-        }
-    }
-}
 
 macro_rules! page_request {
     () => {
@@ -81,47 +41,22 @@ pub async fn on_page(
     page: &Page,
     request: Request,
 ) -> Result<Value, ServerError> {
-    let command = request.cmd();
-    let arguments = request.args_json();
-    let policy = blockers::policy(command, &arguments);
-    let remedies = Remedies::new(None);
-    let name = remedies.name(command, &arguments);
-    if let Some(blocker) = blockers::admit(operations, page, policy).await {
-        let mut response =
-            Response::err_detail(blocker.detail(&remedies, &name, Stage::NotStarted));
-        if policy == Policy::Gate {
-            response.data = Some(json!({
-                "status": eoka_protocol::OperationStatus::NotDispatched,
-                "operation_id": arguments["operation_id"],
-            }));
-        }
-        return crate::state::catalog_result(response, Some(page));
-    }
-    let work = execute(page, request);
-    let result = if matches!(policy, Policy::Read | Policy::Wait | Policy::Capture) {
-        let limit = blockers::limit(policy, &arguments);
-        blockers::guard(Some(page), remedies, &name, policy, limit, work).await
-    } else {
-        work.await
+    let call = crate::methods::blocked::Call::catalog(&request);
+    let work = async {
+        let response = execute(page, request).await?;
+        crate::state::catalog_result(response, Some(page))
     };
-    match result {
-        Ok(response) => crate::state::catalog_result(response, Some(page)),
-        Err(PageError::Core(error)) => Err(error.into()),
-        Err(PageError::Other(error)) => {
-            crate::state::catalog_result(error.into_response(), Some(page))
-        }
-    }
+    crate::methods::blocked::guarded(operations, page, call, work).await
 }
 
-pub(super) async fn execute(page: &Page, request: Request) -> Result<Response, PageError> {
+pub(super) async fn execute(page: &Page, request: Request) -> Result<Response, ServerError> {
     match request {
         Request::Text => Ok(Response::ok_text(page.text().await?)),
         Request::Content => Ok(Response::ok_text(page.content().await?)),
-        Request::Info => {
-            let url = page.url().await?;
-            let title = super::target::title_nonblocking(page).await;
-            ok(PageInfo { url, title })
-        }
+        Request::Info => ok(PageInfo {
+            url: page.url().await?,
+            title: page.title().await?,
+        }),
         Request::GetText(args) => Ok(Response::ok_text(
             page.find(&args.selector).await?.text().await?,
         )),
@@ -195,19 +130,24 @@ pub(super) async fn execute(page: &Page, request: Request) -> Result<Response, P
             let receipt =
                 crate::cloudflare::solve_turnstile(page, Duration::from_millis(args.timeout_ms))
                     .await
-                    .map_err(|error| error.to_string())?;
+                    .map_err(|error| ServerError::internal(error.to_string()))?;
             ok(CaptchaTurnstileResult {
                 tab_id: page.target_id().to_string(),
                 clicks: receipt.clicks,
                 elapsed_ms: receipt.elapsed.as_millis() as u64,
             })
         }
-        other => Err(format!("{} does not run on a page alone", other.cmd()).into()),
+        other => Err(ServerError::internal(format!(
+            "{} does not run on a page alone",
+            other.cmd()
+        ))),
     }
 }
 
-fn ok(value: impl serde::Serialize) -> Result<Response, PageError> {
-    Ok(Response::ok(serde_json::to_value(value)?))
+fn ok(value: impl serde::Serialize) -> Result<Response, ServerError> {
+    serde_json::to_value(value)
+        .map(Response::ok)
+        .map_err(|error| ServerError::internal(error.to_string()))
 }
 
 fn button(button: eoka_protocol::MouseButton) -> MouseButton {
@@ -220,7 +160,7 @@ fn button(button: eoka_protocol::MouseButton) -> MouseButton {
     }
 }
 
-async fn wait(page: &Page, args: &WaitArgs) -> Result<Response, PageError> {
+async fn wait(page: &Page, args: &WaitArgs) -> Result<Response, ServerError> {
     if let Some(ms) = args.ms {
         let ms = ms.min(30_000);
         tokio::time::sleep(Duration::from_millis(ms)).await;
@@ -260,5 +200,7 @@ async fn wait(page: &Page, args: &WaitArgs) -> Result<Response, PageError> {
         page.wait_for_network_idle(500, timeout).await?;
         return Ok(Response::ok_text("Network idle"));
     }
-    Err("Provide ms, --text, --url, --selector, or --load".into())
+    Err(ServerError::invalid_params(
+        "Provide ms, --text, --url, --selector, or --load",
+    ))
 }

@@ -21,6 +21,7 @@ pub struct Existence {
 pub struct FrameSummary {
     pub id: String,
     pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
 }
 

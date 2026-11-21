@@ -51,13 +51,6 @@ pub(crate) fn policy(method: &str, params: &Value) -> Policy {
     }
 }
 
-fn limit(policy: Policy) -> Option<Duration> {
-    match policy {
-        Policy::Read => Some(blockers::READ_LIMIT),
-        _ => None,
-    }
-}
-
 fn ends_itself(method: &str) -> bool {
     method.starts_with("agent.") || crate::operations::sidecar::supports(method)
 }
@@ -68,8 +61,22 @@ impl Call {
         Self {
             method: method.to_owned(),
             policy,
-            limit: limit(policy),
+            limit: blockers::limit(policy, params),
             ends_itself: ends_itself(method),
+        }
+    }
+
+    pub(crate) fn catalog(request: &eoka_protocol::Request) -> Self {
+        let command = request.cmd();
+        let arguments = request.args_json();
+        let policy = blockers::policy(command, &arguments);
+        Self {
+            method: eoka_protocol::operation_by_cmd(command)
+                .map_or(command, |operation| operation.path)
+                .to_owned(),
+            policy,
+            limit: blockers::limit(policy, &arguments),
+            ends_itself: false,
         }
     }
 }
@@ -241,14 +248,6 @@ mod tests {
         for method in ["page.capture_state", "page.evaluate", "page.screenshot"] {
             assert!(!ends_itself(method), "{method}");
         }
-    }
-
-    #[test]
-    fn reads_and_waits_are_bounded_and_scripts_are_not() {
-        assert_eq!(limit(Policy::Read), Some(blockers::READ_LIMIT));
-        assert_eq!(limit(Policy::Wait), None);
-        assert_eq!(limit(Policy::Script), None);
-        assert_eq!(limit(Policy::Capture), None);
     }
 
     #[test]
