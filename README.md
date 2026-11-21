@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/shrimp-software/eoka-tools/actions/workflows/ci.yml/badge.svg)](https://github.com/shrimp-software/eoka-tools/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/eoka-cli.svg?label=eoka-cli)](https://crates.io/crates/eoka-cli)
-[![npm](https://img.shields.io/npm/v/@cbxss/eoka/beta.svg?label=%40cbxss%2Feoka)](https://www.npmjs.com/package/@cbxss/eoka)
+[![npm](https://img.shields.io/npm/v/@cbxss/eoka.svg?label=%40cbxss%2Feoka)](https://www.npmjs.com/package/@cbxss/eoka)
 [![Go Reference](https://pkg.go.dev/badge/github.com/shrimp-software/eoka-tools/clients/go.svg)](https://pkg.go.dev/github.com/shrimp-software/eoka-tools/clients/go)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
@@ -108,7 +108,7 @@ actions:
 | [**eoka-protocol**](crates/eoka-protocol) | Shared daemon protocol types and tool catalog metadata |
 | [**eoka-sdk**](crates/eoka-sdk) | Rust SDK for typed Eoka browser sessions |
 | [**eoka-tack**](crates/eoka-tack) | Tack `ToolSet` adapter generated from the Eoka protocol catalog |
-| [**@cbxss/eoka**](clients/node) | Node/TypeScript SDK for private sidecar sessions; npm beta: `npm install @cbxss/eoka` |
+| [**@cbxss/eoka**](clients/node) | Node/TypeScript SDK for private sidecar sessions: `npm install @cbxss/eoka` |
 | [**eoka-runner**](crates/eoka-runner) | Declarative YAML automation runner |
 | [**eoka-solvers**](crates/eoka-solvers) | Optional CAPTCHA plugins: Anti-Captcha provider and local DataDome slider |
 | [**eoka-email**](crates/eoka-email) | IMAP helpers for OTP and verification-link flows |

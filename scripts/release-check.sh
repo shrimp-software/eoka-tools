@@ -60,18 +60,7 @@ cargo package --workspace --allow-dirty --no-verify
 
 cat <<MSG
 
-Release check passed.
-
-Publish order:
-  0. use the published eoka ${eoka_version} registry dependency
-  1. publish tack-rs ${tack_version} crates first
-  2. cargo publish -p eoka-solvers
-  3. cargo publish -p eoka-protocol
-  4. cargo publish -p eoka-sdk
-  5. cargo publish -p eoka-email
-  6. cargo publish -p eoka-server
-  7. cargo publish -p eoka-runner
-  8. cargo publish -p eoka-mcp
-  9. cargo publish -p eoka-tack
- 10. cargo publish -p eoka-cli
+Release check passed. To release, run node scripts/bump-release.mjs X.Y.Z,
+merge it to main and approve the npm deployment. tack-rs ${tack_version}
+and eoka ${eoka_version} must already be on crates.io.
 MSG

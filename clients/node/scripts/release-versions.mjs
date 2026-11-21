@@ -1,50 +1,13 @@
-// Release version sources of truth: the SDK version in clients/node/package.json,
-// the server version in crates/eoka-server/Cargo.toml and the eoka version in
-// the root Cargo.toml [workspace.dependencies]. The Node manifest and lockfile,
-// the eoka-server eoka pin and the Go server download repeat
-// them; scripts/bump-release.mjs writes them, versionDrift() checks the Node
-// files and repoVersionDrift() checks the rest.
+// One release version for every crate and SDK: [workspace.package] version in
+// the root Cargo.toml. Every file below repeats it; scripts/bump-release.mjs
+// writes them and versionDrift() checks them. The eoka core pin in
+// crates/eoka-server/Cargo.toml follows the workspace eoka dependency instead.
 import { readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
-const sdkRoot = resolve(import.meta.dirname, '..');
-
-export async function serverCrateVersion(repoRoot = resolve(sdkRoot, '../..')) {
-  const cargo = await readFile(join(repoRoot, 'crates', 'eoka-server', 'Cargo.toml'), 'utf8');
-  const version = /^version = "([^"]+)"$/m.exec(cargo)?.[1];
-  if (!version) throw new Error('crates/eoka-server/Cargo.toml has no package version');
-  return version;
-}
-
-export async function releaseVersions(root = sdkRoot) {
-  const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
-  return { sdk: pkg.version, server: await serverCrateVersion(resolve(root, '../..')) };
-}
-
-export async function versionDrift(root = sdkRoot) {
-  const { sdk, server } = await releaseVersions(root);
-  const read = async file => JSON.parse(await readFile(join(root, file), 'utf8'));
-  const manifest = await read('release-manifest.json');
-  const lock = await read('package-lock.json');
-  const found = {
-    'release-manifest.json sdkVersion': manifest.sdkVersion,
-    ...Object.fromEntries(Object.entries(manifest.server.platforms).map(([id, pin]) => [`release-manifest.json ${id} packageVersion`, pin.packageVersion])),
-    'package-lock.json version': lock.version,
-    'package-lock.json root package version': lock.packages?.['']?.version,
-  };
-  const drift = Object.entries(found).filter(([, value]) => value !== sdk).map(([where, value]) => `${where} is ${value}, package.json is ${sdk}`);
-  if (manifest.server.version !== server) drift.push(`release-manifest.json server.version is ${manifest.server.version}, eoka-server crate is ${server}`);
-  return drift;
-}
-
-const repoRoot = resolve(sdkRoot, '../..');
-const readRepo = path => readFile(join(repoRoot, path), 'utf8');
-
-const repoPins = [
-  { file: 'crates/eoka-server/Cargo.toml', source: 'eoka', pattern: /^(eoka = "=)([^"]+)(")$/gm },
-  { file: 'clients/go/download.go', source: 'server', pattern: /^(const serverReleaseVersion = ")([^"]+)(")$/gm },
-  { file: 'clients/go/README.md', source: 'server', pattern: /(eoka-server-v)(\d+\.\d+\.\d+[^/)\]`\s]*)()/g },
-];
+const repoRoot = resolve(import.meta.dirname, '../../..');
+const read = path => readFile(join(repoRoot, path), 'utf8');
+const crates = ['eoka-solvers', 'eoka-email', 'eoka-protocol', 'eoka-sdk', 'eoka-server', 'eoka-tack'];
 
 export function workspaceDependencyVersion(cargoToml, name) {
   const section = cargoToml.split(/^\[workspace\.dependencies\]$/m)[1]?.split(/^\[/m)[0] ?? '';
@@ -54,25 +17,63 @@ export function workspaceDependencyVersion(cargoToml, name) {
   return version;
 }
 
-async function repoVersions() {
-  return { eoka: workspaceDependencyVersion(await readRepo('Cargo.toml'), 'eoka'), server: await serverCrateVersion(repoRoot) };
+export async function releaseVersion() {
+  const section = (await read('Cargo.toml')).split(/^\[workspace\.package\]$/m)[1]?.split(/^\[/m)[0] ?? '';
+  const version = /^version = "([^"]+)"$/m.exec(section)?.[1];
+  if (!version) throw new Error('Cargo.toml [workspace.package] has no version');
+  return version;
 }
 
-export async function repoVersionDrift() {
-  const versions = await repoVersions();
+// Each pin: a file and a pattern whose second group is the repeated version.
+const pins = version => [
+  ...crates.map(name => ({ file: 'Cargo.toml', pattern: new RegExp(`^(${name} = \\{ version = ")([^"]+)(")`, 'gm') })),
+  { file: 'clients/node/package.json', fields: [[]] },
+  { file: 'clients/node/package-lock.json', fields: [[], ['packages', '']] },
+  { file: 'clients/node/release-manifest.json', pattern: /("(?:sdkVersion|packageVersion)": ")([^"]+)(")/g },
+  { file: 'clients/node/release-manifest.json', pattern: /("server": \{\n {4}"version": ")([^"]+)(")/g },
+  { file: 'clients/go/download.go', pattern: /^(const serverReleaseVersion = ")([^"]+)(")$/gm },
+  { file: 'clients/go/README.md', pattern: /(eoka-server-v)(\d+\.\d+\.\d+[^/)\]`\s]*)()/g },
+  { file: 'crates/eoka-cli/skill/SKILL.md', pattern: /(\*\*)(\d+\.\d+)( \/ protocol)/g, minor: true },
+];
+const expected = (pin, version) => pin.minor ? version.split('.').slice(0, 2).join('.') : version;
+const at = (value, path) => path.reduce((node, key) => node?.[key], value);
+async function found(pin) {
+  const text = await read(pin.file);
+  if (pin.fields) return pin.fields.map(path => at(JSON.parse(text), path)?.version).filter(Boolean);
+  return [...text.matchAll(pin.pattern)].map(match => match[2]);
+}
+
+export async function versionDrift() {
+  const version = await releaseVersion();
   const drift = [];
-  for (const { file, source, pattern } of repoPins) {
-    const found = [...(await readRepo(file)).matchAll(pattern)].map(match => match[2]);
-    if (!found.length) drift.push(`${file} no longer contains its ${source} version pin`);
-    for (const value of found) if (value !== versions[source]) drift.push(`${file} pins ${value}, ${source} is ${versions[source]}`);
+  for (const pin of pins(version)) {
+    const values = await found(pin);
+    if (!values.length) drift.push(`${pin.file} no longer contains the release version`);
+    for (const value of values) if (value !== expected(pin, version)) drift.push(`${pin.file} has ${value}, the release version is ${expected(pin, version)}`);
   }
+  const cargo = await read('Cargo.toml');
+  const core = workspaceDependencyVersion(cargo, 'eoka');
+  const serverPin = /^eoka = "=([^"]+)"$/m.exec(await read('crates/eoka-server/Cargo.toml'))?.[1];
+  if (serverPin !== core) drift.push(`crates/eoka-server/Cargo.toml pins eoka =${serverPin}, the workspace uses ${core}`);
   return drift;
 }
 
-export async function writeRepoPins() {
-  const versions = await repoVersions();
-  for (const { file, source, pattern } of repoPins) {
-    const text = await readRepo(file);
-    await writeFile(join(repoRoot, file), text.replaceAll(pattern, (_, before, _old, after) => `${before}${versions[source]}${after}`));
+export async function writeVersion(version) {
+  const cargo = await read('Cargo.toml');
+  const section = /^(\[workspace\.package\]\n(?:[^[\n].*\n)*?)version = "[^"]+"/m;
+  if (!section.test(cargo)) throw new Error('Cargo.toml [workspace.package] has no version line');
+  await writeFile(join(repoRoot, 'Cargo.toml'), cargo.replace(section, `$1version = "${version}"`));
+  for (const pin of pins(version)) {
+    const text = await read(pin.file);
+    if (pin.fields) {
+      const value = JSON.parse(text);
+      for (const path of pin.fields) at(value, path).version = version;
+      await writeFile(join(repoRoot, pin.file), `${JSON.stringify(value, null, 2)}\n`);
+    } else {
+      await writeFile(join(repoRoot, pin.file), text.replace(pin.pattern, (_, before, _old, after) => `${before}${expected(pin, version)}${after}`));
+    }
   }
+  const core = workspaceDependencyVersion(await read('Cargo.toml'), 'eoka');
+  const server = await read('crates/eoka-server/Cargo.toml');
+  await writeFile(join(repoRoot, 'crates/eoka-server/Cargo.toml'), server.replace(/^eoka = "=[^"]+"$/m, `eoka = "=${core}"`));
 }
