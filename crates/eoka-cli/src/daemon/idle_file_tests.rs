@@ -8,18 +8,19 @@ async fn delayed_idle_file_operation_keeps_commands_and_shutdown_serviceable() {
     tokio::task::LocalSet::new()
         .run_until(async {
             async fn command(name: &str, cmd: &str, args: Value) -> eoka_sdk::Response {
-                let mut socket =
-                    tokio::net::UnixStream::connect(eoka_sdk::session::socket_path(name))
-                        .await
-                        .unwrap();
-                let request = eoka_sdk::request_from_cmd(cmd, args).unwrap();
-                let mut wire = serde_json::to_value(request).unwrap();
-                wire["protocol_major"] = json!(eoka_protocol::sidecar::PROTOCOL_VERSION.major);
-                eoka_sdk::write_msg(&mut socket, &wire).await.unwrap();
-                tokio::time::timeout(Duration::from_secs(3), eoka_sdk::read_msg(&mut socket))
+                let socket = tokio::net::UnixStream::connect(eoka_sdk::session::socket_path(name))
                     .await
-                    .unwrap()
-                    .unwrap()
+                    .unwrap();
+                let (reader, mut writer) = socket.into_split();
+                let mut reader = tokio::io::BufReader::new(reader);
+                let frame = eoka_protocol::wire::request_frame(cmd, args);
+                tokio::time::timeout(
+                    Duration::from_secs(3),
+                    eoka_protocol::wire::call(&mut reader, &mut writer, Some(&frame)),
+                )
+                .await
+                .unwrap()
+                .unwrap()
             }
             let name = format!("idle-file-fixture-{}", std::process::id());
             let spec = LaunchSpec::Launch {

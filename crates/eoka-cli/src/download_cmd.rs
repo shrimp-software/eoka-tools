@@ -170,25 +170,42 @@ pub async fn run(
 mod tests {
     use super::*;
     use clap::Parser;
+    use eoka_protocol::wire;
+
+    fn hello() -> serde_json::Value {
+        serde_json::json!({"protocol": eoka_protocol::sidecar::PROTOCOL_VERSION,"mode":"headless"})
+    }
+
     async fn handshake(listener: &tokio::net::UnixListener) {
-        let (mut stream, _) = listener.accept().await.unwrap();
-        assert!(matches!(
-            eoka_protocol::read_msg::<_, Request>(&mut stream)
-                .await
-                .unwrap(),
-            Request::SessionHello
-        ));
-        eoka_protocol::write_msg(
-            &mut stream,
-            &Response::ok(serde_json::json!({"protocol_major": eoka_protocol::sidecar::PROTOCOL_VERSION.major,"mode":"headless"})),
-        )
-        .await
-        .unwrap();
+        let (stream, _) = listener.accept().await.unwrap();
+        let (reader, mut writer) = stream.into_split();
+        let mut reader = tokio::io::BufReader::new(reader);
+        let frame = wire::read_frame(&mut reader).await.unwrap().unwrap();
+        assert_eq!(frame["method"], wire::HELLO);
+        let reply = wire::reply_frame(&frame["id"], &Response::ok(hello()));
+        wire::write_frame(&mut writer, &reply).await.unwrap();
+    }
+
+    async fn next_request(
+        listener: &tokio::net::UnixListener,
+    ) -> (
+        tokio::io::BufReader<tokio::net::unix::OwnedReadHalf>,
+        tokio::net::unix::OwnedWriteHalf,
+        serde_json::Value,
+        Request,
+    ) {
+        let (stream, _) = listener.accept().await.unwrap();
+        let (reader, mut writer) = stream.into_split();
+        let mut reader = tokio::io::BufReader::new(reader);
+        let (id, request) = wire::accept(&mut reader, &mut writer, &hello())
+            .await
+            .unwrap()
+            .unwrap();
+        (reader, writer, id, request)
     }
 
     #[tokio::test]
     async fn lost_wait_response_keeps_known_id_without_replaying_start() {
-        use eoka_protocol::{read_msg, write_msg};
         use tokio::net::UnixListener;
         let session = format!("download-wait-loss-{}", std::process::id());
         crate::session::ensure_runtime_dir().unwrap();
@@ -196,23 +213,20 @@ mod tests {
         let listener = UnixListener::bind(&path).unwrap();
         let server = tokio::spawn(async move {
             handshake(&listener).await;
-            let (mut start, _) = listener.accept().await.unwrap();
+            let (start, mut writer, id, request) = next_request(&listener).await;
             assert!(matches!(
-                read_msg::<_, Request>(&mut start).await.unwrap(),
+                request,
                 Request::ActionCommand(ref args) if args.command=="download_start"
             ));
-            write_msg(
-                &mut start,
-                &Response::ok(serde_json::json!({"id":"known-job","state":"pending"})),
-            )
-            .await
-            .unwrap();
-            drop(start);
+            let pending = Response::ok(serde_json::json!({"id":"known-job","state":"pending"}));
+            wire::write_frame(&mut writer, &wire::reply_frame(&id, &pending))
+                .await
+                .unwrap();
+            drop((start, writer));
             handshake(&listener).await;
-            let (mut wait, _) = listener.accept().await.unwrap();
-            let request: Request = read_msg(&mut wait).await.unwrap();
+            let (wait, writer, _, request) = next_request(&listener).await;
             assert!(matches!(request, Request::DownloadWait(ref args) if args.id == "known-job"));
-            drop(wait);
+            drop((wait, writer));
             assert!(
                 tokio::time::timeout(std::time::Duration::from_millis(150), listener.accept())
                     .await

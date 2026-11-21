@@ -1,79 +1,126 @@
 use super::*;
-use tokio::io::AsyncWriteExt;
-use tokio::net::{UnixListener, UnixStream};
-
-fn temp_socket_path(name: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join(format!(
-        "eoka-protocol-test-{}-{}.sock",
-        std::process::id(),
-        name
-    ))
-}
 
 #[tokio::test]
-async fn round_trip_over_unix_socket() {
-    let sock_path = temp_socket_path("roundtrip");
-    let _ = std::fs::remove_file(&sock_path);
-    let listener = UnixListener::bind(&sock_path).unwrap();
-
-    let server = tokio::spawn(async move {
-        let (stream, _) = listener.accept().await.unwrap();
-        let (mut reader, mut writer) = stream.into_split();
-        let req: Request = read_msg(&mut reader).await.unwrap();
-        assert_eq!(req.cmd(), "click");
-        assert_eq!(req.args_json(), serde_json::json!({ "target": "@e1" }));
-        write_msg(&mut writer, &Response::ok_text("pong"))
-            .await
-            .unwrap();
+async fn a_request_and_its_reply_round_trip_as_sidecar_frames() {
+    let (client, server) = tokio::io::duplex(1 << 16);
+    let (server_read, mut server_write) = tokio::io::split(server);
+    let (client_read, mut client_write) = tokio::io::split(client);
+    let mut server_read = tokio::io::BufReader::new(server_read);
+    let mut client_read = tokio::io::BufReader::new(client_read);
+    let click = Request::Click(TargetArgs {
+        operation: Default::default(),
+        target: "@e1".into(),
     });
-
-    let stream = UnixStream::connect(&sock_path).await.unwrap();
-    let (mut reader, mut writer) = stream.into_split();
-    write_msg(
-        &mut writer,
-        &Request::Click(TargetArgs {
-            operation: Default::default(),
-            target: "@e1".into(),
-        }),
-    )
-    .await
-    .unwrap();
-    let response: Response = read_msg(&mut reader).await.unwrap();
-
-    server.await.unwrap();
-    let _ = std::fs::remove_file(&sock_path);
-
-    assert!(response.ok);
-    assert_eq!(
-        response.data,
-        Some(serde_json::Value::String("pong".into()))
-    );
-    assert_eq!(response.error, None);
-}
-
-#[tokio::test]
-async fn read_msg_rejects_oversized_length_prefix() {
-    let sock_path = temp_socket_path("oversized");
-    let _ = std::fs::remove_file(&sock_path);
-    let listener = UnixListener::bind(&sock_path).unwrap();
-
-    let server = tokio::spawn(async move {
-        let (stream, _) = listener.accept().await.unwrap();
-        let (mut reader, _writer) = stream.into_split();
-        let result: std::io::Result<Request> = read_msg(&mut reader).await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("too large"));
-    });
-
-    let mut stream = UnixStream::connect(&sock_path).await.unwrap();
-    let oversized_len: u32 = 65 * 1024 * 1024;
-    stream
-        .write_all(&oversized_len.to_be_bytes())
+    wire::write_frame(&mut client_write, &wire::request(&click))
         .await
         .unwrap();
+    let frame = wire::read_frame(&mut server_read).await.unwrap().unwrap();
+    assert_eq!(frame["method"], "click");
+    let incoming = wire::incoming(frame).ok().unwrap();
+    let request = incoming.request().unwrap();
+    assert_eq!(request.cmd(), "click");
+    assert_eq!(request.args_json()["target"], "@e1");
+    let failed = Response::err_detail(
+        ErrorDetail::new("daemon_busy", "busy")
+            .retryable(true)
+            .hint("wait"),
+    );
+    wire::write_frame(&mut server_write, &wire::reply_frame(&incoming.id, &failed))
+        .await
+        .unwrap();
+    let reply = wire::response(wire::read_frame(&mut client_read).await.unwrap().unwrap());
+    assert_eq!(
+        serde_json::to_value(&reply).unwrap(),
+        serde_json::to_value(&failed).unwrap()
+    );
+}
 
-    server.await.unwrap();
-    let _ = std::fs::remove_file(&sock_path);
+#[test]
+fn replies_keep_every_field_the_cli_renders() {
+    let mut failed = Response::err_detail(
+        ErrorDetail::new("dialog_open", "A dialog is open").hint("dialog accept"),
+    );
+    failed.error = Some("Dialog blocks the tab".into());
+    failed.data = Some(serde_json::json!({"operation_id": "op", "status": "not_dispatched"}));
+    let frame = wire::reply_frame(&serde_json::json!(2), &failed);
+    assert_eq!(frame["error"]["code"], "DialogOpen");
+    let back = wire::response(frame);
+    assert_eq!(
+        serde_json::to_value(&back).unwrap(),
+        serde_json::to_value(&failed).unwrap()
+    );
+    let ok = wire::response(wire::reply_frame(
+        &serde_json::json!(2),
+        &Response::ok_text("done"),
+    ));
+    assert_eq!(
+        serde_json::to_value(&ok).unwrap(),
+        serde_json::to_value(Response::ok_text("done")).unwrap()
+    );
+}
+
+#[test]
+fn the_session_wire_is_locked() {
+    use serde_json::json;
+    let failed = {
+        let mut response = Response::err_detail(
+            ErrorDetail::new("daemon_busy", "Session `work` is busy")
+                .retryable(true)
+                .hint("Run it again once the running command returns."),
+        );
+        response.data = Some(json!({"operation_id": "op-1", "status": "not_dispatched"}));
+        response
+    };
+    let frames = [
+        ("hello", wire::hello_frame()),
+        (
+            "open",
+            wire::request_frame(
+                "open",
+                json!({"url": "https://example.com/", "operation_id": "op-1"}),
+            ),
+        ),
+        (
+            "key.down",
+            wire::request(&Request::KeyDown(HeldKeyArgs {
+                key: "Shift".into(),
+            })),
+        ),
+        ("tab.new", wire::request_frame("tab_new", json!({}))),
+        (
+            "reply ok",
+            wire::reply_frame(&json!(2), &Response::ok_text("done")),
+        ),
+        ("reply error", wire::reply_frame(&json!(2), &failed)),
+    ];
+    let actual: String = frames
+        .iter()
+        .map(|(name, frame)| format!("{}\n", json!({"name": name, "frame": frame})))
+        .collect();
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/locks/session-wire.jsonl");
+    if std::env::var_os("EOKA_UPDATE_LOCKS").is_some() {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, &actual).unwrap();
+    }
+    let locked = std::fs::read_to_string(&path)
+        .expect("run with EOKA_UPDATE_LOCKS=1 to create the session wire lock");
+    assert_eq!(
+        actual, locked,
+        "the session wire changed; review it and update with EOKA_UPDATE_LOCKS=1"
+    );
+}
+
+#[tokio::test]
+async fn an_unterminated_or_oversized_frame_is_an_error() {
+    let mut partial = tokio::io::BufReader::new(&b"{\"id\":1"[..]);
+    assert!(wire::read_frame(&mut partial).await.is_err());
+    let big = vec![b'x'; sidecar::MAX_MESSAGE_BYTES + 8];
+    let mut oversized = tokio::io::BufReader::new(&big[..]);
+    let error = wire::read_frame(&mut oversized).await.unwrap_err();
+    assert!(error.to_string().contains("maxMessageBytes"));
+    let mut empty = tokio::io::BufReader::new(&b""[..]);
+    assert!(wire::read_frame(&mut empty).await.unwrap().is_none());
 }
 
 #[test]

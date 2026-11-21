@@ -496,7 +496,7 @@ impl Engine {
                 LaunchSpec::Reuse => "reuse",
             };
             return Response::ok(
-                json!({"protocol_major": eoka_protocol::sidecar::PROTOCOL_VERSION.major, "daemon_version":host_version(), "session":self.session_name, "mode":mode, "configuration_fingerprint":self.spec.configuration_fingerprint()}),
+                json!({"protocol": eoka_protocol::sidecar::PROTOCOL_VERSION, "serverVersion": host_version(), "session": self.session_name, "mode": mode, "configurationFingerprint": self.spec.configuration_fingerprint()}),
             );
         }
         if let Err(error) = crate::url_policy::ensure_args_allowed(args) {

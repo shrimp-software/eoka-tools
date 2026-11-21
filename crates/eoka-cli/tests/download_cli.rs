@@ -817,27 +817,28 @@ async fn disconnected_clients_do_not_cancel_and_large_files_stay_out_of_daemon_m
     cli.open(&fixture).await;
     let pid = std::fs::read_to_string(eoka_sdk::session::pid_path(&cli.effective_name())).unwrap();
     let socket = eoka_sdk::session::socket_path(&cli.effective_name());
-    let mut stream = tokio::net::UnixStream::connect(&socket).await.unwrap();
-    eoka_sdk::write_msg(
-        &mut stream,
-        &serde_json::json!({"protocol_major": eoka_protocol::sidecar::PROTOCOL_VERSION.major,"cmd":"download_start","args":eoka_protocol::DownloadStartArgs {
-            operation_id: None,
-            click: Some("css:#slow".into()),
-            url: None,
-            output: cli
-                .directory
-                .path()
-                .join("disconnected.bin")
-                .to_str()
-                .unwrap()
-                .into(),
-            expect_bytes: None,
-            start_timeout_ms: 1000,
-        }}),
+    let stream = tokio::net::UnixStream::connect(&socket).await.unwrap();
+    send_and_leave(
+        stream,
+        eoka_protocol::wire::request_frame(
+            "download_start",
+            serde_json::json!(eoka_protocol::DownloadStartArgs {
+                operation_id: None,
+                click: Some("css:#slow".into()),
+                url: None,
+                output: cli
+                    .directory
+                    .path()
+                    .join("disconnected.bin")
+                    .to_str()
+                    .unwrap()
+                    .into(),
+                expect_bytes: None,
+                start_timeout_ms: 1000,
+            }),
+        ),
     )
-    .await
-    .unwrap();
-    drop(stream);
+    .await;
     tokio::time::sleep(Duration::from_millis(3000)).await;
     let jobs = cli.ok(&["download", "list"]).await;
     assert_eq!(jobs.as_array().unwrap().len(), 1);
@@ -950,14 +951,14 @@ async fn durable_actions_survive_client_disconnect_and_completed_downloads_survi
     cli.ok(&["eval", "document.body.insertAdjacentHTML('beforeend','<button id=operation>Run</button><p id=operation-result>pending</p>');window.operationHits=0;document.getElementById('operation').onclick=()=>{window.operationHits++;setTimeout(()=>document.getElementById('operation-result').textContent='done',300)};true"]).await;
     let id = "6d098ba0-d7d5-4d08-940a-438a0d6a5375";
     let expect=serde_json::json!({"kind":"text","target":{"query":{"kind":"css","selector":"#operation-result"}},"value":"done"}).to_string();
-    let request = serde_json::json!({"protocol_major": eoka_protocol::sidecar::PROTOCOL_VERSION.major,"cmd":"action_command","args":{"operation_id":id,"command":"click","arguments":{"target":"css:#operation","expect":serde_json::from_str::<Value>(&expect).unwrap()}}});
-    let mut stream = UnixStream::connect(eoka_sdk::session::socket_path(&cli.session))
+    let request = eoka_protocol::wire::request_frame(
+        "action_command",
+        serde_json::json!({"operation_id":id,"command":"click","arguments":{"target":"css:#operation","expect":serde_json::from_str::<Value>(&expect).unwrap()}}),
+    );
+    let stream = UnixStream::connect(eoka_sdk::session::socket_path(&cli.session))
         .await
         .unwrap();
-    eoka_protocol::write_msg(&mut stream, &request)
-        .await
-        .unwrap();
-    drop(stream);
+    send_and_leave(stream, request).await;
     let mut record = Value::Null;
     for _ in 0..50 {
         let result = cli.call(&["operations", "get", id]).await;
@@ -1038,4 +1039,15 @@ async fn durable_actions_survive_client_disconnect_and_completed_downloads_survi
         std::fs::read(cli.directory.path().join("restart.bin")).unwrap(),
         bytes
     );
+}
+
+async fn send_and_leave(stream: tokio::net::UnixStream, frame: Value) {
+    use eoka_protocol::wire;
+    let (reader, mut writer) = stream.into_split();
+    let mut reader = tokio::io::BufReader::new(reader);
+    wire::write_frame(&mut writer, &wire::hello_frame())
+        .await
+        .unwrap();
+    assert!(wire::read_frame(&mut reader).await.unwrap().is_some());
+    wire::write_frame(&mut writer, &frame).await.unwrap();
 }

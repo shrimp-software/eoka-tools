@@ -1,5 +1,15 @@
 use super::*;
+use tokio::io::BufReader;
+use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::UnixListener;
+
+fn hello(extra: serde_json::Value) -> serde_json::Value {
+    let mut hello = serde_json::json!({"protocol": eoka_protocol::sidecar::PROTOCOL_VERSION,"mode":"headless","configurationFingerprint":test_client("fixture").spec.configuration_fingerprint()});
+    for (key, value) in extra.as_object().into_iter().flatten() {
+        hello[key] = value.clone();
+    }
+    hello
+}
 
 async fn handshake(listener: &UnixListener) {
     handshake_with(listener, serde_json::json!({})).await;
@@ -7,14 +17,43 @@ async fn handshake(listener: &UnixListener) {
 
 async fn handshake_with(listener: &UnixListener, extra: serde_json::Value) {
     let (stream, _) = listener.accept().await.unwrap();
-    let (mut reader, mut writer) = stream.into_split();
-    let request: Request = read_msg(&mut reader).await.unwrap();
-    assert!(matches!(request, Request::SessionHello));
-    let mut hello = serde_json::json!({"protocol_major": eoka_protocol::sidecar::PROTOCOL_VERSION.major,"mode":"headless","configuration_fingerprint":test_client("fixture").spec.configuration_fingerprint()});
-    for (key, value) in extra.as_object().into_iter().flatten() {
-        hello[key] = value.clone();
+    let (reader, mut writer) = stream.into_split();
+    let mut reader = BufReader::new(reader);
+    let frame = wire::read_frame(&mut reader).await.unwrap().unwrap();
+    assert_eq!(frame["method"], wire::HELLO);
+    let reply = wire::reply_frame(&frame["id"], &Response::ok(hello(extra)));
+    wire::write_frame(&mut writer, &reply).await.unwrap();
+}
+
+struct Conn {
+    _reader: BufReader<OwnedReadHalf>,
+    writer: OwnedWriteHalf,
+    id: serde_json::Value,
+}
+
+impl Conn {
+    async fn reply(&mut self, response: &Response) {
+        let frame = wire::reply_frame(&self.id, response);
+        wire::write_frame(&mut self.writer, &frame).await.unwrap();
     }
-    write_msg(&mut writer, &Response::ok(hello)).await.unwrap();
+}
+
+async fn next_request(listener: &UnixListener) -> (Conn, Request) {
+    let (stream, _) = listener.accept().await.unwrap();
+    let (reader, mut writer) = stream.into_split();
+    let mut reader = BufReader::new(reader);
+    let (id, request) = wire::accept(&mut reader, &mut writer, &hello(serde_json::json!({})))
+        .await
+        .unwrap()
+        .unwrap();
+    (
+        Conn {
+            _reader: reader,
+            writer,
+            id,
+        },
+        request,
+    )
 }
 
 fn fake_daemon(prefix: &str) -> (String, std::path::PathBuf, UnixListener) {
@@ -59,10 +98,8 @@ async fn a_daemon_that_accepts_but_stays_silent_is_reported_as_unresponsive() {
 async fn an_unanswered_read_times_out_with_the_daemon_activity_and_is_not_replayed() {
     let (session, socket, listener) = fake_daemon("reply-timeout");
     let server = tokio::spawn(async move {
-        handshake_with(&listener, serde_json::json!({"command_limit_ms":100})).await;
-        let (stream, _) = listener.accept().await.unwrap();
-        let (mut reader, _held) = stream.into_split();
-        let request: Request = read_msg(&mut reader).await.unwrap();
+        handshake_with(&listener, serde_json::json!({"commandLimitMs":100})).await;
+        let (_held, request) = next_request(&listener).await;
         assert_eq!(request.cmd(), "info");
         handshake_with(
             &listener,
@@ -104,10 +141,8 @@ async fn an_unanswered_read_times_out_with_the_daemon_activity_and_is_not_replay
 async fn an_unanswered_script_reports_that_it_may_have_run() {
     let (session, socket, listener) = fake_daemon("script-timeout");
     let server = tokio::spawn(async move {
-        handshake_with(&listener, serde_json::json!({"command_limit_ms":100})).await;
-        let (stream, _) = listener.accept().await.unwrap();
-        let (mut reader, held) = stream.into_split();
-        let request: Request = read_msg(&mut reader).await.unwrap();
+        handshake_with(&listener, serde_json::json!({"commandLimitMs":100})).await;
+        let (held, request) = next_request(&listener).await;
         assert_eq!(request.cmd(), "exec");
         let (probe, _) = listener.accept().await.unwrap();
         tokio::time::sleep(Duration::from_millis(1700)).await;
@@ -138,9 +173,7 @@ async fn a_busy_refusal_is_returned_as_is_and_never_replayed() {
     let (session, socket, listener) = fake_daemon("busy-daemon");
     let server = tokio::spawn(async move {
         handshake(&listener).await;
-        let (stream, _) = listener.accept().await.unwrap();
-        let (mut reader, mut writer) = stream.into_split();
-        let _: Request = read_msg(&mut reader).await.unwrap();
+        let (mut conn, _) = next_request(&listener).await;
         let busy = Response::err_detail(
             eoka_protocol::ErrorDetail::new(
                 "daemon_busy",
@@ -149,7 +182,7 @@ async fn a_busy_refusal_is_returned_as_is_and_never_replayed() {
             .retryable(true)
             .hint("Run it again once the running command returns."),
         );
-        write_msg(&mut writer, &busy).await.unwrap();
+        conn.reply(&busy).await;
         assert!(
             tokio::time::timeout(Duration::from_millis(200), listener.accept())
                 .await
@@ -273,9 +306,7 @@ async fn agent_step_allocates_id_before_transport_and_retains_it_on_disconnect()
     let listener = UnixListener::bind(&socket).unwrap();
     let server = tokio::spawn(async move {
         handshake(&listener).await;
-        let (stream, _) = listener.accept().await.unwrap();
-        let (mut reader, _) = stream.into_split();
-        let request: Request = read_msg(&mut reader).await.unwrap();
+        let (_conn, request) = next_request(&listener).await;
         let Request::AgentStep(args) = request else {
             panic!("wrong request")
         };
@@ -364,16 +395,12 @@ async fn typed_mouse_down_helper_sends_protocol_request() {
 
     let server = tokio::spawn(async move {
         handshake(&listener).await;
-        let (stream, _) = listener.accept().await.unwrap();
-        let (mut reader, mut writer) = stream.into_split();
-        let request: Request = read_msg(&mut reader).await.unwrap();
+        let (mut conn, request) = next_request(&listener).await;
         assert_eq!(request.cmd(), "mouse_down");
         assert_eq!(request.args_json()["x"], 10.0);
         assert_eq!(request.args_json()["y"], 20.0);
         assert_eq!(request.args_json()["button"], "left");
-        write_msg(&mut writer, &Response::ok_text("ok"))
-            .await
-            .unwrap();
+        conn.reply(&Response::ok_text("ok")).await;
     });
 
     let response = test_client(&session)
@@ -450,17 +477,12 @@ async fn existing_session_transport_failure_and_old_daemon_are_not_replayed() {
             let listener = UnixListener::bind(&sock).unwrap();
             let server = tokio::spawn(async move {
                 handshake(&listener).await;
-                let (stream, _) = listener.accept().await.unwrap();
-                let (mut reader, mut writer) = stream.into_split();
-                let request: Request = read_msg(&mut reader).await.unwrap();
+                let (mut conn, request) = next_request(&listener).await;
                 assert_eq!(request.cmd(), cmd);
                 if let Some(message) = error {
-                    write_msg(&mut writer, &Response::err(message))
-                        .await
-                        .unwrap();
+                    conn.reply(&Response::err(message)).await;
                 }
-                drop(reader);
-                drop(writer);
+                drop(conn);
                 assert!(
                     tokio::time::timeout(Duration::from_millis(150), listener.accept())
                         .await
@@ -521,19 +543,14 @@ async fn downloads_require_existing_sessions_and_never_replay() {
         let listener = UnixListener::bind(&sock).unwrap();
         let server = tokio::spawn(async move {
             handshake(&listener).await;
-            let (stream, _) = listener.accept().await.unwrap();
-            let (mut reader, mut writer) = stream.into_split();
-            let request: Request = read_msg(&mut reader).await.unwrap();
+            let (mut conn, request) = next_request(&listener).await;
             assert!(
                 matches!(request,Request::ActionCommand(ref a) if a.command=="download_start" && !a.operation_id.is_empty())
             );
             if let Some(message) = error {
-                write_msg(&mut writer, &Response::err(message))
-                    .await
-                    .unwrap();
+                conn.reply(&Response::err(message)).await;
             }
-            drop(reader);
-            drop(writer);
+            drop(conn);
             assert!(
                 tokio::time::timeout(Duration::from_millis(150), listener.accept())
                     .await
@@ -574,14 +591,10 @@ async fn typed_open_helper_sends_protocol_request() {
 
     let server = tokio::spawn(async move {
         handshake(&listener).await;
-        let (stream, _) = listener.accept().await.unwrap();
-        let (mut reader, mut writer) = stream.into_split();
-        let request: Request = read_msg(&mut reader).await.unwrap();
+        let (mut conn, request) = next_request(&listener).await;
         assert_eq!(request.cmd(), "open");
         assert_eq!(request.args_json()["url"], "https://example.com");
-        write_msg(&mut writer, &Response::ok_text("ok"))
-            .await
-            .unwrap();
+        conn.reply(&Response::ok_text("ok")).await;
     });
 
     let response = test_client(&session)
@@ -595,4 +608,25 @@ async fn typed_open_helper_sends_protocol_request() {
     assert!(response.ok);
     server.await.unwrap();
     let _ = std::fs::remove_file(&sock);
+}
+
+#[tokio::test]
+async fn a_daemon_from_another_version_is_reported_as_a_version_mismatch() {
+    let (session, socket, listener) = fake_daemon("old-daemon");
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut length = [0u8; 4];
+        tokio::io::AsyncReadExt::read_exact(&mut stream, &mut length)
+            .await
+            .unwrap();
+        assert!(u32::from_be_bytes(length) > 64 * 1024 * 1024);
+    });
+    let started = std::time::Instant::now();
+    let response = test_client(&session).info().await.unwrap();
+    server.await.unwrap();
+    let _ = std::fs::remove_file(socket);
+    let detail = response.error_detail.unwrap();
+    assert_eq!(detail.code, "protocol_mismatch");
+    assert!(detail.hint.unwrap().contains("eoka update --kill-daemons"));
+    assert!(started.elapsed() < Duration::from_secs(2));
 }
