@@ -88,7 +88,7 @@ jobs:
         run: "! cargo tree -p eoka-cli -e normal --depth 1 | grep -q eoka-mcp"
       - name: Dependency policy
         if: env.RUST == 'true'
-        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        uses: EmbarkStudios/cargo-deny-action@70f81531115945ba6eb6b941ec9d39d063438eb9 # v2.1.2
         with:
           command: check
 
@@ -131,7 +131,7 @@ jobs:
         working-directory: clients/go
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: "1.21"
       - name: gofmt
@@ -149,7 +149,7 @@ jobs:
       - uses: shrimp-software/eoka/.github/actions/rust@e6662c5f7faf03b5f6c2979903367003c426b5d4
         with:
           cache-key: node-schema
-      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b
+      - uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a
       - name: Install SDK dependencies
         run: mise exec -- npm --prefix clients/node ci --ignore-scripts --omit=optional
       - name: Check generated contracts against the Rust schema export
@@ -171,8 +171,8 @@ jobs:
       - uses: shrimp-software/eoka/.github/actions/rust@e6662c5f7faf03b5f6c2979903367003c426b5d4
         with:
           cache-key: browser
-      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      - uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a
+      - uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
         with:
           tool: cargo-nextest
       - name: Build native client, SDK and test archive
@@ -213,12 +213,12 @@ jobs:
             echo "EOKA_RELEASE_STAGE_DIR=$RUNNER_TEMP/eoka-stage"
           } >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
         if: matrix.suite == 'clients'
         with:
           go-version: "1.21"
-      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      - uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a
+      - uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
         if: matrix.suite != 'clients'
         with:
           tool: cargo-nextest
