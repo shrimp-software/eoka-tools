@@ -50,7 +50,7 @@ jobs:
         env:
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
-          version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' crates/eoka-cli/Cargo.toml | head -1)"
+          version="$(sed -n '/^\[workspace\.package\]/,/^\[/s/^version = "\([^"]*\)"/\1/p' Cargo.toml)"
           test "$RELEASE_TAG" = "eoka-cli-v$version"
           cargo build --release --locked -p eoka-cli --target '${{ matrix.target }}'
           target/${{ matrix.target }}/release/eoka --version

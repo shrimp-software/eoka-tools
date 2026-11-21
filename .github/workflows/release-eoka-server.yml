@@ -59,7 +59,7 @@ jobs:
           persist-credentials: false
       - name: Tag matches the server version
         run: |
-          version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' crates/eoka-server/Cargo.toml | head -1)
+          version=$(sed -n '/^\[workspace\.package\]/,/^\[/s/^version = "\([^"]*\)"/\1/p' Cargo.toml)
           test "$TAG" = "eoka-server-v${version}"
           echo "VERSION=${version}" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
