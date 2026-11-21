@@ -66,13 +66,12 @@ Publish order:
   0. use the published eoka ${eoka_version} registry dependency
   1. publish tack-rs ${tack_version} crates first
   2. cargo publish -p eoka-solvers
-  3. cargo publish -p eoka-proxy
-  4. cargo publish -p eoka-protocol
-  5. cargo publish -p eoka-sdk
-  6. cargo publish -p eoka-email
-  7. cargo publish -p eoka-server
-  8. cargo publish -p eoka-runner
-  9. cargo publish -p eoka-mcp
- 10. cargo publish -p eoka-tack
- 11. cargo publish -p eoka-cli
+  3. cargo publish -p eoka-protocol
+  4. cargo publish -p eoka-sdk
+  5. cargo publish -p eoka-email
+  6. cargo publish -p eoka-server
+  7. cargo publish -p eoka-runner
+  8. cargo publish -p eoka-mcp
+  9. cargo publish -p eoka-tack
+ 10. cargo publish -p eoka-cli
 MSG

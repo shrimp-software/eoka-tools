@@ -15,6 +15,7 @@ mod methods;
 pub mod observe;
 pub mod operations;
 pub mod page_context;
+pub mod proxy;
 pub mod recordings;
 pub mod runtime;
 pub mod saved_state;

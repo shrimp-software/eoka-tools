@@ -89,7 +89,7 @@ impl BrowserState {
 
         let proxy = proxy
             .map(|value| {
-                eoka_proxy::parse(&value).map_err(|error| eoka::Error::Launch(error.to_string()))
+                crate::proxy::parse(&value).map_err(|error| eoka::Error::Launch(error.to_string()))
             })
             .transpose()?;
 
