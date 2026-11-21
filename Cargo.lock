@@ -578,27 +578,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dirs"
-version = "7.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d57d423b3c82e89b9a24ca3091fee61f456a26edbd28d26c65906f4bc1dcd8f"
-dependencies = [
- "dirs-sys",
-]
-
-[[package]]
-name = "dirs-sys"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e01a3366d27ee9890022452ee61b2b63a67e6f13f58900b651ff5665f0bb1fab"
-dependencies = [
- "libc",
- "option-ext",
- "redox_users",
- "windows-sys 0.61.2",
-]
-
-[[package]]
 name = "displaydoc"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -666,8 +645,6 @@ dependencies = [
 [[package]]
 name = "eoka"
 version = "0.10.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "054adf64ef77e226140c2bb830ae8f67af53bb9a0320cbb6adceb492fe389b4e"
 dependencies = [
  "aho-corasick",
  "base64 0.23.1",
@@ -686,7 +663,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-cli"
-version = "0.17.0"
+version = "0.17.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -743,7 +720,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-protocol"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "eoka",
  "schemars",
@@ -775,10 +752,9 @@ dependencies = [
 
 [[package]]
 name = "eoka-sdk"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "anyhow",
- "eoka",
  "eoka-protocol",
  "libc",
  "serde_json",
@@ -788,11 +764,10 @@ dependencies = [
 
 [[package]]
 name = "eoka-server"
-version = "0.14.0"
+version = "0.14.1"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
- "dirs",
  "eoka",
  "eoka-protocol",
  "eoka-solvers",
@@ -1602,16 +1577,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a"
 
 [[package]]
-name = "libredox"
-version = "0.1.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d0b95e02c851351f877147b7deea7b1afb1df71b63aa5f8270716e0c5720616"
-dependencies = [
- "bitflags",
- "libc",
-]
-
-[[package]]
 name = "libsqlite3-sys"
 version = "0.40.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1888,12 +1853,6 @@ dependencies = [
  "pkg-config",
  "vcpkg",
 ]
-
-[[package]]
-name = "option-ext"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "ouroboros"
@@ -2580,16 +2539,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "580c875845b41ecb1564ad1ae4703044cef774145e3d7a94dc2b3fa7c97868fd"
 dependencies = [
  "bitflags",
-]
-
-[[package]]
-name = "redox_users"
-version = "0.5.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "60dc65c0ff1a7ae1294b0c67b9f14baf70b644404010370171787bfac1038fc0"
-dependencies = [
- "libredox",
- "thiserror",
 ]
 
 [[package]]

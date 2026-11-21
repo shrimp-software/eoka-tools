@@ -1,6 +1,6 @@
 {
   "name": "@cbxss/eoka",
-  "version": "0.1.0-beta.19",
+  "version": "0.1.0-beta.20",
   "private": true,
   "type": "module",
   "description": "Node.js SDK with pinned Chrome installation and verified eoka sidecar resolution",
@@ -54,7 +54,6 @@
   },
   "devDependencies": {
     "@types/node": "24.19.2",
-    "sigstore": "5.0.1",
     "typescript": "6.0.3"
   },
   "overrides": {
