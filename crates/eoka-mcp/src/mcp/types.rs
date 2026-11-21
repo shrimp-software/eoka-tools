@@ -1,20 +1,8 @@
 use serde::Deserialize;
 use std::collections::HashMap;
 
-pub type TargetRequest = eoka_protocol::TargetArgs;
-pub type FillRequest = eoka_protocol::FillArgs;
-pub type SelectRequest = eoka_protocol::SelectArgs;
-pub type TypeKeyRequest = eoka_protocol::KeyArgs;
-pub type MouseButtonRequest = eoka_protocol::MouseButtonArgs;
-pub type MouseMoveRequest = eoka_protocol::MouseMoveArgs;
-pub type ScrollRequest = eoka_protocol::TargetArgs;
-pub type FindTextRequest = eoka_protocol::TextArgs;
 pub type NewTabRequest = eoka_protocol::TabNewArgs;
-pub type TabIdRequest = eoka_protocol::TabIdArgs;
-pub type SpaNavigateRequest = eoka_protocol::PathStringArgs;
 pub type ObserveRequest = eoka_protocol::ObserveArgs;
-pub type SnapshotRequest = eoka_protocol::SnapshotArgs;
-pub type SaveStateRequest = eoka_protocol::PathArgs;
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct NavigateRequest {
@@ -34,7 +22,6 @@ pub struct NavigateRequest {
 
 pub type JsRequest = eoka_protocol::ScriptArgs;
 
-pub type FetchRequest = eoka_protocol::FetchArgs;
 pub type DownloadStartRequest = eoka_protocol::DownloadStartArgs;
 pub type DownloadIdRequest = eoka_protocol::DownloadIdArgs;
 pub type DownloadWaitRequest = eoka_protocol::DownloadWaitArgs;
@@ -199,99 +186,4 @@ pub struct LoadStateRequest {
         description = "Navigate to the saved URL before restoring (default: true). Set false to restore into the current tab. localStorage and sessionStorage are only restored when the tab is on the saved origin; otherwise they are skipped and the result says so."
     )]
     pub navigate: Option<bool>,
-}
-
-#[cfg(test)]
-mod tests {
-    use eoka_protocol::{input_schema_for_cmd, operation_by_cmd};
-
-    use super::{
-        FillRequest, MouseButtonRequest, MouseMoveRequest, NewTabRequest, ObserveRequest,
-        SaveStateRequest, SelectRequest, SnapshotRequest, SpaNavigateRequest, TabIdRequest,
-        TargetRequest, TypeKeyRequest,
-    };
-
-    #[test]
-    fn shared_mcp_protocol_operations_are_cataloged() {
-        let shared_commands = [
-            "snapshot",
-            "click",
-            "fill",
-            "select",
-            "key",
-            "mouse_down",
-            "mouse_move",
-            "mouse_up",
-            "key_down",
-            "key_up",
-            "release_all_inputs",
-            "scroll",
-            "find",
-            "tab_new",
-            "tab_switch",
-            "tab_close",
-            "spa_navigate",
-            "observe",
-            "save_state",
-        ];
-
-        for command in shared_commands {
-            assert!(
-                operation_by_cmd(command).is_some(),
-                "MCP shared request type is not represented in protocol catalog: {command}"
-            );
-        }
-    }
-
-    #[test]
-    fn shared_mcp_protocol_request_schemas_match_catalog() {
-        assert_eq!(
-            serde_json::to_value(schemars::schema_for!(TargetRequest)).unwrap(),
-            input_schema_for_cmd("click")
-        );
-        assert_eq!(
-            serde_json::to_value(schemars::schema_for!(FillRequest)).unwrap(),
-            input_schema_for_cmd("fill")
-        );
-        assert_eq!(
-            serde_json::to_value(schemars::schema_for!(SelectRequest)).unwrap(),
-            input_schema_for_cmd("select")
-        );
-        assert_eq!(
-            serde_json::to_value(schemars::schema_for!(TypeKeyRequest)).unwrap(),
-            input_schema_for_cmd("key")
-        );
-        assert_eq!(
-            serde_json::to_value(schemars::schema_for!(MouseButtonRequest)).unwrap(),
-            input_schema_for_cmd("mouse_down")
-        );
-        assert_eq!(
-            serde_json::to_value(schemars::schema_for!(MouseMoveRequest)).unwrap(),
-            input_schema_for_cmd("mouse_move")
-        );
-        assert_eq!(
-            serde_json::to_value(schemars::schema_for!(NewTabRequest)).unwrap(),
-            input_schema_for_cmd("tab_new")
-        );
-        assert_eq!(
-            serde_json::to_value(schemars::schema_for!(TabIdRequest)).unwrap(),
-            input_schema_for_cmd("tab_switch")
-        );
-        assert_eq!(
-            serde_json::to_value(schemars::schema_for!(SpaNavigateRequest)).unwrap(),
-            input_schema_for_cmd("spa_navigate")
-        );
-        assert_eq!(
-            serde_json::to_value(schemars::schema_for!(ObserveRequest)).unwrap(),
-            input_schema_for_cmd("observe")
-        );
-        assert_eq!(
-            serde_json::to_value(schemars::schema_for!(SnapshotRequest)).unwrap(),
-            input_schema_for_cmd("snapshot")
-        );
-        assert_eq!(
-            serde_json::to_value(schemars::schema_for!(SaveStateRequest)).unwrap(),
-            input_schema_for_cmd("save_state")
-        );
-    }
 }

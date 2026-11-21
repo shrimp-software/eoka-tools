@@ -10,6 +10,8 @@ Browser automation for AI agents, built on [eoka](https://github.com/shrimp-soft
 
 One shared engine drives every interface: a CLI with an agent skill, an MCP server, Node, Go and Rust SDKs, and a YAML runner. Actions are verified and durable. Each one gets an operation ID, waits for its expected outcome, and survives a lost response.
 
+![eoka filling a signup form and verifying the result](docs/assets/demo.gif)
+
 ```mermaid
 flowchart LR
     agent["AI agent"] --> cli["eoka CLI + skill"]
