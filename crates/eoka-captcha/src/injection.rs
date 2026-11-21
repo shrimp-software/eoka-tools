@@ -1,13 +1,7 @@
-//! Shared browser-side delivery for solved CAPTCHA tokens.
-//!
-//! The script is intentionally browser-library agnostic: callers execute the
-//! returned JavaScript through the browser abstraction they use.
-
 use std::fmt;
 
 const CAPTCHA_INJECT_JS: &str = include_str!("captcha_inject.js");
 
-/// The widget family that should receive a solved CAPTCHA token.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CaptchaInjectionKind {
     Auto,
@@ -17,7 +11,6 @@ pub enum CaptchaInjectionKind {
 }
 
 impl CaptchaInjectionKind {
-    /// Returns the value understood by the shared browser-side script.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Auto => "auto",
@@ -28,7 +21,6 @@ impl CaptchaInjectionKind {
     }
 }
 
-/// A validation error for an unsupported CAPTCHA injection kind.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CaptchaInjectionKindError {
     kind: String,
@@ -46,7 +38,6 @@ impl fmt::Display for CaptchaInjectionKindError {
 
 impl std::error::Error for CaptchaInjectionKindError {}
 
-/// Normalizes public solver names to the relevant widget family.
 pub fn parse_captcha_inject_kind(
     kind: &str,
 ) -> Result<CaptchaInjectionKind, CaptchaInjectionKindError> {
@@ -63,10 +54,6 @@ pub fn parse_captcha_inject_kind(
     }
 }
 
-/// Builds JavaScript that delivers `token` to the selected CAPTCHA widget.
-///
-/// The token and optional callback are JSON encoded so untrusted values cannot
-/// alter the generated script.
 pub fn build_captcha_inject_js(
     token: &str,
     kind: CaptchaInjectionKind,

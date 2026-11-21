@@ -988,9 +988,6 @@ mod tests {
             .map(|args| assert_command_maps_to_cataloged_operation(args))
             .collect();
 
-        // The catalog is the single list of operations: anything added to it
-        // must be reachable from the CLI. These are the only exceptions, each
-        // reached another way.
         let not_cli_commands = [
             "session_hello",  // sent by every client connection, not a command
             "action_command", // envelope `main` wraps around back/forward/reload

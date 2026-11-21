@@ -346,8 +346,6 @@ fn managed_validation_and_invalid_executables_never_launch_a_fallback() {
         std::fs::set_permissions(&non_executable, std::fs::Permissions::from_mode(0o600)).unwrap();
     }
     let mut invalid = vec![root.path().join("missing-chrome"), root.path().to_owned()];
-    // Windows has no execute permission, so a plain file there is only
-    // rejected when it fails to spawn, after the profile exists.
     if cfg!(unix) {
         invalid.push(non_executable);
     }
@@ -814,7 +812,6 @@ fn catalog_operations_run_on_the_addressed_page_and_report_structured_errors() {
         .unwrap()
         .to_owned();
 
-    // Each call targets the page named by pageId, in either order.
     for (id, page, title) in [(4, &first, "first"), (5, &second, "second")] {
         let response = server.request(
             id,
@@ -826,12 +823,10 @@ fn catalog_operations_run_on_the_addressed_page_and_report_structured_errors() {
     for (id, page, title) in [(6, &second, "second"), (7, &first, "first")] {
         let response = server.request(id, "info", json!({"pageId":page}));
         assert!(response["result"].to_string().contains(title), "{response}");
-        // The sidecar's own method sees the same page.
         let legacy = server.request(id + 10, "page.title", json!({"pageId":page}));
         assert_eq!(legacy["result"]["title"], title, "{legacy}");
     }
 
-    // An operation with no sidecar equivalent: console capture.
     assert!(server
         .request(20, "console", json!({"pageId":first}))
         .get("result")
@@ -852,7 +847,6 @@ fn catalog_operations_run_on_the_addressed_page_and_report_structured_errors() {
         "{other}"
     );
 
-    // Reads, waits and shadow clicks folded in from the sidecar-only methods.
     let markup = "document.body.innerHTML = '<h1>Heading</h1><a id=link href=\"/next\">Next</a>'; \
         setTimeout(() => { const late = document.createElement('p'); late.id = 'late'; late.textContent = 'Late'; document.body.append(late); }, 200); void 0";
     server.request(50, "exec", json!({"pageId":first,"raw":true,"code":markup}));
@@ -895,11 +889,9 @@ fn catalog_operations_run_on_the_addressed_page_and_report_structured_errors() {
         "wait",
         json!({"pageId":first,"selector":"#absent","state":"attached","timeout":300}),
     );
-    // Core errors keep their kind through the catalog path.
     assert_eq!(missing["error"]["code"], "Timeout", "{missing}");
     let absent = server.request(49, "get_text", json!({"pageId":first,"selector":"#absent"}));
     assert_eq!(absent["error"]["code"], "ElementNotFound", "{absent}");
-    // The shadow search needs a real document rather than about:blank.
     let shadow_url = "data:text/html,<!doctype html><title>start</title><div id=host></div><script>\
         const root = document.getElementById('host').attachShadow({mode:'closed'});\
         root.innerHTML = '<button id=inner style=\"width:120px;height:40px\">go</button>';\
@@ -922,8 +914,6 @@ fn catalog_operations_run_on_the_addressed_page_and_report_structured_errors() {
     }
     assert_eq!(title["result"]["title"], "shadow-clicked", "{title}");
 
-    // Actions need no caller-supplied operation ID and return their record,
-    // including when the outcome is not verified.
     let reloaded = server.request(100, "reload", json!({"pageId":first}));
     assert_eq!(
         reloaded["result"]["outcome"], "verified_complete",
@@ -945,7 +935,6 @@ fn catalog_operations_run_on_the_addressed_page_and_report_structured_errors() {
         "an unverified action must still return its record: {unverified}"
     );
 
-    // A reference from the sidecar's own observation resolves in a catalog action.
     server.request(
         103,
         "exec",
@@ -961,8 +950,6 @@ fn catalog_operations_run_on_the_addressed_page_and_report_structured_errors() {
     let stale = server.request(106, "scroll", json!({"pageId":shadow,"target":"@e999"}));
     assert!(stale.get("error").is_some(), "{stale}");
 
-    // An interception rule must not stall requests made outside the engine:
-    // nothing polls an adopted engine, so it has to keep draining by itself.
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     std::thread::spawn(move || {
@@ -975,7 +962,6 @@ fn catalog_operations_run_on_the_addressed_page_and_report_structured_errors() {
             );
         }
     });
-    // Same origin as the fixture, so the credentialed fetch below is allowed.
     let opened = server.request(
         108,
         "open",
@@ -1012,7 +998,6 @@ fn catalog_operations_run_on_the_addressed_page_and_report_structured_errors() {
         "{rules}"
     );
 
-    // Unknown and camelCase fields are named instead of ignored.
     let misspelt = server.request(
         113,
         "click_shadow",
@@ -1037,7 +1022,6 @@ fn catalog_operations_run_on_the_addressed_page_and_report_structured_errors() {
         assert_eq!(response["error"]["code"], code, "{method}: {response}");
     }
 
-    // The browser stays under sidecar ownership and closes with it.
     assert!(server
         .request(40, "browser.close_tab", json!({"pageId":second}))
         .get("result")
@@ -1051,7 +1035,6 @@ fn catalog_operations_run_on_the_addressed_page_and_report_structured_errors() {
     server.shutdown(43);
 }
 
-/// A same-origin fixture: a small form page at any path, plain text at `/data`.
 fn fixture_server() -> std::net::SocketAddr {
     const PAGE: &str = "<!doctype html><title>fixture</title><h1>Heading</h1>\
         <input id=name aria-label=Name><select id=pick><option value=a>A<option value=b>B</select>\
@@ -1094,9 +1077,6 @@ fn every_catalog_operation_answers_through_the_sidecar() {
     let file = |name: &str| scratch.join(name).to_string_lossy().into_owned();
     let status = json!({"kind":"text","target":{"query":{"kind":"css","selector":"#status"}},"value":"clicked"});
 
-    // `true` means the call must succeed. `false` means the operation has
-    // nothing to act on in this fixture (no CAPTCHA, no WASM, no dialog) and
-    // only has to answer with a structured operation error.
     let calls: Vec<(&str, Value, bool)> = vec![
         ("open", json!({"url":format!("{origin}/page")}), true),
         ("info", json!({}), true),
@@ -1266,15 +1246,12 @@ fn every_catalog_operation_answers_through_the_sidecar() {
         }
         match response["error"]["code"].as_str() {
             None => {}
-            // A wrong name, a rejected input or a server fault is a defect in
-            // the projection whatever the fixture contains.
             Some(code @ ("UnknownMethod" | "InvalidParams" | "Internal" | "InvalidPage")) => {
                 problems.push(format!("{method} failed with {code}: {summary}"))
             }
             Some(_) if must_succeed => problems.push(format!("{method} failed: {summary}")),
             Some(_) => {}
         }
-        // An action that was admitted answers with its record either way.
         if must_succeed && response["result"]["outcome"].is_string() {
             let outcome = response["result"]["outcome"].as_str().unwrap();
             let unverified_by_design = matches!(method, "double_click" | "key");
@@ -1283,7 +1260,6 @@ fn every_catalog_operation_answers_through_the_sidecar() {
             }
         }
     }
-    // The server is still healthy and the page is still the one addressed.
     let title = server.request(5000, "page.title", json!({"pageId":page}));
     if title["result"]["title"] != "fixture" {
         problems.push(format!("page was lost: {title}"));

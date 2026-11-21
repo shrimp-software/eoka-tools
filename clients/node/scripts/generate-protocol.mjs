@@ -72,12 +72,10 @@ const goCatalog = `${header}
 
 package eoka
 
-// Catalog operation method names for Page.Invoke.
 const (
 ${catalog.map(method => `\t${`Op${pascal(method)}`.padEnd(goWidth)} = ${JSON.stringify(method)}`).join("\n")}
 )
 
-// CatalogMethods lists every catalog operation this client was generated with.
 var CatalogMethods = []string{
 ${catalog.map(method => `\tOp${pascal(method)},`).join("\n")}
 }

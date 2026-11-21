@@ -160,9 +160,6 @@ func WithVisible() Option {
 	return WithHeadless(false)
 }
 
-// WithAutoSolveCloudflare has the server watch every tab and solve full-page
-// Cloudflare challenges. Zero durations use the server defaults (500ms poll,
-// 30s per solve). It applies to both Launch and Connect.
 func WithAutoSolveCloudflare(interval, timeout time.Duration) Option {
 	return func(o *options) {
 		o.autoSolveCloudflare = true

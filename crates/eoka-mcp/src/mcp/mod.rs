@@ -62,7 +62,6 @@ const MCP_PROTOCOL_TOOL_ROUTES: &[(&str, &str)] = &[
     ("captcha_turnstile", "captcha_turnstile"),
 ];
 
-/// Hand-written tools that cover a catalog command under a different name.
 const MCP_OWN_TOOL_COMMANDS: &[(&str, &str)] = &[
     ("navigate", "open"),
     ("page_info", "info"),
@@ -1406,8 +1405,6 @@ mod tests {
             .chain(MCP_OWN_TOOL_COMMANDS)
             .map(|(_, command)| *command)
             .collect();
-        // Every operation that acts on a page, including those the sidecar
-        // serves under a method of its own such as recording.
         for operation in eoka_protocol::sidecar::page_operations() {
             let name = operation.name.replace('.', "_");
             assert!(
@@ -1416,7 +1413,6 @@ mod tests {
                 operation.cmd
             );
         }
-        // Opt-in operations stay out of the default tool list.
         let mut default_router = EokaServer::tool_router();
         add_catalog_tools(&mut default_router, false);
         assert!(default_router.map.contains_key("content"));

@@ -1110,7 +1110,6 @@ pub enum OperationCommand {
     },
 }
 
-/// Parse `X,Y,WIDTH,HEIGHT` for `screenshot --clip`.
 fn parse_clip(value: &str) -> Result<eoka_protocol::sidecar::ScreenshotClip, String> {
     let numbers: Vec<f64> = value
         .split(',')

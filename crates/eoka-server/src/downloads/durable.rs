@@ -337,7 +337,6 @@ mod tests {
         });
     }
 
-    // Downloads are Unix-only (ensure_space rejects other platforms).
     #[cfg(unix)]
     #[tokio::test]
     async fn publication_recovery_requires_native_completion_and_the_original_artifact() {

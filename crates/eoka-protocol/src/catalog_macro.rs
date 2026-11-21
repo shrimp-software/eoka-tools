@@ -1,6 +1,3 @@
-//! `define_operations!` builds the operation catalog: the `Request` enum,
-//! its command names and tool metadata, from one table in `catalog.rs`.
-
 macro_rules! define_operations {
     (
         $(

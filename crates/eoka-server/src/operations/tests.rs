@@ -39,8 +39,6 @@ async fn admission_is_unique_conflicts_are_rejected_and_values_are_not_saved() {
         .is_err());
     for entry in std::fs::read_dir(directory.path()).unwrap() {
         let path = entry.unwrap().path();
-        // The store holds its lock files open; Windows locks are mandatory,
-        // so they cannot be read. They are always empty.
         if path.extension().is_some_and(|e| e == "lock") {
             continue;
         }

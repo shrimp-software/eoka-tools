@@ -2,35 +2,29 @@ use crate::{Error, Result};
 use serde::Deserialize;
 use std::collections::HashMap;
 
-/// Runtime parameters passed to a config.
 #[derive(Debug, Clone, Default)]
 pub struct Params {
     values: HashMap<String, String>,
 }
 
 impl Params {
-    /// Create empty params.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Set a parameter value.
     pub fn set(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.values.insert(key.into(), value.into());
         self
     }
 
-    /// Get a parameter value.
     pub fn get(&self, key: &str) -> Option<&str> {
         self.values.get(key).map(|s| s.as_str())
     }
 
-    /// Check if empty.
     pub fn is_empty(&self) -> bool {
         self.values.is_empty()
     }
 
-    /// Parse from CLI args like "key=value".
     pub fn from_args(args: &[String]) -> Result<Self> {
         let mut params = Self::new();
         for arg in args {
@@ -43,21 +37,16 @@ impl Params {
     }
 }
 
-/// Parameter definition in config.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ParamDef {
-    /// Whether this parameter is required.
     #[serde(default)]
     pub required: bool,
 
-    /// Default value if not provided.
     pub default: Option<String>,
 
-    /// Description for documentation.
     pub description: Option<String>,
 }
 
-/// Substitute `${var}` patterns in a string.
 pub fn substitute(
     template: &str,
     params: &Params,
@@ -86,11 +75,9 @@ pub fn substitute(
                     var_name
                 )));
             } else {
-                // Optional param with no default - leave empty
                 String::new()
             }
         } else {
-            // Unknown param - leave as-is for now (might be env var or other substitution)
             start = var_end + 1;
             continue;
         };
@@ -102,7 +89,6 @@ pub fn substitute(
     Ok(result)
 }
 
-/// Recursively substitute params in a serde_yaml::Value.
 pub fn substitute_value(
     value: &mut serde_yaml::Value,
     params: &Params,

@@ -8,27 +8,27 @@ use tracing_subscriber::FmtSubscriber;
 #[command(about = "Config-based browser automation")]
 #[command(version)]
 struct Cli {
-    /// Config file to run
+    #[arg(help = "Config file to run")]
     config: PathBuf,
 
-    /// Run in headless mode (overrides config)
-    #[arg(long)]
+    #[arg(long, help = "Run in headless mode (overrides config)")]
     headless: bool,
 
-    /// Set a parameter (can be used multiple times)
-    #[arg(short = 'P', long = "param", value_name = "KEY=VALUE")]
+    #[arg(
+        short = 'P',
+        long = "param",
+        value_name = "KEY=VALUE",
+        help = "Set a parameter (can be used multiple times)"
+    )]
     params: Vec<String>,
 
-    /// Verbose output (-v for info, -vv for debug)
-    #[arg(short, long, action = clap::ArgAction::Count)]
+    #[arg(short, long, action = clap::ArgAction::Count, help = "Verbose output (-v for info, -vv for debug)")]
     verbose: u8,
 
-    /// Validate config without running
-    #[arg(long)]
+    #[arg(long, help = "Validate config without running")]
     check: bool,
 
-    /// Quiet mode (only errors)
-    #[arg(short, long)]
+    #[arg(short, long, help = "Quiet mode (only errors)")]
     quiet: bool,
 }
 
@@ -36,7 +36,6 @@ struct Cli {
 async fn main() -> eoka_runner::Result<()> {
     let cli = Cli::parse();
 
-    // Set up logging based on verbosity
     let level = if cli.quiet {
         Level::ERROR
     } else {
@@ -56,10 +55,8 @@ async fn main() -> eoka_runner::Result<()> {
         .compact()
         .init();
 
-    // Parse parameters
     let params = eoka_runner::Params::from_args(&cli.params)?;
 
-    // Load and validate config with parameters
     let mut config = eoka_runner::Config::load_with_params(&cli.config, &params)?;
 
     if cli.check {
@@ -87,14 +84,12 @@ async fn main() -> eoka_runner::Result<()> {
         return Ok(());
     }
 
-    // Override headless if specified
     if cli.headless {
         config.browser.headless = true;
     }
 
     println!("Running: {}", config.name);
 
-    // Get base path for resolving includes (directory containing the config file)
     let base_path = cli
         .config
         .parent()
@@ -103,7 +98,6 @@ async fn main() -> eoka_runner::Result<()> {
     let mut runner = eoka_runner::Runner::new(&config.browser).await?;
     let result = runner.run_with_base_path(&config, base_path).await?;
 
-    // Print result
     println!();
     if result.success {
         println!("✓ Success");

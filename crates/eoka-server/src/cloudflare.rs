@@ -1,9 +1,3 @@
-//! Cloudflare challenge handling shared by the sidecar, CLI daemon and MCP.
-//!
-//! `solve_turnstile` clicks the Turnstile checkbox through its closed shadow
-//! root until the page leaves the challenge. `CloudflareWatcher` runs it
-//! automatically for every tab whose title is a full-page challenge.
-
 use std::time::{Duration, Instant};
 
 use eoka::Page;
@@ -19,8 +13,6 @@ const RETRY_INTERVAL: Duration = Duration::from_millis(500);
 pub const DEFAULT_SOLVE_TIMEOUT: Duration = Duration::from_secs(30);
 pub const DEFAULT_WATCH_INTERVAL: Duration = Duration::from_millis(500);
 
-/// Full-page Cloudflare challenge titles. A Turnstile widget embedded in a
-/// normal form uses the same frame URL, so the title is the discriminator.
 pub fn is_challenge_title(title: &str) -> bool {
     let title = title.to_lowercase();
     [
@@ -42,10 +34,6 @@ pub struct TurnstileReceipt {
     pub elapsed: Duration,
 }
 
-/// Click the Turnstile checkbox until the page leaves the challenge.
-///
-/// Returns immediately with zero clicks when the page is not a challenge.
-/// Click failures are retried until `timeout`, then reported in the timeout.
 pub async fn solve_turnstile(page: &Page, timeout: Duration) -> eoka::Result<TurnstileReceipt> {
     let started = Instant::now();
     let deadline = started + timeout;
@@ -91,11 +79,6 @@ pub async fn solve_turnstile(page: &Page, timeout: Duration) -> eoka::Result<Tur
     }
 }
 
-/// Polls the published pages and solves full-page challenges one at a time.
-///
-/// It only uses `Page` clones handed to `set_pages`, never its own CDP
-/// sessions or the browser handle, so stopping it is enough for browser
-/// teardown to proceed.
 pub struct CloudflareWatcher {
     pages: watch::Sender<Vec<(String, Page)>>,
     stop: watch::Sender<bool>,
@@ -119,7 +102,6 @@ impl CloudflareWatcher {
         );
     }
 
-    /// Stop polling and wait for an in-flight solve to observe the signal.
     pub async fn stop(mut self) {
         self.stop.send_replace(true);
         if tokio::time::timeout(Duration::from_secs(2), &mut self.task)

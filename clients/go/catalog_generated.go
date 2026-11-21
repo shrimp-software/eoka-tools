@@ -2,7 +2,6 @@
 
 package eoka
 
-// Catalog operation method names for Page.Invoke.
 const (
 	OpBack                = "back"
 	OpCaptchaDatadome     = "captcha.datadome"
@@ -89,7 +88,6 @@ const (
 	OpWasmWrite           = "wasm.write"
 )
 
-// CatalogMethods lists every catalog operation this client was generated with.
 var CatalogMethods = []string{
 	OpBack,
 	OpCaptchaDatadome,

@@ -48,22 +48,17 @@ use script_policy::{ScriptPolicyMode, ScriptPolicyState};
 use state::{BrowserState, TabState};
 use target::{click_once, json_str, title_nonblocking, wait_for_stable};
 
-/// Hooks for the daemon's own regression tests.
 #[doc(hidden)]
 pub mod test_support {
     pub use super::intercept_files::FILE_SLOT;
 }
 
-/// Map a recording result onto a catalog response, keeping the record that a
-/// failure carries so the caller can still read its state and partial path.
 fn recording_response(
     result: Result<Value, eoka_protocol::sidecar::ServerError>,
 ) -> Result<Response, EngineError> {
     match result {
         Ok(record) => Ok(Response::ok(record)),
         Err(error) => {
-            // Keep the recording error kind (for example recording_not_found)
-            // instead of the generic classification of its message.
             let code = serde_json::to_value(error.code)
                 .ok()
                 .and_then(|code| code.as_str().map(snake_case))
@@ -89,9 +84,6 @@ fn snake_case(pascal: &str) -> String {
     snake
 }
 
-/// A failed catalog command. Errors from the core library keep their kind so
-/// every adapter can report a timeout or a missing element as such; anything
-/// else is a message.
 #[derive(Debug)]
 pub struct EngineError {
     message: String,
@@ -100,8 +92,6 @@ pub struct EngineError {
 
 impl EngineError {
     fn into_response(self) -> Response {
-        // A known core error kind replaces the message-based classification
-        // entirely, including its retry flag and hint.
         match self
             .kind
             .and_then(eoka_protocol::sidecar::core_error_detail_code)
@@ -135,7 +125,6 @@ impl From<anyhow::Error> for EngineError {
     fn from(error: anyhow::Error) -> Self {
         match error.downcast::<eoka::Error>() {
             Ok(error) => error.into(),
-            // The outermost message only, as these errors were reported before.
             Err(error) => error.to_string().into(),
         }
     }
@@ -161,8 +150,6 @@ impl From<&str> for EngineError {
 
 static HOST_VERSION: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
 
-/// Record the version of the binary hosting the engine. It is reported by
-/// `session_hello` and in exported HAR files; defaults to this crate's version.
 pub fn set_host_version(version: &'static str) {
     let _ = HOST_VERSION.set(version);
 }
@@ -249,9 +236,6 @@ impl Engine {
         self.ensure_browser().await
     }
 
-    /// An engine over a browser the caller owns and keeps managing, sharing
-    /// the caller's durable operation records and recordings. Tabs are supplied per call
-    /// through [`Engine::handle_on`]; the engine never closes the browser.
     pub fn adopt(
         session_name: impl Into<String>,
         browser: std::sync::Arc<eoka::Browser>,
@@ -307,8 +291,6 @@ impl Engine {
         response
     }
 
-    /// Stop tracking a tab the owner is closing and release what the engine
-    /// attached to it.
     pub async fn release_tab(&mut self, tab_id: &str) {
         let session = self
             .state
@@ -324,7 +306,6 @@ impl Engine {
         self.service_idle_fetch();
     }
 
-    /// Stop tracking a tab that is already gone.
     pub fn forget_tab(&mut self, tab_id: &str) {
         if let Some(state) = self.state.as_mut() {
             state.tabs.remove(tab_id);
@@ -334,8 +315,6 @@ impl Engine {
         }
     }
 
-    /// Stop everything the engine runs against a browser it adopted, before
-    /// the owner closes that browser.
     pub async fn release(&mut self) {
         self.downloads.stop().await;
         if let Some(recorder) = self.network.take() {
@@ -350,7 +329,6 @@ impl Engine {
         self.state = None;
     }
 
-    /// Whether a recording started through this engine is still running.
     pub fn is_recording(&self) -> bool {
         self.recordings.is_active()
     }
@@ -1074,7 +1052,6 @@ impl Engine {
         recording_response(crate::recordings::control(&self.recordings, method, params).await)
     }
 
-    /// Accept (`Some(prompt_text)`) or dismiss (`None`) the open JavaScript dialog.
     async fn cmd_dialog(&mut self, accept: Option<Option<&str>>) -> Result<Response, EngineError> {
         let tab = self.require_tab_mut()?;
         tab.invalidate();
@@ -1674,8 +1651,6 @@ impl Engine {
             .as_ref()
             .and_then(|s| s.tabs.get(&tab_id))
             .map(|t| t.page.session().clone());
-        // A recording cannot outlive its tab; cancel it rather than leave it
-        // running against a closed target.
         if let Err(error) = self.recordings.cancel_page(&tab_id).await {
             eprintln!("[eoka] recording cleanup failed: {}", error.message);
         }
