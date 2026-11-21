@@ -4,7 +4,7 @@ A Go client for [`eoka`](https://github.com/shrimp-software/eoka), a Rust stealt
 Chrome-automation library, via its `eoka-server` sidecar process. This
 package spawns `eoka-server` as a child process and drives it over
 newline-delimited JSON on stdin/stdout, per the contract in
-[`PROTOCOL.md`](../../PROTOCOL.md).
+[`docs/protocol.md`](../../docs/protocol.md).
 
 ## Install
 
@@ -74,7 +74,7 @@ Click/type/key methods accept `ActionOptions{Expect: ...}` and require a fresh
 observable completion condition. Use `NewOperationID` plus `Page.Perform` to retain
 the ID before transmission; `Operation` and `WaitOperation` recover the record after
 a lost response. Actions are never replayed automatically.
-See [OPERATIONS.md](../../OPERATIONS.md) for JSON expectations and durable recovery.
+See [docs/operations.md](../../docs/operations.md) for JSON expectations and durable recovery.
 
 ## Usage
 

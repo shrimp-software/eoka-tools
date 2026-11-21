@@ -378,7 +378,7 @@ Element handles do not cross this wire.
 - Waits: `page.wait_for`, `page.wait_for_visible`, `page.wait_for_text`.
 - Evaluation: `page.evaluate` returns `{result: <JSON value>}`;
   `page.execute` discards the result. These accept `function` and JSON `arguments`; raw evaluation uses the explicit
-  `page.evaluate_raw` / `page.execute_raw` methods. See [migration](RELIABILITY-MIGRATION.md). These are JavaScript primitives,
+  `page.evaluate_raw` / `page.execute_raw` methods. These are JavaScript primitives,
   not action-receipt-producing operations and not closure serialization.
 - Fetch: `page.fetch` performs browser-context fetch with page credentials and
   preserves its existing result shape. The protocol response limit does not
@@ -565,7 +565,7 @@ as complete. A record can instead report `not_dispatched` or `outcome_unknown`.
 
 No uncertain action is automatically replayed. Local waiter cancellation,
 transport loss and shutdown remain separate from the site's business outcome.
-See [OPERATIONS.md](OPERATIONS.md) for deduplication and durable recovery.
+See [operations.md](operations.md) for deduplication and durable recovery.
 
 Chrome answers no page-level request (`page.title`, `page.url`, evaluation,
 element reads) for a page whose main-frame navigation is still waiting for the
@@ -623,7 +623,7 @@ does not roll back dispatched work. Durable operation IDs are allocated before
 dispatch; strict action conveniences require verified receipts. Close is shared,
 bounded and uncanceled by abandoned request waiters. If both work and cleanup
 fail, AggregateError retains the primary error as `cause`, including operation
-identity for recovery. See [the Node SDK README](clients/node/README.md).
+identity for recovery. See [the Node SDK README](../clients/node/README.md).
 
 Go errors preserve structured server data and caller-known operation IDs.
 Go launch negotiates compatibility before opening Chrome, and close requests

@@ -6,11 +6,6 @@ saw. There is no Eoka agent planner. It answers one question: given the same
 agent and the same tasks, does one build of the tools get it stuck less than
 another?
 
-Earlier pilots are recorded in [RESULTS.md](RESULTS.md) and
-[DOWNLOAD-RESULTS.md](DOWNLOAD-RESULTS.md). They predate verify-by-default and
-this harness's surfaces and tasks, so their numbers are not comparable with new
-runs.
-
 ## Surfaces
 
 `--surfaces` picks how the agent reaches the tools:

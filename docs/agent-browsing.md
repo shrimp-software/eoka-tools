@@ -64,9 +64,6 @@ validation. Use real Tab blur and an enabled/visible application condition.
 `mode: "explore"` permits unverified input and reports `outcome_unknown` (CLI exit
 4). Running actions return exit 3; verified completion returns 0; definite
 failures return 1. Operation and observation errors retain the action receipt.
-See [RELIABILITY-MIGRATION.md](RELIABILITY-MIGRATION.md) for popup destinations,
-pagination, function evaluation and session migration.
-
 ## Blocked and busy sessions
 
 Chrome answers no page command while a JavaScript dialog is open or while a tab
@@ -123,7 +120,7 @@ defined in `eoka-protocol` and projected through CLI, Tack and MCP.
 
 ## Evaluation
 
-The reproducible comparison in [eval/agent-browsing](eval/agent-browsing/README.md)
+The reproducible comparison in [eval/agent-browsing](../eval/agent-browsing/README.md)
 uses the same existing Pi agent/model with Eoka and the installed Browser Use
 CLI. Fixtures independently count submissions/downloads and verify output files.
 Treat its results as a controlled pilot, not proof about arbitrary websites.
