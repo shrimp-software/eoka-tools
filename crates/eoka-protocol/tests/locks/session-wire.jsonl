@@ -1,0 +1,6 @@
+{"frame":{"id":1,"method":"server.hello","params":{"protocol":{"major":3,"minor":0}}},"name":"hello"}
+{"frame":{"id":2,"method":"open","params":{"operation_id":"op-1","url":"https://example.com/"}},"name":"open"}
+{"frame":{"id":2,"method":"key.down","params":{"key":"Shift"}},"name":"key.down"}
+{"frame":{"id":2,"method":"tab.new","params":{}},"name":"tab.new"}
+{"frame":{"id":2,"result":"done"},"name":"reply ok"}
+{"frame":{"error":{"code":"Operation","data":{"detail":{"code":"daemon_busy","hint":"Run it again once the running command returns.","message":"Session `work` is busy","retryable":true},"result":{"operation_id":"op-1","status":"not_dispatched"}},"message":"Session `work` is busy"},"id":2},"name":"reply error"}

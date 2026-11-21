@@ -28,7 +28,12 @@ pub fn catalog_result(
             None => ServerError::blocked(detail, None),
         },
         Some(detail) => match eoka_protocol::sidecar::core_error_code(&detail.code) {
-            Some(code) => ServerError::new(code, detail.message),
+            Some(code) => ServerError::new(code, detail.message.clone()).with_data(
+                eoka_protocol::sidecar::ErrorData {
+                    detail: Some(detail),
+                    ..Default::default()
+                },
+            ),
             None => ServerError::from_detail(detail),
         },
         None => ServerError::new(

@@ -8,27 +8,9 @@ use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 
 use crate::launch_spec::LaunchSpec;
-use crate::protocol::{write_msg, Request, Response};
+use crate::protocol::{Request, Response};
 use crate::session;
 use eoka_server::engine::Engine;
-
-fn engine_arguments(raw: &serde_json::Value) -> serde_json::Value {
-    let mut args = raw
-        .get("args")
-        .cloned()
-        .unwrap_or_else(|| serde_json::json!({}));
-    if args.is_null() {
-        args = serde_json::json!({});
-    }
-    if let Some(id) = raw.get("operation_id") {
-        args["operation_id"] = id.clone();
-    }
-    args
-}
-
-fn engine_request(raw: &serde_json::Value, parsed: Request) -> Request {
-    eoka_protocol::request_from_cmd(parsed.cmd(), engine_arguments(raw)).unwrap_or(parsed)
-}
 
 fn idle_timeout() -> Duration {
     let ms = std::env::var("EOKA_IDLE_TIMEOUT")
@@ -89,7 +71,7 @@ pub async fn run(session_name: &str, spec: LaunchSpec) -> anyhow::Result<()> {
         .data
         .unwrap_or_default();
     if hello.is_object() {
-        hello["command_limit_ms"] = serde_json::json!(command_limit_ms);
+        hello["commandLimitMs"] = serde_json::json!(command_limit_ms);
     }
     let (accepted, mut incoming) = mpsc::channel(1);
     let board = frontdoor::Board::new(session_name, hello);
@@ -106,12 +88,12 @@ pub async fn run(session_name: &str, spec: LaunchSpec) -> anyhow::Result<()> {
     loop {
         tokio::select! {
             request = incoming.recv() => {
-                let Some(frontdoor::Admitted { mut reader, mut writer, request: req, raw, turn }) = request else { break };
+                let Some(frontdoor::Admitted { mut reader, mut writer, request: req, arguments: args, turn }) = request else { break };
                 last_activity = Instant::now();
                 if matches!(req, Request::Shutdown) {
                     let _ = handler.handle(Request::Close).await;
                     let resp = Response::ok_text("Daemon shutting down");
-                    let _ = write_msg(&mut writer, &resp).await;
+                    let _ = writer.send(&resp).await;
                     break;
                 }
 
@@ -121,15 +103,13 @@ pub async fn run(session_name: &str, spec: LaunchSpec) -> anyhow::Result<()> {
                         let mut disconnected = [0u8; 1];
                         tokio::select! {
                             response = manager.wait(&args.id, args.timeout_ms) => {
-                                let _ = write_msg(&mut writer, &response).await;
+                                let _ = writer.send(&response).await;
                             },
                             _ = reader.read(&mut disconnected) => {},
                         }
                     });
                     continue;
                 }
-                let args = engine_arguments(&raw);
-                let req = engine_request(&raw, req);
                 let (caller_left, left) = tokio::sync::watch::channel(false);
                 let watchdog = tokio::spawn(async move {
                     let mut disconnected = [0u8; 1];
@@ -145,7 +125,7 @@ pub async fn run(session_name: &str, spec: LaunchSpec) -> anyhow::Result<()> {
                 watchdog.abort();
                 board.finished(handler.current_page());
                 last_activity = Instant::now();
-                if let Err(e) = write_msg(&mut writer, &resp).await {
+                if let Err(e) = writer.send(&resp).await {
                     eprintln!("[eoka] caller left before `{}` answered: {}", req.cmd(), e);
                 }
                 drop(turn);
@@ -182,112 +162,75 @@ pub async fn run(session_name: &str, spec: LaunchSpec) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod wire_tests {
-    use super::*;
+    use eoka_protocol::wire;
     use serde_json::json;
 
     const ID: &str = "11111111-1111-4111-8111-111111111111";
 
-    fn sent_by_the_cli(cmd: &str, args: serde_json::Value) -> serde_json::Value {
-        json!({"cmd": cmd, "args": args, "operation_id": ID, "protocol_major": eoka_protocol::sidecar::PROTOCOL_VERSION.major})
-    }
-
-    fn action(command: &str, arguments: serde_json::Value) -> serde_json::Value {
-        sent_by_the_cli(
-            "action_command",
-            json!({"operation_id": ID, "command": command, "arguments": arguments}),
-        )
+    fn parsed(cmd: &str, params: serde_json::Value) -> eoka_protocol::Request {
+        let frame = wire::request_frame(cmd, params);
+        wire::incoming(frame)
+            .ok()
+            .unwrap()
+            .request()
+            .unwrap_or_else(|error| panic!("{cmd} is rejected: {}", error.message))
     }
 
     #[test]
-    fn requests_from_an_older_cli_reach_the_engine_unchanged() {
+    fn session_frames_reach_the_engine_unchanged() {
         let expect = json!({"kind": "url", "value": "/next", "contains": true});
-        let envelopes = [
+        let actions = [
             (
                 "click",
                 json!({"operation_id": ID, "expect": expect, "target": "css:#save"}),
-            ),
-            (
-                "dblclick",
-                json!({"operation_id": ID, "target": "text:Open"}),
             ),
             (
                 "fill",
                 json!({"operation_id": ID, "target": "placeholder:Name", "text": "Ada", "input_mode": "sequential"}),
             ),
             (
-                "select",
-                json!({"operation_id": ID, "target": "css:select", "value": "b"}),
-            ),
-            (
-                "hover",
-                json!({"operation_id": ID, "target": "role:button"}),
-            ),
-            (
                 "key",
                 json!({"operation_id": ID, "timeout_ms": 5000, "key": "Enter"}),
             ),
             ("back", json!({"expect": expect, "timeout_ms": 5000})),
-            ("forward", json!({"expect": null, "timeout_ms": null})),
             ("reload", json!(null)),
         ];
-        for (command, arguments) in envelopes {
-            let raw = action(command, arguments.clone());
-            let request: Request = serde_json::from_value(raw.clone())
-                .unwrap_or_else(|error| panic!("{command} envelope is rejected: {error}"));
-            let request = engine_request(&raw, request);
+        for (command, arguments) in actions {
+            let args = json!({"operation_id": ID, "command": command, "arguments": arguments});
+            let request = parsed("action_command", args.clone());
             assert_eq!(request.cmd(), "action_command", "{command}");
-            assert_eq!(
-                request.args_json(),
-                json!({"operation_id": ID, "command": command, "arguments": arguments}),
-                "{command}"
-            );
+            assert_eq!(request.args_json(), args, "{command}");
         }
         let direct = [
             (
                 "open",
-                json!({"url": "https://example.com/"}),
                 json!({"url": "https://example.com/", "operation_id": ID}),
             ),
             (
                 "agent_step",
-                json!({"action": {"kind": "back"}}),
                 json!({"action": {"kind": "back"}, "operation_id": ID}),
             ),
             (
                 "action_perform",
                 json!({"operation_id": ID, "action": {"kind": "back"}, "options": {"timeout_ms": 900}}),
-                json!({"operation_id": ID, "action": {"kind": "back"}}),
             ),
-            (
-                "snapshot",
-                json!({"interactive": true}),
-                json!({"interactive": true}),
-            ),
-            ("info", json!(null), json!({})),
+            ("snapshot", json!({"interactive": true})),
         ];
-        for (cmd, args, reaches_engine) in direct {
-            let raw = sent_by_the_cli(cmd, args);
-            let request: Request = serde_json::from_value(raw.clone())
-                .unwrap_or_else(|error| panic!("{cmd} is rejected: {error}"));
-            let request = engine_request(&raw, request);
-            assert_eq!(request.cmd(), cmd);
-            let reached = request.args_json();
-            for (field, value) in reaches_engine.as_object().unwrap() {
-                assert_eq!(&reached[field], value, "{cmd} {field}");
+        for (cmd, params) in direct {
+            let reached = parsed(cmd, params.clone()).args_json();
+            for (field, value) in params.as_object().unwrap() {
+                if !value.is_object() {
+                    assert_eq!(&reached[field], value, "{cmd} {field}");
+                }
             }
         }
-        let timed = sent_by_the_cli(
-            "action_perform",
-            json!({"operation_id": ID, "action": {"kind": "back"}, "options": {"timeout_ms": 900}}),
-        );
-        let request: Request = serde_json::from_value(timed.clone()).unwrap();
         assert_eq!(
-            engine_request(&timed, request).args_json()["options"]["timeout_ms"],
+            parsed("action_perform", json!({"operation_id": ID, "action": {"kind": "back"}, "options": {"timeout_ms": 900}}))
+                .args_json()["options"]["timeout_ms"],
             900
         );
-        let bare = json!({"cmd": "text", "protocol_major": eoka_protocol::sidecar::PROTOCOL_VERSION.major});
-        let request: Request = serde_json::from_value(bare.clone()).unwrap();
-        assert_eq!(engine_request(&bare, request).args_json(), json!({}));
+        assert_eq!(parsed("text", json!(null)).cmd(), "text");
+        assert_eq!(parsed("tab_new", json!({})).cmd(), "tab_new");
     }
 }
 

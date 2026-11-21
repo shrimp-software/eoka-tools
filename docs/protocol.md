@@ -1,8 +1,14 @@
-# eoka-server wire protocol
+# eoka wire protocol
 
-`eoka-server` is a private subprocess wrapping the `eoka` Rust browser library.
-It accepts newline-delimited JSON on stdin and returns newline-delimited JSON on
-stdout. It is not the CLI daemon and does not expose every CLI/MCP/Tack tool.
+One wire protocol, newline-delimited JSON with `{id, method, params}` requests
+and `{id, result}` or `{id, error}` replies, has two transports:
+
+- **stdio:** `eoka-server` is a private subprocess wrapping the `eoka` Rust
+  browser library. It reads requests on stdin and writes replies on stdout. The
+  Node and Go clients use it. Most of this document describes this transport.
+- **Session socket:** the CLI's per-session daemon listens on a Unix socket
+  (`$XDG_RUNTIME_DIR/eoka/eoka-<session>.sock`). The CLI and `eoka-sdk` use
+  it. See [Session socket](#session-socket).
 
 The canonical sidecar envelopes, method parameters, results and schemas live in
 `eoka-protocol::sidecar`. Server handlers and generated TypeScript definitions
@@ -115,7 +121,9 @@ method-specific: `operations.list`, for example, returns an array directly.
 
 Errors retain stable `code` and human-readable `message`. Optional `data`
 contains structured evidence such as an operation ID, action receipt, original
-protocol error or canonical error detail. Branch on codes and fields, not text.
+protocol error or canonical error detail. A failed catalog operation always
+carries its canonical detail in `data.detail`, including the `hint` naming
+the next step. Branch on codes and fields, not text.
 An absent receipt is not proof that nothing was dispatched.
 
 ### Blocked pages
@@ -605,3 +613,31 @@ Go launch negotiates compatibility before opening Chrome, and close requests
 `server.shutdown`. A previously downloaded server without the new handshake is
 rejected with compatible-binary guidance; do not assume an unreleased server
 artifact exists simply because client source changed.
+
+## Session socket
+
+A named session outlives the CLI invocation that started it. Its daemon speaks
+the same framing, envelopes, error codes and `server.hello` as `eoka-server`,
+with these differences:
+
+- **One exchange per connection.** A client connects, sends `server.hello`,
+  then at most one request, reads its reply and closes. Closing early tells the
+  daemon the caller left; actions that already started are not cancelled.
+- **Hello.** The reply carries `protocol`, `serverVersion`, `session`, `mode`
+  (`headless`, `headed` or `connect`), `configurationFingerprint`,
+  `commandLimitMs` and `activity` (the running command, the queue and any
+  page blocker). A hello with another protocol major is refused with
+  `protocol_mismatch`, and a connection that does not start with a JSON frame
+  is closed at once, so clients from other versions fail fast.
+- **Methods** are catalog paths with no `pageId`: they act on the session's
+  current tab. The session surface adds `tab.*`, `close` and `shutdown`,
+  which `eoka-server` does not serve.
+- **Errors** keep the CLI's full detail: `error.data.detail` is the
+  `ErrorDetail` (code, message, hint, retryable, context), and
+  `error.data.result` carries any partial result, such as an operation record.
+- **Admission.** One command runs at a time. Another waits up to
+  `EOKA_QUEUE_WAIT_MS` (default 5000) and is then refused with `daemon_busy`;
+  `dialog.accept` and `dialog.dismiss` skip the queue while a dialog blocks
+  the tab.
+
+`crates/eoka-protocol/tests/locks/session-wire.jsonl` locks the frames.

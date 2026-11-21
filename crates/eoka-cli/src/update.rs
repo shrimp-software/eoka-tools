@@ -263,7 +263,7 @@ async fn stale_daemons(installed: &str, kill: bool) -> Vec<Value> {
             .ok()
             .filter(|response| response.ok)
             .and_then(|response| response.data)
-            .and_then(|data| data["daemon_version"].as_str().map(str::to_string));
+            .and_then(|data| data["serverVersion"].as_str().map(str::to_string));
         if version.as_deref() == Some(installed) {
             continue;
         }

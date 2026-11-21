@@ -677,20 +677,19 @@ async fn failed_interception_files_suppress_clearance_and_idle_special_files_do_
             .await
             .unwrap();
     }
-    let mut socket =
+    let socket =
         tokio::net::UnixStream::connect(eoka_sdk::session::socket_path(&cli.effective_name()))
             .await
             .unwrap();
-    eoka_sdk::write_msg(
-        &mut socket,
-        &serde_json::json!({"cmd":"shutdown","protocol_major": eoka_protocol::sidecar::PROTOCOL_VERSION.major}),
+    let (reader, mut writer) = socket.into_split();
+    let mut reader = tokio::io::BufReader::new(reader);
+    let frame = eoka_protocol::wire::request_frame("shutdown", serde_json::json!({}));
+    let shutdown = tokio::time::timeout(
+        Duration::from_secs(5),
+        eoka_protocol::wire::call(&mut reader, &mut writer, Some(&frame)),
     )
     .await
+    .unwrap()
     .unwrap();
-    let shutdown: eoka_sdk::Response =
-        tokio::time::timeout(Duration::from_secs(5), eoka_sdk::read_msg(&mut socket))
-            .await
-            .unwrap()
-            .unwrap();
     assert!(shutdown.ok);
 }

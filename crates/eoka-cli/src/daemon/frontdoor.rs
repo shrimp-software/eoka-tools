@@ -2,12 +2,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use eoka_protocol::wire;
 use eoka_server::downloads::DownloadManager;
 use eoka_server::engine::blockers::{self, Blocker, Remedies, Surface};
 use eoka_server::operations::OperationManager;
 use serde_json::{json, Value};
 use tokio::{
-    io::AsyncReadExt,
+    io::{AsyncBufReadExt, AsyncReadExt, BufReader},
     net::{
         unix::{OwnedReadHalf, OwnedWriteHalf},
         UnixListener,
@@ -16,14 +17,27 @@ use tokio::{
     task::JoinSet,
 };
 
-use crate::protocol::{read_msg, write_msg, Request, Response};
+use crate::protocol::{Request, Response};
+
+pub(super) type Reader = BufReader<OwnedReadHalf>;
 
 pub(super) struct Admitted {
-    pub reader: OwnedReadHalf,
-    pub writer: OwnedWriteHalf,
+    pub reader: Reader,
+    pub writer: Replier,
     pub request: Request,
-    pub raw: Value,
+    pub arguments: Value,
     pub turn: OwnedMutexGuard<()>,
+}
+
+pub(super) struct Replier {
+    writer: OwnedWriteHalf,
+    id: Value,
+}
+
+impl Replier {
+    pub async fn send(&mut self, response: &Response) -> std::io::Result<()> {
+        wire::write_frame(&mut self.writer, &wire::reply_frame(&self.id, response)).await
+    }
 }
 
 struct Running {
@@ -220,6 +234,38 @@ pub(super) async fn serve(
     }
 }
 
+fn mismatch() -> Response {
+    Response::err_detail(eoka_protocol::ErrorDetail::new(
+        "protocol_mismatch",
+        "Client and daemon protocols differ; upgrade explicitly. No browser was restarted and no command was dispatched.",
+    ))
+}
+
+type Incoming = Result<wire::Incoming, (Value, eoka_protocol::sidecar::ServerError)>;
+
+async fn next_frame(reader: &mut Reader) -> Option<Incoming> {
+    next_frame_from(reader).await
+}
+
+async fn next_frame_from<R: tokio::io::AsyncBufRead + Unpin>(reader: &mut R) -> Option<Incoming> {
+    let frame = tokio::time::timeout(Duration::from_secs(5), async {
+        if reader
+            .fill_buf()
+            .await?
+            .first()
+            .is_some_and(|byte| *byte != b'{')
+        {
+            return Err(std::io::Error::other("not a session frame"));
+        }
+        wire::read_frame(reader).await
+    })
+    .await;
+    match frame {
+        Ok(Ok(Some(frame))) => Some(wire::incoming(frame)),
+        _ => None,
+    }
+}
+
 async fn connection_task(
     stream: tokio::net::UnixStream,
     board: Arc<Board>,
@@ -227,20 +273,40 @@ async fn connection_task(
     downloads: DownloadManager,
     accepted: mpsc::Sender<Admitted>,
 ) {
-    let (mut reader, mut writer) = stream.into_split();
-    let raw: Value = match tokio::time::timeout(Duration::from_secs(5), read_msg(&mut reader)).await
-    {
-        Ok(Ok(raw)) => raw,
-        _ => return,
+    let (reader, writer) = stream.into_split();
+    let mut reader = BufReader::new(reader);
+    let mut writer = Replier {
+        writer,
+        id: Value::Null,
     };
-    let request: Request = match serde_json::from_value(raw.clone()) {
+    let hello = match next_frame(&mut reader).await {
+        Some(Ok(hello)) => hello,
+        Some(Err((id, error))) => {
+            let _ = wire::write_frame(&mut writer.writer, &wire::error_frame(&id, &error)).await;
+            return;
+        }
+        None => return,
+    };
+    writer.id = hello.id.clone();
+    if hello.method != wire::HELLO || !hello.protocol_matches() {
+        reply(&mut writer, mismatch()).await;
+        return;
+    }
+    reply(&mut writer, Response::ok(board.hello().await)).await;
+    let incoming = match next_frame(&mut reader).await {
+        Some(Ok(incoming)) => incoming,
+        Some(Err((id, error))) => {
+            let _ = wire::write_frame(&mut writer.writer, &wire::error_frame(&id, &error)).await;
+            return;
+        }
+        None => return,
+    };
+    writer.id = incoming.id.clone();
+    let request = match incoming.request() {
         Ok(request) => request,
         Err(error) => {
-            reply(
-                &mut writer,
-                Response::err(format!("Invalid command request: {error}")),
-            )
-            .await;
+            let _ = wire::write_frame(&mut writer.writer, &wire::error_frame(&incoming.id, &error))
+                .await;
             return;
         }
     };
@@ -248,11 +314,7 @@ async fn connection_task(
         reply(&mut writer, Response::ok(board.hello().await)).await;
         return;
     }
-    if raw["protocol_major"] != eoka_protocol::sidecar::PROTOCOL_VERSION.major {
-        reply(&mut writer, Response::err_detail(eoka_protocol::ErrorDetail::new("protocol_mismatch", "Client and daemon protocols differ; upgrade explicitly. No browser was restarted and no command was dispatched."))).await;
-        return;
-    }
-    let arguments = raw.get("args").cloned().unwrap_or(Value::Null);
+    let arguments = incoming.params;
     if matches!(request, Request::OperationWait(_)) {
         if board.waiting.load(Ordering::SeqCst) >= 64 {
             reply(
@@ -321,7 +383,7 @@ async fn connection_task(
             reader,
             writer,
             request,
-            raw,
+            arguments,
             turn,
         })
         .await;
@@ -352,13 +414,13 @@ async fn handle_dialog(
     })
 }
 
-async fn hung_up(reader: &mut OwnedReadHalf) {
+async fn hung_up(reader: &mut Reader) {
     let mut probe = [0u8; 1];
     let _ = reader.read(&mut probe).await;
 }
 
-async fn reply(writer: &mut OwnedWriteHalf, response: Response) {
-    match tokio::time::timeout(Duration::from_secs(5), write_msg(writer, &response)).await {
+async fn reply(writer: &mut Replier, response: Response) {
+    match tokio::time::timeout(Duration::from_secs(5), writer.send(&response)).await {
         Ok(Ok(())) => {}
         Ok(Err(error)) => eprintln!("[eoka] control response disconnected: {error}"),
         Err(_) => eprintln!("[eoka] control response timed out"),
@@ -372,7 +434,7 @@ mod tests {
     fn board() -> Arc<Board> {
         Board::new(
             "work",
-            json!({"protocol_major": eoka_protocol::sidecar::PROTOCOL_VERSION.major,"mode":"headless"}),
+            json!({"protocol": eoka_protocol::sidecar::PROTOCOL_VERSION,"mode":"headless"}),
         )
     }
 
@@ -383,7 +445,7 @@ mod tests {
         board.started("action_command", &json!({"command":"reload"}));
         let hello = board.hello().await;
         assert_eq!(
-            hello["protocol_major"],
+            hello["protocol"]["major"],
             eoka_protocol::sidecar::PROTOCOL_VERSION.major
         );
         assert_eq!(hello["activity"]["busy"]["cmd"], "reload");
@@ -413,6 +475,21 @@ mod tests {
             detail.context.unwrap().action_status,
             Some(eoka_protocol::ActionStatus::NotAttempted)
         );
+    }
+
+    #[tokio::test]
+    async fn a_client_from_another_version_is_dropped_at_once() {
+        let (client, server) = tokio::io::duplex(1024);
+        let (_client_read, mut client_write) = tokio::io::split(client);
+        let length_prefixed = [&22u32.to_be_bytes()[..], br#"{"cmd":"session_hello"}"#].concat();
+        tokio::io::AsyncWriteExt::write_all(&mut client_write, &length_prefixed)
+            .await
+            .unwrap();
+        let (server_read, _server_write) = tokio::io::split(server);
+        let mut reader = BufReader::new(server_read);
+        let started = Instant::now();
+        assert!(next_frame_from(&mut reader).await.is_none());
+        assert!(started.elapsed() < Duration::from_secs(1));
     }
 
     #[test]

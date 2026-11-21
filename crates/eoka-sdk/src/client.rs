@@ -4,15 +4,16 @@ use tokio::net::UnixStream;
 
 use crate::launch_spec::LaunchSpec;
 use crate::session;
+use eoka_protocol::wire;
 use eoka_protocol::{
-    read_msg, write_msg, CaptchaDatadomeArgs, CaptchaInjectArgs, CaptchaTurnstileArgs,
-    ClearFlagArgs, CloneFromArgs, ConsoleArgs, DeleteCookieArgs, DomainArgs, EmulateArgs,
-    FakeCameraArgs, FetchArgs, FillArgs, FrameEvalArgs, HeadersArgs, HeldKeyArgs, IdArgs,
-    InterceptAddArgs, KeyArgs, LoadStateArgs, ModeArgs, MouseButtonArgs, MouseMoveArgs,
-    NetworkExportArgs, NetworkLogArgs, NetworkRecordStartArgs, NetworkShowArgs, NetworkWaitArgs,
-    ObserveArgs, OpenArgs, PathArgs, PathStringArgs, Request, Response, ScreenshotArgs, ScriptArgs,
-    SelectArgs, SetCookieArgs, SetStorageArgs, SnapshotArgs, StorageArgs, TabIdArgs, TabNewArgs,
-    TargetArgs, TextArgs, WaitArgs, WasmFindArgs, WasmReadArgs, WasmWriteArgs,
+    CaptchaDatadomeArgs, CaptchaInjectArgs, CaptchaTurnstileArgs, ClearFlagArgs, CloneFromArgs,
+    ConsoleArgs, DeleteCookieArgs, DomainArgs, EmulateArgs, FakeCameraArgs, FetchArgs, FillArgs,
+    FrameEvalArgs, HeadersArgs, HeldKeyArgs, IdArgs, InterceptAddArgs, KeyArgs, LoadStateArgs,
+    ModeArgs, MouseButtonArgs, MouseMoveArgs, NetworkExportArgs, NetworkLogArgs,
+    NetworkRecordStartArgs, NetworkShowArgs, NetworkWaitArgs, ObserveArgs, OpenArgs, PathArgs,
+    PathStringArgs, Request, Response, ScreenshotArgs, ScriptArgs, SelectArgs, SetCookieArgs,
+    SetStorageArgs, SnapshotArgs, StorageArgs, TabIdArgs, TabNewArgs, TargetArgs, TextArgs,
+    WaitArgs, WasmFindArgs, WasmReadArgs, WasmWriteArgs,
 };
 
 macro_rules! forward_requests {
@@ -179,13 +180,14 @@ pub async fn send_command(
     let mut reply_limit = None;
     if !matches!(request, Request::SessionHello) {
         if let Ok(stream) = connect_session(session_name).await {
-            let hello = match exchange(stream, &hello_wire(), HELLO_LIMIT).await {
+            let hello = match exchange(stream, None, HELLO_LIMIT).await {
                 Ok(response) if response.ok => response.data.unwrap_or_default(),
                 Ok(_) => return Ok(non_retryable_error("protocol_mismatch", "Daemon compatibility could not be verified. Upgrade explicitly; no browser was restarted and no action was sent.")),
-                Err(_) => return Ok(silent_daemon(session_name)),
+                Err(Lost::Disconnected) => return Ok(other_version(session_name)),
+                Err(Lost::Timeout(_)) => return Ok(silent_daemon(session_name)),
             };
-            reply_limit = hello["command_limit_ms"].as_u64();
-            if hello["protocol_major"] != eoka_protocol::sidecar::PROTOCOL_VERSION.major {
+            reply_limit = hello["commandLimitMs"].as_u64();
+            if hello["protocol"]["major"] != eoka_protocol::sidecar::PROTOCOL_VERSION.major {
                 return Ok(non_retryable_error("protocol_mismatch", "Client and daemon protocols differ. Upgrade explicitly; the existing browser was retained."));
             }
             let required_mode = match &spec {
@@ -197,7 +199,7 @@ pub async fn send_command(
                 LaunchSpec::Reuse => None,
             };
             if spec.has_creation_settings()
-                && hello["configuration_fingerprint"] != spec.configuration_fingerprint()
+                && hello["configurationFingerprint"] != spec.configuration_fingerprint()
             {
                 return Ok(non_retryable_error("session_configuration_conflict", "Creation settings differ from the existing session. Omit creation flags to reuse it or choose a new session name."));
             }
@@ -271,26 +273,18 @@ enum Lost {
     Disconnected,
 }
 
-fn hello_wire() -> serde_json::Value {
-    serde_json::json!({"cmd":"session_hello"})
-}
-
 fn request_wire(request: &Request) -> anyhow::Result<serde_json::Value> {
-    let mut wire = serde_json::to_value(request)?;
-    wire["protocol_major"] = serde_json::json!(eoka_protocol::sidecar::PROTOCOL_VERSION.major);
-    Ok(wire)
+    Ok(wire::request(request))
 }
 
 async fn exchange(
     stream: UnixStream,
-    wire: &serde_json::Value,
+    frame: Option<&serde_json::Value>,
     limit: Duration,
 ) -> Result<Response, Lost> {
-    let (mut reader, mut writer) = stream.into_split();
-    let reply = async {
-        write_msg(&mut writer, wire).await?;
-        Ok::<Response, anyhow::Error>(read_msg(&mut reader).await?)
-    };
+    let (reader, mut writer) = stream.into_split();
+    let mut reader = tokio::io::BufReader::new(reader);
+    let reply = wire::call(&mut reader, &mut writer, frame);
     match tokio::time::timeout(limit, reply).await {
         Ok(Ok(response)) => Ok(response),
         Ok(Err(_)) => Err(Lost::Disconnected),
@@ -371,6 +365,22 @@ fn session_flag(session_name: &str) -> String {
     }
 }
 
+fn other_version(session_name: &str) -> Response {
+    let flag = session_flag(session_name);
+    Response::err_detail(
+        eoka_protocol::ErrorDetail::new(
+            "protocol_mismatch",
+            format!("Session `{session_name}` closed the connection without answering the handshake; it is most likely a daemon from another eoka version. No command was sent."),
+        )
+        .retryable(false)
+        .hint(format!("`eoka update --kill-daemons` stops daemons from other versions, or `eoka {flag}kill` stops this one; both close its browser."))
+        .context(eoka_protocol::ErrorContext {
+            action_status: Some(eoka_protocol::ActionStatus::NotAttempted),
+            ..Default::default()
+        }),
+    )
+}
+
 fn silent_daemon(session_name: &str) -> Response {
     let flag = session_flag(session_name);
     Response::err_detail(
@@ -395,7 +405,7 @@ fn silent_daemon(session_name: &str) -> Response {
 
 pub async fn session_status(session_name: &str) -> Option<serde_json::Value> {
     let stream = connect_session(session_name).await.ok()?;
-    exchange(stream, &hello_wire(), STATUS_LIMIT)
+    exchange(stream, None, STATUS_LIMIT)
         .await
         .ok()
         .filter(|response| response.ok)
@@ -548,7 +558,7 @@ async fn send_download(
         request.clone()
     };
     let exchanged = match request_wire(&wire) {
-        Ok(message) => exchange(stream, &message, reply_budget(request, reply_limit))
+        Ok(message) => exchange(stream, Some(&message), reply_budget(request, reply_limit))
             .await
             .ok(),
         Err(_) => None,
@@ -604,7 +614,7 @@ async fn send_existing_session(
         );
     };
     let exchanged = match request_wire(request) {
-        Ok(wire) => exchange(stream, &wire, reply_budget(request, reply_limit))
+        Ok(wire) => exchange(stream, Some(&wire), reply_budget(request, reply_limit))
             .await
             .ok(),
         Err(_) => None,
@@ -638,7 +648,7 @@ async fn send_command_once(
 
     let wire = request_wire(&request)?;
     Ok(
-        match exchange(stream, &wire, reply_budget(&request, reply_limit)).await {
+        match exchange(stream, Some(&wire), reply_budget(&request, reply_limit)).await {
             Ok(response) => response,
             Err(lost) => unanswered(session_name, &request, lost).await,
         },
@@ -858,14 +868,22 @@ async fn send_operation(
         .as_str()
         .map(str::to_owned)
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    let mut wire = serde_json::to_value(&request)?;
-    if request.is_convenience_action() {
-        wire = serde_json::json!({"cmd":"action_command","args":{"operation_id":id,"command":request.cmd(),"arguments":args}});
-    }
-    if !matches!(request, Request::AgentObserve(_)) {
-        wire["operation_id"] = serde_json::json!(id);
-    }
-    wire["protocol_major"] = serde_json::json!(eoka_protocol::sidecar::PROTOCOL_VERSION.major);
+    let wire = if request.is_convenience_action() {
+        wire::request_frame(
+            "action_command",
+            serde_json::json!({"operation_id":id,"command":request.cmd(),"arguments":args}),
+        )
+    } else {
+        let mut params = args.clone();
+        let queries_an_operation = request.cmd().starts_with("operation_");
+        if !matches!(request, Request::AgentObserve(_))
+            && !queries_an_operation
+            && params.is_object()
+        {
+            params["operation_id"] = serde_json::json!(id);
+        }
+        wire::request_frame(request.cmd(), params)
+    };
     let stream = match connect_session(session_name).await {
         Ok(stream) => stream,
         Err(_) if request.cmd().starts_with("operation_") => {
@@ -881,7 +899,7 @@ async fn send_operation(
             return Ok(response);
         }
     };
-    let lost = match exchange(stream, &wire, reply_budget(&request, reply_limit)).await {
+    let lost = match exchange(stream, Some(&wire), reply_budget(&request, reply_limit)).await {
         Ok(response) => return Ok(response),
         Err(lost) => lost,
     };
