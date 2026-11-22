@@ -11,12 +11,23 @@ pub const MAX_IN_FLIGHT: usize = 128;
 pub const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion { major: 4, minor: 0 };
 pub const MAX_SCREENSHOT_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_RECORDING_FPS: u32 = 120;
-pub const CAPABILITY_SCREENSHOT_OPTIONS: &str = "screenshotOptions";
-pub const CAPABILITY_SCREENSHOT_FILE: &str = "screenshotFile";
-pub const CAPABILITY_NATIVE_RECORDING: &str = "nativeRecording";
-pub const CAPABILITY_CLOUDFLARE_AUTO_SOLVE: &str = "cloudflareAutoSolve";
-pub const CAPABILITY_OPERATION_CATALOG: &str = "operationCatalog";
-pub const CAPABILITY_PAGE_BLOCKERS: &str = "pageBlockers";
+pub const CAPABILITIES: &[&str] = &[
+    "durableActions",
+    "operationCancellation",
+    "gracefulShutdown",
+    "explicitExecutablePath",
+    "browserAttachment",
+    "runtimeIsolation",
+    "sandboxControl",
+    "viewportEmulation",
+    "boundedFetch",
+    "screenshotOptions",
+    "screenshotFile",
+    "nativeRecording",
+    "cloudflareAutoSolve",
+    "operationCatalog",
+    "pageBlockers",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProtocolVersion {

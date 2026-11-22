@@ -286,11 +286,11 @@ impl Engine {
 
     pub(super) async fn cmd_recording_control(
         &mut self,
-        method: &str,
+        control: crate::recordings::RecordingControl,
         args: &RecordingIdArgs,
     ) -> Result<Response, EngineError> {
         let params = json!({"recordingId": args.recording_id});
-        recording_response(crate::recordings::control(&self.recordings, method, params).await)
+        recording_response(crate::recordings::control(&self.recordings, control, params).await)
     }
 
     pub(super) async fn cmd_dialog(

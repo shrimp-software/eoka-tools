@@ -247,7 +247,8 @@ caller (`save_state`, `load_state`, `network.export`, `intercept.add` with
 Chrome. A sidecar client has the same local reach as the `eoka` CLI. Do not pass
 untrusted input through as method names or file paths.
 
-Every registered method declares a role in `eoka-protocol::sidecar::method_role`:
+Every registered method declares a role in the `define_sidecar_methods!` table in
+`eoka-protocol::sidecar`:
 lifecycle, shared with a catalog operation of the same name, or distinct from
 the catalog for a stated reason. No registered method duplicates a catalog
 operation.

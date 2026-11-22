@@ -1,29 +1,40 @@
 use crate::state::AppState;
-use eoka_protocol::sidecar::{validate_safe_numbers, ActionPerformParams, ErrorData, ServerError};
+use eoka_protocol::sidecar::{
+    validate_safe_numbers, ActionPerformParams, ErrorData, Method, ServerError,
+};
 use eoka_protocol::{ErrorDetail, OperationIdArgs, OperationListArgs, OperationWaitArgs};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 
-pub fn supports(method: &str) -> bool {
-    method == "actions.perform" || supports_control(method)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OperationControl {
+    Get,
+    List,
+    Wait,
+    Cancel,
 }
 
-pub(crate) fn supports_control(method: &str) -> bool {
-    matches!(
-        method,
-        "operations.get" | "operations.list" | "operations.wait" | "operations.cancel"
-    )
+impl OperationControl {
+    pub(crate) fn of(method: Method) -> Option<Self> {
+        match method {
+            Method::OperationsGet => Some(Self::Get),
+            Method::OperationsList => Some(Self::List),
+            Method::OperationsWait => Some(Self::Wait),
+            Method::OperationsCancel => Some(Self::Cancel),
+            _ => None,
+        }
+    }
 }
 
 pub(crate) async fn existing_control(
     manager: &super::OperationManager,
-    method: &str,
+    control: OperationControl,
     params: &Value,
 ) -> Option<Result<Value, ServerError>> {
     validate_safe_numbers(params).ok()?;
     let args = OperationIdArgs::deserialize(params).ok()?;
     let record = manager.get(&args.id).await.ok()?;
-    Some(if method == "operations.get" {
+    Some(if control == OperationControl::Get {
         encode(record)
     } else {
         manager
@@ -52,13 +63,7 @@ fn encode<T: Serialize>(value: T) -> Result<Value, ServerError> {
     serde_json::to_value(value).map_err(|error| ServerError::internal(error.to_string()))
 }
 
-pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<Value, ServerError> {
-    if supports_control(method) {
-        return control(&state.operations, method, params).await;
-    }
-    if method != "actions.perform" {
-        return Err(ServerError::unknown_method(method));
-    }
+pub async fn perform(state: &AppState, params: Value) -> Result<Value, ServerError> {
     let args: ActionPerformParams = parse(params)?;
     let page = state.page(&args.page_id)?;
     let id = args.operation_id;
@@ -77,17 +82,14 @@ pub async fn wait(manager: &super::OperationManager, params: Value) -> Result<Va
 
 pub(crate) async fn control(
     manager: &super::OperationManager,
-    method: &str,
+    control: OperationControl,
     params: Value,
 ) -> Result<Value, ServerError> {
-    if method == "operations.wait" {
-        return wait(manager, params).await;
-    }
     validate_safe_numbers(&params)?;
-    match method {
-        "operations.get" | "operations.cancel" => {
+    match control {
+        OperationControl::Get | OperationControl::Cancel => {
             let args: OperationIdArgs = parse(params)?;
-            let record = if method == "operations.get" {
+            let record = if control == OperationControl::Get {
                 manager.get(&args.id).await
             } else {
                 manager.cancel(&args.id).await
@@ -95,7 +97,7 @@ pub(crate) async fn control(
             .map_err(|error| operation_error(error, Some(args.id)))?;
             encode(record)
         }
-        "operations.list" => {
+        OperationControl::List => {
             let args: OperationListArgs = parse(params)?;
             encode(
                 manager
@@ -104,7 +106,7 @@ pub(crate) async fn control(
                     .map_err(|error| operation_error(error, None))?,
             )
         }
-        _ => Err(ServerError::unknown_method(method)),
+        OperationControl::Wait => wait_inner(manager, params).await,
     }
 }
 

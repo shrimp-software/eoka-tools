@@ -3,8 +3,8 @@ mod lanes;
 use std::{future::Future, sync::Arc, time::Duration};
 
 use eoka_protocol::sidecar::{
-    validate_params, validate_safe_numbers, ErrorCode, ErrorData, RecordingStartParams, Request,
-    Response, ServerError, MAX_IN_FLIGHT,
+    validate_params, validate_safe_numbers, ErrorCode, ErrorData, Method, RecordingStartParams,
+    Request, Response, ServerError, MAX_IN_FLIGHT,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -16,7 +16,8 @@ use tokio::{
 
 use crate::{
     dispatch,
-    operations::sidecar,
+    operations::sidecar::{self, OperationControl},
+    recordings::RecordingControl,
     state::AppState,
     transport::{self, Frame, FrameReader},
 };
@@ -138,10 +139,22 @@ async fn cancelled(shutdown: &mut watch::Receiver<bool>) {
     let _ = shutdown.changed().await;
 }
 
+enum Waiter {
+    Operation(OperationControl),
+    Recording(RecordingControl),
+}
+
+fn waiter(method: Option<Method>) -> Option<Waiter> {
+    let method = method?;
+    OperationControl::of(method)
+        .map(Waiter::Operation)
+        .or_else(|| RecordingControl::of(method).map(Waiter::Recording))
+}
+
 fn lane(request: &Request) -> Lane {
     if matches!(
-        request.method.as_str(),
-        "browser.launch" | "browser.connect" | "browser.close"
+        Method::parse(&request.method),
+        Some(Method::BrowserLaunch | Method::BrowserConnect | Method::BrowserClose)
     ) {
         return Lane::Barrier;
     }
@@ -154,7 +167,10 @@ fn lane(request: &Request) -> Lane {
 
 fn admit<B: Backend>(backend: &B, lanes: &mut Lanes<Job>, job: Job) {
     let operation = job.operation_id.clone();
-    if sidecar::supports_control(&job.request.method) {
+    if Method::parse(&job.request.method)
+        .and_then(OperationControl::of)
+        .is_some()
+    {
         lanes.admit_after_operation(operation, job);
     } else if backend.overtakes(&job.request) {
         lanes.admit_overtaking(lane(&job.request), operation, job);
@@ -165,8 +181,13 @@ fn admit<B: Backend>(backend: &B, lanes: &mut Lanes<Job>, job: Job) {
 
 fn protected(request: &Request) -> bool {
     matches!(
-        request.method.as_str(),
-        "browser.launch" | "browser.connect" | "actions.perform" | "agent.step"
+        Method::parse(&request.method),
+        Some(
+            Method::BrowserLaunch
+                | Method::BrowserConnect
+                | Method::ActionsPerform
+                | Method::AgentStep
+        )
     ) || request.params.get("operation_id").is_some()
 }
 
@@ -358,7 +379,8 @@ where
                     },
                     Frame::Request(request) => request,
                 };
-                if request.method == "server.shutdown" {
+                let method = Method::parse(&request.method);
+                if method == Some(Method::ServerShutdown) {
                     match validate_params(&request.method, &request.params) {
                         Ok(()) => { shutdown_id = Some(request.id); break; },
                         Err(error) => {
@@ -382,7 +404,7 @@ where
                     },
                 };
                 let mut job = Job { operation_id: operation_id(&request), request, permit };
-                if job.request.method == "recording.start" {
+                if method == Some(Method::RecordingStart) {
                     let admission = RecordingStartParams::deserialize(&job.request.params)
                         .map_err(|error| ServerError::invalid_params(error.to_string()))
                         .and_then(|params| recordings.admit(params));
@@ -394,15 +416,13 @@ where
                         continue;
                     }
                 }
-                if job.request.method == "server.hello" {
+                if method == Some(Method::ServerHello) {
                     let result = dispatch::hello(std::mem::take(&mut job.request.params));
                     if let Err(error) = emit(&responses, Outgoing::result(job, result)) {
                         intake_error = Some(error);
                         break;
                     }
-                } else if crate::recordings::supports_control(&job.request.method)
-                    || sidecar::supports_control(&job.request.method)
-                {
+                } else if let Some(waiter) = waiter(method) {
                     let operations = operations.clone();
                     let recordings = recordings.clone();
                     let output = responses.clone();
@@ -413,15 +433,18 @@ where
                             biased;
                             _ = cancelled(&mut shutdown) => Some(Err(ServerError::new(ErrorCode::ShuttingDown, "wait ended because the server is shutting down; cancelling a waiter does not cancel its operation or recording"))),
                             result = async {
-                                if matches!(job.request.method.as_str(), "operations.get" | "operations.cancel") {
-                                    sidecar::existing_control(&operations, &job.request.method, &job.request.params).await
-                                } else {
-                                    let params = std::mem::take(&mut job.request.params);
-                                    Some(if crate::recordings::supports_control(&job.request.method) {
-                                        crate::recordings::control(&recordings, &job.request.method, params).await
-                                    } else {
-                                        sidecar::control(&operations, &job.request.method, params).await
-                                    })
+                                match waiter {
+                                    Waiter::Operation(control @ (OperationControl::Get | OperationControl::Cancel)) => {
+                                        sidecar::existing_control(&operations, control, &job.request.params).await
+                                    },
+                                    Waiter::Operation(control) => {
+                                        let params = std::mem::take(&mut job.request.params);
+                                        Some(sidecar::control(&operations, control, params).await)
+                                    },
+                                    Waiter::Recording(control) => {
+                                        let params = std::mem::take(&mut job.request.params);
+                                        Some(crate::recordings::control(&recordings, control, params).await)
+                                    },
                                 }
                             } => result,
                         };

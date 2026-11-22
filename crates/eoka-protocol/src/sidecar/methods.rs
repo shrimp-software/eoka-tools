@@ -86,55 +86,6 @@ pub(super) fn schema<T: JsonSchema>() -> Value {
     value
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct MethodSpec {
-    pub name: &'static str,
-    pub params_schema: fn() -> Value,
-    pub result_schema: fn() -> Value,
-    pub validate: fn(&Value) -> Result<(), ServerError>,
-}
-
-macro_rules! methods {
-    ($($name:literal => $params:ty $(, $check:expr)? => $result:ty),* $(,)?) => {
-        pub const METHODS: &[MethodSpec] = &[$(MethodSpec {
-            name: $name,
-            params_schema: schema::<$params>,
-            result_schema: schema::<$result>,
-            validate: |params| {
-                let _params = <$params>::deserialize(params)
-                    .map_err(|error| ServerError::invalid_params(error.to_string()))?;
-                $(($check)(&_params)?;)?
-                Ok(())
-            },
-        }),*];
-    };
-}
-
-methods! {
-    "server.hello" => HelloParams => HelloResult,
-    "server.shutdown" => Empty => Empty,
-    "browser.launch" => LaunchParams, LaunchParams::validate => BrowserSessionResult,
-    "browser.connect" => ConnectParams, ConnectParams::validate => BrowserSessionResult,
-    "browser.new_page" => NewPageParams => NewPageResult,
-    "browser.tabs" => Empty => TabsResult,
-    "browser.close_tab" => PageIdParams => CloseTabResult,
-    "browser.close" => Empty => Empty,
-    "actions.perform" => ActionPerformParams => crate::OperationRecord,
-    "operations.get" => OperationIdArgs => crate::OperationRecord,
-    "operations.list" => OperationListArgs => Vec<crate::OperationRecord>,
-    "operations.wait" => OperationWaitArgs => crate::OperationRecord,
-    "operations.cancel" => OperationIdArgs => crate::OperationRecord,
-    "agent.observe" => AgentObserveParams => crate::AgentObservation,
-    "agent.step" => AgentStepParams => crate::AgentStepResult,
-    "page.capture_state" => PageIdParams => CaptureStateResult,
-    "page.restore_state" => RestoreStateParams => Empty,
-    "recording.start" => RecordingStartParams, RecordingStartParams::validate => RecordingRecord,
-    "recording.get" => RecordingIdParams, RecordingIdParams::validate => RecordingRecord,
-    "recording.stop" => RecordingIdParams, RecordingIdParams::validate => RecordingRecord,
-    "recording.cancel" => RecordingIdParams, RecordingIdParams::validate => RecordingRecord,
-    "page.solve_captcha" => SolveCaptchaParams => SolveCaptchaResult,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MethodRole {
     Lifecycle,
@@ -142,25 +93,87 @@ pub enum MethodRole {
     Distinct(&'static str),
 }
 
-pub fn method_role(method: &str) -> Option<MethodRole> {
-    use MethodRole::*;
-    Some(match method {
-        "server.hello" | "server.shutdown" | "browser.launch" | "browser.connect"
-        | "browser.new_page" | "browser.tabs" | "browser.close_tab" | "browser.close" => Lifecycle,
-        "actions.perform" | "operations.get" | "operations.list" | "operations.wait"
-        | "operations.cancel" | "agent.observe" | "agent.step" | "recording.start"
-        | "recording.get" | "recording.stop" | "recording.cancel" => Shared,
-        "page.capture_state" | "page.restore_state" => {
-            Distinct("in-memory state; catalog save_state and load_state use a file")
+macro_rules! define_sidecar_methods {
+    (@feature) => { None };
+    (@feature $feature:literal) => { Some($feature) };
+    ($($variant:ident $name:literal: $params:ty $(, $check:expr)? => $result:ty, $role:ident $(($reason:literal))? $(, feature $feature:literal)?;)*) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        pub enum Method { $($variant),* }
+
+        impl Method {
+            pub const ALL: &'static [Method] = &[$(Method::$variant),*];
+
+            pub fn parse(name: &str) -> Option<Self> {
+                match name {
+                    $($name => Some(Self::$variant),)*
+                    _ => None,
+                }
+            }
+
+            pub fn name(self) -> &'static str {
+                match self { $(Self::$variant => $name),* }
+            }
+
+            pub fn role(self) -> MethodRole {
+                match self { $(Self::$variant => MethodRole::$role $(($reason))?),* }
+            }
+
+            pub fn feature(self) -> Option<&'static str> {
+                match self { $(Self::$variant => define_sidecar_methods!(@feature $($feature)?)),* }
+            }
+
+            pub fn params_schema(self) -> Value {
+                match self { $(Self::$variant => schema::<$params>()),* }
+            }
+
+            pub fn result_schema(self) -> Value {
+                match self { $(Self::$variant => schema::<$result>()),* }
+            }
+
+            pub fn validate(self, params: &Value) -> Result<(), ServerError> {
+                match self {
+                    $(Self::$variant => {
+                        let _params = <$params>::deserialize(params)
+                            .map_err(|error| ServerError::invalid_params(error.to_string()))?;
+                        $(($check)(&_params)?;)?
+                        Ok(())
+                    }),*
+                }
+            }
         }
-        "page.solve_captcha" => Distinct("provider solving runs client-side in the CLI"),
-        _ => return None,
-    })
+    };
+}
+
+define_sidecar_methods! {
+    ServerHello "server.hello": HelloParams => HelloResult, Lifecycle;
+    ServerShutdown "server.shutdown": Empty => Empty, Lifecycle;
+    BrowserLaunch "browser.launch": LaunchParams, LaunchParams::validate => BrowserSessionResult, Lifecycle;
+    BrowserConnect "browser.connect": ConnectParams, ConnectParams::validate => BrowserSessionResult, Lifecycle;
+    BrowserNewPage "browser.new_page": NewPageParams => NewPageResult, Lifecycle;
+    BrowserTabs "browser.tabs": Empty => TabsResult, Lifecycle;
+    BrowserCloseTab "browser.close_tab": PageIdParams => CloseTabResult, Lifecycle;
+    BrowserClose "browser.close": Empty => Empty, Lifecycle;
+    ActionsPerform "actions.perform": ActionPerformParams => crate::OperationRecord, Shared;
+    OperationsGet "operations.get": OperationIdArgs => crate::OperationRecord, Shared;
+    OperationsList "operations.list": OperationListArgs => Vec<crate::OperationRecord>, Shared;
+    OperationsWait "operations.wait": OperationWaitArgs => crate::OperationRecord, Shared;
+    OperationsCancel "operations.cancel": OperationIdArgs => crate::OperationRecord, Shared;
+    AgentObserve "agent.observe": AgentObserveParams => crate::AgentObservation, Shared;
+    AgentStep "agent.step": AgentStepParams => crate::AgentStepResult, Shared;
+    PageCaptureState "page.capture_state": PageIdParams => CaptureStateResult,
+        Distinct("in-memory state; catalog save_state and load_state use a file");
+    PageRestoreState "page.restore_state": RestoreStateParams => Empty,
+        Distinct("in-memory state; catalog save_state and load_state use a file");
+    RecordingStart "recording.start": RecordingStartParams, RecordingStartParams::validate => RecordingRecord, Shared;
+    RecordingGet "recording.get": RecordingIdParams, RecordingIdParams::validate => RecordingRecord, Shared;
+    RecordingStop "recording.stop": RecordingIdParams, RecordingIdParams::validate => RecordingRecord, Shared;
+    RecordingCancel "recording.cancel": RecordingIdParams, RecordingIdParams::validate => RecordingRecord, Shared;
+    PageSolveCaptcha "page.solve_captcha": SolveCaptchaParams => SolveCaptchaResult,
+        Distinct("provider solving runs client-side in the CLI"), feature "anti-captcha";
 }
 
 pub fn catalog_operations() -> impl Iterator<Item = &'static crate::OperationSpec> {
-    page_operations()
-        .filter(|operation| !METHODS.iter().any(|method| method.name == operation.path))
+    page_operations().filter(|operation| Method::parse(operation.path).is_none())
 }
 
 pub fn page_operations() -> impl Iterator<Item = &'static crate::OperationSpec> {
@@ -232,16 +245,16 @@ fn catalog_result_schema(operation: &crate::OperationSpec) -> Value {
 }
 
 pub fn method_feature(method: &str) -> Option<&'static str> {
-    match method {
-        "page.solve_captcha" => Some("anti-captcha"),
-        _ => catalog_operation(method).and_then(|operation| operation.feature),
+    match Method::parse(method) {
+        Some(method) => method.feature(),
+        None => catalog_operation(method).and_then(|operation| operation.feature),
     }
 }
 
 pub fn method_names() -> Vec<&'static str> {
-    METHODS
+    Method::ALL
         .iter()
-        .map(|method| method.name)
+        .map(|method| method.name())
         .chain(catalog_operations().map(|operation| operation.path))
         .collect()
 }
@@ -251,20 +264,18 @@ pub fn validate_params(method: &str, params: &Value) -> Result<(), ServerError> 
     if let Some(operation) = catalog_operation(method) {
         return catalog_request(operation, params).map(|_| ());
     }
-    let spec = METHODS
-        .iter()
-        .find(|spec| spec.name == method)
-        .ok_or_else(|| ServerError::unknown_method(method))?;
-    (spec.validate)(params)
+    Method::parse(method)
+        .ok_or_else(|| ServerError::unknown_method(method))?
+        .validate(params)
 }
 
 pub fn schema_bundle() -> Value {
-    let methods: BTreeMap<_, _> = METHODS
+    let methods: BTreeMap<_, _> = Method::ALL
         .iter()
         .map(|method| {
             (
-                method.name,
-                json!({"params": (method.params_schema)(), "result": (method.result_schema)()}),
+                method.name(),
+                json!({"params": method.params_schema(), "result": method.result_schema()}),
             )
         })
         .chain(catalog_operations().map(|operation| {

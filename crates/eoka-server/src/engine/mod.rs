@@ -37,6 +37,7 @@ use eoka_protocol::{
 use std::collections::HashMap;
 use std::fmt::Write as FmtWrite;
 
+use crate::recordings::RecordingControl;
 use crate::{annotate, observe, snapshot};
 use ::eoka_solvers::{build_captcha_inject_js, parse_captcha_inject_kind};
 use base64::Engine as _;
@@ -607,12 +608,17 @@ impl Engine {
             Request::Emulate(args) => self.cmd_emulate(&args).await,
             Request::Find(args) => self.cmd_find(&args).await,
             Request::RecordingStart(args) => self.cmd_recording_start(args).await,
-            Request::RecordingGet(args) => self.cmd_recording_control("recording.get", &args).await,
+            Request::RecordingGet(args) => {
+                self.cmd_recording_control(RecordingControl::Get, &args)
+                    .await
+            }
             Request::RecordingStop(args) => {
-                self.cmd_recording_control("recording.stop", &args).await
+                self.cmd_recording_control(RecordingControl::Stop, &args)
+                    .await
             }
             Request::RecordingCancel(args) => {
-                self.cmd_recording_control("recording.cancel", &args).await
+                self.cmd_recording_control(RecordingControl::Cancel, &args)
+                    .await
             }
             Request::Scroll(args) => self.cmd_scroll(&args).await,
             Request::Eval(args) => self.script("eval", eval::Script::Eval(args)).await,
