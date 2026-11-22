@@ -67,6 +67,14 @@ impl Sidecar {
         self.send(json!({"id":id,"method":method,"params":params}));
         let response = self.reply();
         assert_eq!(response["id"], id);
+        if let (Some(result), Some(operation)) = (
+            response.get("result"),
+            eoka_protocol::sidecar::catalog_operation(method),
+        ) {
+            if let Err(error) = eoka_protocol::decode_result_for_cmd(operation.cmd, result) {
+                panic!("{method} result drifted from its declared type: {error}");
+            }
+        }
         response
     }
 

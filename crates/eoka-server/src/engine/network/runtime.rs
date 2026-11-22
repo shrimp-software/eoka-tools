@@ -28,7 +28,10 @@ pub(super) async fn run_recorder(
     store: Arc<Mutex<NetworkStore>>,
     transport: Arc<Transport>,
     mut rx: broadcast::Receiver<CdpMessage>,
-    mut control_rx: mpsc::Receiver<(NetworkControl, oneshot::Sender<Value>)>,
+    mut control_rx: mpsc::Receiver<(
+        NetworkControl,
+        oneshot::Sender<eoka_protocol::NetworkStatus>,
+    )>,
     body_permits: Arc<Semaphore>,
     notify: Arc<Notify>,
 ) {
@@ -39,7 +42,7 @@ pub(super) async fn run_recorder(
                     break;
                 };
                 apply_control(&store, command, notify.as_ref()).await;
-                let _ = reply.send(store.lock().await.status_json());
+                let _ = reply.send(store.lock().await.status());
             }
             message = rx.recv() => {
                 match message {

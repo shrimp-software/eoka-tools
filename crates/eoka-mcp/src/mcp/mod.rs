@@ -1,4 +1,6 @@
 mod blocked;
+#[cfg(test)]
+mod decoded;
 mod error;
 mod helpers;
 mod reply;
@@ -112,13 +114,16 @@ impl EokaServer {
         arguments: &Value,
         request: &Operation,
     ) -> eoka_protocol::Response {
-        if let Some(response) = self.operations.query(cmd, arguments).await {
-            return response;
-        }
-        self.downloads
-            .query(request)
-            .await
-            .unwrap_or_else(|| eoka_protocol::Response::err(format!("Unknown command: {cmd}")))
+        let response =
+            match self.operations.query(cmd, arguments).await {
+                Some(response) => response,
+                None => self.downloads.query(request).await.unwrap_or_else(|| {
+                    eoka_protocol::Response::err(format!("Unknown command: {cmd}"))
+                }),
+            };
+        #[cfg(test)]
+        decoded::record(cmd, &response);
+        response
     }
 
     async fn action(
@@ -156,6 +161,8 @@ impl EokaServer {
     ) -> Result<(eoka_protocol::Response, Option<eoka_server::eoka::Page>), ErrorData> {
         let engine = self.engine.clone();
         let spoken = tool.to_owned();
+        #[cfg(test)]
+        let cmd = operation.cmd();
         let answered = tokio::spawn(async move {
             let mut engine = engine.lock_owned().await;
             if needs != OperationNeeds::Nothing && !engine.is_open() {
@@ -170,6 +177,8 @@ impl EokaServer {
         .await
         .map_err(internal)?;
         let (mut response, page) = answered?;
+        #[cfg(test)]
+        decoded::record(cmd, &response);
         let failure = response.error.clone().unwrap_or_default();
         let answered_late = failure.to_ascii_lowercase().contains("timed out")
             && page

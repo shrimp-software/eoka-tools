@@ -346,3 +346,123 @@ impl OperationSpec {
         }
     }
 }
+
+fn untyped(schema: &serde_json::Value) -> bool {
+    let shape = [
+        "type",
+        "$ref",
+        "anyOf",
+        "oneOf",
+        "allOf",
+        "properties",
+        "items",
+        "enum",
+        "const",
+    ];
+    schema.as_bool() == Some(true)
+        || schema
+            .as_object()
+            .is_some_and(|object| shape.iter().all(|key| !object.contains_key(*key)))
+}
+
+#[test]
+fn every_catalog_operation_declares_its_result() {
+    let mut arbitrary = Vec::new();
+    for operation in all_operations() {
+        let schema = result_schema_for_cmd(operation.cmd)
+            .unwrap_or_else(|| panic!("{} declares no result", operation.cmd));
+        if untyped(&schema) {
+            arbitrary.push(operation.cmd);
+        }
+    }
+    assert_eq!(
+        arbitrary,
+        ["eval"],
+        "only user-defined JavaScript values are untyped"
+    );
+    assert!(result_schema_for_cmd("no_such_command").is_none());
+}
+
+#[test]
+fn a_result_must_round_trip_through_its_declared_type() {
+    use serde_json::json;
+    decode_result_for_cmd("exists", &json!({"exists": true})).unwrap();
+    decode_result_for_cmd("text", &json!("Heading")).unwrap();
+    decode_result_for_cmd("emulate", &json!("Device emulation cleared")).unwrap();
+    decode_result_for_cmd(
+        "emulate",
+        &json!({"width": 640, "height": 360, "dpr": 2.0, "mobile": false}),
+    )
+    .unwrap();
+    decode_result_for_cmd("eval", &json!({"any": ["value", 1]})).unwrap();
+    assert!(decode_result_for_cmd("exists", &json!({"exists": "yes"})).is_err());
+    assert!(decode_result_for_cmd("exists", &json!({"exists": true, "extra": 1})).is_err());
+    assert!(decode_result_for_cmd("info", &json!({"url": "u"})).is_err());
+    assert!(decode_result_for_cmd("no_such_command", &json!(null)).is_err());
+}
+
+#[test]
+fn an_action_result_is_its_record_plus_a_status() {
+    use serde_json::json;
+    let record = json!({
+        "id": "op", "runtime_id": "rt", "target_id": "tab", "action": "reload",
+        "state": "finished", "outcome": "not_dispatched", "dispatch_intent": false,
+        "preparation_intent": false, "started_at_ms": 1, "finished_at_ms": 2,
+        "receipt": null, "error_code": null, "error": null
+    });
+    let response = Response::action_result(serde_json::from_value(record.clone()).unwrap());
+    let data = response.data.unwrap();
+    assert_eq!(data["status"], "not_dispatched");
+    decode_result_for_cmd("reload", &data).unwrap();
+    assert!(decode_result_for_cmd("reload", &record).is_err());
+    decode_result_for_cmd("operation_get", &record).unwrap();
+}
+
+#[test]
+fn network_rows_keep_their_compact_or_full_shape() {
+    use serde_json::json;
+    let meta = json!({
+        "namespace": "session:s", "active": true, "entry_count": 1, "in_flight": 0,
+        "last_id": 1, "next_since": 1, "body_pending": 0, "body_failed": 0,
+        "warnings": [], "suggested_commands": []
+    });
+    let filters = json!({"limit": 100, "pattern": null, "method": null, "status": null, "since": null, "compact": true});
+    let compact = json!({"id": 1, "url": "u", "method": "GET", "status": 200, "complete": true});
+    let full = json!({
+        "id": 1, "url": "u", "method": "GET", "status": null, "resource_type": null,
+        "duration_ms": 1.5, "request_body": null,
+        "response_body": {"bytes": 2, "base64": false, "omitted": null},
+        "complete": false, "failed": null
+    });
+    for row in [compact, full] {
+        let log = json!({"meta": meta, "count": 1, "entries": [row], "filters": filters});
+        decode_result_for_cmd("network_log", &log).unwrap();
+    }
+    let body = |text: serde_json::Value| {
+        json!({
+            "id": 1, "session_id": "s", "target_id": "t", "request_id": "r", "hop": 0,
+            "url": "u", "method": "GET", "resource_type": null, "started_at": null,
+            "duration_ms": 0.0,
+            "request": {"headers": {}, "headers_text": null, "post_data": null},
+            "response": {
+                "status": 200, "status_text": "OK", "protocol": null, "mime_type": null,
+                "headers": {"a": "b"}, "headers_text": null, "remote_ip": null,
+                "remote_port": null, "encoded_data_length": null,
+                "timing": {"requestTime": 1.25, "proxyStart": -1}, "redirect_url": null,
+                "body": text
+            },
+            "failure": null, "canceled": false, "complete": true
+        })
+    };
+    for entry in [
+        body(json!({"bytes": 2, "base64": false, "omitted": null})),
+        body(
+            json!({"bytes": 2, "base64": false, "text": "ok", "omitted": null, "mime_type": null}),
+        ),
+        body(
+            json!({"bytes": 9, "base64": false, "text": "ok", "omitted": null, "mime_type": null, "truncated": true}),
+        ),
+    ] {
+        decode_result_for_cmd("network_show", &json!({"meta": meta, "entry": entry})).unwrap();
+    }
+}

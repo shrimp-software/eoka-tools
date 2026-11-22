@@ -13,7 +13,7 @@ macro_rules! define_operations {
                 $(, input: $input:ty)?
                 $(, cli: $cli:literal)?
                 $(, feature: $feature:literal)?
-                $(, result: $result:ty)?
+                , result: $result:ty
                 $(, needs: $needs:ident)?
                 $(, launch: $launch:literal)?
                 $(, reply: $reply:ident)?
@@ -134,12 +134,21 @@ macro_rules! define_operations {
             }
         }
 
-        pub fn result_schema_for_cmd(cmd: &str) -> serde_json::Value {
+        pub fn result_schema_for_cmd(cmd: &str) -> Option<serde_json::Value> {
             match cmd {
                 $(
-                    $cmd => define_operations!(@result_schema $( $result )?),
+                    $cmd => Some(schema_for::<$result>()),
                 )+
-                _ => serde_json::json!({}),
+                _ => None,
+            }
+        }
+
+        pub fn decode_result_for_cmd(cmd: &str, value: &serde_json::Value) -> Result<(), String> {
+            match cmd {
+                $(
+                    $cmd => round_trip::<$result>(value),
+                )+
+                _ => Err(format!("unknown eoka protocol command: {cmd}")),
             }
         }
 
@@ -211,14 +220,6 @@ macro_rules! define_operations {
 
     (@schema $ty:ty) => {
         schema_for::<$ty>()
-    };
-
-    (@result_schema $ty:ty) => {
-        schema_for::<$ty>()
-    };
-
-    (@result_schema) => {
-        serde_json::json!({})
     };
 
     (@schema) => {

@@ -72,15 +72,15 @@ pub struct Response {
 
 impl Response {
     pub fn action_result(record: crate::OperationRecord) -> Self {
-        let status = record.status();
         let detail = record.error.clone().or_else(|| {
             record
                 .error_code
                 .as_ref()
                 .map(|code| ErrorDetail::new(code, "Historical operation detail unavailable"))
         });
-        let mut data = serde_json::to_value(record).expect("operation record is JSON serializable");
-        data["status"] = serde_json::json!(status);
+        let result = crate::ActionResult::from(record);
+        let status = result.status;
+        let data = serde_json::to_value(result).expect("operation record is JSON serializable");
         Self::completion(status, data, detail)
     }
 

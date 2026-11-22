@@ -6,7 +6,7 @@ use eoka_protocol::wire;
 use eoka_server::downloads::DownloadManager;
 use eoka_server::engine::blockers::{self, Blocker, Remedies, Surface};
 use eoka_server::operations::OperationManager;
-use serde_json::{json, Value};
+use serde_json::Value;
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, BufReader},
     net::{
@@ -47,7 +47,7 @@ struct Running {
 
 pub(super) struct Board {
     session: String,
-    hello: Value,
+    hello: eoka_protocol::SessionHello,
     queue_wait: Duration,
     turn: Arc<tokio::sync::Mutex<()>>,
     running: Mutex<Option<Running>>,
@@ -88,7 +88,7 @@ fn queue_wait() -> Duration {
 }
 
 impl Board {
-    pub fn new(session: &str, hello: Value) -> Arc<Self> {
+    pub fn new(session: &str, hello: eoka_protocol::SessionHello) -> Arc<Self> {
         Arc::new(Self {
             session: session.to_owned(),
             hello,
@@ -141,29 +141,28 @@ impl Board {
             .map(|running| (running.command.clone(), running.since.elapsed()))
     }
 
-    async fn activity(&self) -> Value {
+    async fn activity(&self) -> eoka_protocol::SessionActivity {
         let blocker = self.blocker().await;
-        json!({
-            "busy": self.busy().map(|(command, elapsed)| json!({
-                "cmd": command,
-                "for_ms": elapsed.as_millis() as u64,
-            })),
-            "queued": self.queued.load(Ordering::SeqCst),
-            "blocker": blocker.map(|blocker| {
-                let mut summary = blocker.summary();
-                summary["description"] = json!(blocker.describe());
-                summary["hint"] = json!(blocker.remedy(&self.remedies()));
-                summary
+        eoka_protocol::SessionActivity {
+            busy: self
+                .busy()
+                .map(|(cmd, elapsed)| eoka_protocol::BusyCommand {
+                    cmd,
+                    for_ms: elapsed.as_millis() as u64,
+                }),
+            queued: self.queued.load(Ordering::SeqCst),
+            blocker: blocker.map(|blocker| eoka_protocol::SessionBlocker {
+                blocker: blocker.summary(),
+                description: blocker.describe(),
+                hint: blocker.remedy(&self.remedies()),
             }),
-        })
+        }
     }
 
     async fn hello(&self) -> Value {
         let mut hello = self.hello.clone();
-        if hello.is_object() {
-            hello["activity"] = self.activity().await;
-        }
-        hello
+        hello.activity = Some(self.activity().await);
+        serde_json::to_value(hello).unwrap_or_default()
     }
 
     async fn busy_response(&self, command: &str) -> Response {
@@ -430,12 +429,11 @@ async fn reply(writer: &mut Replier, response: Response) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     fn board() -> Arc<Board> {
-        Board::new(
-            "work",
-            json!({"protocol": eoka_protocol::sidecar::PROTOCOL_VERSION,"mode":"headless"}),
-        )
+        let engine = eoka_server::engine::Engine::new("work", eoka_protocol::LaunchSpec::Reuse);
+        Board::new("work", engine.hello())
     }
 
     #[tokio::test]
@@ -450,6 +448,7 @@ mod tests {
         );
         assert_eq!(hello["activity"]["busy"]["cmd"], "reload");
         assert_eq!(hello["activity"]["queued"], 0);
+        eoka_protocol::decode_result_for_cmd("session_hello", &hello).unwrap();
         board.finished(None);
         assert!(board.hello().await["activity"]["busy"].is_null());
     }

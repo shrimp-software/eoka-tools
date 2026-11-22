@@ -51,7 +51,7 @@ const total = await page.evaluate((a, b) => a + b, [2, 3]); // 5
 await page.execute(() => window.scrollTo(0, document.body.scrollHeight));
 ```
 
-Every page-scoped operation in the `eoka` CLI's catalog is available under `page.ops`, generated from that catalog: console and error logs, cookies and storage, network recording and interception, downloads, JavaScript policy, dialogs and more. Inputs are typed; results are untyped for now. Tabs, recording and the browser lifecycle keep their own methods on `Browser` and `Page`. Catalog actions such as `page.ops.reload()` return their operation record, including when the outcome is unverified, so check `outcome` on it. These operations include ones that read and write local files; see the protocol reference before passing untrusted input.
+Every page-scoped operation in the `eoka` CLI's catalog is available under `page.ops`, generated from that catalog: console and error logs, cookies and storage, network recording and interception, downloads, JavaScript policy, dialogs and more. Inputs and results are typed; only `eval` returns `unknown`, the page's own JavaScript value. Tabs, recording and the browser lifecycle keep their own methods on `Browser` and `Page`. Catalog actions such as `page.ops.reload()` return their operation record, including when the outcome is unverified, so check `outcome` on it. These operations include ones that read and write local files; see the protocol reference before passing untrusted input.
 
 ```js
 await page.ops.networkRecordStart();

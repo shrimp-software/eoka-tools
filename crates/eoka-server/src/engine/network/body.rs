@@ -1,5 +1,6 @@
 use base64::Engine;
-use serde_json::{json, Value};
+use eoka_protocol::{NetworkBody, NetworkBodySummary};
+use serde_json::Value;
 
 use super::BodyCapture;
 
@@ -76,41 +77,32 @@ pub(super) fn decode_response_body(value: Value, limit: usize) -> BodyCapture {
     }
 }
 
-pub(super) fn body_summary(body: Option<&BodyCapture>) -> Value {
-    match body {
-        Some(body) => json!({
-            "bytes": body.len(),
-            "base64": body.base64_encoded,
-            "omitted": body.omitted,
-        }),
-        None => Value::Null,
-    }
+pub(super) fn body_summary(body: Option<&BodyCapture>) -> Option<NetworkBodySummary> {
+    body.map(|body| NetworkBodySummary {
+        bytes: body.len(),
+        base64: body.base64_encoded,
+        omitted: body.omitted.clone(),
+    })
 }
 
-pub(super) fn body_json(body: Option<&BodyCapture>) -> Value {
-    match body {
-        Some(body) => json!({
-            "bytes": body.len(),
-            "base64": body.base64_encoded,
-            "text": body.to_text(),
-            "omitted": body.omitted,
-            "mime_type": body.mime_type,
-        }),
-        None => Value::Null,
-    }
+pub(super) fn body_json(body: Option<&BodyCapture>) -> Option<NetworkBody> {
+    body.map(|body| NetworkBody {
+        bytes: body.len(),
+        base64: body.base64_encoded,
+        text: body.to_text(),
+        omitted: body.omitted.clone(),
+        mime_type: body.mime_type.clone(),
+        truncated: None,
+    })
 }
 
-pub(super) fn limit_body_json(body: &mut Value, max_body: usize) {
-    let Some(text) = body
-        .get_mut("text")
-        .and_then(|value| value.as_str())
-        .map(str::to_string)
-    else {
+pub(super) fn limit_body(body: &mut NetworkBody, max_body: usize) {
+    let Some(text) = body.text.as_mut() else {
         return;
     };
     if text.len() <= max_body {
         return;
     }
-    body["text"] = Value::String(text.chars().take(max_body).collect());
-    body["truncated"] = Value::Bool(true);
+    *text = text.chars().take(max_body).collect();
+    body.truncated = Some(true);
 }

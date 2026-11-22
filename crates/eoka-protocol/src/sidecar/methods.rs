@@ -224,6 +224,13 @@ fn catalog_params_schema(operation: &crate::OperationSpec) -> Value {
     input
 }
 
+fn catalog_result_schema(operation: &crate::OperationSpec) -> Value {
+    let mut result = crate::result_schema_for_cmd(operation.cmd)
+        .expect("every catalog operation declares a result");
+    constrain_integers(&mut result);
+    result
+}
+
 pub fn method_feature(method: &str) -> Option<&'static str> {
     match method {
         "page.solve_captcha" => Some("anti-captcha"),
@@ -263,7 +270,7 @@ pub fn schema_bundle() -> Value {
         .chain(catalog_operations().map(|operation| {
             (
                 operation.path,
-                json!({"params": catalog_params_schema(operation), "result": crate::result_schema_for_cmd(operation.cmd)}),
+                json!({"params": catalog_params_schema(operation), "result": catalog_result_schema(operation)}),
             )
         }))
         .collect();

@@ -3,7 +3,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use eoka::cdp::{Session as CdpSession, Transport};
-use serde_json::{json, Value};
+use eoka_protocol::{
+    NetworkCleared, NetworkCompactEntry, NetworkExport, NetworkLog, NetworkLogEntry,
+    NetworkLogFilters, NetworkLogRow, NetworkMatch, NetworkMeta, NetworkRecording, NetworkShow,
+    NetworkShowEntry, NetworkStatus,
+};
 use tokio::sync::{mpsc, oneshot, Mutex, Notify, Semaphore};
 
 mod body;
@@ -22,12 +26,12 @@ use runtime::{network_enable, run_recorder, NetworkControl};
 pub struct NetworkRecorder {
     namespace: String,
     store: Arc<Mutex<NetworkStore>>,
-    control: mpsc::Sender<(NetworkControl, oneshot::Sender<Value>)>,
+    control: mpsc::Sender<(NetworkControl, oneshot::Sender<NetworkStatus>)>,
     notify: Arc<Notify>,
 }
 
 impl NetworkRecorder {
-    async fn apply(&self, command: NetworkControl) -> Result<Value, String> {
+    async fn apply(&self, command: NetworkControl) -> Result<NetworkStatus, String> {
         let (reply, result) = oneshot::channel();
         self.control
             .send((command, reply))
@@ -64,7 +68,7 @@ impl NetworkRecorder {
         &self,
         session: &CdpSession,
         config: NetworkConfig,
-    ) -> Result<Value, String> {
+    ) -> Result<NetworkRecording, String> {
         network_enable(session, &config).await?;
         let status = self
             .apply(NetworkControl::Start {
@@ -73,7 +77,10 @@ impl NetworkRecorder {
                 config,
             })
             .await?;
-        Ok(json!({"meta":self.meta_with_warnings(Vec::new()).await,"status":status}))
+        Ok(NetworkRecording {
+            meta: self.meta_with_warnings(Vec::new()).await,
+            status,
+        })
     }
 
     pub async fn update_session(&self, session: &CdpSession) -> Result<(), String> {
@@ -87,23 +94,28 @@ impl NetworkRecorder {
         .map(|_| ())
     }
 
-    pub async fn stop(&self, _session: Option<CdpSession>) -> Result<Value, String> {
+    pub async fn stop(&self, _session: Option<CdpSession>) -> Result<NetworkRecording, String> {
         let status = self.apply(NetworkControl::Stop).await?;
-        Ok(json!({"meta":self.meta_with_warnings(Vec::new()).await,"status":status}))
-    }
-
-    pub async fn clear(&self) -> Result<Value, String> {
-        self.apply(NetworkControl::Clear).await?;
-        let meta = self.meta_with_warnings(Vec::new()).await;
-        Ok(json!({ "cleared": true, "meta": meta }))
-    }
-
-    pub async fn status(&self) -> Value {
-        let status = self.store.lock().await.status_json();
-        json!({
-            "meta": self.meta_with_warnings(Vec::new()).await,
-            "status": status,
+        Ok(NetworkRecording {
+            meta: self.meta_with_warnings(Vec::new()).await,
+            status,
         })
+    }
+
+    pub async fn clear(&self) -> Result<NetworkCleared, String> {
+        self.apply(NetworkControl::Clear).await?;
+        Ok(NetworkCleared {
+            cleared: true,
+            meta: self.meta_with_warnings(Vec::new()).await,
+        })
+    }
+
+    pub async fn status(&self) -> NetworkRecording {
+        let status = self.store.lock().await.status();
+        NetworkRecording {
+            meta: self.meta_with_warnings(Vec::new()).await,
+            status,
+        }
     }
 
     pub async fn is_active(&self) -> bool {
@@ -118,10 +130,10 @@ impl NetworkRecorder {
         status: Option<u16>,
         since: Option<u64>,
         compact: bool,
-    ) -> Value {
+    ) -> NetworkLog {
         let store = self.store.lock().await;
         let host = pattern.and_then(pattern_exact_host);
-        let mut rows: Vec<Value> = store
+        let mut rows: Vec<NetworkLogRow> = store
             .candidate_ids(method, status, None, host.as_deref())
             .into_iter()
             .filter_map(|id| store.entries.get(&id))
@@ -131,38 +143,41 @@ impl NetworkRecorder {
             .take(limit)
             .map(|entry| {
                 if compact {
-                    json!({
-                        "id": entry.id,
-                        "url": entry.url,
-                        "method": entry.method,
-                        "status": entry.status,
-                        "complete": entry.complete,
+                    NetworkLogRow::Compact(NetworkCompactEntry {
+                        id: entry.id,
+                        url: entry.url.clone(),
+                        method: entry.method.clone(),
+                        status: entry.status,
+                        complete: entry.complete,
                     })
                 } else {
-                    entry.log_json()
+                    NetworkLogRow::Full(entry.log_entry())
                 }
             })
             .collect();
         rows.reverse();
         let next_since = rows
             .iter()
-            .filter_map(|entry| entry["id"].as_u64())
+            .map(|row| match row {
+                NetworkLogRow::Full(entry) => entry.id,
+                NetworkLogRow::Compact(entry) => entry.id,
+            })
             .max()
             .or(since)
             .unwrap_or(0);
-        json!({
-            "meta": self.meta_from_store(&store, next_since, Vec::new()),
-            "count": rows.len(),
-            "entries": rows,
-            "filters": {
-                "limit": limit,
-                "pattern": pattern,
-                "method": method,
-                "status": status,
-                "since": since,
-                "compact": compact,
+        NetworkLog {
+            meta: self.meta_from_store(&store, next_since, Vec::new()),
+            count: rows.len(),
+            entries: rows,
+            filters: NetworkLogFilters {
+                limit,
+                pattern: pattern.map(str::to_owned),
+                method: method.map(str::to_owned),
+                status,
+                since,
+                compact,
             },
-        })
+        }
     }
 
     pub async fn show(
@@ -170,18 +185,15 @@ impl NetworkRecorder {
         id: u64,
         include_body: bool,
         max_body: Option<usize>,
-    ) -> Option<Value> {
+    ) -> Option<NetworkShow> {
         let store = self.store.lock().await;
-        store.entry_by_id(id).map(|entry| {
-            let entry = if include_body {
-                entry.full_json_with_body_limit(max_body)
+        store.entry_by_id(id).map(|entry| NetworkShow {
+            meta: self.meta_from_store(&store, id, Vec::new()),
+            entry: if include_body {
+                NetworkShowEntry::WithBody(entry.full_detail_with_body_limit(max_body))
             } else {
-                entry.metadata_json()
-            };
-            json!({
-                "meta": self.meta_from_store(&store, id, Vec::new()),
-                "entry": entry,
-            })
+                NetworkShowEntry::Metadata(entry.metadata_detail())
+            },
         })
     }
 
@@ -219,7 +231,7 @@ impl NetworkRecorder {
         path: &Path,
         format: &str,
         settle_ms: Option<u64>,
-    ) -> Result<Value, String> {
+    ) -> Result<NetworkExport, String> {
         self.settle(settle_ms.unwrap_or(5000)).await;
         let snapshot = {
             let store = self.store.lock().await;
@@ -246,17 +258,17 @@ impl NetworkRecorder {
             .flatten()
             .filter(|body| body.omitted.is_some())
             .count();
-        Ok(json!({
-            "meta": self.meta_from_store(&store, self.highest_snapshot_id(&snapshot), Vec::new()),
-            "path": path.to_string_lossy(),
-            "format": format,
-            "entries": snapshot.len(),
-            "exported": exported,
-            "skipped_in_flight": in_flight,
-            "body_pending": body_pending,
-            "body_omitted": body_omitted,
-            "warnings": [],
-        }))
+        Ok(NetworkExport {
+            meta: self.meta_from_store(&store, self.highest_snapshot_id(&snapshot), Vec::new()),
+            path: path.to_string_lossy().into_owned(),
+            format: format.to_owned(),
+            entries: snapshot.len(),
+            exported,
+            skipped_in_flight: in_flight,
+            body_pending,
+            body_omitted,
+            warnings: Vec::new(),
+        })
     }
 
     pub async fn high_water_id(&self) -> u64 {
@@ -271,7 +283,7 @@ impl NetworkRecorder {
         since: Option<u64>,
         include_existing: bool,
         timeout_ms: u64,
-    ) -> Option<Value> {
+    ) -> Option<NetworkMatch> {
         let floor = if include_existing {
             since.unwrap_or(0)
         } else {
@@ -283,12 +295,11 @@ impl NetworkRecorder {
         let deadline = Instant::now() + Duration::from_millis(timeout_ms);
         loop {
             if let Some(entry) = self.find_match(pattern, method, status, floor).await {
-                let next_since = entry["id"].as_u64().unwrap_or(floor);
-                return Some(json!({
-                    "meta": self.meta_with_next_since(next_since).await,
-                    "entry": entry,
-                    "matched": true,
-                }));
+                return Some(NetworkMatch {
+                    meta: self.meta_with_next_since(entry.id).await,
+                    entry,
+                    matched: true,
+                });
             }
             if !wait_for_notify(&self.notify, deadline).await {
                 return None;
@@ -302,7 +313,7 @@ impl NetworkRecorder {
         method: Option<&str>,
         status: Option<u16>,
         since: u64,
-    ) -> Option<Value> {
+    ) -> Option<NetworkLogEntry> {
         let store = self.store.lock().await;
         let host = pattern.and_then(pattern_exact_host);
         store
@@ -317,7 +328,7 @@ impl NetworkRecorder {
                         .unwrap_or(true)
                     && status.map(|s| entry.status == Some(s)).unwrap_or(true)
             })
-            .map(NetworkEntry::log_json)
+            .map(NetworkEntry::log_entry)
     }
 
     pub async fn settle(&self, timeout_ms: u64) {
@@ -332,12 +343,12 @@ impl NetworkRecorder {
         }
     }
 
-    pub async fn meta_with_warnings(&self, warnings: Vec<String>) -> Value {
+    pub async fn meta_with_warnings(&self, warnings: Vec<String>) -> NetworkMeta {
         let store = self.store.lock().await;
         self.meta_from_store(&store, store.next_id, warnings)
     }
 
-    async fn meta_with_next_since(&self, next_since: u64) -> Value {
+    async fn meta_with_next_since(&self, next_since: u64) -> NetworkMeta {
         let store = self.store.lock().await;
         self.meta_from_store(&store, next_since, Vec::new())
     }
@@ -347,24 +358,32 @@ impl NetworkRecorder {
         store: &NetworkStore,
         next_since: u64,
         warnings: Vec<String>,
-    ) -> Value {
-        json!({
-            "namespace": self.namespace,
-            "active": store.active,
-            "entry_count": store.entries.len(),
-            "in_flight": store.active_by_key.len(),
-            "last_id": store.next_id,
-            "next_since": next_since,
-            "body_pending": store.body_pending,
-            "body_failed": store.body_failed,
-            "warnings": warnings,
-            "suggested_commands": suggested_commands(next_since),
-        })
+    ) -> NetworkMeta {
+        NetworkMeta {
+            namespace: self.namespace.clone(),
+            active: store.active,
+            entry_count: store.entries.len(),
+            in_flight: store.active_by_key.len(),
+            last_id: store.next_id,
+            next_since,
+            body_pending: store.body_pending,
+            body_failed: store.body_failed,
+            warnings,
+            suggested_commands: suggested_commands(next_since),
+        }
     }
 
     fn highest_snapshot_id(&self, entries: &[NetworkEntry]) -> u64 {
         entries.iter().map(|entry| entry.id).max().unwrap_or(0)
     }
+}
+
+pub fn idle_status() -> NetworkStatus {
+    NetworkStore {
+        config: NetworkConfig::default(),
+        ..NetworkStore::default()
+    }
+    .status()
 }
 
 async fn wait_for_notify(notify: &Notify, deadline: Instant) -> bool {
@@ -418,7 +437,7 @@ fn suggested_commands(next_since: u64) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::Map;
+    use serde_json::{json, Map, Value};
 
     use super::*;
     use crate::engine::network::body::capture_text_body;
@@ -680,9 +699,12 @@ mod tests {
         second.url = "https://example.com/api/second".into();
         let recorder = recorder_with_entries(vec![first, second]);
 
-        let log = recorder
-            .log(10, Some("*/api/*"), Some("GET"), Some(200), Some(1), true)
-            .await;
+        let log = serde_json::to_value(
+            recorder
+                .log(10, Some("*/api/*"), Some("GET"), Some(200), Some(1), true)
+                .await,
+        )
+        .unwrap();
         let rows = log["entries"].as_array().unwrap();
 
         assert_eq!(rows.len(), 1);
@@ -697,10 +719,10 @@ mod tests {
         entry.id = 1;
         let recorder = recorder_with_entries(vec![entry]);
 
-        let metadata = recorder.show(1, false, None).await.unwrap();
+        let metadata = serde_json::to_value(recorder.show(1, false, None).await).unwrap();
         assert!(metadata["entry"]["response"]["body"].get("text").is_none());
 
-        let full = recorder.show(1, true, Some(4)).await.unwrap();
+        let full = serde_json::to_value(recorder.show(1, true, Some(4)).await).unwrap();
         assert_eq!(full["entry"]["response"]["body"]["text"], r#"{"ok"#);
         assert_eq!(full["entry"]["response"]["body"]["truncated"], true);
     }
@@ -747,7 +769,7 @@ mod tests {
         }
         recorder.notify.notify_waiters();
 
-        let result = waiting.await.unwrap().unwrap();
+        let result = serde_json::to_value(waiting.await.unwrap()).unwrap();
         assert_eq!(result["matched"], true);
         assert_eq!(result["entry"]["status"], 201);
     }
@@ -776,7 +798,8 @@ mod tests {
         entry.id = 1;
         let recorder = recorder_with_entries(vec![entry]);
 
-        let result = recorder.export(&path, "json", Some(0)).await.unwrap();
+        let result =
+            serde_json::to_value(recorder.export(&path, "json", Some(0)).await.unwrap()).unwrap();
         let parsed: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
 
         assert_eq!(result["format"], "json");

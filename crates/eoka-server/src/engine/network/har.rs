@@ -30,7 +30,7 @@ pub(super) fn build_json_export(entries: &[NetworkEntry]) -> Value {
             "name": "eoka",
             "version": crate::engine::host_version(),
         },
-        "entries": entries.iter().map(NetworkEntry::full_json).collect::<Vec<_>>(),
+        "entries": entries.iter().map(NetworkEntry::full_detail).collect::<Vec<_>>(),
     })
 }
 

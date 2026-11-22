@@ -65,14 +65,8 @@ pub async fn run(session_name: &str, spec: LaunchSpec) -> anyhow::Result<()> {
         let _ = shutdown_tx.send(()).await;
     });
 
-    let mut hello = handler
-        .handle(Request::SessionHello)
-        .await
-        .data
-        .unwrap_or_default();
-    if hello.is_object() {
-        hello["commandLimitMs"] = serde_json::json!(command_limit_ms);
-    }
+    let mut hello = handler.hello();
+    hello.command_limit_ms = Some(command_limit_ms);
     let (accepted, mut incoming) = mpsc::channel(1);
     let board = frontdoor::Board::new(session_name, hello);
     let frontdoor = tokio::spawn(frontdoor::serve(

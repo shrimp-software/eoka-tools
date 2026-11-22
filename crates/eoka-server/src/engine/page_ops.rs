@@ -5,8 +5,9 @@ use base64::Engine as _;
 use eoka::{MouseButton, Page};
 use eoka_protocol::sidecar::{ErrorCode, ServerError};
 use eoka_protocol::{
-    AttributeValue, CaptchaTurnstileResult, EmulateArgs, Existence, FrameSummary, PageInfo,
-    Request, Response, ScreenshotArgs, ShadowClick, WaitArgs, WaitSelectorState,
+    AttributeValue, CaptchaTurnstileResult, EmulateArgs, Existence, FrameSummary, InlineScreenshot,
+    PageInfo, Request, Response, ScreenshotArgs, ScreenshotFile, ScreenshotResult, ShadowClick,
+    Viewport, WaitArgs, WaitSelectorState,
 };
 use serde_json::{json, Value};
 
@@ -158,7 +159,7 @@ pub(super) async fn execute(page: &Page, request: Request) -> Result<Response, S
             if let Some(output) = args.output.as_deref() {
                 eoka_protocol::sidecar::validate_output_path(output)?;
             }
-            screenshot(page, &args).await.map(Response::ok)
+            ok(screenshot(page, &args).await?)
         }
         Request::Emulate(args) => viewport(page, &args).await,
         other => Err(ServerError::internal(format!(
@@ -168,7 +169,10 @@ pub(super) async fn execute(page: &Page, request: Request) -> Result<Response, S
     }
 }
 
-pub(super) async fn screenshot(page: &Page, args: &ScreenshotArgs) -> Result<Value, ServerError> {
+pub(super) async fn screenshot(
+    page: &Page,
+    args: &ScreenshotArgs,
+) -> Result<ScreenshotResult, ServerError> {
     args.validate()?;
     let options = args.options();
     publish_screenshot(args, async {
@@ -180,7 +184,7 @@ pub(super) async fn screenshot(page: &Page, args: &ScreenshotArgs) -> Result<Val
 pub(super) async fn publish_screenshot(
     args: &ScreenshotArgs,
     capture: impl Future<Output = Result<Vec<u8>, ServerError>>,
-) -> Result<Value, ServerError> {
+) -> Result<ScreenshotResult, ServerError> {
     if args.inline {
         return inline_screenshot(&capture.await?);
     }
@@ -223,22 +227,26 @@ pub(super) async fn publish_screenshot(
         .await
         .map_err(|error| ServerError::internal(error.to_string()))?
         .map_err(|error| error.server_error())?;
-    Ok(json!({
-        "path": artifact.path,
-        "size": size,
-        "mimeType": artifact.mime_type,
-        "bytes": artifact.bytes,
+    Ok(ScreenshotResult::File(ScreenshotFile {
+        path: artifact.path,
+        size,
+        mime_type: artifact.mime_type,
+        bytes: artifact.bytes,
+        elements: None,
     }))
 }
 
-fn inline_screenshot(bytes: &[u8]) -> Result<Value, ServerError> {
+fn inline_screenshot(bytes: &[u8]) -> Result<ScreenshotResult, ServerError> {
     if bytes.len() > eoka_protocol::sidecar::MAX_SCREENSHOT_BYTES {
         return Err(ServerError::new(
             ErrorCode::ScreenshotTooLarge,
             "screenshot exceeds the 16 MiB inline limit; write it to a file with output instead",
         ));
     }
-    Ok(json!({ "dataBase64": base64::engine::general_purpose::STANDARD.encode(bytes) }))
+    Ok(ScreenshotResult::Inline(InlineScreenshot {
+        data_base64: base64::engine::general_purpose::STANDARD.encode(bytes),
+        elements: None,
+    }))
 }
 
 pub(super) async fn viewport(page: &Page, args: &EmulateArgs) -> Result<Response, ServerError> {
@@ -250,12 +258,12 @@ pub(super) async fn viewport(page: &Page, args: &EmulateArgs) -> Result<Response
     eoka_protocol::sidecar::validate_viewport(args.width, args.height, args.dpr)?;
     page.set_viewport(args.width, args.height, args.dpr).await?;
     disable_touch(page).await;
-    ok(json!({
-        "width": args.width,
-        "height": args.height,
-        "dpr": args.dpr,
-        "mobile": false,
-    }))
+    ok(Viewport {
+        width: args.width,
+        height: args.height,
+        dpr: args.dpr,
+        mobile: false,
+    })
 }
 
 async fn disable_touch(page: &Page) {
@@ -340,10 +348,13 @@ mod tests {
         let error = inline_screenshot(&bytes).unwrap_err();
         assert_eq!(error.code, ErrorCode::ScreenshotTooLarge);
         assert!(error.message.contains("output"));
-        let value =
-            inline_screenshot(&bytes[..eoka_protocol::sidecar::MAX_SCREENSHOT_BYTES]).unwrap();
+        let ScreenshotResult::Inline(value) =
+            inline_screenshot(&bytes[..eoka_protocol::sidecar::MAX_SCREENSHOT_BYTES]).unwrap()
+        else {
+            panic!("an inline screenshot is inline");
+        };
         let decoded = base64::engine::general_purpose::STANDARD
-            .decode(value["dataBase64"].as_str().unwrap())
+            .decode(value.data_base64)
             .unwrap();
         assert_eq!(decoded.len(), eoka_protocol::sidecar::MAX_SCREENSHOT_BYTES);
     }
