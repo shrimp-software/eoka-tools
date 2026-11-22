@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use eoka::{NativeRecording, NativeRecordingOptions, Page, RecordingError};
 use eoka_protocol::sidecar::{
-    ArtifactContainer, ErrorCode, RecordingFailure, RecordingFailureStage, RecordingIdParams,
-    RecordingRecord, RecordingStartParams, RecordingState, ServerError,
+    ArtifactContainer, ErrorCode, Method, RecordingFailure, RecordingFailureStage,
+    RecordingIdParams, RecordingRecord, RecordingStartParams, RecordingState, ServerError,
 };
 use serde_json::Value;
 use tokio::io::AsyncWriteExt;
@@ -473,25 +473,35 @@ impl RecordingManager {
     }
 }
 
-pub fn supports_control(method: &str) -> bool {
-    matches!(
-        method,
-        "recording.get" | "recording.stop" | "recording.cancel"
-    )
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecordingControl {
+    Get,
+    Stop,
+    Cancel,
+}
+
+impl RecordingControl {
+    pub fn of(method: Method) -> Option<Self> {
+        match method {
+            Method::RecordingGet => Some(Self::Get),
+            Method::RecordingStop => Some(Self::Stop),
+            Method::RecordingCancel => Some(Self::Cancel),
+            _ => None,
+        }
+    }
 }
 
 pub async fn control(
     manager: &RecordingManager,
-    method: &str,
+    control: RecordingControl,
     params: Value,
 ) -> Result<Value, ServerError> {
     let params: RecordingIdParams = crate::methods::parse_params(params)?;
     params.validate()?;
-    let record = match method {
-        "recording.get" => manager.get(&params.recording_id).await?,
-        "recording.stop" => manager.stop(&params.recording_id).await?,
-        "recording.cancel" => manager.cancel(&params.recording_id).await?,
-        _ => return Err(ServerError::unknown_method(method)),
+    let record = match control {
+        RecordingControl::Get => manager.get(&params.recording_id).await?,
+        RecordingControl::Stop => manager.stop(&params.recording_id).await?,
+        RecordingControl::Cancel => manager.cancel(&params.recording_id).await?,
     };
     serde_json::to_value(record).map_err(|error| ServerError::internal(error.to_string()))
 }

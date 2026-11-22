@@ -30,26 +30,10 @@ pub enum Command {
         long_about = "Navigate to URL. file: URLs are blocked unless EOKA_ALLOW_FILE_URLS=1 was set when the daemon started.\n\nA load still pending from an earlier command is replaced. If the server sends no response before --action-timeout-ms (default 30000), the load is stopped, the tab keeps the page it had, and the command fails with navigation_timeout."
     )]
     Open {
-        #[arg(help = "URL, or a path relative to the current page")]
-        url: String,
         #[arg(long, help = "Extra HTTP headers as a JSON object")]
         headers: Option<String>,
-        #[arg(long, help = "User-Agent header for this navigation")]
-        user_agent: Option<String>,
-        #[arg(long, help = "Disable the page's Content-Security-Policy")]
-        bypass_csp: bool,
-        #[arg(
-            long,
-            value_name = "FILE",
-            help = "JavaScript source, or a .js file, to run on each new document before page scripts"
-        )]
-        inject_js: Option<String>,
-        #[arg(
-            long,
-            value_name = "FILE",
-            help = "Restore a save-state file before navigating"
-        )]
-        load_state: Option<PathBuf>,
+        #[command(flatten)]
+        args: eoka_protocol::OpenArgs,
     },
     #[command(about = "Go back in history")]
     Back,
@@ -60,42 +44,9 @@ pub enum Command {
     #[command(about = "Accessibility tree with @eN refs")]
     Snapshot(eoka_protocol::SnapshotArgs),
     #[command(about = "Inspect page context and interactive elements with indices")]
-    Observe {
-        #[arg(long, help = "Filter elements: inputs, buttons, or all")]
-        filter: Option<String>,
-        #[arg(long, help = "Maximum elements to return")]
-        max: Option<usize>,
-        #[arg(long, help = "Return structured element objects instead of text")]
-        structured: bool,
-    },
+    Observe(eoka_protocol::ObserveArgs),
     #[command(about = "Take screenshot")]
-    Screenshot {
-        #[arg(
-            short,
-            long,
-            help = "PNG path [default: eoka-screenshot-<ms>.png in the temp dir]"
-        )]
-        output: Option<PathBuf>,
-        #[arg(long, help = "Overlay numbered labels on interactive elements")]
-        annotate: bool,
-        #[arg(long, value_parser = ["png", "jpeg", "webp"], help = "Image format [default: png]")]
-        format: Option<String>,
-        #[arg(long, help = "JPEG or WebP quality, 0 to 100")]
-        quality: Option<u8>,
-        #[arg(
-            long,
-            conflicts_with = "clip",
-            help = "Capture the whole scrollable page"
-        )]
-        full_page: bool,
-        #[arg(
-            long,
-            value_name = "X,Y,WIDTH,HEIGHT",
-            value_parser = parse_clip,
-            help = "Capture a document-relative region in CSS pixels"
-        )]
-        clip: Option<eoka_protocol::sidecar::ScreenshotClip>,
-    },
+    Screenshot(eoka_protocol::ScreenshotArgs),
     #[command(about = "Record the current tab to an MP4 file")]
     Recording {
         #[command(subcommand)]
@@ -139,26 +90,11 @@ pub enum Command {
         about = "Click element",
         long_about = "Click element. Requires --expect with the result that proves the click worked; without it the command fails before any input."
     )]
-    Click {
-        #[arg(help = eoka_protocol::TARGET_HELP)]
-        target: String,
-    },
+    Click(eoka_protocol::ClickArgs),
     #[command(name = "dblclick", about = "Double-click element")]
     DoubleClick(eoka_protocol::TargetArgs),
     #[command(about = "Clear and fill input")]
-    Fill {
-        #[arg(help = eoka_protocol::TARGET_HELP)]
-        target: String,
-        #[arg(help = "Text to enter")]
-        text: String,
-        #[arg(
-            long,
-            default_value = "sequential",
-            value_parser = ["sequential", "bulk"],
-            help = "sequential types native keystrokes; bulk sets the value at once"
-        )]
-        input_mode: String,
-    },
+    Fill(eoka_protocol::FillArgs),
     #[command(about = "Select dropdown option")]
     Select(eoka_protocol::SelectArgs),
     #[command(about = "Hover over element")]
@@ -170,10 +106,8 @@ pub enum Command {
     Key(eoka_protocol::KeyArgs),
     #[command(about = "Press and hold a mouse button at viewport coordinates")]
     MouseDown {
-        #[arg(help = "Viewport X in CSS pixels")]
-        x: f64,
-        #[arg(help = "Viewport Y in CSS pixels")]
-        y: f64,
+        #[command(flatten)]
+        position: eoka_protocol::MouseButtonArgs,
         #[arg(
             long,
             default_value = "left",
@@ -185,10 +119,8 @@ pub enum Command {
     MouseMove(eoka_protocol::MouseMoveArgs),
     #[command(about = "Release a held mouse button at viewport coordinates")]
     MouseUp {
-        #[arg(help = "Viewport X in CSS pixels")]
-        x: f64,
-        #[arg(help = "Viewport Y in CSS pixels")]
-        y: f64,
+        #[command(flatten)]
+        position: eoka_protocol::MouseButtonArgs,
         #[arg(
             long,
             default_value = "left",
@@ -220,7 +152,7 @@ pub enum Command {
             help = "Evaluate CODE unchanged in global scope and return display text"
         )]
         raw: bool,
-        #[arg(help = CODE)]
+        #[arg(help = eoka_protocol::CODE_HELP)]
         code: Option<String>,
         #[arg(short, long, help = "Read JavaScript from a file")]
         file: Option<PathBuf>,
@@ -240,16 +172,7 @@ pub enum Command {
         about = "Execute JavaScript in an isolated frame world",
         long_about = "Execute JavaScript in an isolated frame world, including cross-origin OOPIFs.\n\nThe code has DOM access but not the page's own JavaScript globals. Requires an existing session; never launches, restarts or replays. Frame IDs change on navigation: list them again with `frames`."
     )]
-    FrameEval {
-        #[arg(
-            help = "CSS selector matching one frame, or id:<frame-id> from frames; no bare URL/index"
-        )]
-        frame: String,
-        #[arg(help = CODE)]
-        code: Option<String>,
-        #[arg(short, long, help = "Read JavaScript from a file")]
-        file: Option<PathBuf>,
-    },
+    FrameEval(eoka_protocol::FrameEvalArgs),
     #[command(
         about = "Execute JavaScript without returning a value",
         long_about = "Execute JavaScript without returning a value.\n\nCODE, also when loaded with --file, is a function called with --args, an expression such as an IIFE, or statements run as an async function body. Syntax is checked before anything runs, so the code runs exactly once; promises are awaited and exceptions fail the command. --raw runs the source unchanged in global scope."
@@ -261,14 +184,8 @@ pub enum Command {
             help = "JSON array of arguments passed to the function"
         )]
         args: String,
-        #[arg(long, help = "Run CODE unchanged in global scope")]
-        raw: bool,
-        #[arg(help = CODE)]
-        code: Option<String>,
-        #[arg(short, long, help = "Read JavaScript from a file")]
-        file: Option<PathBuf>,
-        #[arg(long, help = "Do not await a returned promise; requires --raw")]
-        no_await: bool,
+        #[command(flatten)]
+        script: eoka_protocol::ScriptArgs,
     },
     #[command(
         about = "Serve the eoka browser tools over MCP on stdio",
@@ -305,26 +222,10 @@ pub enum Command {
         long_about = "Fetch from inside the page with its cookies and fingerprint; use download for files.\n\nJSON output reports bytesRead, truncated and bodyOmitted. Known binary bodies are skipped."
     )]
     Fetch {
-        #[arg(help = "URL to fetch from the page's context")]
-        url: String,
-        #[arg(short, long, help = "HTTP method [default: GET]")]
-        method: Option<String>,
-        #[arg(long, help = "Request headers as a JSON object")]
+        #[arg(long, display_order = 1, help = "Request headers as a JSON object")]
         headers: Option<String>,
-        #[arg(short, long, help = "Request body")]
-        body: Option<String>,
-        #[arg(long, help = "Fetch redirect mode: follow, error or manual")]
-        redirect: Option<String>,
-        #[arg(
-            long,
-            help = "Print only the body; fails on binary or truncated bodies"
-        )]
-        body_only: bool,
-        #[arg(
-            long,
-            help = "Raw text bytes to retain: default 8192, maximum 16777216; 0 means headers only"
-        )]
-        max_body: Option<usize>,
+        #[command(flatten)]
+        args: eoka_protocol::FetchArgs,
     },
 
     #[command(about = "Network recording, inspection, export, and interception")]
@@ -350,20 +251,12 @@ pub enum Command {
         about = "Save cookies and storage to JSON",
         long_about = "Save the current page's cookies and storage to JSON.\n\nThe path must end in .json. The file is written atomically, owner-only, and can only replace an empty file or an earlier state file."
     )]
-    SaveState {
-        #[arg(help = "State file to write; must end in .json")]
-        path: PathBuf,
-    },
+    SaveState(eoka_protocol::PathArgs),
     #[command(
         about = "Load cookies and storage from JSON",
         long_about = "Load cookies and storage from a save-state file.\n\nCookies are replaced only on the domains the file covers, including their parent domains and subdomains; every other site's cookies are kept. Storage is restored only on the saved origin, and skipped keys are reported."
     )]
-    LoadState {
-        #[arg(help = "State file written by save-state")]
-        path: PathBuf,
-        #[arg(long, help = "Do not navigate to the saved URL first")]
-        no_navigate: bool,
-    },
+    LoadState(eoka_protocol::LoadStateArgs),
     #[command(about = "Set persistent extra HTTP headers")]
     Headers(eoka_protocol::HeadersArgs),
     #[command(about = "Read browser console output")]
@@ -379,27 +272,7 @@ pub enum Command {
         about = "Wait for time, text, URL, selector, or load state",
         long_about = "Wait for time, text, URL, selector, or load state.\n\nA condition wait returns by --timeout (default 10000 ms). It keeps waiting through a navigation that has not answered yet and reports navigation_pending if that is why it timed out."
     )]
-    Wait {
-        #[arg(help = "Fixed delay in milliseconds")]
-        ms: Option<u64>,
-        #[arg(long, help = "Wait until this text is visible")]
-        text: Option<String>,
-        #[arg(long, help = "Wait until the URL contains this string")]
-        url: Option<String>,
-        #[arg(long, help = "Wait for network idle")]
-        load: Option<String>,
-        #[arg(long, help = "Wait until this CSS selector reaches --state")]
-        selector: Option<String>,
-        #[arg(
-            long,
-            requires = "selector",
-            value_parser = ["attached", "visible", "hidden"],
-            help = "Selector condition [default: visible]"
-        )]
-        state: Option<String>,
-        #[arg(short, long, help = "Timeout in milliseconds")]
-        timeout: Option<u64>,
-    },
+    Wait(eoka_protocol::WaitArgs),
     #[command(about = "Execute multiple commands in sequence")]
     Batch {
         #[arg(help = "JSON array of {\"cmd\": ..., \"args\": {...}} objects")]
@@ -410,12 +283,7 @@ pub enum Command {
         bail: bool,
     },
     #[command(about = "Inject fake camera from a video file")]
-    FakeCamera {
-        #[arg(help = "Video file to play as the camera")]
-        file: PathBuf,
-        #[arg(long, help = "Loop the video instead of stopping at the end")]
-        loop_video: bool,
-    },
+    FakeCamera(eoka_protocol::FakeCameraArgs),
     #[command(about = "WASM linear memory operations")]
     Wasm {
         #[command(subcommand)]
@@ -469,10 +337,5 @@ pub enum Command {
         name = "clone-from",
         about = "Snapshot cookies and storage from a running Chrome"
     )]
-    CloneFrom {
-        #[arg(help = "DevTools port or WebSocket URL of the running Chrome")]
-        source: String,
-        #[arg(long, help = "Write the snapshot to this state file")]
-        to: Option<PathBuf>,
-    },
+    CloneFrom(eoka_protocol::CloneFromArgs),
 }

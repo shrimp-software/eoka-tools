@@ -47,21 +47,16 @@ fn capture_validation_preserves_defaults_and_rejects_conflicts() {
 }
 
 #[test]
-fn every_registered_method_declares_its_role() {
-    for method in METHODS {
-        let role =
-            method_role(method.name).unwrap_or_else(|| panic!("{} has no MethodRole", method.name));
-        match role {
-            MethodRole::Shared => assert!(
-                crate::operation_by_path(method.name).is_some(),
+fn shared_methods_are_catalog_paths() {
+    for method in Method::ALL {
+        if method.role() == MethodRole::Shared {
+            assert!(
+                crate::operation_by_path(method.name()).is_some(),
                 "{} is Shared but is not a catalog path",
-                method.name
-            ),
-            MethodRole::Distinct(reason) => assert!(!reason.is_empty()),
-            MethodRole::Lifecycle => {}
+                method.name()
+            );
         }
     }
-    assert_eq!(method_role("page.not_a_method"), None);
 }
 
 #[test]
@@ -72,7 +67,7 @@ fn catalog_operations_are_sidecar_methods_addressed_by_page() {
 
     for operation in crate::all_operations() {
         let projected = catalog_operation(operation.path).is_some();
-        let own_method = METHODS.iter().any(|method| method.name == operation.path);
+        let own_method = Method::parse(operation.path).is_some();
         let sidecar_lifecycle = operation.exposure == crate::OperationExposure::Lifecycle
             || operation.path.starts_with("tab.")
             || matches!(operation.path, "close" | "shutdown");

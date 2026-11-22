@@ -127,7 +127,7 @@ impl Engine {
             horizontal.finish_drag_cleanup(),
         );
         if !matches!(result, Ok(Ok(SolveOutcome::NotPresent))) {
-            if let Ok(tab) = self.require_tab_mut() {
+            if let Ok(tab) = self.require_tab() {
                 tab.invalidate();
             }
         }

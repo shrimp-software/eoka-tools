@@ -37,6 +37,7 @@ use eoka_protocol::{
 use std::collections::HashMap;
 use std::fmt::Write as FmtWrite;
 
+use crate::recordings::RecordingControl;
 use crate::{annotate, observe, snapshot};
 use ::eoka_solvers::{build_captcha_inject_js, parse_captcha_inject_kind};
 use base64::Engine as _;
@@ -46,13 +47,15 @@ use eoka::cdp::{
 };
 use serde_json::{json, Value};
 
+use crate::tabs::Tab;
 use eoka_protocol::launch_spec::LaunchSpec;
 use eoka_protocol::{Request, Response, SessionHello, SessionMode};
 use intercept::{InterceptLog, InterceptLogEntry, InterceptRule, InterceptState};
 use network::{NetworkConfig, NetworkRecorder};
 use persist::{capture_state, ensure_console_capture, restore_cookies, restore_state, SavedState};
 use script_policy::{ScriptPolicyMode, ScriptPolicyState};
-use state::{BrowserState, TabState};
+use state::BrowserState;
+use std::sync::Arc;
 use target::{click_once, json_str, title_nonblocking, wait_for_stable};
 
 #[doc(hidden)]
@@ -196,7 +199,6 @@ pub struct Engine {
     fetch_sender: Option<tokio::sync::mpsc::Sender<RequestPause>>,
     fetch_dropped: std::sync::Arc<std::sync::atomic::AtomicU64>,
     fetch_sessions: HashMap<String, CdpSession>,
-    cloudflare: Option<crate::cloudflare::CloudflareWatcher>,
     recordings: crate::recordings::RecordingManager,
     patch_binary: Option<bool>,
 }
@@ -236,7 +238,6 @@ impl Engine {
             fetch_sender: None,
             fetch_dropped: Default::default(),
             fetch_sessions: HashMap::new(),
-            cloudflare: None,
             recordings: Default::default(),
             patch_binary: None,
         }
@@ -258,6 +259,7 @@ impl Engine {
     pub fn adopt(
         session_name: impl Into<String>,
         browser: std::sync::Arc<eoka::Browser>,
+        tabs: crate::tabs::Tabs,
         operations: crate::operations::OperationManager,
         recordings: crate::recordings::RecordingManager,
         agent: crate::agent::SharedAgentSession,
@@ -266,24 +268,18 @@ impl Engine {
         engine.operations = operations;
         engine.recordings = recordings;
         engine.agent = agent;
-        engine.state = Some(BrowserState::adopted(browser));
+        engine.state = Some(BrowserState::adopted(browser, tabs));
         engine
     }
 
     pub async fn handle_on(
         &mut self,
         tab_id: &str,
-        page: &eoka::Page,
         request: Request,
         spoken: Option<&str>,
     ) -> Response {
         let mut switched = false;
         if let Some(state) = self.state.as_mut() {
-            let tab = state
-                .tabs
-                .entry(tab_id.to_owned())
-                .or_insert_with(|| TabState::new(page.clone()));
-            tab.invalidate();
             switched = state.current_tab_id.as_deref() != Some(tab_id);
             state.current_tab_id = Some(tab_id.to_owned());
         }
@@ -296,11 +292,7 @@ impl Engine {
     }
 
     pub async fn handle_as(&mut self, spoken: Option<&str>, request: Request) -> Response {
-        if let Some(tab) = self
-            .state
-            .as_mut()
-            .and_then(|state| state.current_tab_mut())
-        {
+        if let Some(tab) = self.state.as_ref().and_then(|state| state.current_tab()) {
             tab.invalidate();
         }
         self.spoken = spoken.map(str::to_owned);
@@ -308,30 +300,6 @@ impl Engine {
         self.spoken = None;
         self.service_idle_fetch();
         response
-    }
-
-    pub async fn release_tab(&mut self, tab_id: &str) {
-        let session = self
-            .state
-            .as_ref()
-            .and_then(|state| state.tabs.get(tab_id))
-            .map(|tab| tab.page.session().clone());
-        if let Some(session) = session {
-            if self.fetch_sessions.contains_key(session.session_id()) {
-                self.disable_fetch_session(&session).await;
-            }
-        }
-        self.forget_tab(tab_id);
-        self.service_idle_fetch();
-    }
-
-    pub fn forget_tab(&mut self, tab_id: &str) {
-        if let Some(state) = self.state.as_mut() {
-            state.tabs.remove(tab_id);
-            if state.current_tab_id.as_deref() == Some(tab_id) {
-                state.current_tab_id = None;
-            }
-        }
     }
 
     pub async fn release(&mut self) {
@@ -404,7 +372,7 @@ impl Engine {
                     };
                     let _ = wait_for_stable(&tab.page).await;
                     let restored =
-                        restore_state_and_maybe_reload(tab, &saved, state_url_can_reload(&url))
+                        restore_state_and_maybe_reload(&tab, &saved, state_url_can_reload(&url))
                             .await?;
                     eprintln!("[eoka]{}", restored.notice(&saved.url));
                 }
@@ -420,28 +388,20 @@ impl Engine {
             }
         }
 
-        self.state = Some(state);
         if matches!(
             self.spec,
             LaunchSpec::Launch {
                 auto_solve_cloudflare: true,
                 ..
             }
-        ) && self.cloudflare.is_none()
-        {
-            self.cloudflare = Some(crate::cloudflare::CloudflareWatcher::start(
+        ) {
+            state.tabs.watch_cloudflare(
                 crate::cloudflare::DEFAULT_WATCH_INTERVAL,
                 crate::cloudflare::DEFAULT_SOLVE_TIMEOUT,
-            ));
+            );
         }
+        self.state = Some(state);
         Ok(())
-    }
-
-    fn publish_cloudflare_pages(&self) {
-        if let Some(watcher) = &self.cloudflare {
-            let tabs = self.state.as_ref().map(|state| &state.tabs);
-            watcher.set_pages(tabs.into_iter().flatten().map(|(id, tab)| (id, &tab.page)));
-        }
     }
 
     fn script_enabled_for(&self, url: &str) -> Option<bool> {
@@ -453,19 +413,11 @@ impl Engine {
         })
     }
 
-    fn require_tab(&self) -> Result<&TabState, String> {
+    fn require_tab(&self) -> Result<Arc<Tab>, String> {
         self.state
             .as_ref()
             .ok_or("No browser open. Use 'open' first.")?
             .current_tab()
-            .ok_or_else(|| "No tab open. Use 'open' first.".to_string())
-    }
-
-    fn require_tab_mut(&mut self) -> Result<&mut TabState, String> {
-        self.state
-            .as_mut()
-            .ok_or("No browser open. Use 'open' first.")?
-            .current_tab_mut()
             .ok_or_else(|| "No tab open. Use 'open' first.".to_string())
     }
 
@@ -499,7 +451,7 @@ impl Engine {
         let cmd = request.cmd();
         let args = &request.args_json();
         let policy = blockers::policy(cmd, args);
-        let response = match self.refuse_blocked(cmd, args, policy).await {
+        match self.refuse_blocked(cmd, args, policy).await {
             Some(refusal) => refusal,
             None => {
                 let mut response = Box::pin(self.handle_command(request, args)).await;
@@ -507,9 +459,7 @@ impl Engine {
                     .await;
                 response
             }
-        };
-        self.publish_cloudflare_pages();
-        response
+        }
     }
 
     async fn handle_command(&mut self, request: Request, args: &Value) -> Response {
@@ -607,12 +557,17 @@ impl Engine {
             Request::Emulate(args) => self.cmd_emulate(&args).await,
             Request::Find(args) => self.cmd_find(&args).await,
             Request::RecordingStart(args) => self.cmd_recording_start(args).await,
-            Request::RecordingGet(args) => self.cmd_recording_control("recording.get", &args).await,
+            Request::RecordingGet(args) => {
+                self.cmd_recording_control(RecordingControl::Get, &args)
+                    .await
+            }
             Request::RecordingStop(args) => {
-                self.cmd_recording_control("recording.stop", &args).await
+                self.cmd_recording_control(RecordingControl::Stop, &args)
+                    .await
             }
             Request::RecordingCancel(args) => {
-                self.cmd_recording_control("recording.cancel", &args).await
+                self.cmd_recording_control(RecordingControl::Cancel, &args)
+                    .await
             }
             Request::Scroll(args) => self.cmd_scroll(&args).await,
             Request::Eval(args) => self.script("eval", eval::Script::Eval(args)).await,
@@ -711,20 +666,22 @@ impl Engine {
         Ok(result?)
     }
 
-    fn tab_with_config(&mut self) -> Result<(&mut TabState, bool), String> {
-        let state = self.require_state_mut()?;
-        let vp = state.config.viewport_only;
+    fn tab_with_config(&self) -> Result<(Arc<Tab>, bool), String> {
+        let state = self
+            .state
+            .as_ref()
+            .ok_or_else(|| "No browser open. Use 'open' first.".to_string())?;
         let tab = state
-            .current_tab_mut()
+            .current_tab()
             .ok_or("No tab open. Use 'open' first.")?;
-        Ok((tab, vp))
+        Ok((tab, state.config.viewport_only))
     }
 }
 async fn eval_json_or_string(page: &eoka::Page, js: &str) -> Result<Value, String> {
     let result: String = page.evaluate_sync(js).await.map_err(|e| e.to_string())?;
     Ok(serde_json::from_str(&result).unwrap_or(Value::String(result)))
 }
-async fn tab_summary(tab: &TabState) -> Result<(String, String), String> {
+async fn tab_summary(tab: &Tab) -> Result<(String, String), String> {
     let url = tab.page.url().await.map_err(|e| e.to_string())?;
     let title = title_nonblocking(&tab.page).await;
     Ok((url, title))

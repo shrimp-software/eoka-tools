@@ -5,7 +5,7 @@ use eoka::Page;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use super::state::TabState;
+use crate::tabs::Tab;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SavedState {
@@ -181,8 +181,8 @@ pub async fn clone_state_from_source(source: &str) -> Result<SavedState, String>
 
 const CONSOLE_CAPTURE_JS: &str = include_str!("js/console_capture.js");
 
-pub async fn ensure_console_capture(tab: &mut TabState) -> Result<(), String> {
-    if tab.console_injected {
+pub async fn ensure_console_capture(tab: &Tab) -> Result<(), String> {
+    if tab.console_injected() {
         return Ok(());
     }
     tab.page
@@ -198,7 +198,7 @@ pub async fn ensure_console_capture(tab: &mut TabState) -> Result<(), String> {
         .evaluate_sync(CONSOLE_CAPTURE_JS)
         .await
         .unwrap_or_default();
-    tab.console_injected = true;
+    tab.mark_console_injected();
     Ok(())
 }
 

@@ -2,7 +2,7 @@ use std::future::Future;
 use std::time::Duration;
 
 use eoka::Page;
-use eoka_protocol::sidecar::{PageBlocker, ServerError};
+use eoka_protocol::sidecar::{Method, PageBlocker, ServerError};
 use eoka_protocol::ErrorDetail;
 use serde_json::Value;
 
@@ -25,28 +25,60 @@ fn navigates(action: &Value) -> bool {
     )
 }
 
-pub(crate) fn policy(method: &str, params: &Value) -> Policy {
+pub(crate) fn policy(method: Option<Method>, params: &Value) -> Policy {
+    let Some(method) = method else {
+        return Policy::Free;
+    };
     match method {
-        "page.capture_state" => Policy::Read,
-        "agent.observe" => Policy::Observe,
-        "actions.perform" | "agent.step" if navigates(&params["action"]) => Policy::Navigate,
-        "actions.perform" | "agent.step" | "page.solve_captcha" => Policy::Gate,
-        _ => Policy::Free,
+        Method::PageCaptureState => Policy::Read,
+        Method::AgentObserve => Policy::Observe,
+        Method::ActionsPerform | Method::AgentStep if navigates(&params["action"]) => {
+            Policy::Navigate
+        }
+        Method::ActionsPerform | Method::AgentStep | Method::PageSolveCaptcha => Policy::Gate,
+        Method::ServerHello
+        | Method::ServerShutdown
+        | Method::BrowserLaunch
+        | Method::BrowserConnect
+        | Method::BrowserNewPage
+        | Method::BrowserTabs
+        | Method::BrowserCloseTab
+        | Method::BrowserClose
+        | Method::OperationsGet
+        | Method::OperationsList
+        | Method::OperationsWait
+        | Method::OperationsCancel
+        | Method::PageRestoreState
+        | Method::RecordingStart
+        | Method::RecordingGet
+        | Method::RecordingStop
+        | Method::RecordingCancel => Policy::Free,
     }
 }
 
-fn ends_itself(method: &str) -> bool {
-    method.starts_with("agent.") || crate::operations::sidecar::supports(method)
+fn ends_itself(method: Option<Method>) -> bool {
+    matches!(
+        method,
+        Some(
+            Method::AgentObserve
+                | Method::AgentStep
+                | Method::ActionsPerform
+                | Method::OperationsGet
+                | Method::OperationsList
+                | Method::OperationsWait
+                | Method::OperationsCancel
+        )
+    )
 }
 
 impl Call {
-    pub(crate) fn new(method: &str, params: &Value) -> Self {
-        let policy = policy(method, params);
+    pub(crate) fn new(parsed: Option<Method>, method: &str, params: &Value) -> Self {
+        let policy = policy(parsed, params);
         Self {
             method: method.to_owned(),
             policy,
             limit: blockers::limit(policy, params),
-            ends_itself: ends_itself(method),
+            ends_itself: ends_itself(parsed),
         }
     }
 
@@ -159,64 +191,36 @@ mod tests {
     use std::time::Instant;
 
     #[test]
-    fn every_registered_page_method_has_a_deliberate_policy() {
-        let free = [
-            "server.hello",
-            "server.shutdown",
-            "browser.launch",
-            "browser.connect",
-            "browser.new_page",
-            "browser.tabs",
-            "browser.close_tab",
-            "browser.close",
-            "operations.get",
-            "operations.list",
-            "operations.wait",
-            "operations.cancel",
-            "recording.start",
-            "recording.get",
-            "recording.stop",
-            "recording.cancel",
-            "page.restore_state",
-        ];
-        let registered = eoka_protocol::sidecar::method_names()
-            .into_iter()
-            .filter(|method| eoka_protocol::sidecar::catalog_operation(method).is_none());
-        for method in registered {
-            let policy = policy(method, &json!({"action":{"kind":"click"}}));
-            assert_eq!(
-                policy == Policy::Free,
-                free.contains(&method),
-                "{method} is {policy:?}"
-            );
-        }
-    }
-
-    #[test]
     fn navigation_actions_are_admitted_past_a_pending_navigation() {
         for kind in ["navigate", "reload", "back", "forward", "history"] {
             for method in ["actions.perform", "agent.step"] {
                 assert_eq!(
-                    policy(method, &json!({"action":{"kind":kind}})),
+                    policy(Method::parse(method), &json!({"action":{"kind":kind}})),
                     Policy::Navigate
                 );
             }
         }
         assert_eq!(
-            policy("actions.perform", &json!({"action":{"kind":"fill"}})),
+            policy(
+                Some(Method::ActionsPerform),
+                &json!({"action":{"kind":"fill"}})
+            ),
             Policy::Gate
         );
-        assert_eq!(policy("page.capture_state", &json!({})), Policy::Read);
-        assert_eq!(policy("console", &json!({})), Policy::Free);
+        assert_eq!(
+            policy(Some(Method::PageCaptureState), &json!({})),
+            Policy::Read
+        );
+        assert_eq!(policy(Method::parse("console"), &json!({})), Policy::Free);
     }
 
     #[test]
     fn admissions_and_agent_calls_end_themselves_when_a_dialog_opens() {
         for method in ["actions.perform", "agent.step", "agent.observe"] {
-            assert!(ends_itself(method), "{method}");
+            assert!(ends_itself(Method::parse(method)), "{method}");
         }
         for method in ["page.capture_state", "eval", "screenshot"] {
-            assert!(!ends_itself(method), "{method}");
+            assert!(!ends_itself(Method::parse(method)), "{method}");
         }
     }
 

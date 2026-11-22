@@ -10,17 +10,66 @@ const WASM_MEMORY_HELP: &str =
     "JavaScript expression for the WebAssembly.Memory [default: auto-detect]";
 #[cfg(feature = "clap")]
 pub(crate) const OPERATION_ID_HELP: &str = "Operation ID returned by the action";
+#[cfg(feature = "clap")]
+pub const CODE_HELP: &str = "JavaScript source; omit to use --file";
+
+#[cfg(feature = "clap")]
+fn path_string() -> impl clap::builder::TypedValueParser<Value = String> {
+    use clap::builder::TypedValueParser;
+    clap::builder::PathBufValueParser::new().map(|path| path.to_string_lossy().into_owned())
+}
+
+#[cfg(feature = "clap")]
+fn input_mode() -> impl clap::builder::TypedValueParser<Value = crate::InputMode> {
+    use clap::builder::TypedValueParser;
+    clap::builder::PossibleValuesParser::new(["sequential", "bulk"]).map(|mode| {
+        match mode.as_str() {
+            "bulk" => crate::InputMode::Bulk,
+            _ => crate::InputMode::Sequential,
+        }
+    })
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct OpenArgs {
+    #[cfg_attr(feature = "clap", arg(skip))]
     #[serde(flatten)]
     pub operation: crate::ActionSettings,
+    #[cfg_attr(
+        feature = "clap",
+        arg(help = "URL, or a path relative to the current page")
+    )]
     pub url: String,
+    #[cfg_attr(feature = "clap", arg(skip))]
     pub headers: Option<serde_json::Value>,
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, help = "User-Agent header for this navigation")
+    )]
     pub user_agent: Option<String>,
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, help = "Disable the page's Content-Security-Policy")
+    )]
     #[serde(default)]
     pub bypass_csp: bool,
+    #[cfg_attr(
+        feature = "clap",
+        arg(
+            long,
+            value_name = "FILE",
+            help = "JavaScript source, or a .js file, to run on each new document before page scripts"
+        )
+    )]
     pub inject_js: Option<String>,
+    #[cfg_attr(feature = "clap", arg(
+            long,
+            value_name = "FILE",
+            value_parser = path_string(),
+            help = "Restore a save-state file before navigating"
+        )
+    )]
     pub load_state: Option<String>,
 }
 
@@ -39,34 +88,74 @@ pub struct SnapshotArgs {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct ObserveArgs {
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, help = "Filter elements: inputs, buttons, or all")
+    )]
     #[schemars(
         description = "Filter: 'inputs' for form elements, 'buttons' for buttons and links, or 'all' for all observed elements."
     )]
     pub filter: Option<String>,
+    #[cfg_attr(feature = "clap", arg(long, help = "Maximum elements to return"))]
     #[schemars(description = "Maximum elements to return.")]
     pub max: Option<usize>,
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, help = "Return structured element objects instead of text")
+    )]
     #[serde(default)]
     pub structured: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct ScreenshotArgs {
+    #[cfg_attr(feature = "clap", arg(
+            short,
+            long,
+            value_parser = path_string(),
+            help = "PNG path [default: eoka-screenshot-<ms>.png in the temp dir]"
+        )
+    )]
     pub output: Option<String>,
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, help = "Overlay numbered labels on interactive elements")
+    )]
     #[serde(default)]
     pub annotate: bool,
+    #[cfg_attr(feature = "clap", arg(long, help = "Image format [default: png]"))]
     #[serde(default)]
     #[schemars(description = "Image format; PNG when omitted.")]
     pub format: Option<crate::sidecar::ScreenshotFormat>,
+    #[cfg_attr(feature = "clap", arg(long, help = "JPEG or WebP quality, 0 to 100"))]
     #[serde(default)]
     #[schemars(range(max = 100), description = "JPEG or WebP quality, 0 to 100.")]
     pub quality: Option<u8>,
-    #[serde(default)]
-    #[schemars(description = "Document-relative CSS pixel region; conflicts with full_page.")]
-    pub clip: Option<crate::sidecar::ScreenshotClip>,
+    #[cfg_attr(
+        feature = "clap",
+        arg(
+            long,
+            conflicts_with = "clip",
+            help = "Capture the whole scrollable page"
+        )
+    )]
     #[serde(default)]
     #[schemars(description = "Capture the whole scrollable page instead of the viewport.")]
     pub full_page: bool,
+    #[cfg_attr(feature = "clap", arg(
+            long,
+            value_name = "X,Y,WIDTH,HEIGHT",
+            value_parser = crate::sidecar::parse_clip,
+            help = "Capture a document-relative region in CSS pixels"
+        )
+    )]
+    #[serde(default)]
+    #[schemars(description = "Document-relative CSS pixel region; conflicts with full_page.")]
+    pub clip: Option<crate::sidecar::ScreenshotClip>,
+    #[cfg_attr(feature = "clap", arg(skip))]
     #[serde(default)]
     #[schemars(
         description = "Return the image as base64 dataBase64 instead of writing a file; conflicts with output."
@@ -127,23 +216,47 @@ impl ScreenshotArgs {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct RecordingStartArgs {
+    #[cfg_attr(feature = "clap", arg(value_parser = path_string(), help = "MP4 file to write"))]
     #[schemars(description = "Absolute path of the MP4 file to write.")]
     pub path: String,
+    #[cfg_attr(
+        feature = "clap",
+        arg(
+            long = "id",
+            value_name = "ID",
+            help = "UUID naming this recording [default: generated]"
+        )
+    )]
     #[serde(default)]
     #[schemars(description = "UUID naming this recording; generated when omitted.")]
     pub recording_id: Option<String>,
-    #[serde(default)]
-    pub max_width: Option<u32>,
-    #[serde(default)]
-    pub max_height: Option<u32>,
+    #[cfg_attr(feature = "clap", arg(long, help = "Frames per second, 1 to 120"))]
     #[serde(default)]
     #[schemars(range(min = 1, max = 120))]
     pub fps: Option<u32>,
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, help = "Scale frames down to at most this width")
+    )]
+    #[serde(default)]
+    pub max_width: Option<u32>,
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, help = "Scale frames down to at most this height")
+    )]
+    #[serde(default)]
+    pub max_height: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct RecordingIdArgs {
+    #[cfg_attr(
+        feature = "clap",
+        arg(value_name = "ID", help = "Recording ID from start")
+    )]
     #[schemars(description = "Recording UUID returned by recording_start.")]
     pub recording_id: String,
 }
@@ -217,9 +330,12 @@ pub struct TargetArgs {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct ClickArgs {
+    #[cfg_attr(feature = "clap", command(flatten))]
     #[serde(flatten)]
     pub element: TargetArgs,
+    #[cfg_attr(feature = "clap", arg(skip))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub intercept_nav: Option<NavIntercept>,
 }
@@ -243,15 +359,26 @@ pub struct HistoryGoArgs {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct FillArgs {
+    #[cfg_attr(feature = "clap", arg(skip))]
     #[serde(flatten)]
     pub operation: crate::ActionSettings,
+    #[cfg_attr(feature = "clap", arg(help = TARGET_HELP))]
     #[schemars(
         description = "Target input. Supports scoped refs from view, text:Email, placeholder:Enter code, css:input.search, id:email-field, or plain text search."
     )]
     pub target: String,
+    #[cfg_attr(feature = "clap", arg(help = "Text to enter"))]
     #[schemars(description = "Text to type into the element.")]
     pub text: String,
+    #[cfg_attr(feature = "clap", arg(
+            long,
+            default_value = "sequential",
+            value_parser = input_mode(),
+            help = "sequential types native keystrokes; bulk sets the value at once"
+        )
+    )]
     #[serde(default)]
     pub input_mode: crate::InputMode,
 }
@@ -307,11 +434,15 @@ pub enum MouseButton {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct MouseButtonArgs {
+    #[cfg_attr(feature = "clap", arg(help = "Viewport X in CSS pixels"))]
     #[schemars(description = "Viewport horizontal coordinate in CSS pixels.")]
     pub x: f64,
+    #[cfg_attr(feature = "clap", arg(help = "Viewport Y in CSS pixels"))]
     #[schemars(description = "Viewport vertical coordinate in CSS pixels.")]
     pub y: f64,
+    #[cfg_attr(feature = "clap", arg(skip = MouseButton::Left))]
     #[schemars(description = "Mouse button to hold or release.")]
     pub button: MouseButton,
 }
@@ -328,21 +459,36 @@ pub struct MouseMoveArgs {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct ScriptArgs {
+    #[cfg_attr(feature = "clap", arg(skip))]
     #[serde(default)]
     pub arguments: Vec<serde_json::Value>,
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, help = "Run CODE unchanged in global scope")
+    )]
     #[serde(default)]
     pub raw: bool,
+    #[cfg_attr(feature = "clap", arg(help = CODE_HELP))]
     pub code: Option<String>,
+    #[cfg_attr(feature = "clap", arg(short, long, value_parser = path_string(), help = "Read JavaScript from a file"))]
     pub file: Option<String>,
+    #[cfg_attr(feature = "clap", arg(skip))]
     pub max_size: Option<usize>,
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, help = "Do not await a returned promise; requires --raw")
+    )]
     #[serde(default)]
     pub no_await: bool,
+    #[cfg_attr(feature = "clap", arg(skip))]
     #[serde(default)]
     #[schemars(
         description = "Treat code as function source and call it with arguments as written, without expression or statement wrapping; conflicts with raw."
     )]
     pub function: bool,
+    #[cfg_attr(feature = "clap", arg(skip))]
     #[serde(default)]
     #[schemars(
         description = "With raw, return the expression's value as strict JSON, failing on values JSON cannot represent."
@@ -351,24 +497,59 @@ pub struct ScriptArgs {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct FrameEvalArgs {
+    #[cfg_attr(
+        feature = "clap",
+        arg(
+            help = "CSS selector matching one frame, or id:<frame-id> from frames; no bare URL/index"
+        )
+    )]
     #[schemars(
         description = "CSS selector matching exactly one iframe/frame in the top document, or id:<frame-id> from frames for explicit/nested selection. Bare URLs and indices are not supported. Evaluation uses an isolated world, not page-owned JavaScript globals."
     )]
     pub frame: String,
+    #[cfg_attr(feature = "clap", arg(help = CODE_HELP))]
     pub code: Option<String>,
+    #[cfg_attr(feature = "clap", arg(short, long, value_parser = path_string(), help = "Read JavaScript from a file"))]
     pub file: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct FetchArgs {
+    #[cfg_attr(feature = "clap", arg(help = "URL to fetch from the page's context"))]
     pub url: String,
+    #[cfg_attr(
+        feature = "clap",
+        arg(short, long, display_order = 0, help = "HTTP method [default: GET]")
+    )]
     pub method: Option<String>,
+    #[cfg_attr(feature = "clap", arg(skip))]
     pub headers: Option<serde_json::Value>,
+    #[cfg_attr(feature = "clap", arg(short, long, help = "Request body"))]
     pub body: Option<String>,
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, help = "Fetch redirect mode: follow, error or manual")
+    )]
     pub redirect: Option<String>,
+    #[cfg_attr(
+        feature = "clap",
+        arg(
+            long,
+            help = "Print only the body; fails on binary or truncated bodies"
+        )
+    )]
     #[serde(default)]
     pub body_only: bool,
+    #[cfg_attr(
+        feature = "clap",
+        arg(
+            long,
+            help = "Raw text bytes to retain: default 8192, maximum 16777216; 0 means headers only"
+        )
+    )]
     #[schemars(
         description = "Raw text byte limit: default 8192, maximum 16777216; zero inspects headers only.",
         range(max = 16777216)
@@ -433,14 +614,22 @@ pub struct SetStorageArgs {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct PathArgs {
+    #[cfg_attr(feature = "clap", arg(value_parser = path_string(), help = "State file to write; must end in .json"))]
     #[schemars(description = "File path.")]
     pub path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct LoadStateArgs {
+    #[cfg_attr(feature = "clap", arg(value_parser = path_string(), help = "State file written by save-state"))]
     pub path: String,
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, help = "Do not navigate to the saved URL first")
+    )]
     #[serde(default)]
     pub no_navigate: bool,
 }
@@ -496,36 +685,66 @@ pub struct TabIdArgs {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct CloneFromArgs {
+    #[cfg_attr(
+        feature = "clap",
+        arg(help = "DevTools port or WebSocket URL of the running Chrome")
+    )]
     pub source: String,
+    #[cfg_attr(feature = "clap", arg(long, value_parser = path_string(), help = "Write the snapshot to this state file"))]
     pub to: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct WaitArgs {
+    #[cfg_attr(feature = "clap", arg(skip))]
     #[serde(default)]
     pub expect: Option<crate::Expectation>,
+    #[cfg_attr(feature = "clap", arg(help = "Fixed delay in milliseconds"))]
     pub ms: Option<u64>,
+    #[cfg_attr(feature = "clap", arg(long, help = "Wait until this text is visible"))]
     pub text: Option<String>,
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, help = "Wait until the URL contains this string")
+    )]
     pub url: Option<String>,
+    #[cfg_attr(feature = "clap", arg(long, help = "Wait for network idle"))]
     pub load: Option<String>,
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, help = "Wait until this CSS selector reaches --state")
+    )]
     #[serde(default)]
     #[schemars(description = "CSS selector to wait for; see `state`.")]
     pub selector: Option<String>,
+    #[cfg_attr(
+        feature = "clap",
+        arg(
+            long,
+            requires = "selector",
+            help = "Selector condition [default: visible]"
+        )
+    )]
     #[serde(default)]
     #[schemars(description = "What the selector must become. Defaults to visible.")]
     pub state: Option<WaitSelectorState>,
+    #[cfg_attr(feature = "clap", arg(skip))]
     #[serde(default)]
     #[schemars(
         description = "Wait until no XHR or fetch request has run for this many milliseconds."
     )]
     pub network_idle: Option<u64>,
+    #[cfg_attr(feature = "clap", arg(short, long, help = "Timeout in milliseconds"))]
     pub timeout: Option<u64>,
 }
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema,
 )]
+#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 #[serde(rename_all = "lowercase")]
 #[schemars(description = "The condition a `wait` selector must reach.")]
 pub enum WaitSelectorState {
@@ -636,8 +855,14 @@ pub struct PathStringArgs {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct FakeCameraArgs {
+    #[cfg_attr(feature = "clap", arg(value_parser = path_string(), help = "Video file to play as the camera"))]
     pub file: String,
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, help = "Loop the video instead of stopping at the end")
+    )]
     #[serde(default)]
     pub loop_video: bool,
 }
@@ -702,10 +927,18 @@ impl Default for WasmFindArgs {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct InterceptAddArgs {
+    #[cfg_attr(feature = "clap", arg(help = "URL glob such as */api/data*"))]
     pub url_pattern: String,
+    #[cfg_attr(feature = "clap", arg(long, value_parser = path_string(), help = "Write matching requests to this file"))]
     pub capture: Option<String>,
+    #[cfg_attr(feature = "clap", arg(long, value_parser = path_string(), help = "Serve this file's exact bytes as the response"))]
     pub respond: Option<String>,
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, default_value = "200", help = "Status code for --respond")
+    )]
     #[serde(default = "default_intercept_status")]
     pub status: u16,
 }
@@ -722,7 +955,9 @@ impl Default for InterceptAddArgs {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct IdArgs {
+    #[cfg_attr(feature = "clap", arg(help = "Rule ID from intercept list"))]
     pub id: String,
 }
 
@@ -741,11 +976,22 @@ pub struct DomainArgs {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct CaptchaInjectArgs {
+    #[cfg_attr(feature = "clap", arg(help = "Token returned by captcha solve"))]
     pub token: String,
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, default_value = "auto", help = "auto, recaptcha or hcaptcha")
+    )]
     #[serde(default = "default_captcha_type")]
     pub captcha_type: String,
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, help = "Page callback to call with the token")
+    )]
     pub callback: Option<String>,
+    #[cfg_attr(feature = "clap", arg(long, help = "Target to click after injecting"))]
     pub click_after: Option<String>,
 }
 
@@ -830,10 +1076,20 @@ pub struct NetworkWaitArgs {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct NetworkExportArgs {
+    #[cfg_attr(feature = "clap", arg(value_parser = path_string(), help = "File to write"))]
     pub path: String,
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, default_value = "har", help = "har or json")
+    )]
     #[serde(default = "default_network_export_format")]
     pub format: String,
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, help = "Wait this long for in-flight requests before writing")
+    )]
     pub settle_ms: Option<u64>,
 }
 

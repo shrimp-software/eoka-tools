@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -65,11 +65,8 @@ pub struct AppState {
 #[derive(Default)]
 struct Shared {
     browser: Mutex<Option<Arc<Browser>>>,
-    pages: Mutex<HashMap<String, Page>>,
+    tabs: crate::tabs::Tabs,
     engine: tokio::sync::Mutex<Option<crate::engine::Engine>>,
-    engine_pages: Mutex<HashSet<String>>,
-    retired_engine_pages: Mutex<Vec<String>>,
-    cloudflare: Mutex<Option<crate::cloudflare::CloudflareWatcher>>,
     topology: tokio::sync::Mutex<()>,
     shutdown: AtomicBool,
 }
@@ -85,8 +82,6 @@ impl AppState {
 
     pub async fn take_browser(&self) -> Option<Arc<Browser>> {
         *self.shared.engine.lock().await = None;
-        self.shared.engine_pages.lock().clear();
-        self.shared.retired_engine_pages.lock().clear();
         self.shared.browser.lock().take()
     }
 
@@ -94,8 +89,6 @@ impl AppState {
         if let Ok(mut engine) = self.shared.engine.try_lock() {
             *engine = None;
         }
-        self.shared.engine_pages.lock().clear();
-        self.shared.retired_engine_pages.lock().clear();
         self.shared.browser.lock().take();
     }
 
@@ -111,17 +104,11 @@ impl AppState {
         })
     }
 
-    pub fn insert_page(&self, id: String, page: Page) {
-        crate::engine::blockers::watch(&page);
-        self.shared.pages.lock().insert(id, page);
-        self.publish_pages();
-    }
-
     pub async fn open_page(&self) -> Result<Page, ServerError> {
         let browser = self.browser()?;
         let _topology = self.shared.topology.lock().await;
         let page = browser.new_blank_page().await?;
-        self.insert_page(page.target_id().to_owned(), page.clone());
+        self.shared.tabs.insert(page.target_id(), page.clone());
         Ok(page)
     }
 
@@ -132,7 +119,7 @@ impl AppState {
             return Ok(page);
         }
         let page = browser.attach_page(id).await?;
-        self.insert_page(id.to_owned(), page.clone());
+        self.shared.tabs.insert(id, page.clone());
         Ok(page)
     }
 
@@ -161,86 +148,39 @@ impl AppState {
         request: eoka_protocol::Request,
         spoken: Option<&str>,
     ) -> Result<eoka_protocol::Response, ServerError> {
-        let page = self.page(page_id)?;
+        self.page(page_id)?;
         let browser = self.browser()?;
-        let response = {
-            let mut engine = self.shared.engine.lock().await;
-            let retired = std::mem::take(&mut *self.shared.retired_engine_pages.lock());
-            if let Some(engine) = engine.as_mut() {
-                for closed in retired {
-                    engine.release_tab(&closed).await;
-                }
-            }
-            self.shared.engine_pages.lock().insert(page_id.to_owned());
-            let engine = engine.get_or_insert_with(|| {
-                crate::engine::Engine::adopt(
-                    "sidecar",
-                    browser,
-                    self.operations.clone(),
-                    self.recordings.clone(),
-                    self.agent.clone(),
-                )
-            });
-            Box::pin(engine.handle_on(page_id, &page, request, spoken)).await
-        };
-        Ok(response)
-    }
-
-    pub async fn release_engine_tab(&self, id: &str) {
-        if !self.shared.engine_pages.lock().remove(id) {
-            return;
-        }
-        match self.shared.engine.try_lock() {
-            Ok(mut engine) => {
-                if let Some(engine) = engine.as_mut() {
-                    engine.release_tab(id).await;
-                }
-            }
-            Err(_) => {
-                self.shared.retired_engine_pages.lock().push(id.to_owned());
-            }
-        }
-    }
-
-    pub fn remove_page(&self, id: &str) -> Option<Page> {
-        let page = self.shared.pages.lock().remove(id);
-        self.publish_pages();
-        page
+        let mut engine = self.shared.engine.lock().await;
+        let engine = engine.get_or_insert_with(|| {
+            crate::engine::Engine::adopt(
+                "sidecar",
+                browser,
+                self.shared.tabs.clone(),
+                self.operations.clone(),
+                self.recordings.clone(),
+                self.agent.clone(),
+            )
+        });
+        Ok(Box::pin(engine.handle_on(page_id, request, spoken)).await)
     }
 
     pub async fn close_page(&self, id: &str) -> Result<(), ServerError> {
         let browser = self.browser()?;
         let _topology = self.shared.topology.lock().await;
         browser.close_tab(id).await?;
-        self.remove_page(id);
+        self.shared.tabs.remove(id);
         Ok(())
     }
 
     pub fn start_cloudflare_watcher(&self, interval: Duration, timeout: Duration) {
-        *self.shared.cloudflare.lock() = Some(crate::cloudflare::CloudflareWatcher::start(
-            interval, timeout,
-        ));
-        self.publish_pages();
-    }
-
-    fn publish_pages(&self) {
-        let pages = self.shared.pages.lock();
-        if let Some(watcher) = self.shared.cloudflare.lock().as_ref() {
-            watcher.set_pages(pages.iter());
-        }
+        self.shared.tabs.watch_cloudflare(interval, timeout);
     }
 
     pub fn page(&self, id: &str) -> Result<Page, ServerError> {
         self.shared
-            .pages
-            .lock()
-            .get(id)
-            .cloned()
+            .tabs
+            .page(id)
             .ok_or_else(|| ServerError::invalid_page(id))
-    }
-
-    fn has_page(&self, id: &str) -> bool {
-        self.shared.pages.lock().contains_key(id)
     }
 
     pub async fn reconcile_pages(&self) -> Result<Vec<eoka::TabInfo>, ServerError> {
@@ -249,10 +189,9 @@ impl AppState {
         let mut tabs = browser.tabs().await?;
         let mut attached = Vec::new();
         for tab in &tabs {
-            if !self.has_page(&tab.id) {
+            if !self.shared.tabs.contains(&tab.id) {
                 match browser.attach_page(&tab.id).await {
                     Ok(page) => {
-                        crate::engine::blockers::watch(&page);
                         attached.push((tab.id.clone(), page));
                     }
                     Err(error) => {
@@ -272,11 +211,10 @@ impl AppState {
         let live_tabs: HashSet<&str> = tabs.iter().map(|tab| tab.id.as_str()).collect();
         let closed: Vec<(String, Page)> = self
             .shared
-            .pages
-            .lock()
-            .iter()
+            .tabs
+            .entries()
+            .into_iter()
             .filter(|(id, _)| !live_tabs.contains(id.as_str()))
-            .map(|(id, page)| (id.clone(), page.clone()))
             .collect();
         let mut release_error = None;
         for (_, page) in &closed {
@@ -284,19 +222,15 @@ impl AppState {
                 release_error.get_or_insert(error);
             }
         }
-        {
-            let mut pages = self.shared.pages.lock();
-            for (id, _) in &closed {
-                pages.remove(id);
-            }
-            for (id, page) in attached {
-                if live_tabs.contains(id.as_str()) {
-                    pages.entry(id).or_insert(page);
-                }
+        for (id, _) in &closed {
+            self.shared.tabs.remove(id);
+        }
+        for (id, page) in attached {
+            if live_tabs.contains(id.as_str()) {
+                self.shared.tabs.insert_missing(id, page);
             }
         }
-        self.publish_pages();
-        tabs.retain(|tab| self.has_page(&tab.id));
+        tabs.retain(|tab| self.shared.tabs.contains(&tab.id));
         match release_error {
             Some(error) => Err(error.into()),
             None => Ok(tabs),
@@ -304,7 +238,7 @@ impl AppState {
     }
 
     pub async fn cleanup_browser(&self) -> Result<(), ServerError> {
-        let watcher = self.shared.cloudflare.lock().take();
+        let watcher = self.shared.tabs.take_cloudflare();
         if let Some(watcher) = watcher {
             watcher.stop().await;
         }
@@ -357,16 +291,15 @@ impl AppState {
     }
 
     pub fn pages(&self) -> Vec<Page> {
-        self.shared.pages.lock().values().cloned().collect()
+        self.shared.tabs.pages()
     }
 
     pub fn clear_pages(&self) {
-        self.shared.pages.lock().clear();
-        self.publish_pages();
+        self.shared.tabs.clear();
     }
 
     pub fn abandon_cleanup(&self) {
-        self.shared.cloudflare.lock().take();
+        self.shared.tabs.take_cloudflare();
         self.clear_pages();
         self.abandon_browser();
     }
