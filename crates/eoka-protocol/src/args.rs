@@ -1,5 +1,16 @@
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "clap")]
+pub const TARGET_HELP: &str =
+    "text:Submit (or bare text), placeholder:Email, css:#id, id:login, role:button, or a target from view";
+#[cfg(feature = "clap")]
+const WASM_ADDR_HELP: &str = "Address, decimal or 0x-prefixed hex";
+#[cfg(feature = "clap")]
+const WASM_MEMORY_HELP: &str =
+    "JavaScript expression for the WebAssembly.Memory [default: auto-detect]";
+#[cfg(feature = "clap")]
+pub(crate) const OPERATION_ID_HELP: &str = "Operation ID returned by the action";
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
 pub struct OpenArgs {
     #[serde(flatten)]
@@ -14,9 +25,15 @@ pub struct OpenArgs {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct SnapshotArgs {
+    #[cfg_attr(feature = "clap", arg(short, long, help = "Only interactive nodes"))]
     #[serde(default)]
     pub interactive: bool,
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, help = "Keep decorative and empty text nodes")
+    )]
     #[serde(default)]
     pub all: bool,
 }
@@ -132,15 +149,36 @@ pub struct RecordingIdArgs {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct EmulateArgs {
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, default_value = "390", help = "Viewport width in CSS pixels")
+    )]
     #[serde(default = "default_viewport_width")]
     pub width: u32,
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, default_value = "844", help = "Viewport height in CSS pixels")
+    )]
     #[serde(default = "default_viewport_height")]
     pub height: u32,
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, default_value = "2", help = "Device pixel ratio")
+    )]
     #[serde(default = "default_device_pixel_ratio")]
     pub dpr: f64,
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, help = "Emulate a desktop instead of a touch mobile device")
+    )]
     #[serde(default)]
     pub desktop: bool,
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, help = "Clear emulation and ignore the other flags")
+    )]
     #[serde(default)]
     pub reset: bool,
 }
@@ -158,15 +196,20 @@ impl Default for EmulateArgs {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct TextArgs {
+    #[cfg_attr(feature = "clap", arg(help = "Text to search for"))]
     #[schemars(description = "Text substring to search for, matched case-insensitively.")]
     pub text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct TargetArgs {
+    #[cfg_attr(feature = "clap", arg(skip))]
     #[serde(flatten)]
     pub operation: crate::ActionSettings,
+    #[cfg_attr(feature = "clap", arg(help = TARGET_HELP))]
     #[schemars(
         description = "Target element. Supports scoped refs from view, text:Submit, placeholder:Email, role:button, css:form button, id:my-btn, or plain text search."
     )]
@@ -214,21 +257,31 @@ pub struct FillArgs {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct SelectArgs {
+    #[cfg_attr(feature = "clap", arg(skip))]
     #[serde(flatten)]
     pub operation: crate::ActionSettings,
+    #[cfg_attr(feature = "clap", arg(help = TARGET_HELP))]
     #[schemars(
         description = "Target select element by scoped reference, text, CSS selector, id, or role."
     )]
     pub target: String,
+    #[cfg_attr(feature = "clap", arg(help = "Option value or visible label"))]
     #[schemars(description = "Option value or visible text to select.")]
     pub value: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct KeyArgs {
+    #[cfg_attr(feature = "clap", arg(skip))]
     #[serde(flatten)]
     pub operation: crate::ActionSettings,
+    #[cfg_attr(
+        feature = "clap",
+        arg(help = "Key name or chord such as Enter, a, Shift+o, Control+a")
+    )]
     #[schemars(
         description = "Key to press, for example Enter, Tab, Escape, ArrowDown, or Backspace."
     )]
@@ -236,7 +289,9 @@ pub struct KeyArgs {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct HeldKeyArgs {
+    #[cfg_attr(feature = "clap", arg(help = "Key name such as Shift, Control or a"))]
     #[schemars(description = "Key to hold or release, for example Shift, Control, or a.")]
     pub key: String,
 }
@@ -262,9 +317,12 @@ pub struct MouseButtonArgs {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct MouseMoveArgs {
+    #[cfg_attr(feature = "clap", arg(help = "Viewport X in CSS pixels"))]
     #[schemars(description = "Viewport horizontal coordinate in CSS pixels.")]
     pub x: f64,
+    #[cfg_attr(feature = "clap", arg(help = "Viewport Y in CSS pixels"))]
     #[schemars(description = "Viewport vertical coordinate in CSS pixels.")]
     pub y: f64,
 }
@@ -319,30 +377,57 @@ pub struct FetchArgs {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct SetCookieArgs {
+    #[cfg_attr(feature = "clap", arg(help = "Cookie name"))]
     pub name: String,
+    #[cfg_attr(feature = "clap", arg(help = "Cookie value"))]
     pub value: String,
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, help = "Cookie domain [default: current page]")
+    )]
     pub domain: Option<String>,
+    #[cfg_attr(feature = "clap", arg(long, help = "Cookie path"))]
     pub path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct DeleteCookieArgs {
+    #[cfg_attr(feature = "clap", arg(help = "Cookie name"))]
     pub name: String,
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, help = "Cookie domain [default: current page hostname]")
+    )]
     pub domain: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct StorageArgs {
+    #[cfg_attr(feature = "clap", arg(help = "Key to read; omit for every key"))]
     pub key: Option<String>,
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, help = "Use sessionStorage instead of localStorage")
+    )]
     #[serde(default)]
     pub session_storage: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct SetStorageArgs {
+    #[cfg_attr(feature = "clap", arg(help = "Storage key"))]
     pub key: String,
+    #[cfg_attr(feature = "clap", arg(help = "Value to store"))]
     pub value: String,
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, help = "Use sessionStorage instead of localStorage")
+    )]
     #[serde(default)]
     pub session_storage: bool,
 }
@@ -361,31 +446,51 @@ pub struct LoadStateArgs {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct HeadersArgs {
+    #[cfg_attr(feature = "clap", arg(help = "Headers as a JSON object"))]
     pub headers_json: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct ConsoleArgs {
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, help = "Clear captured output after reading")
+    )]
     #[serde(default)]
     pub clear: bool,
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, help = "Only this level: log, warn, error, info or debug")
+    )]
     pub level: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct ClearFlagArgs {
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, help = "Clear captured errors after reading")
+    )]
     #[serde(default)]
     pub clear: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct TabNewArgs {
+    #[cfg_attr(feature = "clap", arg(help = "URL to open [default: blank page]"))]
     #[schemars(description = "Optional URL to navigate to. If omitted, opens a blank tab.")]
     pub url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct TabIdArgs {
+    #[cfg_attr(feature = "clap", arg(help = "Tab ID from tab list"))]
     #[schemars(description = "Tab ID from list_tabs.")]
     pub tab_id: String,
 }
@@ -434,7 +539,12 @@ pub enum WaitSelectorState {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct DialogAcceptArgs {
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, help = "Text to enter for a prompt() dialog")
+    )]
     #[serde(default)]
     #[schemars(
         description = "Text to enter for a prompt() dialog; ignored for alert and confirm."
@@ -443,27 +553,49 @@ pub struct DialogAcceptArgs {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct SelectorArgs {
+    #[cfg_attr(feature = "clap", arg(help = "CSS selector"))]
     #[schemars(description = "CSS selector of the element.")]
     pub selector: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct AttributeArgs {
+    #[cfg_attr(feature = "clap", arg(help = "CSS selector"))]
     #[schemars(description = "CSS selector of the element.")]
     pub selector: String,
+    #[cfg_attr(feature = "clap", arg(help = "Attribute name, for example href"))]
     #[schemars(description = "Attribute name, for example href.")]
     pub name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct ClickShadowArgs {
+    #[cfg_attr(
+        feature = "clap",
+        arg(help = "CSS selector, matched through shadow roots")
+    )]
     #[serde(deserialize_with = "shadow_selector")]
     #[schemars(description = "CSS selector, matched through open and closed shadow roots.")]
     pub selector: String,
+    #[cfg_attr(
+        feature = "clap",
+        arg(
+            long = "frame",
+            value_name = "FRAME",
+            help = "Frame ID from `eoka frames`; the top frame when omitted"
+        )
+    )]
     #[serde(default)]
     #[schemars(description = "Frame ID from `frames`; the top frame when omitted.")]
     pub frame_id: Option<String>,
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, default_value = "10000", help = "Deadline in milliseconds")
+    )]
     #[serde(
         default = "default_click_shadow_timeout_ms",
         deserialize_with = "shadow_timeout"
@@ -496,7 +628,9 @@ fn shadow_timeout<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u64, D::Erro
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct PathStringArgs {
+    #[cfg_attr(feature = "clap", arg(help = "Route path such as /dashboard"))]
     #[schemars(description = "Target path, for example /docs or /about.")]
     pub path: String,
 }
@@ -509,26 +643,49 @@ pub struct FakeCameraArgs {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct WasmReadArgs {
+    #[cfg_attr(feature = "clap", arg(help = WASM_ADDR_HELP))]
     pub addr: String,
+    #[cfg_attr(feature = "clap", arg(help = "Number of bytes"))]
     pub len: usize,
+    #[cfg_attr(feature = "clap", arg(long, help = WASM_MEMORY_HELP))]
     pub memory: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct WasmWriteArgs {
+    #[cfg_attr(feature = "clap", arg(help = WASM_ADDR_HELP))]
     pub addr: String,
+    #[cfg_attr(feature = "clap", arg(help = "Bytes as hex, such as deadbeef"))]
     pub hex: String,
+    #[cfg_attr(feature = "clap", arg(long, help = WASM_MEMORY_HELP))]
     pub memory: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct WasmFindArgs {
+    #[cfg_attr(
+        feature = "clap",
+        arg(help = "Hex bytes to find; spaces allowed, such as \"ff d8 ff e0\"")
+    )]
     pub pattern: String,
+    #[cfg_attr(feature = "clap", arg(long, help = "Start address [default: 0]"))]
     pub start: Option<String>,
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, help = "End address [default: end of memory]")
+    )]
     pub end: Option<String>,
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, default_value = "20", help = "Maximum matches")
+    )]
     #[serde(default = "default_wasm_find_max")]
     pub max: usize,
+    #[cfg_attr(feature = "clap", arg(long, help = WASM_MEMORY_HELP))]
     pub memory: Option<String>,
 }
 
@@ -570,12 +727,16 @@ pub struct IdArgs {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct ModeArgs {
+    #[cfg_attr(feature = "clap", arg(help = "block-all or allow-all"))]
     pub mode: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct DomainArgs {
+    #[cfg_attr(feature = "clap", arg(help = "Domain such as example.com"))]
     pub domain: String,
 }
 
@@ -589,43 +750,81 @@ pub struct CaptchaInjectArgs {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct NetworkRecordStartArgs {
+    #[cfg_attr(
+        feature = "clap",
+        arg(long = "pattern", help = "URL glob to record; repeat for several")
+    )]
     #[serde(default)]
     pub patterns: Vec<String>,
+    #[cfg_attr(feature = "clap", arg(long, help = "Record metadata only"))]
     #[serde(default)]
     pub no_bodies: bool,
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, default_value = "10485760", help = "Per-response body cap")
+    )]
     #[serde(default = "default_max_body_bytes")]
     pub max_body_bytes: usize,
+    #[cfg_attr(feature = "clap", arg(long, help = "Discard earlier entries first"))]
     #[serde(default)]
     pub clear: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct NetworkLogArgs {
+    #[cfg_attr(feature = "clap", arg(long, help = "Maximum entries to return"))]
     pub limit: Option<usize>,
+    #[cfg_attr(feature = "clap", arg(long, help = "URL glob such as */api/*"))]
     pub pattern: Option<String>,
+    #[cfg_attr(feature = "clap", arg(long, help = "Only this HTTP method"))]
     pub method: Option<String>,
+    #[cfg_attr(feature = "clap", arg(long, help = "Only this response status"))]
     pub status: Option<u16>,
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, help = "Only entries after this request ID")
+    )]
     pub since: Option<u64>,
+    #[cfg_attr(feature = "clap", arg(long, help = "One line per request"))]
     #[serde(default)]
     pub compact: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct NetworkShowArgs {
+    #[cfg_attr(feature = "clap", arg(help = "Request ID from network log"))]
     pub id: u64,
+    #[cfg_attr(feature = "clap", arg(long, help = "Include the response body"))]
     #[serde(default)]
     pub body: bool,
+    #[cfg_attr(feature = "clap", arg(long, help = "Maximum body bytes to print"))]
     pub max_body: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct NetworkWaitArgs {
+    #[cfg_attr(feature = "clap", arg(long, help = "URL glob such as */api/*"))]
     pub pattern: Option<String>,
+    #[cfg_attr(feature = "clap", arg(long, help = "Only this HTTP method"))]
     pub method: Option<String>,
+    #[cfg_attr(feature = "clap", arg(long, help = "Only this response status"))]
     pub status: Option<u16>,
+    #[cfg_attr(feature = "clap", arg(long, help = "Timeout in milliseconds"))]
     pub timeout: Option<u64>,
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, help = "Only match requests after this request ID")
+    )]
     pub since: Option<u64>,
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, help = "Also match requests recorded before the wait started")
+    )]
     #[serde(default)]
     pub include_existing: bool,
 }

@@ -12,14 +12,6 @@ fn make_element(
     checked: bool,
 ) -> InteractiveElement {
     let selector = format!("[data-idx=\"{}\"]", index);
-    let fingerprint = InteractiveElement::compute_fingerprint(
-        tag,
-        text,
-        role,
-        input_type,
-        placeholder,
-        &selector,
-    );
     InteractiveElement {
         index,
         tag: tag.to_string(),
@@ -38,7 +30,6 @@ fn make_element(
             width: 100.0,
             height: 30.0,
         },
-        fingerprint,
     }
 }
 
@@ -124,62 +115,7 @@ fn test_element_display_non_redundant_role_shown() {
 }
 
 #[test]
-fn test_observe_diff_display_no_changes() {
-    let diff = ObserveDiff {
-        added: vec![],
-        removed: 0,
-        total: 5,
-    };
-    assert_eq!(diff.to_string(), "no changes (5 elements)");
-}
-
-#[test]
-fn test_observe_diff_display_added_only() {
-    let diff = ObserveDiff {
-        added: vec![5, 6],
-        removed: 0,
-        total: 7,
-    };
-    assert_eq!(diff.to_string(), "+2 added (7 total)");
-}
-
-#[test]
-fn test_observe_diff_display_removed_only() {
-    let diff = ObserveDiff {
-        added: vec![],
-        removed: 3,
-        total: 2,
-    };
-    assert_eq!(diff.to_string(), "-3 removed (2 total)");
-}
-
-#[test]
-fn test_observe_diff_display_both() {
-    let diff = ObserveDiff {
-        added: vec![3, 4],
-        removed: 1,
-        total: 5,
-    };
-    assert_eq!(diff.to_string(), "+2 added, -1 removed (5 total)");
-}
-
-#[test]
 fn test_observe_config_default() {
     let config = ObserveConfig::default();
     assert!(config.viewport_only);
-}
-
-#[test]
-fn test_fingerprint_uses_full_selector() {
-    let base = "a".repeat(50);
-    let sel_a = format!("{}AAAA", base);
-    let sel_b = format!("{}BBBB", base);
-
-    let fp_a = InteractiveElement::compute_fingerprint("button", "X", None, None, None, &sel_a);
-    let fp_b = InteractiveElement::compute_fingerprint("button", "X", None, None, None, &sel_b);
-
-    assert_ne!(
-        fp_a, fp_b,
-        "selectors differing after char 50 should produce different fingerprints"
-    );
 }

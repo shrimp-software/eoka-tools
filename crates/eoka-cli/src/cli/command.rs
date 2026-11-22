@@ -6,26 +6,7 @@ pub enum Command {
         about = "Compact agent page state with scoped control references",
         long_about = "Compact agent page state with scoped control references.\n\nAnswers within --timeout-ms. When the tab cannot answer, it fails at once with the reason and the next command: dialog_open, navigation_pending, page_unresponsive, or daemon_busy while another command is running."
     )]
-    View {
-        #[arg(long, help = "Continue from a cursor returned by a previous view")]
-        cursor: Option<String>,
-        #[arg(long, help = "Only controls with this role")]
-        role: Option<String>,
-        #[arg(long, help = "Only controls whose accessible name contains this text")]
-        name: Option<String>,
-        #[arg(
-            long,
-            default_value_t = 40,
-            help = "Maximum controls to return, 1 through 200"
-        )]
-        max_controls: usize,
-        #[arg(
-            long,
-            default_value_t = 3000,
-            help = "Observation deadline, 50 through 60000 ms"
-        )]
-        timeout_ms: u64,
-    },
+    View(eoka_protocol::AgentObserveArgs),
     #[command(
         about = "Perform one agent action and return its outcome and fresh page state",
         long_about = "Perform one agent action and return its outcome and fresh page state.\n\nREQUEST is JSON. Steps verify by default: give clicks and keys an explicit expected result. Exploratory input needs \"mode\": \"explore\" and exits 4 when unverified. Fill is sequential native input unless \"input_mode\": \"bulk\"."
@@ -77,12 +58,7 @@ pub enum Command {
     #[command(about = "Reload current page")]
     Reload,
     #[command(about = "Accessibility tree with @eN refs")]
-    Snapshot {
-        #[arg(short, long, help = "Only interactive nodes")]
-        interactive: bool,
-        #[arg(long, help = "Keep decorative and empty text nodes")]
-        all: bool,
-    },
+    Snapshot(eoka_protocol::SnapshotArgs),
     #[command(about = "Inspect page context and interactive elements with indices")]
     Observe {
         #[arg(long, help = "Filter elements: inputs, buttons, or all")]
@@ -131,27 +107,13 @@ pub enum Command {
         action: CaptchaAction,
     },
     #[command(about = "Emulate a device viewport")]
-    Emulate {
-        #[arg(long, default_value = "390", help = "Viewport width in CSS pixels")]
-        width: u32,
-        #[arg(long, default_value = "844", help = "Viewport height in CSS pixels")]
-        height: u32,
-        #[arg(long, default_value = "2", help = "Device pixel ratio")]
-        dpr: f64,
-        #[arg(long, help = "Emulate a desktop instead of a touch mobile device")]
-        desktop: bool,
-        #[arg(long, help = "Clear emulation and ignore the other flags")]
-        reset: bool,
-    },
+    Emulate(eoka_protocol::EmulateArgs),
     #[command(about = "Get page URL and title")]
     Info,
     #[command(about = "Get all visible text on page")]
     Text,
     #[command(about = "Find elements by text substring")]
-    Find {
-        #[arg(help = "Text to search for")]
-        text: String,
-    },
+    Find(eoka_protocol::TextArgs),
     #[command(about = "Get the page HTML")]
     Content,
     #[command(
@@ -163,50 +125,29 @@ pub enum Command {
         action: DialogAction,
     },
     #[command(about = "Get the text of the first element matching a CSS selector")]
-    GetText {
-        #[arg(help = "CSS selector")]
-        selector: String,
-    },
+    GetText(eoka_protocol::SelectorArgs),
     #[command(about = "Get an attribute of the first element matching a CSS selector")]
-    GetAttribute {
-        #[arg(help = "CSS selector")]
-        selector: String,
-        #[arg(help = "Attribute name, for example href")]
-        name: String,
-    },
+    GetAttribute(eoka_protocol::AttributeArgs),
     #[command(about = "Check whether a CSS selector matches an element")]
-    Exists {
-        #[arg(help = "CSS selector")]
-        selector: String,
-    },
+    Exists(eoka_protocol::SelectorArgs),
     #[command(
         about = "Click an element inside open or closed shadow roots",
         long_about = "Click an element inside open or closed shadow roots with human-like movement.\n\nThe result proves the click was dispatched, not what it did; check the page afterwards."
     )]
-    ClickShadow {
-        #[arg(help = "CSS selector, matched through shadow roots")]
-        selector: String,
-        #[arg(long, help = "Frame ID from `eoka frames`; the top frame when omitted")]
-        frame: Option<String>,
-        #[arg(long, default_value = "10000", help = "Deadline in milliseconds")]
-        timeout_ms: u64,
-    },
+    ClickShadow(eoka_protocol::ClickShadowArgs),
     #[command(
         about = "Click element",
         long_about = "Click element. Requires --expect with the result that proves the click worked; without it the command fails before any input."
     )]
     Click {
-        #[arg(help = TARGET)]
+        #[arg(help = eoka_protocol::TARGET_HELP)]
         target: String,
     },
     #[command(name = "dblclick", about = "Double-click element")]
-    DoubleClick {
-        #[arg(help = TARGET)]
-        target: String,
-    },
+    DoubleClick(eoka_protocol::TargetArgs),
     #[command(about = "Clear and fill input")]
     Fill {
-        #[arg(help = TARGET)]
+        #[arg(help = eoka_protocol::TARGET_HELP)]
         target: String,
         #[arg(help = "Text to enter")]
         text: String,
@@ -219,25 +160,14 @@ pub enum Command {
         input_mode: String,
     },
     #[command(about = "Select dropdown option")]
-    Select {
-        #[arg(help = TARGET)]
-        target: String,
-        #[arg(help = "Option value or visible label")]
-        value: String,
-    },
+    Select(eoka_protocol::SelectArgs),
     #[command(about = "Hover over element")]
-    Hover {
-        #[arg(help = TARGET)]
-        target: String,
-    },
+    Hover(eoka_protocol::TargetArgs),
     #[command(
         about = "Press keyboard key",
         long_about = "Press a key on the current focus, including a focused frame.\n\n`o` sends a native printable key; `Shift+o` sends `O`. Shift uses US-keyboard ASCII mappings; Ctrl/Alt/Meta shortcuts do not insert text. Requires --expect: choose an expectation that proves the intended effect, because read-only controls and prevented events can reject edits."
     )]
-    Key {
-        #[arg(help = "Key name or chord such as Enter, a, Shift+o, Control+a")]
-        key: String,
-    },
+    Key(eoka_protocol::KeyArgs),
     #[command(about = "Press and hold a mouse button at viewport coordinates")]
     MouseDown {
         #[arg(help = "Viewport X in CSS pixels")]
@@ -252,12 +182,7 @@ pub enum Command {
         button: String,
     },
     #[command(about = "Move the mouse to viewport coordinates")]
-    MouseMove {
-        #[arg(help = "Viewport X in CSS pixels")]
-        x: f64,
-        #[arg(help = "Viewport Y in CSS pixels")]
-        y: f64,
-    },
+    MouseMove(eoka_protocol::MouseMoveArgs),
     #[command(about = "Release a held mouse button at viewport coordinates")]
     MouseUp {
         #[arg(help = "Viewport X in CSS pixels")]
@@ -272,22 +197,13 @@ pub enum Command {
         button: String,
     },
     #[command(about = "Press and hold a keyboard key")]
-    KeyDown {
-        #[arg(help = "Key name such as Shift, Control or a")]
-        key: String,
-    },
+    KeyDown(eoka_protocol::HeldKeyArgs),
     #[command(about = "Release a held keyboard key")]
-    KeyUp {
-        #[arg(help = "Key name such as Shift, Control or a")]
-        key: String,
-    },
+    KeyUp(eoka_protocol::HeldKeyArgs),
     #[command(about = "Release every held mouse button and key")]
     ReleaseAllInputs,
     #[command(about = "Scroll page or element into view")]
-    Scroll {
-        #[arg(help = TARGET)]
-        target: String,
-    },
+    Scroll(eoka_protocol::TargetArgs),
     #[command(
         about = "Execute JavaScript and return result",
         long_about = "Execute JavaScript and return its JSON result.\n\nCODE, also when loaded with --file, is a function called with --args, an expression such as document.title, or statements run as an async function body where return gives the value. Syntax is checked before anything runs, so the code runs exactly once, in a fresh scope; promises are awaited and exceptions fail the command. The result must be JSON: undefined, cycles, non-finite numbers and non-JSON objects are rejected. Source, arguments and result are each bounded to 1 MiB. --raw instead evaluates source in global scope and returns display text, not typed JSON."
@@ -419,41 +335,15 @@ pub enum Command {
     #[command(about = "Get all cookies")]
     Cookies,
     #[command(about = "Set a cookie")]
-    SetCookie {
-        #[arg(help = "Cookie name")]
-        name: String,
-        #[arg(help = "Cookie value")]
-        value: String,
-        #[arg(long, help = "Cookie domain [default: current page]")]
-        domain: Option<String>,
-        #[arg(long, help = "Cookie path")]
-        path: Option<String>,
-    },
+    SetCookie(eoka_protocol::SetCookieArgs),
     #[command(about = "Delete a cookie by name")]
-    DeleteCookie {
-        #[arg(help = "Cookie name")]
-        name: String,
-        #[arg(long, help = "Cookie domain [default: current page hostname]")]
-        domain: Option<String>,
-    },
+    DeleteCookie(eoka_protocol::DeleteCookieArgs),
     #[command(about = "Clear all cookies")]
     ClearCookies,
     #[command(about = "Get localStorage")]
-    Storage {
-        #[arg(help = "Key to read; omit for every key")]
-        key: Option<String>,
-        #[arg(long, help = "Use sessionStorage instead of localStorage")]
-        session_storage: bool,
-    },
+    Storage(eoka_protocol::StorageArgs),
     #[command(about = "Set storage value")]
-    SetStorage {
-        #[arg(help = "Storage key")]
-        key: String,
-        #[arg(help = "Value to store")]
-        value: String,
-        #[arg(long, help = "Use sessionStorage instead of localStorage")]
-        session_storage: bool,
-    },
+    SetStorage(eoka_protocol::SetStorageArgs),
     #[command(about = "Dump localStorage and sessionStorage")]
     DumpStorage,
     #[command(
@@ -475,22 +365,11 @@ pub enum Command {
         no_navigate: bool,
     },
     #[command(about = "Set persistent extra HTTP headers")]
-    Headers {
-        #[arg(help = "Headers as a JSON object")]
-        headers_json: String,
-    },
+    Headers(eoka_protocol::HeadersArgs),
     #[command(about = "Read browser console output")]
-    Console {
-        #[arg(long, help = "Clear captured output after reading")]
-        clear: bool,
-        #[arg(long, help = "Only this level: log, warn, error, info or debug")]
-        level: Option<String>,
-    },
+    Console(eoka_protocol::ConsoleArgs),
     #[command(about = "Read JavaScript errors")]
-    Errors {
-        #[arg(long, help = "Clear captured errors after reading")]
-        clear: bool,
-    },
+    Errors(eoka_protocol::ClearFlagArgs),
     #[command(about = "Tab management")]
     Tab {
         #[command(subcommand)]
@@ -550,10 +429,7 @@ pub enum Command {
     #[command(about = "Detect SPA router type")]
     SpaInfo,
     #[command(about = "Navigate SPA without page reload")]
-    SpaNavigate {
-        #[arg(help = "Route path such as /dashboard")]
-        path: String,
-    },
+    SpaNavigate(eoka_protocol::PathStringArgs),
     #[command(about = "List all sessions")]
     Sessions,
     #[command(

@@ -2,7 +2,7 @@ mod detect;
 mod navigate;
 
 pub use detect::detect_router;
-pub use navigate::{history_go, spa_navigate};
+pub use navigate::spa_navigate;
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

@@ -115,36 +115,8 @@ fn batch_step_to_request(idx: usize, step: Value) -> Result<Request, String> {
 }
 
 fn batch_request(idx: usize, cmd: &str, args: Value) -> Result<Request, String> {
-    let value = if unit_batch_command(cmd) && args.as_object().is_some_and(|obj| obj.is_empty()) {
-        json!({ "cmd": cmd })
-    } else {
-        json!({ "cmd": cmd, "args": args })
-    };
-    serde_json::from_value(value)
+    crate::protocol::request_from_cmd(cmd, args)
         .map_err(|e| format!("Batch step {} invalid command '{}': {}", idx + 1, cmd, e))
-}
-
-fn unit_batch_command(cmd: &str) -> bool {
-    matches!(
-        cmd,
-        "back"
-            | "forward"
-            | "reload"
-            | "info"
-            | "text"
-            | "cookies"
-            | "clear_cookies"
-            | "dump_storage"
-            | "tab_list"
-            | "spa_info"
-            | "wasm_info"
-            | "intercept_list"
-            | "js_list"
-            | "network_record_stop"
-            | "network_record_status"
-            | "network_clear"
-            | "close"
-    )
 }
 
 fn normalize_batch_args(idx: usize, cmd: &str, value: Value) -> Result<Value, String> {
@@ -345,6 +317,33 @@ mod tests {
 
         assert!(effect.stop);
         assert!(!effect.shutdown_daemon);
+    }
+
+    #[test]
+    fn batch_accepts_zero_argument_commands_in_every_step_form() {
+        let requests = parse_batch_requests(
+            r#"[
+                {"frames":null},
+                {"content":{}},
+                {"cmd":"frames","args":{}},
+                {"cmd":"content"},
+                {"back":null}
+            ]"#,
+        )
+        .unwrap();
+
+        let cmds: Vec<_> = requests.iter().map(|request| request.cmd()).collect();
+        assert_eq!(cmds, ["frames", "content", "frames", "content", "back"]);
+    }
+
+    #[test]
+    fn batch_names_the_step_of_an_unknown_command() {
+        let err = parse_batch_requests(r#"[{"info":null},{"nope":{}}]"#).unwrap_err();
+
+        assert!(
+            err.starts_with("Batch step 2 invalid command 'nope'"),
+            "{err}"
+        );
     }
 
     #[test]

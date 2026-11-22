@@ -26,8 +26,8 @@ pub mod target;
 pub mod transport;
 pub mod url_policy;
 
-pub use browser::{InteractiveElement, ObserveConfig, ObserveDiff, Session};
+pub use browser::{InteractiveElement, ObserveConfig};
 pub use eoka;
 pub use eoka::{Browser, Error, StealthConfig};
 pub use spa::{RouterType, SpaRouterInfo};
-pub use target::{BBox, LivePattern, Resolved, Target};
+pub use target::{LivePattern, Target};

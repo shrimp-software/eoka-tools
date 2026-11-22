@@ -4,18 +4,44 @@ use crate::{
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 #[serde(deny_unknown_fields)]
 pub struct AgentObserveArgs {
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, help = "Continue from a cursor returned by a previous view")
+    )]
     #[serde(default)]
     pub cursor: Option<String>,
+    #[cfg_attr(feature = "clap", arg(long, help = "Only controls with this role"))]
     #[serde(default)]
     pub role: Option<String>,
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, help = "Only controls whose accessible name contains this text")
+    )]
     #[serde(default)]
     pub name: Option<String>,
+    #[cfg_attr(
+        feature = "clap",
+        arg(
+            long,
+            default_value_t = 40,
+            help = "Maximum controls to return, 1 through 200"
+        )
+    )]
     #[schemars(description = "Maximum labeled controls, 1 through 200. Increase if truncated.")]
     #[serde(default = "control_limit")]
     #[schemars(range(min = 1, max = 200))]
     pub max_controls: usize,
+    #[cfg_attr(
+        feature = "clap",
+        arg(
+            long,
+            default_value_t = 3000,
+            help = "Observation deadline, 50 through 60000 ms"
+        )
+    )]
     #[serde(default = "observe_timeout")]
     #[schemars(range(min = 50, max = 60000))]
     pub timeout_ms: u64,

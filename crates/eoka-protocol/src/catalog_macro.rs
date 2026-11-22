@@ -2,9 +2,9 @@ macro_rules! define_operations {
     (
         $(
             $variant:ident {
-                path: $path:literal,
+                $(path: $path:literal,)?
                 cmd: $cmd:literal,
-                name: $name:literal,
+                $(name: $name:literal,)?
                 description: $description:literal,
                 capability: $capability:ident,
                 exposure: $exposure:ident,
@@ -57,9 +57,9 @@ macro_rules! define_operations {
         pub const OPERATIONS: &[OperationSpec] = &[
             $(OperationSpec {
                 id: OperationId::$variant,
-                path: $path,
+                path: define_operations!(@or $cmd $(, $path)?),
                 cmd: $cmd,
-                name: $name,
+                name: define_operations!(@or $cmd $(, $name)?),
                 description: $description,
                 capability: OperationCapability::$capability,
                 exposure: OperationExposure::$exposure,
@@ -272,6 +272,14 @@ macro_rules! define_operations {
 
     (@flag) => {
         false
+    };
+
+    (@or $default:literal, $value:literal) => {
+        $value
+    };
+
+    (@or $default:literal) => {
+        $default
     };
 
 }

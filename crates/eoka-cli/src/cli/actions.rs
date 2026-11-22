@@ -11,29 +11,9 @@ pub enum NetworkAction {
         action: NetworkRecordAction,
     },
     #[command(about = "List recorded requests")]
-    Log {
-        #[arg(long, help = "Maximum entries to return")]
-        limit: Option<usize>,
-        #[arg(long, help = "URL glob such as */api/*")]
-        pattern: Option<String>,
-        #[arg(long, help = "Only this HTTP method")]
-        method: Option<String>,
-        #[arg(long, help = "Only this response status")]
-        status: Option<u16>,
-        #[arg(long, help = "Only entries after this request ID")]
-        since: Option<u64>,
-        #[arg(long, help = "One line per request")]
-        compact: bool,
-    },
+    Log(eoka_protocol::NetworkLogArgs),
     #[command(about = "Show one recorded request")]
-    Show {
-        #[arg(help = "Request ID from network log")]
-        id: u64,
-        #[arg(long, help = "Include the response body")]
-        body: bool,
-        #[arg(long, help = "Maximum body bytes to print")]
-        max_body: Option<usize>,
-    },
+    Show(eoka_protocol::NetworkShowArgs),
     #[command(about = "Write recorded requests as a HAR file")]
     Har {
         #[arg(help = "HAR file to write")]
@@ -51,20 +31,7 @@ pub enum NetworkAction {
         settle_ms: Option<u64>,
     },
     #[command(about = "Wait for a matching request")]
-    Wait {
-        #[arg(long, help = "URL glob such as */api/*")]
-        pattern: Option<String>,
-        #[arg(long, help = "Only this HTTP method")]
-        method: Option<String>,
-        #[arg(long, help = "Only this response status")]
-        status: Option<u16>,
-        #[arg(long, help = "Timeout in milliseconds")]
-        timeout: Option<u64>,
-        #[arg(long, help = "Only match requests after this request ID")]
-        since: Option<u64>,
-        #[arg(long, help = "Also match requests recorded before the wait started")]
-        include_existing: bool,
-    },
+    Wait(eoka_protocol::NetworkWaitArgs),
     #[command(about = "Discard recorded requests")]
     Clear,
     #[command(
@@ -91,16 +58,7 @@ pub enum ToolsAction {
 #[derive(Clone, Subcommand)]
 pub enum NetworkRecordAction {
     #[command(about = "Start recording")]
-    Start {
-        #[arg(long = "pattern", help = "URL glob to record; repeat for several")]
-        patterns: Vec<String>,
-        #[arg(long, help = "Record metadata only")]
-        no_bodies: bool,
-        #[arg(long, default_value = "10485760", help = "Per-response body cap")]
-        max_body_bytes: usize,
-        #[arg(long, help = "Discard earlier entries first")]
-        clear: bool,
-    },
+    Start(eoka_protocol::NetworkRecordStartArgs),
     #[command(about = "Stop recording")]
     Stop,
     #[command(about = "Show recording state")]
@@ -116,20 +74,12 @@ pub enum CaptchaAction {
         about = "Attempt local DataDome clearance on the current tab; keep the session open",
         long_about = "Attempt local DataDome clearance on the current tab. No API key needed.\n\nRequires an existing session; foregrounds the tab and leaves it open. challenge_cleared is not proof of login; not_present is a no-op; every other outcome exits nonzero."
     )]
-    Datadome {
-        #[arg(long, default_value_t = eoka_protocol::DATADOME_DEFAULT_ATTEMPTS, value_parser = clap::value_parser!(u32).range(1..=i64::from(eoka_protocol::DATADOME_MAX_ATTEMPTS)), help = "Clearance attempts, 1 through 4")]
-        max_attempts: u32,
-        #[arg(long, default_value_t = eoka_protocol::DATADOME_DEFAULT_TIMEOUT_MS, value_parser = clap::value_parser!(u64).range(eoka_protocol::DATADOME_MIN_TIMEOUT_MS..=eoka_protocol::DATADOME_MAX_TIMEOUT_MS), help = "Total budget, 5000 through 120000 ms")]
-        timeout_ms: u64,
-    },
+    Datadome(eoka_protocol::CaptchaDatadomeArgs),
     #[command(
         about = "Click the Cloudflare Turnstile checkbox on the current tab until the challenge clears",
         long_about = "Click the Cloudflare Turnstile checkbox on the current tab until it leaves the challenge page.\n\nReports clicks and elapsed_ms; a normal page returns zero clicks. --auto-solve-cloudflare does this for every tab of a browser eoka launches."
     )]
-    Turnstile {
-        #[arg(long, default_value_t = eoka_protocol::TURNSTILE_DEFAULT_TIMEOUT_MS, value_parser = clap::value_parser!(u64).range(1..=eoka_protocol::TURNSTILE_MAX_TIMEOUT_MS), help = "Total budget, at most 120000 ms")]
-        timeout_ms: u64,
-    },
+    Turnstile(eoka_protocol::CaptchaTurnstileArgs),
     #[command(about = "Solve a CAPTCHA through the Anti-Captcha provider")]
     Solve(Box<SolveArgs>),
     #[command(about = "Inject a solved token into the current page")]
@@ -194,36 +144,11 @@ pub struct SolveArgs {
 #[derive(Clone, Subcommand)]
 pub enum WasmAction {
     #[command(about = "Read LEN bytes at ADDR as hex")]
-    Read {
-        #[arg(help = ADDR)]
-        addr: String,
-        #[arg(help = "Number of bytes")]
-        len: usize,
-        #[arg(long, help = MEMORY)]
-        memory: Option<String>,
-    },
+    Read(eoka_protocol::WasmReadArgs),
     #[command(about = "Write hex bytes at ADDR")]
-    Write {
-        #[arg(help = ADDR)]
-        addr: String,
-        #[arg(help = "Bytes as hex, such as deadbeef")]
-        hex: String,
-        #[arg(long, help = MEMORY)]
-        memory: Option<String>,
-    },
+    Write(eoka_protocol::WasmWriteArgs),
     #[command(about = "Search memory for a hex byte pattern")]
-    Find {
-        #[arg(help = "Hex bytes to find; spaces allowed, such as \"ff d8 ff e0\"")]
-        pattern: String,
-        #[arg(long, help = "Start address [default: 0]")]
-        start: Option<String>,
-        #[arg(long, help = "End address [default: end of memory]")]
-        end: Option<String>,
-        #[arg(long, default_value = "20", help = "Maximum matches")]
-        max: usize,
-        #[arg(long, help = MEMORY)]
-        memory: Option<String>,
-    },
+    Find(eoka_protocol::WasmFindArgs),
     #[command(about = "List WASM memories and their sizes")]
     Info,
 }
@@ -258,25 +183,13 @@ pub enum InterceptAction {
 #[derive(Clone, Subcommand)]
 pub enum JsAction {
     #[command(about = "Set the default policy")]
-    Mode {
-        #[arg(help = "block-all or allow-all")]
-        mode: String,
-    },
+    Mode(eoka_protocol::ModeArgs),
     #[command(about = "Always run JavaScript on a domain")]
-    Allow {
-        #[arg(help = "Domain such as example.com")]
-        domain: String,
-    },
+    Allow(eoka_protocol::DomainArgs),
     #[command(about = "Always block JavaScript on a domain")]
-    Block {
-        #[arg(help = "Domain such as example.com")]
-        domain: String,
-    },
+    Block(eoka_protocol::DomainArgs),
     #[command(about = "Remove a domain rule")]
-    Remove {
-        #[arg(help = "Domain such as example.com")]
-        domain: String,
-    },
+    Remove(eoka_protocol::DomainArgs),
     #[command(about = "List the policy")]
     List,
 }
@@ -286,64 +199,34 @@ pub enum TabAction {
     #[command(about = "List tabs")]
     List,
     #[command(about = "Open a tab, optionally at a URL")]
-    New {
-        #[arg(help = "URL to open [default: blank page]")]
-        url: Option<String>,
-    },
+    New(eoka_protocol::TabNewArgs),
     #[command(about = "Make a tab current")]
-    Switch {
-        #[arg(help = TAB_ID)]
-        tab_id: String,
-    },
+    Switch(eoka_protocol::TabIdArgs),
     #[command(about = "Close a tab")]
-    Close {
-        #[arg(help = TAB_ID)]
-        tab_id: String,
-    },
+    Close(eoka_protocol::TabIdArgs),
     #[command(about = "Adopt a tab eoka did not open")]
-    Attach {
-        #[arg(help = TAB_ID)]
-        tab_id: String,
-    },
+    Attach(eoka_protocol::TabIdArgs),
 }
 
 #[derive(Clone, Subcommand)]
 pub enum OperationCommand {
     #[command(about = "Show one operation record")]
-    Get {
-        #[arg(help = OPERATION_ID)]
-        id: String,
-    },
+    Get(eoka_protocol::OperationIdArgs),
     #[command(about = "List recent operation records")]
     List {
         #[arg(long, default_value_t = 100, help = "Maximum records to return")]
         limit: u32,
     },
     #[command(about = "Wait for an operation to finish")]
-    Wait {
-        #[arg(help = OPERATION_ID)]
-        id: String,
-        #[arg(
-            long,
-            default_value_t = 30000,
-            help = "How long to wait; the operation keeps running after it"
-        )]
-        timeout_ms: u64,
-    },
+    Wait(eoka_protocol::OperationWaitArgs),
     #[command(about = "Cancel a running operation")]
-    Cancel {
-        #[arg(help = OPERATION_ID)]
-        id: String,
-    },
+    Cancel(eoka_protocol::OperationIdArgs),
 }
 
 #[derive(Clone, Subcommand)]
 pub enum DialogAction {
     #[command(about = "Accept the open dialog")]
-    Accept {
-        #[arg(long, help = "Text to enter for a prompt() dialog")]
-        prompt_text: Option<String>,
-    },
+    Accept(eoka_protocol::DialogAcceptArgs),
     #[command(about = "Dismiss the open dialog")]
     Dismiss,
 }

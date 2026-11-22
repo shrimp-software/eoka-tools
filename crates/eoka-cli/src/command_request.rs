@@ -3,12 +3,9 @@ mod network;
 use crate::captcha_cmd::captcha_inject_request;
 use crate::cli::{CaptchaAction, Command, JsAction, TabAction, WasmAction};
 use crate::protocol::{
-    CaptchaDatadomeArgs, CaptchaTurnstileArgs, ClearFlagArgs, CloneFromArgs, ConsoleArgs,
-    DeleteCookieArgs, DomainArgs, EmulateArgs, FakeCameraArgs, FetchArgs, FillArgs, FrameEvalArgs,
-    HeadersArgs, HeldKeyArgs, KeyArgs, LoadStateArgs, ModeArgs, MouseButton, MouseButtonArgs,
-    MouseMoveArgs, ObserveArgs, OpenArgs, PathArgs, PathStringArgs, Request, ScreenshotArgs,
-    ScriptArgs, SelectArgs, SetCookieArgs, SetStorageArgs, SnapshotArgs, StorageArgs, TabIdArgs,
-    TabNewArgs, TargetArgs, TextArgs, WaitArgs, WasmFindArgs, WasmReadArgs, WasmWriteArgs,
+    CloneFromArgs, FakeCameraArgs, FetchArgs, FillArgs, FrameEvalArgs, LoadStateArgs, MouseButton,
+    MouseButtonArgs, ObserveArgs, OpenArgs, PathArgs, Request, ScreenshotArgs, ScriptArgs,
+    TargetArgs, WaitArgs,
 };
 use network::network_action_to_request;
 
@@ -35,19 +32,7 @@ fn parse_headers_json(raw: &str) -> serde_json::Value {
 
 pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
     match cmd.clone() {
-        Command::View {
-            cursor,
-            role,
-            name,
-            max_controls,
-            timeout_ms,
-        } => Request::AgentObserve(eoka_protocol::AgentObserveArgs {
-            cursor,
-            role,
-            name,
-            max_controls,
-            timeout_ms,
-        }),
+        Command::View(args) => Request::AgentObserve(args),
         Command::Step { request } => {
             Request::AgentStep(serde_json::from_str(&request).unwrap_or_else(|error| {
                 eprintln!("Invalid step request: {error}\n{STEP_SHAPES}");
@@ -61,21 +46,15 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
             }))
         }
         Command::Operations { command } => match command {
-            crate::cli::OperationCommand::Get { id } => {
-                Request::OperationGet(eoka_protocol::OperationIdArgs { id })
-            }
+            crate::cli::OperationCommand::Get(args) => Request::OperationGet(args),
             crate::cli::OperationCommand::List { limit } => {
                 Request::OperationList(eoka_protocol::OperationListArgs {
                     limit: Some(limit),
                     before_ms: None,
                 })
             }
-            crate::cli::OperationCommand::Wait { id, timeout_ms } => {
-                Request::OperationWait(eoka_protocol::OperationWaitArgs { id, timeout_ms })
-            }
-            crate::cli::OperationCommand::Cancel { id } => {
-                Request::OperationCancel(eoka_protocol::OperationIdArgs { id })
-            }
+            crate::cli::OperationCommand::Wait(args) => Request::OperationWait(args),
+            crate::cli::OperationCommand::Cancel(args) => Request::OperationCancel(args),
         },
         Command::Download(args) => args.request().unwrap_or_else(|error| {
             eprintln!("Error: {error}");
@@ -102,9 +81,7 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
         Command::Back => Request::Back(Default::default()),
         Command::Forward => Request::Forward(Default::default()),
         Command::Reload => Request::Reload,
-        Command::Snapshot { interactive, all } => {
-            Request::Snapshot(SnapshotArgs { interactive, all })
-        }
+        Command::Snapshot(args) => Request::Snapshot(args),
         Command::Observe {
             filter,
             max,
@@ -171,46 +148,22 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
                 }
             }
         }
-        Command::Emulate {
-            width,
-            height,
-            dpr,
-            desktop,
-            reset,
-        } => Request::Emulate(EmulateArgs {
-            width,
-            height,
-            dpr,
-            desktop,
-            reset,
-        }),
+        Command::Emulate(args) => Request::Emulate(args),
         Command::Info => Request::Info,
         Command::Text => Request::Text,
-        Command::Find { text } => Request::Find(TextArgs { text }),
+        Command::Find(args) => Request::Find(args),
         Command::Content => Request::Content,
         Command::Dialog { action } => match action {
-            crate::cli::DialogAction::Accept { prompt_text } => {
-                Request::DialogAccept(eoka_protocol::DialogAcceptArgs { prompt_text })
-            }
+            crate::cli::DialogAction::Accept(args) => Request::DialogAccept(args),
             crate::cli::DialogAction::Dismiss => Request::DialogDismiss,
         },
         Command::Captcha {
             action: CaptchaAction::Detect,
         } => Request::CaptchaDetect,
-        Command::GetText { selector } => Request::GetText(eoka_protocol::SelectorArgs { selector }),
-        Command::GetAttribute { selector, name } => {
-            Request::GetAttribute(eoka_protocol::AttributeArgs { selector, name })
-        }
-        Command::Exists { selector } => Request::Exists(eoka_protocol::SelectorArgs { selector }),
-        Command::ClickShadow {
-            selector,
-            frame,
-            timeout_ms,
-        } => Request::ClickShadow(eoka_protocol::ClickShadowArgs {
-            selector,
-            frame_id: frame,
-            timeout_ms,
-        }),
+        Command::GetText(args) => Request::GetText(args),
+        Command::GetAttribute(args) => Request::GetAttribute(args),
+        Command::Exists(args) => Request::Exists(args),
+        Command::ClickShadow(args) => Request::ClickShadow(args),
         Command::Click { target } => Request::Click(eoka_protocol::ClickArgs {
             element: TargetArgs {
                 operation: Default::default(),
@@ -218,10 +171,7 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
             },
             intercept_nav: None,
         }),
-        Command::DoubleClick { target } => Request::DblClick(TargetArgs {
-            operation: Default::default(),
-            target,
-        }),
+        Command::DoubleClick(args) => Request::DblClick(args),
         Command::Fill {
             target,
             text,
@@ -236,37 +186,24 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
             target,
             text,
         }),
-        Command::Select { target, value } => Request::Select(SelectArgs {
-            operation: Default::default(),
-            target,
-            value,
-        }),
-        Command::Hover { target } => Request::Hover(TargetArgs {
-            operation: Default::default(),
-            target,
-        }),
-        Command::Key { key } => Request::Key(KeyArgs {
-            operation: Default::default(),
-            key,
-        }),
+        Command::Select(args) => Request::Select(args),
+        Command::Hover(args) => Request::Hover(args),
+        Command::Key(args) => Request::Key(args),
         Command::MouseDown { x, y, button } => Request::MouseDown(MouseButtonArgs {
             x,
             y,
             button: parse_mouse_button(&button),
         }),
-        Command::MouseMove { x, y } => Request::MouseMove(MouseMoveArgs { x, y }),
+        Command::MouseMove(args) => Request::MouseMove(args),
         Command::MouseUp { x, y, button } => Request::MouseUp(MouseButtonArgs {
             x,
             y,
             button: parse_mouse_button(&button),
         }),
-        Command::KeyDown { key } => Request::KeyDown(HeldKeyArgs { key }),
-        Command::KeyUp { key } => Request::KeyUp(HeldKeyArgs { key }),
+        Command::KeyDown(args) => Request::KeyDown(args),
+        Command::KeyUp(args) => Request::KeyUp(args),
         Command::ReleaseAllInputs => Request::ReleaseAllInputs,
-        Command::Scroll { target } => Request::Scroll(TargetArgs {
-            operation: Default::default(),
-            target,
-        }),
+        Command::Scroll(args) => Request::Scroll(args),
         Command::Eval {
             args,
             raw,
@@ -341,37 +278,11 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
             max_body,
         }),
         Command::Cookies => Request::Cookies,
-        Command::SetCookie {
-            name,
-            value,
-            domain,
-            path,
-        } => Request::SetCookie(SetCookieArgs {
-            name,
-            value,
-            domain,
-            path,
-        }),
-        Command::DeleteCookie { name, domain } => {
-            Request::DeleteCookie(DeleteCookieArgs { name, domain })
-        }
+        Command::SetCookie(args) => Request::SetCookie(args),
+        Command::DeleteCookie(args) => Request::DeleteCookie(args),
         Command::ClearCookies => Request::ClearCookies,
-        Command::Storage {
-            key,
-            session_storage,
-        } => Request::Storage(StorageArgs {
-            key,
-            session_storage,
-        }),
-        Command::SetStorage {
-            key,
-            value,
-            session_storage,
-        } => Request::SetStorage(SetStorageArgs {
-            key,
-            value,
-            session_storage,
-        }),
+        Command::Storage(args) => Request::Storage(args),
+        Command::SetStorage(args) => Request::SetStorage(args),
         Command::DumpStorage => Request::DumpStorage,
         Command::SaveState { path } => Request::SaveState(PathArgs {
             path: path.to_string_lossy().to_string(),
@@ -380,15 +291,15 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
             path: path.to_string_lossy().to_string(),
             no_navigate,
         }),
-        Command::Headers { headers_json } => Request::Headers(HeadersArgs { headers_json }),
-        Command::Console { clear, level } => Request::Console(ConsoleArgs { clear, level }),
-        Command::Errors { clear } => Request::Errors(ClearFlagArgs { clear }),
+        Command::Headers(args) => Request::Headers(args),
+        Command::Console(args) => Request::Console(args),
+        Command::Errors(args) => Request::Errors(args),
         Command::Tab { action } => match action {
             TabAction::List => Request::TabList,
-            TabAction::New { url } => Request::TabNew(TabNewArgs { url }),
-            TabAction::Switch { tab_id } => Request::TabSwitch(TabIdArgs { tab_id }),
-            TabAction::Close { tab_id } => Request::TabClose(TabIdArgs { tab_id }),
-            TabAction::Attach { tab_id } => Request::TabAttach(TabIdArgs { tab_id }),
+            TabAction::New(args) => Request::TabNew(args),
+            TabAction::Switch(args) => Request::TabSwitch(args),
+            TabAction::Close(args) => Request::TabClose(args),
+            TabAction::Attach(args) => Request::TabAttach(args),
         },
         Command::Wait {
             ms,
@@ -414,40 +325,24 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
             timeout,
         }),
         Command::SpaInfo => Request::SpaInfo,
-        Command::SpaNavigate { path } => Request::SpaNavigate(PathStringArgs { path }),
+        Command::SpaNavigate(args) => Request::SpaNavigate(args),
         Command::FakeCamera { file, loop_video } => Request::FakeCamera(FakeCameraArgs {
             file: file.to_string_lossy().to_string(),
             loop_video,
         }),
         Command::Wasm { action } => match action {
             WasmAction::Info => Request::WasmInfo,
-            WasmAction::Read { addr, len, memory } => {
-                Request::WasmRead(WasmReadArgs { addr, len, memory })
-            }
-            WasmAction::Write { addr, hex, memory } => {
-                Request::WasmWrite(WasmWriteArgs { addr, hex, memory })
-            }
-            WasmAction::Find {
-                pattern,
-                start,
-                end,
-                max,
-                memory,
-            } => Request::WasmFind(WasmFindArgs {
-                pattern,
-                start,
-                end,
-                max,
-                memory,
-            }),
+            WasmAction::Read(args) => Request::WasmRead(args),
+            WasmAction::Write(args) => Request::WasmWrite(args),
+            WasmAction::Find(args) => Request::WasmFind(args),
         },
 
         Command::Network { action } => network_action_to_request(&action),
         Command::Js { action } => match action {
-            JsAction::Mode { mode } => Request::JsMode(ModeArgs { mode }),
-            JsAction::Allow { domain } => Request::JsAllow(DomainArgs { domain }),
-            JsAction::Block { domain } => Request::JsBlock(DomainArgs { domain }),
-            JsAction::Remove { domain } => Request::JsRemove(DomainArgs { domain }),
+            JsAction::Mode(args) => Request::JsMode(args),
+            JsAction::Allow(args) => Request::JsAllow(args),
+            JsAction::Block(args) => Request::JsBlock(args),
+            JsAction::Remove(args) => Request::JsRemove(args),
             JsAction::List => Request::JsList,
         },
         Command::Close => Request::Close,
@@ -456,18 +351,11 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
             to: to.as_ref().map(|path| path.to_string_lossy().to_string()),
         }),
         Command::Captcha {
-            action:
-                CaptchaAction::Datadome {
-                    max_attempts,
-                    timeout_ms,
-                },
-        } => Request::CaptchaDatadome(CaptchaDatadomeArgs {
-            max_attempts,
-            timeout_ms,
-        }),
+            action: CaptchaAction::Datadome(args),
+        } => Request::CaptchaDatadome(args),
         Command::Captcha {
-            action: CaptchaAction::Turnstile { timeout_ms },
-        } => Request::CaptchaTurnstile(CaptchaTurnstileArgs { timeout_ms }),
+            action: CaptchaAction::Turnstile(args),
+        } => Request::CaptchaTurnstile(args),
         Command::Captcha {
             action:
                 CaptchaAction::Inject {

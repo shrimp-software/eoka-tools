@@ -67,21 +67,7 @@ console.log(await page.title());
 
 **Go:** `go get github.com/shrimp-software/eoka-tools/clients/go`. See the [Go client](clients/go/README.md).
 
-**Rust:**
-
-```rust
-use eoka_server::{Session, eoka::{ActionOptions, Expectation}};
-
-let mut session = Session::launch().await?;
-session.goto("https://example.com").await?;
-session.observe().await?;
-session.set_action_options(ActionOptions::expecting(Expectation::Url {
-    value: "https://www.iana.org/help/example-domains".into(),
-    contains: false,
-}));
-session.click(0).await?;
-session.close().await?;
-```
+**Rust:** see the [Rust SDK](crates/eoka-sdk/README.md).
 
 **YAML runner** (`cargo install eoka-runner`, then `eoka-runner automation.yaml`):
 
@@ -103,7 +89,7 @@ actions:
 |---|---|
 | [**eoka-mcp**](crates/eoka-mcp) | MCP server for browser tools, run as `eoka mcp` |
 | [**eoka-cli**](crates/eoka-cli) | Interactive shell CLI for browser automation and debugging |
-| [**eoka-server**](crates/eoka-server) | Shared browser runtime, `Session` API, and browser helper primitives |
+| [**eoka-server**](crates/eoka-server) | Shared browser runtime and browser helper primitives |
 | [**eoka-protocol**](crates/eoka-protocol) | Shared daemon protocol types and tool catalog metadata |
 | [**eoka-sdk**](crates/eoka-sdk) | Rust SDK for typed Eoka browser sessions |
 | [**eoka-tack**](crates/eoka-tack) | Tack `ToolSet` adapter generated from the Eoka protocol catalog |

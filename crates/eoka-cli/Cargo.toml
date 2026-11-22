@@ -19,7 +19,7 @@ tack = ["dep:eoka-tack", "dep:tack-core", "dep:tack-runtime-quickjs"]
 
 [dependencies]
 uuid = { version = "1", features = ["v4"] }
-eoka-protocol = { workspace = true }
+eoka-protocol = { workspace = true, features = ["clap"] }
 eoka-server = { workspace = true }
 eoka-sdk = { workspace = true }
 eoka-mcp = { workspace = true }
