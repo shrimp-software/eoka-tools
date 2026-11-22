@@ -73,10 +73,11 @@ Every crate, the Node SDK and the Go client's server pin share one version, the
 node scripts/bump-release.mjs 0.19.0
 ```
 
-Merge that to `main`. Publish puts every crate on crates.io, tags
-`eoka-cli-v0.19.0` and `eoka-server-v0.19.0`, releases both binaries and
-starts the npm release, which waits for approval of the `npm-prerelease`
-deployment. A merge without a version bump publishes nothing. CI runs
+Merge that to `main`. Publish puts every crate on crates.io, tags `v0.19.0`
+and starts `release.yml`. That one run builds `eoka` and `eoka-mcp` for each
+CLI target, qualifies the `eoka-server` binaries and publishes them all in the
+GitHub release `v0.19.0` with one `SHA256SUMS`. Its npm job waits for approval
+of the `npm-prerelease` deployment. A merge without a version bump publishes nothing. CI runs
 `node scripts/bump-release.mjs --check` to catch files that drifted.
 
 ## Browser regression tests

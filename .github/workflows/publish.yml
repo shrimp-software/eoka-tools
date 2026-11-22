@@ -63,43 +63,36 @@ jobs:
             exit 1
           done
 
-          for crate in eoka-cli eoka-server; do
-            tag="${crate}-v${version}"
-            if ! git rev-parse "$tag" >/dev/null 2>&1; then
-              git tag -a "$tag" -m "Release ${crate} v${version}"
-              git push origin "$tag"
-            fi
-          done
-
-          if gh release view "eoka-cli-v${version}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            echo "Release eoka-cli-v${version} already exists"
-          else
-            gh workflow run release-eoka-cli.yml --repo "${{ github.repository }}" --ref "eoka-cli-v${version}" -f tag="eoka-cli-v${version}"
-          fi
-          if gh release view "eoka-server-v${version}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            echo "Release eoka-server-v${version} already exists"
-          else
-            # Released with npm when both ship, so the binaries are qualified once.
-            echo "SERVER_TAG=eoka-server-v${version}" >> "$GITHUB_ENV"
+          tag="v${version}"
+          if ! git rev-parse "$tag" >/dev/null 2>&1; then
+            git tag -a "$tag" -m "Release ${tag}"
+            git push origin "$tag"
           fi
 
-      - name: Start the npm and server releases
+      - name: Start the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          if gh release view "v${VERSION}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            github_release=present
+          else
+            github_release=missing
+          fi
           http_status=$(curl -sS -o /dev/null -w "%{http_code}" "https://registry.npmjs.org/@cbxss/eoka/${VERSION}" || echo 000)
           case "$http_status" in
-            200) echo "@cbxss/eoka ${VERSION} is already on npm" ;;
-            404)
-              server_tag="${SERVER_TAG:-}"
-              SERVER_TAG=""
-              echo "Dispatching npm publication of @cbxss/eoka ${VERSION} (server release: ${server_tag:-none})"
-              gh workflow run publish-node.yml --repo "${{ github.repository }}" --ref main -f source_sha="$GITHUB_SHA" -f server_tag="$server_tag"
-              ;;
+            200) npm_release=present ;;
+            404) npm_release=missing ;;
             *) echo "npm registry returned ${http_status} for @cbxss/eoka ${VERSION}"; exit 1 ;;
           esac
-          if [ -n "${SERVER_TAG:-}" ]; then
-            echo "Dispatching standalone release of ${SERVER_TAG}"
-            gh workflow run release-eoka-server.yml --repo "${{ github.repository }}" --ref "$SERVER_TAG" -f tag="$SERVER_TAG"
+          tagged="$(git rev-parse "v${VERSION}^{commit}")"
+          if [ "$github_release" = present ] && [ "$npm_release" = present ]; then
+            echo "v${VERSION} is already on GitHub and npm"
+          elif [ "$tagged" != "$GITHUB_SHA" ]; then
+            # A later push without a version bump: the release belongs to the
+            # tagged commit, so finish or rerun that commit's release run.
+            echo "v${VERSION} is tagged at ${tagged}; not starting a release from ${GITHUB_SHA}"
+          else
+            echo "Dispatching release v${VERSION} (GitHub release ${github_release}, npm ${npm_release})"
+            gh workflow run release.yml --repo "${{ github.repository }}" --ref main -f source_sha="$GITHUB_SHA"
           fi

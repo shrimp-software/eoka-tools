@@ -14,7 +14,7 @@ import (
 )
 
 func TestReleaseAssetURLUsesCurrentServerRelease(t *testing.T) {
-	if got, want := releaseAssetURL("checksums.txt"), defaultReleaseBaseURL+"/eoka-server-v"+serverReleaseVersion+"/checksums.txt"; got != want {
+	if got, want := releaseAssetURL("SHA256SUMS"), defaultReleaseBaseURL+"/v"+serverReleaseVersion+"/SHA256SUMS"; got != want {
 		t.Fatalf("releaseAssetURL = %q, want %q", got, want)
 	}
 }
@@ -67,7 +67,7 @@ func newFakeReleaseServer(t *testing.T, assetName, assetBody string) (*httptest.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits++
 		switch filepath.Base(r.URL.Path) {
-		case "checksums.txt":
+		case "SHA256SUMS":
 			_, _ = w.Write([]byte(checksums))
 		case assetName:
 			_, _ = w.Write([]byte(assetBody))
@@ -126,7 +126,7 @@ func TestEnsureServerBinaryDownloadsAndCaches(t *testing.T) {
 		t.Fatalf("downloaded binary is not executable: mode %v", info.Mode())
 	}
 	if *hits != 2 {
-		t.Fatalf("expected 2 requests (checksums.txt + asset), got %d", *hits)
+		t.Fatalf("expected 2 requests (SHA256SUMS + asset), got %d", *hits)
 	}
 
 	path2, err := ensureServerBinary(ctx)
@@ -151,7 +151,7 @@ func TestEnsureServerBinaryChecksumMismatch(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch filepath.Base(r.URL.Path) {
-		case "checksums.txt":
+		case "SHA256SUMS":
 			_, _ = w.Write([]byte(wrongSum + "  " + assetName + "\n"))
 		case assetName:
 			_, _ = w.Write([]byte("not what the checksum says"))

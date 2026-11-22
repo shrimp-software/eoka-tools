@@ -79,13 +79,6 @@ async fn main() {
         }
     };
     match &command {
-        Command::Mcp => {
-            if let Err(error) = eoka_mcp::run_server().await {
-                eprintln!("[eoka] MCP server error: {error}");
-                std::process::exit(1);
-            }
-            return;
-        }
         Command::Sessions => {
             sessions::print_sessions(json_mode).await;
             return;

@@ -15,7 +15,7 @@ One shared engine drives every interface: a CLI with an agent skill, an MCP serv
 ```mermaid
 flowchart LR
     agent["AI agent"] --> cli["eoka CLI + skill"]
-    agent --> mcp["eoka mcp"]
+    agent --> mcp["eoka-mcp"]
     code["Your code"] --> node["Node SDK"]
     code --> go["Go client"]
     code --> rust["Rust SDK"]
@@ -37,7 +37,7 @@ curl -fsSL https://raw.githubusercontent.com/shrimp-software/eoka-tools/main/cra
 eoka skill install
 ```
 
-The script installs the latest `eoka` release for Linux or macOS and verifies it against the release `SHA256SUMS`. `eoka skill install` writes the agent skill for Claude Code, Codex and other agents. `eoka update` keeps both current. From source: `cargo install eoka-cli`.
+The script installs the latest `eoka` and `eoka-mcp` release binaries for Linux or macOS and verifies them against the release `SHA256SUMS`. `eoka skill install` writes the agent skill for Claude Code, Codex and other agents. `eoka update` keeps both current. From source: `cargo install eoka-cli eoka-mcp`.
 
 ## Quick start
 
@@ -49,10 +49,10 @@ eoka --session demo view
 eoka --session demo step '{"action":{"kind":"hover","target":"REFERENCE_FROM_VIEW"}}'
 ```
 
-**MCP**, with the CLI installed as above:
+**MCP**, with `eoka-mcp` installed by the same script:
 
 ```sh
-claude mcp add eoka -- eoka mcp
+claude mcp add eoka -- eoka-mcp
 ```
 
 **Node / TypeScript** (`npm install @cbxss/eoka`):
@@ -87,7 +87,7 @@ actions:
 
 | Component | Purpose |
 |---|---|
-| [**eoka-mcp**](crates/eoka-mcp) | MCP server for browser tools, run as `eoka mcp` |
+| [**eoka-mcp**](crates/eoka-mcp) | Stdio MCP server binary for browser tools, `eoka-mcp` |
 | [**eoka-cli**](crates/eoka-cli) | Interactive shell CLI for browser automation and debugging |
 | [**eoka-server**](crates/eoka-server) | Shared browser runtime and browser helper primitives |
 | [**eoka-protocol**](crates/eoka-protocol) | Shared daemon protocol types and tool catalog metadata |

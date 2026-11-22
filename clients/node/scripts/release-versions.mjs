@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 
 const repoRoot = resolve(import.meta.dirname, '../../..');
 const read = path => readFile(join(repoRoot, path), 'utf8');
-const crates = ['eoka-solvers', 'eoka-email', 'eoka-protocol', 'eoka-sdk', 'eoka-server', 'eoka-tack', 'eoka-mcp'];
+const crates = ['eoka-solvers', 'eoka-email', 'eoka-protocol', 'eoka-sdk', 'eoka-server', 'eoka-tack'];
 
 export function workspaceDependencyVersion(cargoToml, name) {
   const section = cargoToml.split(/^\[workspace\.dependencies\]$/m)[1]?.split(/^\[/m)[0] ?? '';
@@ -32,7 +32,7 @@ const pins = version => [
   { file: 'clients/node/release-manifest.json', pattern: /("(?:sdkVersion|packageVersion)": ")([^"]+)(")/g },
   { file: 'clients/node/release-manifest.json', pattern: /("server": \{\n {4}"version": ")([^"]+)(")/g },
   { file: 'clients/go/download.go', pattern: /^(const serverReleaseVersion = ")([^"]+)(")$/gm },
-  { file: 'clients/go/README.md', pattern: /(eoka-server-v)(\d+\.\d+\.\d+[^/)\]`\s]*)()/g },
+  { file: 'clients/go/README.md', pattern: /(`v|releases\/tag\/v)(\d+\.\d+\.\d+[^/)\]`\s]*)()/g },
   { file: 'crates/eoka-cli/skill/SKILL.md', pattern: /(\*\*)(\d+\.\d+)( \/ protocol)/g, minor: true },
 ];
 const expected = (pin, version) => pin.minor ? version.split('.').slice(0, 2).join('.') : version;
