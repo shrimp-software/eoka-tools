@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 
 const repoRoot = resolve(import.meta.dirname, '../../..');
 const read = path => readFile(join(repoRoot, path), 'utf8');
-const crates = ['eoka-solvers', 'eoka-email', 'eoka-protocol', 'eoka-sdk', 'eoka-server', 'eoka-tack'];
+const crates = ['eoka-solvers', 'eoka-email', 'eoka-protocol', 'eoka-sdk', 'eoka-server', 'eoka-tack', 'eoka-mcp'];
 
 export function workspaceDependencyVersion(cargoToml, name) {
   const section = cargoToml.split(/^\[workspace\.dependencies\]$/m)[1]?.split(/^\[/m)[0] ?? '';

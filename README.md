@@ -15,7 +15,7 @@ One shared engine drives every interface: a CLI with an agent skill, an MCP serv
 ```mermaid
 flowchart LR
     agent["AI agent"] --> cli["eoka CLI + skill"]
-    agent --> mcp["eoka-mcp"]
+    agent --> mcp["eoka mcp"]
     code["Your code"] --> node["Node SDK"]
     code --> go["Go client"]
     code --> rust["Rust SDK"]
@@ -49,11 +49,10 @@ eoka --session demo view
 eoka --session demo step '{"action":{"kind":"hover","target":"REFERENCE_FROM_VIEW"}}'
 ```
 
-**MCP:**
+**MCP**, with the CLI installed as above:
 
 ```sh
-cargo install eoka-mcp
-claude mcp add eoka -- eoka-mcp
+claude mcp add eoka -- eoka mcp
 ```
 
 **Node / TypeScript** (`npm install @cbxss/eoka`):
@@ -102,7 +101,7 @@ actions:
 
 | Component | Purpose |
 |---|---|
-| [**eoka-mcp**](crates/eoka-mcp) | Stdio MCP server for browser tools |
+| [**eoka-mcp**](crates/eoka-mcp) | MCP server for browser tools, run as `eoka mcp` |
 | [**eoka-cli**](crates/eoka-cli) | Interactive shell CLI for browser automation and debugging |
 | [**eoka-server**](crates/eoka-server) | Shared browser runtime, `Session` API, and browser helper primitives |
 | [**eoka-protocol**](crates/eoka-protocol) | Shared daemon protocol types and tool catalog metadata |

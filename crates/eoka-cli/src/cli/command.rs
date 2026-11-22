@@ -354,6 +354,11 @@ pub enum Command {
         #[arg(long, help = "Do not await a returned promise; requires --raw")]
         no_await: bool,
     },
+    #[command(
+        about = "Serve the eoka browser tools over MCP on stdio",
+        long_about = "Serve the eoka browser tools over MCP on stdio. Register it with an MCP client, for example: claude mcp add eoka -- eoka mcp. The server owns its own browser; set EOKA_MCP_ALL_TOOLS=1 to list opt-in tools."
+    )]
+    Mcp,
     #[command(about = "Run Tack TypeScript against the active eoka browser session")]
     Tack {
         #[arg(help = "Tack TypeScript source; omit to use --file")]
