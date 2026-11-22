@@ -4,8 +4,10 @@ pub const TURNSTILE_DEFAULT_TIMEOUT_MS: u64 = 30_000;
 pub const TURNSTILE_MAX_TIMEOUT_MS: u64 = 120_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 #[serde(default, deny_unknown_fields)]
 pub struct CaptchaTurnstileArgs {
+    #[cfg_attr(feature = "clap", arg(long, default_value_t = TURNSTILE_DEFAULT_TIMEOUT_MS, value_parser = clap::value_parser!(u64).range(1..=TURNSTILE_MAX_TIMEOUT_MS), help = "Total budget, at most 120000 ms"))]
     #[serde(deserialize_with = "deserialize_timeout")]
     #[schemars(range(min = 1, max = TURNSTILE_MAX_TIMEOUT_MS))]
     pub timeout_ms: u64,

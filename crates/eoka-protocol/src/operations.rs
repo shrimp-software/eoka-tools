@@ -13,17 +13,29 @@ pub struct ActionPerformArgs {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct OperationIdArgs {
+    #[cfg_attr(feature = "clap", arg(help = crate::args::OPERATION_ID_HELP))]
     #[serde(alias = "operation_id")]
     #[schemars(description = "Operation ID: the id field of the action's result.")]
     pub id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct OperationWaitArgs {
+    #[cfg_attr(feature = "clap", arg(help = crate::args::OPERATION_ID_HELP))]
     #[serde(alias = "operation_id")]
     #[schemars(description = "Operation ID: the id field of the action's result.")]
     pub id: String,
+    #[cfg_attr(
+        feature = "clap",
+        arg(
+            long,
+            default_value_t = 30000,
+            help = "How long to wait; the operation keeps running after it"
+        )
+    )]
     #[serde(default = "wait_timeout")]
     #[schemars(range(max = 86400000))]
     pub timeout_ms: u64,

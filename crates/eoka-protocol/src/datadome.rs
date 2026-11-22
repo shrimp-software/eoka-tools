@@ -7,11 +7,14 @@ pub const DATADOME_MIN_TIMEOUT_MS: u64 = 5_000;
 pub const DATADOME_MAX_TIMEOUT_MS: u64 = 120_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 #[serde(default, deny_unknown_fields)]
 pub struct CaptchaDatadomeArgs {
+    #[cfg_attr(feature = "clap", arg(long, default_value_t = DATADOME_DEFAULT_ATTEMPTS, value_parser = clap::value_parser!(u32).range(1..=i64::from(DATADOME_MAX_ATTEMPTS)), help = "Clearance attempts, 1 through 4"))]
     #[serde(deserialize_with = "deserialize_attempts")]
     #[schemars(range(min = 1, max = DATADOME_MAX_ATTEMPTS))]
     pub max_attempts: u32,
+    #[cfg_attr(feature = "clap", arg(long, default_value_t = DATADOME_DEFAULT_TIMEOUT_MS, value_parser = clap::value_parser!(u64).range(DATADOME_MIN_TIMEOUT_MS..=DATADOME_MAX_TIMEOUT_MS), help = "Total budget, 5000 through 120000 ms"))]
     #[serde(deserialize_with = "deserialize_timeout")]
     #[schemars(range(min = DATADOME_MIN_TIMEOUT_MS, max = DATADOME_MAX_TIMEOUT_MS))]
     pub timeout_ms: u64,

@@ -1,12 +1,6 @@
 use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 
-const TARGET: &str =
-    "text:Submit (or bare text), placeholder:Email, css:#id, id:login, role:button, or a target from view";
-const ADDR: &str = "Address, decimal or 0x-prefixed hex";
-const MEMORY: &str = "JavaScript expression for the WebAssembly.Memory [default: auto-detect]";
-const TAB_ID: &str = "Tab ID from tab list";
-const OPERATION_ID: &str = "Operation ID returned by the action";
 const CODE: &str = "JavaScript source; omit to use --file";
 
 const DEADLINES: &str = "Deadlines:\n  Every command returns within a bounded time and never replays an action.\n  A failure carries error_detail.code and a hint naming the next command:\n    dialog_open          a JavaScript dialog blocks the tab: dialog accept | dialog dismiss\n    navigation_pending   the tab waits for a server: wait --url, or reload | open URL to abandon it\n    navigation_timeout   no response before the deadline; the load was stopped and the tab kept its page\n    daemon_busy          another command is running; this one was not started (EOKA_QUEUE_WAIT_MS, default 5000)\n    page_unresponsive    the page's main thread is frozen: retry, or tab new URL\n    reply_timeout        the daemon did not reply in time (EOKA_REPLY_TIMEOUT_MS overrides the default)\n    daemon_unresponsive  the daemon did not answer its handshake within 5 s\n  Page reads answer within 15 s, view within --timeout-ms (3000), open and actions\n  within --action-timeout-ms (30000). status shows what a session is running.";

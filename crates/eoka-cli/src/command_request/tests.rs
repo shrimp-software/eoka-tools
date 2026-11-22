@@ -102,6 +102,37 @@ fn new_command_flags_reach_their_requests() {
 }
 
 #[test]
+fn derived_cli_args_default_like_protocol_input() {
+    let cases: &[(&[&str], serde_json::Value)] = &[
+        (&["eoka", "view"], json!({})),
+        (&["eoka", "snapshot"], json!({})),
+        (&["eoka", "emulate"], json!({})),
+        (&["eoka", "click-shadow", "b"], json!({"selector": "b"})),
+        (&["eoka", "storage"], json!({})),
+        (&["eoka", "console"], json!({})),
+        (&["eoka", "errors"], json!({})),
+        (&["eoka", "tab", "new"], json!({})),
+        (&["eoka", "dialog", "accept"], json!({})),
+        (&["eoka", "wasm", "find", "ff"], json!({"pattern": "ff"})),
+        (&["eoka", "network", "record", "start"], json!({})),
+        (&["eoka", "network", "log"], json!({})),
+        (&["eoka", "network", "show", "1"], json!({"id": 1})),
+        (&["eoka", "network", "wait"], json!({})),
+        (&["eoka", "operations", "wait", "op"], json!({"id": "op"})),
+        (&["eoka", "captcha", "datadome"], json!({})),
+        (&["eoka", "captcha", "turnstile"], json!({})),
+        (&["eoka", "hover", "Menu"], json!({"target": "Menu"})),
+    ];
+    for (argv, input) in cases {
+        let (_cli, command) = parsed_command(argv);
+        let request = command_to_request(&command, false);
+        let protocol = eoka_protocol::request_from_cmd(request.cmd(), input.clone())
+            .unwrap_or_else(|error| panic!("{argv:?}: {error}"));
+        assert_eq!(request.args_json(), protocol.args_json(), "{argv:?}");
+    }
+}
+
+#[test]
 fn click_accepts_bracketed_observe_target_at_cli_layer() {
     let (_cli, command) = parsed_command(&["eoka", "click", "[38]"]);
     let request = command_to_request(&command, false);

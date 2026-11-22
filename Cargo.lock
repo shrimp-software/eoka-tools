@@ -724,6 +724,7 @@ dependencies = [
 name = "eoka-protocol"
 version = "0.23.0"
 dependencies = [
+ "clap",
  "eoka",
  "schemars",
  "serde",

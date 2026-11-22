@@ -1,67 +1,24 @@
 use std::path::{Path, PathBuf};
 
 use crate::cli::{InterceptAction, NetworkAction, NetworkRecordAction};
-use crate::protocol::{
-    ClearFlagArgs, IdArgs, InterceptAddArgs, NetworkExportArgs, NetworkLogArgs,
-    NetworkRecordStartArgs, NetworkShowArgs, NetworkWaitArgs, Request,
-};
+use crate::protocol::{ClearFlagArgs, IdArgs, InterceptAddArgs, NetworkExportArgs, Request};
 
 pub(super) fn network_action_to_request(action: &NetworkAction) -> Request {
     match action.clone() {
         NetworkAction::Record { action } => match action {
-            NetworkRecordAction::Start {
-                patterns,
-                no_bodies,
-                max_body_bytes,
-                clear,
-            } => Request::NetworkRecordStart(NetworkRecordStartArgs {
-                patterns,
-                no_bodies,
-                max_body_bytes,
-                clear,
-            }),
+            NetworkRecordAction::Start(args) => Request::NetworkRecordStart(args),
             NetworkRecordAction::Stop => Request::NetworkRecordStop,
             NetworkRecordAction::Status => Request::NetworkRecordStatus,
         },
-        NetworkAction::Log {
-            limit,
-            pattern,
-            method,
-            status,
-            since,
-            compact,
-        } => Request::NetworkLog(NetworkLogArgs {
-            limit,
-            pattern,
-            method,
-            status,
-            since,
-            compact,
-        }),
-        NetworkAction::Show { id, body, max_body } => {
-            Request::NetworkShow(NetworkShowArgs { id, body, max_body })
-        }
+        NetworkAction::Log(args) => Request::NetworkLog(args),
+        NetworkAction::Show(args) => Request::NetworkShow(args),
         NetworkAction::Har { path, settle_ms } => network_export_request(&path, "har", settle_ms),
         NetworkAction::Export {
             path,
             format,
             settle_ms,
         } => network_export_request(&path, &format, settle_ms),
-        NetworkAction::Wait {
-            pattern,
-            method,
-            status,
-            timeout,
-            since,
-            include_existing,
-        } => Request::NetworkWait(NetworkWaitArgs {
-            pattern,
-            method,
-            status,
-            timeout,
-            since,
-            include_existing,
-        }),
+        NetworkAction::Wait(args) => Request::NetworkWait(args),
         NetworkAction::Clear => Request::NetworkClear,
         NetworkAction::Intercept { action } => intercept_action_to_request(&action),
     }
