@@ -79,7 +79,7 @@ try {
   }`);
   await assert.rejects(page.screenshot({ format: 'png', timeoutMs: 30000 }), error => {
     assert.equal(error.code, 'ScreenshotTooLarge');
-    assert.match(error.message, /screenshot_to_file/);
+    assert.match(error.message, /16 MiB inline limit/);
     return true;
   });
   assert.equal(await page.title(), title);
