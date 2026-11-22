@@ -45,9 +45,15 @@ fn wait_timeout() -> u64 {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct OperationListArgs {
+    #[cfg_attr(feature = "clap", arg(skip))]
     #[serde(default)]
     pub before_ms: Option<u64>,
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, help = "Maximum records to return [default: 100]")
+    )]
     #[serde(default)]
     pub limit: Option<u32>,
 }

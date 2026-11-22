@@ -122,6 +122,53 @@ fn derived_cli_args_default_like_protocol_input() {
         (&["eoka", "captcha", "datadome"], json!({})),
         (&["eoka", "captcha", "turnstile"], json!({})),
         (&["eoka", "hover", "Menu"], json!({"target": "Menu"})),
+        (&["eoka", "open", "u"], json!({"url": "u"})),
+        (&["eoka", "fetch", "u"], json!({"url": "u"})),
+        (&["eoka", "observe"], json!({})),
+        (&["eoka", "screenshot"], json!({})),
+        (&["eoka", "click", "b"], json!({"target": "b"})),
+        (
+            &["eoka", "fill", "t", "x"],
+            json!({"target": "t", "text": "x"}),
+        ),
+        (
+            &["eoka", "mouse-down", "1", "2"],
+            json!({"x": 1.0, "y": 2.0, "button": "left"}),
+        ),
+        (
+            &["eoka", "mouse-up", "1", "2"],
+            json!({"x": 1.0, "y": 2.0, "button": "left"}),
+        ),
+        (&["eoka", "exec", "x"], json!({"code": "x"})),
+        (&["eoka", "frame-eval", "f"], json!({"frame": "f"})),
+        (&["eoka", "save-state", "s.json"], json!({"path": "s.json"})),
+        (&["eoka", "load-state", "s.json"], json!({"path": "s.json"})),
+        (&["eoka", "wait"], json!({})),
+        (&["eoka", "fake-camera", "v.y4m"], json!({"file": "v.y4m"})),
+        (&["eoka", "clone-from", "9222"], json!({"source": "9222"})),
+        (
+            &["eoka", "network", "export", "/e.har"],
+            json!({"path": "/e.har"}),
+        ),
+        (
+            &["eoka", "network", "intercept", "add", "*a*"],
+            json!({"url_pattern": "*a*"}),
+        ),
+        (
+            &["eoka", "network", "intercept", "remove", "r"],
+            json!({"id": "r"}),
+        ),
+        (&["eoka", "network", "intercept", "log"], json!({})),
+        (&["eoka", "captcha", "inject", "t"], json!({"token": "t"})),
+        (&["eoka", "operations", "list"], json!({})),
+        (
+            &["eoka", "recording", "start", "/a.mp4"],
+            json!({"path": "/a.mp4"}),
+        ),
+        (
+            &["eoka", "recording", "status", "i"],
+            json!({"recording_id": "i"}),
+        ),
     ];
     for (argv, input) in cases {
         let (_cli, command) = parsed_command(argv);

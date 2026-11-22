@@ -22,14 +22,7 @@ pub enum NetworkAction {
         settle_ms: Option<u64>,
     },
     #[command(about = "Export recorded requests as HAR or JSON")]
-    Export {
-        #[arg(help = "File to write")]
-        path: PathBuf,
-        #[arg(long, default_value = "har", help = "har or json")]
-        format: String,
-        #[arg(long, help = "Wait this long for in-flight requests before writing")]
-        settle_ms: Option<u64>,
-    },
+    Export(eoka_protocol::NetworkExportArgs),
     #[command(about = "Wait for a matching request")]
     Wait(eoka_protocol::NetworkWaitArgs),
     #[command(about = "Discard recorded requests")]
@@ -83,16 +76,7 @@ pub enum CaptchaAction {
     #[command(about = "Solve a CAPTCHA through the Anti-Captcha provider")]
     Solve(Box<SolveArgs>),
     #[command(about = "Inject a solved token into the current page")]
-    Inject {
-        #[arg(help = "Token returned by captcha solve")]
-        token: String,
-        #[arg(long, default_value = "auto", help = "auto, recaptcha or hcaptcha")]
-        captcha_type: String,
-        #[arg(long, help = "Page callback to call with the token")]
-        callback: Option<String>,
-        #[arg(long, help = "Target to click after injecting")]
-        click_after: Option<String>,
-    },
+    Inject(eoka_protocol::CaptchaInjectArgs),
 }
 
 #[derive(Clone, Args)]
@@ -156,28 +140,16 @@ pub enum WasmAction {
 #[derive(Clone, Subcommand)]
 pub enum InterceptAction {
     #[command(about = "Add an interception rule")]
-    Add {
-        #[arg(help = "URL glob such as */api/data*")]
-        url_pattern: String,
-        #[arg(long, help = "Write matching requests to this file")]
-        capture: Option<PathBuf>,
-        #[arg(long, help = "Serve this file's exact bytes as the response")]
-        respond: Option<PathBuf>,
-        #[arg(long, default_value = "200", help = "Status code for --respond")]
-        status: u16,
-    },
+    Add(eoka_protocol::InterceptAddArgs),
     #[command(about = "List interception rules")]
     List,
     #[command(about = "Remove an interception rule")]
-    Remove {
-        #[arg(help = "Rule ID from intercept list")]
-        id: String,
-    },
-    #[command(about = "Read the interception log (latest 1000 entries)")]
-    Log {
-        #[arg(long, help = "Clear the log after reading")]
-        clear: bool,
-    },
+    Remove(eoka_protocol::IdArgs),
+    #[command(
+        about = "Read the interception log (latest 1000 entries)",
+        mut_arg("clear", |arg| arg.help("Clear the log after reading"))
+    )]
+    Log(eoka_protocol::ClearFlagArgs),
 }
 
 #[derive(Clone, Subcommand)]
@@ -213,10 +185,7 @@ pub enum OperationCommand {
     #[command(about = "Show one operation record")]
     Get(eoka_protocol::OperationIdArgs),
     #[command(about = "List recent operation records")]
-    List {
-        #[arg(long, default_value_t = 100, help = "Maximum records to return")]
-        limit: u32,
-    },
+    List(eoka_protocol::OperationListArgs),
     #[command(about = "Wait for an operation to finish")]
     Wait(eoka_protocol::OperationWaitArgs),
     #[command(about = "Cancel a running operation")]
@@ -234,33 +203,13 @@ pub enum DialogAction {
 #[derive(Clone, Subcommand)]
 pub enum RecordingAction {
     #[command(about = "Start recording the current tab; prints the recording ID")]
-    Start {
-        #[arg(help = "MP4 file to write")]
-        path: PathBuf,
-        #[arg(long, help = "UUID naming this recording [default: generated]")]
-        id: Option<String>,
-        #[arg(long, help = "Frames per second, 1 to 120")]
-        fps: Option<u32>,
-        #[arg(long, help = "Scale frames down to at most this width")]
-        max_width: Option<u32>,
-        #[arg(long, help = "Scale frames down to at most this height")]
-        max_height: Option<u32>,
-    },
+    Start(eoka_protocol::RecordingStartArgs),
     #[command(about = "Show a recording's state")]
-    Status {
-        #[arg(help = "Recording ID from start")]
-        id: String,
-    },
+    Status(eoka_protocol::RecordingIdArgs),
     #[command(about = "Stop a recording and finalize its file")]
-    Stop {
-        #[arg(help = "Recording ID from start")]
-        id: String,
-    },
+    Stop(eoka_protocol::RecordingIdArgs),
     #[command(about = "Cancel a recording and discard its file")]
-    Cancel {
-        #[arg(help = "Recording ID from start")]
-        id: String,
-    },
+    Cancel(eoka_protocol::RecordingIdArgs),
 }
 
 #[derive(Clone, Args)]

@@ -29,12 +29,12 @@ pub(crate) async fn solve_captcha_command(
     let inject_type = captcha_inject_kind_from_solve(captcha_type)?;
     let response = client::send_command(
         session_name,
-        captcha_inject_request(
-            &token,
-            inject_type,
-            inject_callback.as_deref(),
-            click_after.as_deref(),
-        ),
+        protocol::Request::CaptchaInject(protocol::CaptchaInjectArgs {
+            token,
+            captcha_type: inject_type.to_string(),
+            callback: inject_callback.clone(),
+            click_after: click_after.clone(),
+        }),
         spec,
     )
     .await
@@ -132,20 +132,6 @@ fn captcha_inject_kind_from_solve(captcha_type: &str) -> Result<&'static str, St
             "--inject is not supported for captcha type '{other}'. Use hcaptcha, recaptcha_v2, or recaptcha_v3."
         )),
     }
-}
-
-pub(crate) fn captcha_inject_request(
-    token: &str,
-    captcha_type: &str,
-    callback: Option<&str>,
-    click_after: Option<&str>,
-) -> protocol::Request {
-    protocol::Request::CaptchaInject(protocol::CaptchaInjectArgs {
-        token: token.to_string(),
-        captcha_type: captcha_type.to_string(),
-        callback: callback.map(str::to_string),
-        click_after: click_after.map(str::to_string),
-    })
 }
 
 #[cfg(test)]

@@ -1,6 +1,7 @@
 use super::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 #[serde(rename_all = "lowercase")]
 pub enum ScreenshotFormat {
     Png,
@@ -18,6 +19,34 @@ dto!(ScreenshotClip {
     #[schemars(schema_with = "positive_scale_schema")]
     height: f64,
 });
+
+#[cfg(feature = "clap")]
+pub fn parse_clip(value: &str) -> Result<ScreenshotClip, String> {
+    let numbers: Vec<f64> = value
+        .split(',')
+        .map(|part| part.trim().parse::<f64>())
+        .collect::<Result<_, _>>()
+        .map_err(|_| "expected four numbers: X,Y,WIDTH,HEIGHT".to_owned())?;
+    match numbers[..] {
+        [x, y, width, height]
+            if numbers.iter().all(|n| n.is_finite())
+                && x >= 0.0
+                && y >= 0.0
+                && width > 0.0
+                && height > 0.0 =>
+        {
+            Ok(ScreenshotClip {
+                x,
+                y,
+                width,
+                height,
+            })
+        }
+        [_, _, _, _] => Err("X and Y must be at least 0, WIDTH and HEIGHT greater than 0".into()),
+        _ => Err("expected four numbers: X,Y,WIDTH,HEIGHT".into()),
+    }
+}
+
 pub fn screenshot_options(
     format: Option<ScreenshotFormat>,
     quality: Option<u8>,
