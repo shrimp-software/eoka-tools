@@ -85,8 +85,13 @@ jobs:
             404) npm_release=missing ;;
             *) echo "npm registry returned ${http_status} for @cbxss/eoka ${VERSION}"; exit 1 ;;
           esac
+          tagged="$(git rev-parse "v${VERSION}^{commit}")"
           if [ "$github_release" = present ] && [ "$npm_release" = present ]; then
             echo "v${VERSION} is already on GitHub and npm"
+          elif [ "$tagged" != "$GITHUB_SHA" ]; then
+            # A later push without a version bump: the release belongs to the
+            # tagged commit, so finish or rerun that commit's release run.
+            echo "v${VERSION} is tagged at ${tagged}; not starting a release from ${GITHUB_SHA}"
           else
             echo "Dispatching release v${VERSION} (GitHub release ${github_release}, npm ${npm_release})"
             gh workflow run release.yml --repo "${{ github.repository }}" --ref main -f source_sha="$GITHUB_SHA"
