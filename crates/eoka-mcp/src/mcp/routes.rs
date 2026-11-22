@@ -196,6 +196,26 @@ pub(super) struct Route {
 }
 
 impl Route {
+    pub(super) fn unknown_argument(&self, given: &Value) -> Option<String> {
+        let schema = match self.alias {
+            Some(alias) => alias.schema(),
+            None => input_schema_for_cmd(self.operation.cmd),
+        };
+        let known = schema["properties"].as_object()?;
+        given
+            .as_object()?
+            .keys()
+            .find(|key| !known.contains_key(*key))
+            .map(|key| {
+                let mut accepted: Vec<&str> = known.keys().map(String::as_str).collect();
+                accepted.sort_unstable();
+                format!(
+                    "unknown argument `{key}`; accepted: {}",
+                    accepted.join(", ")
+                )
+            })
+    }
+
     pub(super) fn arguments(&self, given: &Value) -> Value {
         let mut arguments = given.as_object().cloned().unwrap_or_default();
         if let Some(alias) = self.alias {
@@ -303,6 +323,21 @@ pub(super) fn router(include_opt_in: bool) -> ToolRouter<EokaServer> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn renamed_or_unknown_arguments_are_refused_instead_of_ignored() {
+        let load_state = route("load_state").unwrap();
+        assert!(load_state
+            .unknown_argument(&serde_json::json!({"path": "state.json", "navigate": false}))
+            .is_some_and(|error| error.contains("`navigate`")));
+        assert!(load_state
+            .unknown_argument(&serde_json::json!({"path": "state.json", "no_navigate": true}))
+            .is_none());
+        let wait = route("wait_for_text").unwrap();
+        assert!(wait
+            .unknown_argument(&serde_json::json!({"text": "x", "timeout_ms": 1}))
+            .is_some());
+    }
 
     fn plain(alias: &Alias) -> bool {
         alias.about.is_none() && alias.keep.is_none() && object(alias.fixed).is_empty()

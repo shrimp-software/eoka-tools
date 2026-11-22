@@ -71,7 +71,11 @@ impl EokaServer {
         arguments: Option<JsonObject>,
     ) -> Result<CallToolResult, ErrorData> {
         let operation = route.operation;
-        let arguments = route.arguments(&Value::Object(arguments.unwrap_or_default()));
+        let given = Value::Object(arguments.unwrap_or_default());
+        if let Some(error) = route.unknown_argument(&given) {
+            return Ok(CallToolResult::error(vec![ContentBlock::text(error)]));
+        }
+        let arguments = route.arguments(&given);
         let request = match eoka_protocol::request_from_cmd(operation.cmd, arguments.clone()) {
             Ok(request) => request,
             Err(error) => {
