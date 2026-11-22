@@ -5,31 +5,14 @@ use eoka_server::eoka::Page;
 use rmcp::model::{CallToolResponse, CallToolResult, ContentBlock, ErrorData};
 use serde_json::Value;
 
-use super::{EokaServer, MCP_OWN_TOOL_COMMANDS, MCP_PROTOCOL_TOOLS};
+use super::{routes, EokaServer};
 
 pub(super) const BUSY_LIMIT: Duration = Duration::from_secs(60);
 
-pub(super) fn command_for_tool(tool: &str) -> &str {
-    match tool {
-        "history_go" => "back",
-        "batch" | "click_intercept_nav" => "click",
-        "wait_ms" | "wait_for_text" | "wait_for_network_idle" => "wait",
-        "session_storage_get" => "storage",
-        "session_storage_set" => "set_storage",
-        tool => MCP_PROTOCOL_TOOLS
-            .iter()
-            .map(|(name, command, _)| (*name, *command))
-            .chain(MCP_OWN_TOOL_COMMANDS.iter().copied())
-            .find(|(name, _)| *name == tool)
-            .map_or(tool, |(_, command)| command),
-    }
-}
-
 pub(super) fn policy_for_tool(tool: &str, arguments: &Value) -> Policy {
-    if tool == "screenshot" {
-        return Policy::Gate;
-    }
-    blockers::policy(command_for_tool(tool), arguments)
+    routes::route(tool).map_or(Policy::Free, |route| {
+        blockers::policy(route.operation.cmd, &route.arguments(arguments))
+    })
 }
 
 fn remedies() -> Remedies<'static> {
@@ -166,14 +149,6 @@ impl EokaServer {
             Some(stop) => Ok(stopped(tool, policy, &stop).into()),
             None => result,
         }
-    }
-
-    pub(super) async fn transport_alive(&self) -> bool {
-        self.engine
-            .lock()
-            .await
-            .current_page()
-            .is_some_and(|page| !page.session().transport().is_closed())
     }
 }
 

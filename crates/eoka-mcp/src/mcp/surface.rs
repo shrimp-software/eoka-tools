@@ -330,13 +330,10 @@ async fn every_mcp_tool_answers() {
         ("errors", json!({"clear": true})),
         ("detect_captcha", json!({})),
         ("wait_ms", json!({"ms": 20})),
+        ("wait_for_text", json!({"text": "heading", "timeout": 3000})),
         (
             "wait_for_text",
-            json!({"text": "heading", "timeout_ms": 3000}),
-        ),
-        (
-            "wait_for_text",
-            json!({"text": "never shown", "timeout_ms": 300}),
+            json!({"text": "never shown", "timeout": 300}),
         ),
         ("scroll", json!({"target": "css:#b"})),
         ("scroll", json!({"target": "down"})),
@@ -420,13 +417,10 @@ async fn every_mcp_tool_answers() {
             json!({"code": "() => { document.body.dataset.done = '1' }"}),
         ),
         ("exec", json!({"code": "() => 0", "no_await": true})),
-        (
-            "inject_captcha_token",
-            json!({"code": "() => { window.injected = true }"}),
-        ),
+        ("inject_captcha_token", json!({"token": "fixture-token"})),
         (
             "wait_for_network_idle",
-            json!({"idle_ms": 100, "timeout_ms": 3000}),
+            json!({"network_idle": 100, "timeout": 3000}),
         ),
         ("screenshot", json!({})),
         (

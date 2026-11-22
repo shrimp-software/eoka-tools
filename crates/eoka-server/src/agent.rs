@@ -702,9 +702,11 @@ fn command_key(
     input_mode: eoka::InputMode,
     options: &eoka::ActionOptions,
 ) -> Result<Vec<u8>> {
-    Ok(serde_json::to_vec(
-        &serde_json::json!({"command":command,"target_id":target_id,"target":arguments["target"],"text":arguments["text"],"value":arguments["value"],"key":arguments["key"],"input_mode":input_mode,"options":options}),
-    )?)
+    let mut key = serde_json::json!({"command":command,"target_id":target_id,"target":arguments["target"],"text":arguments["text"],"value":arguments["value"],"key":arguments["key"],"input_mode":input_mode,"options":options});
+    if !arguments["delta"].is_null() {
+        key["delta"] = arguments["delta"].clone();
+    }
+    Ok(serde_json::to_vec(&key)?)
 }
 
 #[cfg(test)]

@@ -524,6 +524,7 @@ impl Engine {
                 None => Response::err(format!("Unknown command: {cmd}")),
             },
             Request::ActionPerform(_) => self.handle_action(cmd, args).await,
+            Request::ActionBatch(batch) => self.action_batch(batch).await,
             action if action.is_convenience_action() => self.handle_action(cmd, args).await,
             Request::DownloadStart(start) => {
                 if let Err(error) = self.downloads.restore().await {
@@ -666,8 +667,10 @@ impl Engine {
             | Request::Select(_)
             | Request::Hover(_)
             | Request::Key(_)
-            | Request::Back
-            | Request::Forward
+            | Request::ActionBatch(_)
+            | Request::Back(_)
+            | Request::Forward(_)
+            | Request::HistoryGo(_)
             | Request::Reload
             | Request::DownloadStart(_)
             | Request::CaptchaDatadome(_)

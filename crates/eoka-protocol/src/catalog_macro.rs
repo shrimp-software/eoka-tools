@@ -14,6 +14,10 @@ macro_rules! define_operations {
                 $(, cli: $cli:literal)?
                 $(, feature: $feature:literal)?
                 $(, result: $result:ty)?
+                $(, needs: $needs:ident)?
+                $(, launch: $launch:literal)?
+                $(, reply: $reply:ident)?
+                $(, lock_free: $lock_free:literal)?
                 $(,)?
             }
         ),+ $(,)?
@@ -35,6 +39,10 @@ macro_rules! define_operations {
             pub read_only: bool,
             pub destructive: bool,
             pub feature: Option<&'static str>,
+            pub needs: OperationNeeds,
+            pub auto_launch: bool,
+            pub reply: OperationReply,
+            pub lock_free: bool,
         }
 
         #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -58,6 +66,10 @@ macro_rules! define_operations {
                 read_only: $read_only,
                 destructive: $destructive,
                 feature: define_operations!(@feature $($feature)?),
+                needs: define_operations!(@needs $($needs)?),
+                auto_launch: define_operations!(@flag $($launch)?),
+                reply: define_operations!(@reply $($reply)?),
+                lock_free: define_operations!(@flag $($lock_free)?),
             }),+
         ];
         impl OperationSpec {
@@ -235,6 +247,30 @@ macro_rules! define_operations {
 
     (@cli) => {
         None
+    };
+
+    (@needs $needs:ident) => {
+        OperationNeeds::$needs
+    };
+
+    (@needs) => {
+        OperationNeeds::Page
+    };
+
+    (@reply $reply:ident) => {
+        OperationReply::$reply
+    };
+
+    (@reply) => {
+        OperationReply::Unwrapped
+    };
+
+    (@flag $flag:literal) => {
+        $flag
+    };
+
+    (@flag) => {
+        false
     };
 
 }

@@ -177,9 +177,9 @@ pub fn policy(command: &str, arguments: &Value) -> Policy {
         )
     };
     match operation.id {
-        Id::Open | Id::Back | Id::Forward | Id::Reload => Policy::Navigate,
+        Id::Open | Id::Back | Id::Forward | Id::HistoryGo | Id::Reload => Policy::Navigate,
         Id::ActionCommand => match arguments["command"].as_str() {
-            Some("back" | "forward" | "reload") => Policy::Navigate,
+            Some("back" | "forward" | "history_go" | "reload") => Policy::Navigate,
             _ => Policy::Gate,
         },
         Id::ActionPerform | Id::AgentStep if navigates(arguments["action"]["kind"].as_str()) => {
@@ -211,6 +211,7 @@ pub fn policy(command: &str, arguments: &Value) -> Policy {
         Id::AgentObserve => Policy::Observe,
         Id::AgentStep
         | Id::ActionPerform
+        | Id::ActionBatch
         | Id::Click
         | Id::DblClick
         | Id::Fill

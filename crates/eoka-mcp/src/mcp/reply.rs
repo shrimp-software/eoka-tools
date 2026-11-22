@@ -1,48 +1,87 @@
-use super::*;
+use eoka_protocol::Response;
+use rmcp::model::{CallToolResult, ContentBlock, ErrorData};
+use serde_json::Value;
 
-impl EokaServer {
-    pub(super) async fn action_tool(
-        &self,
-        tool: &str,
-        command: &str,
-        mut arguments: Value,
-    ) -> Result<CallToolResult, ErrorData> {
-        let operation_id = match arguments["operation_id"].as_str() {
-            Some(id) => id.to_owned(),
-            None => new_operation_id(),
-        };
-        let unverified = runs_unverified(command, &arguments);
-        if unverified {
-            arguments["exploratory"] = Value::Bool(true);
-        }
-        let request = if command == "action_perform" {
-            arguments["operation_id"] = Value::String(operation_id);
-            eoka_protocol::request_from_cmd(command, arguments).map_err(invalid)?
-        } else {
-            Operation::ActionCommand(eoka_protocol::ActionCommandArgs {
-                operation_id,
-                command: command.to_owned(),
-                arguments,
-            })
-        };
-        let (response, _) = self.respond(tool, request, Needs::Page).await?;
-        protocol_tool_response(if unverified {
-            as_unverified_success(response)
-        } else {
-            with_action_hint(response)
-        })
-    }
-}
+use super::blocked;
+use super::error::internal;
+use super::helpers::text_ok;
 
 const EXPECT_REQUIRED_HINT: &str = "Add expect with what the action should change, for example {\"kind\":\"url\",\"value\":\"/submit\",\"contains\":true}. If the result is unknown, use the click tool without expect.";
 const EXPECT_SATISFIED_HINT: &str = "This expect was already true before the action, so it cannot prove the action worked. Use a condition that is false now, or omit expect if the result is unknown.";
 const UNVERIFIED_NOTE: &str = "The action ran, but its result was not verified because no expect was given. Read the page with page_text or observe to see what happened. Do not repeat the action unless the page shows it failed.";
 
-fn runs_unverified(cmd: &str, args: &Value) -> bool {
+pub(super) fn envelope(response: Response) -> Result<CallToolResult, ErrorData> {
+    let ok = response.ok;
+    let text = serde_json::to_string(&response).map_err(internal)?;
+    Ok(if ok {
+        CallToolResult::success(vec![ContentBlock::text(text)])
+    } else {
+        CallToolResult::error(vec![ContentBlock::text(text)])
+    })
+}
+
+fn data(
+    response: Response,
+    page: Option<&eoka_server::eoka::Page>,
+) -> Result<Value, CallToolResult> {
+    let error = match eoka_server::state::catalog_result(response, page) {
+        Ok(data) => return Ok(data),
+        Err(error) => error,
+    };
+    if let Some(detail) = blocked::blocked_detail(&error) {
+        return Err(blocked::refusal(detail));
+    }
+    Err(CallToolResult::error(vec![ContentBlock::text(
+        serde_json::to_string(&error).unwrap_or_else(|_| error.message.clone()),
+    )]))
+}
+
+pub(super) fn unwrapped(
+    response: Response,
+    page: Option<&eoka_server::eoka::Page>,
+) -> Result<CallToolResult, ErrorData> {
+    match data(response, page) {
+        Ok(Value::String(text)) => text_ok(text),
+        Ok(data) => text_ok(serde_json::to_string(&data).map_err(internal)?),
+        Err(failed) => Ok(failed),
+    }
+}
+
+pub(super) fn image(
+    response: Response,
+    page: Option<&eoka_server::eoka::Page>,
+) -> Result<CallToolResult, ErrorData> {
+    let captured = match data(response, page) {
+        Ok(captured) => captured,
+        Err(failed) => return Ok(failed),
+    };
+    let png = captured["dataBase64"]
+        .as_str()
+        .ok_or_else(|| internal("the screenshot reply carries no image"))?;
+    let elements = captured["elements"].as_str().unwrap_or_default();
+    Ok(CallToolResult::success(vec![
+        ContentBlock::image(png.to_owned(), "image/png"),
+        ContentBlock::text(if elements.is_empty() {
+            "No interactive elements found.".into()
+        } else {
+            elements.to_owned()
+        }),
+    ]))
+}
+
+pub(super) fn action(response: Response, unverified: bool) -> Result<CallToolResult, ErrorData> {
+    envelope(if unverified {
+        as_unverified_success(response)
+    } else {
+        with_action_hint(response)
+    })
+}
+
+pub(super) fn runs_unverified(cmd: &str, args: &Value) -> bool {
     matches!(cmd, "click" | "dblclick" | "key") && args["expect"].is_null()
 }
 
-fn as_unverified_success(mut response: eoka_protocol::Response) -> eoka_protocol::Response {
+fn as_unverified_success(mut response: Response) -> Response {
     let dispatched = response
         .data
         .as_ref()
@@ -72,7 +111,7 @@ fn action_hint(message: &str) -> Option<&'static str> {
     }
 }
 
-fn with_action_hint(mut response: eoka_protocol::Response) -> eoka_protocol::Response {
+fn with_action_hint(mut response: Response) -> Response {
     let Some(hint) = response.error.as_deref().and_then(action_hint) else {
         return response;
     };

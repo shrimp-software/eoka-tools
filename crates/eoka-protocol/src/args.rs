@@ -52,7 +52,7 @@ pub struct ScreenshotArgs {
     pub full_page: bool,
     #[serde(default)]
     #[schemars(
-        description = "Return the image as base64 dataBase64 instead of writing a file; conflicts with output and annotate."
+        description = "Return the image as base64 dataBase64 instead of writing a file; conflicts with output."
     )]
     pub inline: bool,
 }
@@ -65,9 +65,9 @@ impl ScreenshotArgs {
             self.clip.as_ref(),
             Some(self.full_page),
         )?;
-        if self.inline && (self.output.is_some() || self.annotate) {
+        if self.inline && self.output.is_some() {
             return Err(crate::sidecar::ServerError::invalid_params(
-                "inline cannot be combined with output or annotate",
+                "inline cannot be combined with output",
             ));
         }
         if self.annotate
@@ -171,6 +171,32 @@ pub struct TargetArgs {
         description = "Target element. Supports scoped refs from view, text:Submit, placeholder:Email, role:button, css:form button, id:my-btn, or plain text search."
     )]
     pub target: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+pub struct ClickArgs {
+    #[serde(flatten)]
+    pub element: TargetArgs,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub intercept_nav: Option<NavIntercept>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+#[schemars(
+    description = "Install a history.pushState/replaceState diagnostic before the click and record the attempted navigation in window.__eoka_nav. block keeps the page where it is; allow lets the history change through. Requires expect; location navigation cannot be intercepted."
+)]
+pub enum NavIntercept {
+    Block,
+    Allow,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
+pub struct HistoryGoArgs {
+    #[serde(flatten)]
+    pub operation: crate::ActionSettings,
+    #[schemars(description = "History delta: -1 for back, 1 for forward, -2 for back twice, etc.")]
+    pub delta: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
@@ -384,6 +410,11 @@ pub struct WaitArgs {
     #[serde(default)]
     #[schemars(description = "What the selector must become. Defaults to visible.")]
     pub state: Option<WaitSelectorState>,
+    #[serde(default)]
+    #[schemars(
+        description = "Wait until no XHR or fetch request has run for this many milliseconds."
+    )]
+    pub network_idle: Option<u64>,
     pub timeout: Option<u64>,
 }
 
