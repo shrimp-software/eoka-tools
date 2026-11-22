@@ -49,7 +49,7 @@ impl Engine {
             } else {
                 state.new_tab(url).await?
             };
-            let (url, title) = tab_summary(tab).await?;
+            let (url, title) = tab_summary(&tab).await?;
             (tab_id, url, title)
         };
         if let Some(enabled) = script_enabled {
@@ -71,7 +71,7 @@ impl Engine {
         state.switch_tab(tab_id).await?;
         let (url, title) = {
             let tab = state.current_tab().ok_or("Tab switch failed")?;
-            tab_summary(tab).await?
+            tab_summary(&tab).await?
         };
         self.sync_current_target_features().await?;
         Ok(Response::ok_text(format!(
@@ -90,7 +90,7 @@ impl Engine {
         state.attach_existing_tab(&tab_id).await?;
         let (url, title) = {
             let tab = state.current_tab().ok_or("Attach failed")?;
-            tab_summary(tab).await?
+            tab_summary(&tab).await?
         };
         self.sync_current_target_features().await?;
         Ok(Response::ok_text(format!(
@@ -131,7 +131,7 @@ impl Engine {
         };
         let _ = wait_for_stable(&tab.page).await;
         let restored =
-            restore_state_and_maybe_reload(tab, &saved, state_url_can_reload(&url)).await?;
+            restore_state_and_maybe_reload(&tab, &saved, state_url_can_reload(&url)).await?;
         Ok(Response::ok_text(format!(
             "Hydrated session from {} ({} cookies, {} localStorage, {} sessionStorage).{}",
             source,

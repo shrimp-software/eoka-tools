@@ -169,13 +169,13 @@ impl Engine {
             let _ = wait_for_stable(&tab.page).await;
         }
 
-        let tab = state.current_tab_mut().ok_or("No tab open.")?;
+        let tab = state.current_tab().ok_or("No tab open.")?;
         let reload_after_restore = if !no_navigate && !saved.url.is_empty() {
             state_url_can_reload(&saved.url)
         } else {
             page_url_can_reload_state(&tab.page).await
         };
-        let restored = restore_state_and_maybe_reload(tab, &saved, reload_after_restore).await?;
+        let restored = restore_state_and_maybe_reload(&tab, &saved, reload_after_restore).await?;
 
         Ok(Response::ok_text(format!(
             "Loaded state from {} ({} cookies, {} localStorage, {} sessionStorage).{}",
@@ -189,7 +189,7 @@ impl Engine {
 }
 
 pub(super) async fn restore_state_and_maybe_reload(
-    tab: &mut TabState,
+    tab: &crate::tabs::Tab,
     saved: &SavedState,
     reload_after_restore: bool,
 ) -> Result<crate::saved_state::StorageRestoreReport, String> {

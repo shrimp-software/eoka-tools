@@ -219,7 +219,6 @@ async fn close_tab_impl(
                 "held input was not released within 3 seconds before the tab closed",
             )),
         };
-    state.release_engine_tab(page_id).await;
     state.close_page(page_id).await?;
     Ok(match (recording_error, release_error) {
         (Some(mut recording), Some(release)) => {

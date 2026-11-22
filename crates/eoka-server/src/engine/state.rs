@@ -1,26 +1,24 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::{InteractiveElement, ObserveConfig};
+use crate::tabs::{Tab, Tabs};
+use crate::ObserveConfig;
 use eoka::{Browser, Page, StealthConfig};
 
 use super::profile::{clone_profile_dir, ClonedProfile};
 use super::proxy_forward::ProxyForwarder;
 
-fn tracked_tab_page(tabs: &HashMap<String, TabState>, tab_id: &str) -> eoka::Result<Page> {
-    tabs.get(tab_id)
-        .map(|tab| tab.page.clone())
+fn tracked_tab_page(tabs: &Tabs, tab_id: &str) -> eoka::Result<Page> {
+    tabs.page(tab_id)
         .ok_or_else(|| eoka::Error::cdp_msg(format!("Tab {tab_id} not found")))
 }
 
-fn reconcile_closed_tab<T>(
-    tabs: &mut HashMap<String, T>,
+fn reconcile_closed_tab(
     current_tab_id: &mut Option<String>,
     tab_id: &str,
+    remaining: impl FnOnce() -> Option<String>,
 ) -> Option<String> {
-    tabs.remove(tab_id);
     if current_tab_id.as_deref() == Some(tab_id) {
-        let next_tab_id = tabs.keys().next().cloned();
+        let next_tab_id = remaining();
         *current_tab_id = next_tab_id.clone();
         next_tab_id
     } else {
@@ -28,29 +26,9 @@ fn reconcile_closed_tab<T>(
     }
 }
 
-pub struct TabState {
-    pub page: Page,
-    pub elements: Vec<InteractiveElement>,
-    pub console_injected: bool,
-}
-
-impl TabState {
-    pub fn new(page: Page) -> Self {
-        Self {
-            page,
-            elements: Vec::new(),
-            console_injected: false,
-        }
-    }
-
-    pub fn invalidate(&mut self) {
-        self.elements.clear();
-    }
-}
-
 pub struct BrowserState {
     pub browser: Arc<Browser>,
-    pub tabs: HashMap<String, TabState>,
+    pub tabs: Tabs,
     pub current_tab_id: Option<String>,
     pub config: ObserveConfig,
     pub is_live: bool,
@@ -163,7 +141,7 @@ impl BrowserState {
         let browser = Browser::launch_with_config(config).await?;
         Ok(Self {
             browser: Arc::new(browser),
-            tabs: HashMap::new(),
+            tabs: Tabs::default(),
             current_tab_id: None,
             config: ObserveConfig::default(),
             is_live: false,
@@ -178,7 +156,7 @@ impl BrowserState {
         let browser = Browser::connect(ws_url).await?;
         Ok(Self {
             browser: Arc::new(browser),
-            tabs: HashMap::new(),
+            tabs: Tabs::default(),
             current_tab_id: None,
             config: ObserveConfig::default(),
             is_live: true,
@@ -188,11 +166,11 @@ impl BrowserState {
         })
     }
 
-    pub fn adopted(browser: Arc<Browser>) -> Self {
+    pub fn adopted(browser: Arc<Browser>, tabs: Tabs) -> Self {
         let is_live = false;
         Self {
             browser,
-            tabs: HashMap::new(),
+            tabs,
             current_tab_id: None,
             config: ObserveConfig::default(),
             is_live,
@@ -202,64 +180,56 @@ impl BrowserState {
         }
     }
 
-    pub async fn ensure_tab(&mut self, url: &str) -> eoka::Result<&mut TabState> {
+    pub async fn ensure_tab(&mut self, url: &str) -> eoka::Result<Arc<Tab>> {
         if let Some(existing_id) = self.current_tab_id.clone() {
-            if let Some(tab) = self.tabs.get_mut(&existing_id) {
+            if let Some(tab) = self.tabs.get(&existing_id) {
                 tab.invalidate();
                 tab.page.goto(url).await?;
             }
             return self
                 .tabs
-                .get_mut(&existing_id)
+                .get(&existing_id)
                 .ok_or_else(|| eoka::Error::cdp_msg("Current tab disappeared"));
         }
 
         let page = self.browser.new_page(url).await?;
-        let id = self.track(page);
-        self.current_tab_id = Some(id.clone());
-        Ok(self.tabs.get_mut(&id).expect("just inserted"))
+        let tab = self.track(page);
+        self.current_tab_id = Some(tab.page.target_id().to_owned());
+        Ok(tab)
     }
 
-    fn track(&mut self, page: Page) -> String {
-        super::blockers::watch(&page);
-        let id = page.target_id().to_string();
-        self.tabs.insert(id.clone(), TabState::new(page));
-        id
+    fn track(&mut self, page: Page) -> Arc<Tab> {
+        let id = page.target_id().to_owned();
+        self.tabs.insert(id, page)
     }
 
-    pub fn current_tab(&self) -> Option<&TabState> {
+    pub fn current_tab(&self) -> Option<Arc<Tab>> {
         self.current_tab_id
-            .as_ref()
+            .as_deref()
             .and_then(|id| self.tabs.get(id))
     }
 
-    pub fn current_tab_mut(&mut self) -> Option<&mut TabState> {
-        self.current_tab_id
-            .as_ref()
-            .and_then(|id| self.tabs.get_mut(id))
-    }
-
-    pub async fn ensure_blank_tab(&mut self) -> eoka::Result<&mut TabState> {
+    pub async fn ensure_blank_tab(&mut self) -> eoka::Result<Arc<Tab>> {
         let page = self.browser.new_blank_page().await?;
-        let id = self.track(page);
-        self.current_tab_id = Some(id.clone());
-        Ok(self.tabs.get_mut(&id).expect("just inserted"))
+        let tab = self.track(page);
+        self.current_tab_id = Some(tab.page.target_id().to_owned());
+        Ok(tab)
     }
 
-    pub async fn new_tab(&mut self, url: Option<&str>) -> eoka::Result<(String, &mut TabState)> {
+    pub async fn new_tab(&mut self, url: Option<&str>) -> eoka::Result<(String, Arc<Tab>)> {
         let page = match url {
             Some(u) => self.browser.new_page(u).await?,
             None => self.browser.new_blank_page().await?,
         };
-        let tab_id = self.track(page);
+        let tab = self.track(page);
+        let tab_id = tab.page.target_id().to_owned();
         self.browser.activate_tab(&tab_id).await?;
         self.current_tab_id = Some(tab_id.clone());
-        let tab = self.tabs.get_mut(&tab_id).expect("just inserted");
         Ok((tab_id, tab))
     }
 
     pub async fn switch_tab(&mut self, tab_id: &str) -> eoka::Result<()> {
-        if !self.tabs.contains_key(tab_id) {
+        if !self.tabs.contains(tab_id) {
             let page = self.browser.attach_page(tab_id).await?;
             self.track(page);
         }
@@ -269,7 +239,7 @@ impl BrowserState {
     }
 
     pub async fn attach_existing_tab(&mut self, tab_id: &str) -> eoka::Result<()> {
-        if !self.tabs.contains_key(tab_id) {
+        if !self.tabs.contains(tab_id) {
             let page = self.browser.attach_page(tab_id).await?;
             self.track(page);
         }
@@ -287,8 +257,10 @@ impl BrowserState {
                 .await
                 .unwrap_or(Ok(()));
         self.browser.close_tab(tab_id).await?;
+        self.tabs.remove(tab_id);
+        let tabs = &self.tabs;
         if let Some(next_tab_id) =
-            reconcile_closed_tab(&mut self.tabs, &mut self.current_tab_id, tab_id)
+            reconcile_closed_tab(&mut self.current_tab_id, tab_id, || tabs.any_id())
         {
             self.browser.activate_tab(&next_tab_id).await?;
         }
@@ -303,12 +275,10 @@ impl BrowserState {
             ..
         } = self;
         let mut release_error = None;
-        for tab in tabs.values() {
-            let released = tokio::time::timeout(
-                std::time::Duration::from_secs(2),
-                tab.page.release_all_inputs(),
-            )
-            .await;
+        for page in tabs.pages() {
+            let released =
+                tokio::time::timeout(std::time::Duration::from_secs(2), page.release_all_inputs())
+                    .await;
             match released {
                 Ok(Ok(())) => {}
                 Ok(Err(error)) => {
@@ -341,7 +311,7 @@ mod tests {
 
     #[test]
     fn close_tab_rejects_unknown_untracked_tab_without_indexing() {
-        let tabs = HashMap::new();
+        let tabs = Tabs::default();
         let result = tracked_tab_page(&tabs, "unknown-tab");
 
         match result {
@@ -352,15 +322,14 @@ mod tests {
 
     #[test]
     fn close_tab_reconciles_state_before_returning_cleanup_error() {
-        let mut tabs = HashMap::from([("closed".to_string(), ()), ("next".to_string(), ())]);
         let mut current_tab_id = Some("closed".to_string());
         let cleanup_result: Result<(), &str> = Err("release failed");
 
-        let next_tab_id = reconcile_closed_tab(&mut tabs, &mut current_tab_id, "closed");
+        let next_tab_id =
+            reconcile_closed_tab(&mut current_tab_id, "closed", || Some("next".to_string()));
 
         assert_eq!(next_tab_id.as_deref(), Some("next"));
         assert_eq!(current_tab_id.as_deref(), Some("next"));
-        assert!(!tabs.contains_key("closed"));
         assert!(matches!(cleanup_result, Err("release failed")));
     }
 }

@@ -58,7 +58,7 @@ impl Engine {
 
             {
                 let tab = if state.current_tab_id.is_some() {
-                    state.current_tab_mut().ok_or("No tab")?
+                    state.current_tab().ok_or("No tab")?
                 } else {
                     state.ensure_blank_tab().await.map_err(|e| e.to_string())?
                 };
@@ -174,7 +174,7 @@ impl Engine {
     ) -> Result<Response, EngineError> {
         self.ensure_browser().await?;
         let include_all = args.all;
-        let tab = self.require_tab_mut()?;
+        let tab = self.require_tab()?;
 
         let result = snapshot::snapshot(&tab.page, include_all).await?;
 
@@ -187,7 +187,7 @@ impl Engine {
     ) -> Result<Response, EngineError> {
         let (tab, viewport_only) = self.tab_with_config()?;
         let (elements, data) = observe::inspect(&tab.page, viewport_only, args).await?;
-        tab.elements = elements;
+        tab.set_elements(elements);
         Ok(typed(data))
     }
 
@@ -201,11 +201,8 @@ impl Engine {
             return Ok(typed(super::page_ops::screenshot(&page, &capture).await?));
         }
         let (tab, viewport_only) = self.tab_with_config()?;
-        if tab.elements.is_empty() {
-            tab.elements = observe::observe(&tab.page, viewport_only).await?;
-        }
+        let elements = &observed_elements(&tab, viewport_only).await?;
         let page = &tab.page;
-        let elements = &tab.elements;
         let mut result = super::page_ops::publish_screenshot(&capture, async {
             Ok(annotate::annotated_screenshot(page, elements).await?)
         })
@@ -226,7 +223,7 @@ impl Engine {
         args: &EmulateArgs,
     ) -> Result<Response, EngineError> {
         self.ensure_browser().await?;
-        let tab = self.require_tab_mut()?;
+        let tab = self.require_tab()?;
         if args.reset || args.desktop {
             let page = tab.page.clone();
             return Ok(super::page_ops::viewport(&page, args).await?);
@@ -297,7 +294,7 @@ impl Engine {
         &mut self,
         accept: Option<Option<&str>>,
     ) -> Result<Response, EngineError> {
-        let tab = self.require_tab_mut()?;
+        let tab = self.require_tab()?;
         tab.invalidate();
         let page = tab.page.clone();
         let reply = blockers::answer(&self.operations, &page, accept).await?;
@@ -317,14 +314,10 @@ impl Engine {
     pub(super) async fn cmd_find(&mut self, args: &TextArgs) -> Result<Response, EngineError> {
         let text = args.text.as_str();
         let (tab, viewport_only) = self.tab_with_config()?;
-
-        if tab.elements.is_empty() {
-            tab.elements = observe::observe(&tab.page, viewport_only).await?;
-        }
+        let elements = observed_elements(&tab, viewport_only).await?;
 
         let needle = text.to_lowercase();
-        let matches: Vec<_> = tab
-            .elements
+        let matches: Vec<_> = elements
             .iter()
             .filter(|e| {
                 e.text.to_lowercase().contains(&needle)
@@ -412,7 +405,7 @@ impl Engine {
         };
         if let Some(target) = click_after {
             let (tab, viewport_only) = self.tab_with_config()?;
-            let clicked = click_once(tab, &target, viewport_only).await?;
+            let clicked = click_once(&tab, &target, viewport_only).await?;
             injected.click_after = Some(eoka_protocol::ClickAfter { target, clicked });
         } else {
             injected.next_action = Some(
@@ -462,8 +455,8 @@ impl Engine {
         let clear = args.clear;
         let level = args.level.as_deref();
 
-        let tab = self.require_tab_mut()?;
-        ensure_console_capture(tab).await?;
+        let tab = self.require_tab()?;
+        ensure_console_capture(&tab).await?;
 
         let js = match level {
             Some(l) => format!(
@@ -488,8 +481,8 @@ impl Engine {
         args: &ClearFlagArgs,
     ) -> Result<Response, EngineError> {
         let clear = args.clear;
-        let tab = self.require_tab_mut()?;
-        ensure_console_capture(tab).await?;
+        let tab = self.require_tab()?;
+        ensure_console_capture(&tab).await?;
 
         let parsed = eval_json_or_string(&tab.page, "JSON.stringify(__eoka_errors || [])").await?;
         if clear {
@@ -521,7 +514,7 @@ impl Engine {
         let path = args.path.as_str();
         let drain = self.start_fetch_drain();
         let result = async {
-            let tab = self.require_tab_mut()?;
+            let tab = self.require_tab()?;
             let info = crate::spa::detect_router(&tab.page)
                 .await
                 .map_err(|e: eoka::Error| e.to_string())?;
@@ -563,7 +556,7 @@ impl Engine {
             .replace("/*LOOP*/", if loop_video { "true" } else { "false" });
 
         self.ensure_browser().await?;
-        let tab = self.require_tab_mut()?;
+        let tab = self.require_tab()?;
 
         tab.page
             .session()
@@ -611,4 +604,17 @@ impl Engine {
         }
         Ok(Response::ok_text("Browser closed"))
     }
+}
+
+async fn observed_elements(
+    tab: &crate::tabs::Tab,
+    viewport_only: bool,
+) -> Result<Vec<crate::InteractiveElement>, EngineError> {
+    let cached = tab.elements();
+    if !cached.is_empty() {
+        return Ok(cached);
+    }
+    let elements = observe::observe(&tab.page, viewport_only).await?;
+    tab.set_elements(elements.clone());
+    Ok(elements)
 }

@@ -1,11 +1,7 @@
-use super::state::TabState;
+use crate::tabs::Tab;
 use eoka::Page;
 
-pub async fn click_once(
-    tab: &mut TabState,
-    target: &str,
-    _viewport_only: bool,
-) -> Result<String, String> {
+pub async fn click_once(tab: &Tab, target: &str, _viewport_only: bool) -> Result<String, String> {
     let target = crate::operations::commands::live_locator(target).map_err(|e| e.to_string())?;
     let click = tab.page.act(
         eoka::Action::Click {
