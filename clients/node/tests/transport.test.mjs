@@ -22,7 +22,7 @@ async function start(t, mode = 'normal', env = {}, options = {}) {
 }
 
 function evaluate(transport, js = 'null', options = {}) {
-  return transport.invoke('page.evaluate', { pageId: 'page', function: js }, { timeoutMs: 1500, ...options });
+  return transport.invoke('eval', { pageId: 'page', code: js, function: true }, { timeoutMs: 1500, ...options });
 }
 
 function clean(transport) {
@@ -94,7 +94,10 @@ for (const mode of ['malformed', 'array-envelope', 'dual-envelope', 'invalid-utf
   test(`${mode} rejects all pending calls and tears down the peer`, async t => {
     const transport = await start(t, mode, { EOKA_TRANSPORT_TEST_MESSAGE_BYTES: '2048' });
     const signal = new AbortController();
-    const calls = [evaluate(transport, 'null', { signal: signal.signal, operationId }), evaluate(transport, '[]')];
+    const typed = options => transport.invoke('info', { pageId: 'page' }, { timeoutMs: 1500, ...options });
+    const calls = mode === 'invalid-result'
+      ? [typed({ signal: signal.signal, operationId }), typed()]
+      : [evaluate(transport, 'null', { signal: signal.signal, operationId }), evaluate(transport, '[]')];
     const results = await Promise.allSettled(calls);
     for (const result of results) {
       assert.equal(result.status, 'rejected');
@@ -191,7 +194,7 @@ test('queued calls that expire or abort before being sent report not_sent and ne
   const [deadline, abort] = await Promise.allSettled([expired, aborted]);
   assert.equal(deadline.reason.code, 'DeadlineExceeded');
   assert.equal(deadline.reason.requestState, 'not_sent');
-  assert.match(deadline.reason.message, /page\.evaluate exceeded its 0\.01 ms local deadline before dispatch/);
+  assert.match(deadline.reason.message, /eval exceeded its 0\.01 ms local deadline before dispatch/);
   assert.equal(abort.reason.code, 'Aborted');
   assert.equal(abort.reason.requestState, 'not_sent');
   assert.equal(getEventListeners(controller.signal, 'abort').length, 0);
@@ -236,13 +239,13 @@ test('rejected calls carry the frame of the code that made them', async t => {
   const controller = new AbortController();
   const settled = call => new Promise(resolve => { call.then(resolve, resolve); });
   const cases = [
-    ['DeadlineExceeded', () => late.invoke('page.evaluate', { pageId: 'page', function: 'null' }, { timeoutMs: 5 })],
+    ['DeadlineExceeded', () => late.invoke('eval', { pageId: 'page', code: 'null', function: true }, { timeoutMs: 5 })],
     ['Aborted', () => {
-      const call = late.invoke('page.evaluate', { pageId: 'page', function: 'null' }, { signal: controller.signal });
+      const call = late.invoke('eval', { pageId: 'page', code: 'null', function: true }, { signal: controller.signal });
       setImmediate(() => controller.abort());
       return call;
     }],
-    ['Configuration', () => late.invoke('page.evaluate', { pageId: 'page' })],
+    ['Configuration', () => late.invoke('eval', { pageId: 'page', code: 42 })],
     ['Action', () => failing.invoke('info', { pageId: 'page' })],
   ];
   for (const [code, call] of cases) {
@@ -299,16 +302,16 @@ test('blocked-page replies reject at once with the blocker, the server text and 
 test('a call without timeoutMs gets the configured default deadline against a silent peer', async t => {
   const transport = await start(t, 'silent', {}, { defaultTimeoutMs: 40 });
   const started = performance.now();
-  await assert.rejects(transport.invoke('page.evaluate', { pageId: 'page', function: 'null' }, { operationId }), error => {
+  await assert.rejects(transport.invoke('eval', { pageId: 'page', code: 'null', function: true }, { operationId }), error => {
     assert.ok(error instanceof TransportError);
     assert.equal(error.code, 'DeadlineExceeded');
     assert.equal(error.requestState, 'may_have_been_sent');
     assert.equal(error.operationId, operationId);
-    assert.match(error.message, /page\.evaluate exceeded the 40 ms default deadline \(defaultTimeoutMs\)/);
+    assert.match(error.message, /eval exceeded the 40 ms default deadline \(defaultTimeoutMs\)/);
     return true;
   });
   assert.ok(performance.now() - started >= 25);
-  await assert.rejects(transport.invoke('page.evaluate', { pageId: 'page', function: 'null' }, { timeoutMs: 5 }), error => /its 5 ms local deadline/.test(error.message));
+  await assert.rejects(transport.invoke('eval', { pageId: 'page', code: 'null', function: true }, { timeoutMs: 5 }), error => /its 5 ms local deadline/.test(error.message));
 });
 
 test('the default deadline never undercuts a requested server-side wait and skips terminal calls', async t => {
@@ -380,7 +383,7 @@ test('backpressure cancellation differentiates queued and dispatched work withou
 test('outbound negotiated bounds and invalid params reject before dispatch', async t => {
   const transport = await start(t, 'normal', { EOKA_TRANSPORT_TEST_MESSAGE_BYTES: '2048' });
   await assert.rejects(evaluate(transport, 'x'.repeat(4096)), error => error.code === 'MessageTooLarge' && error.requestState === 'not_sent');
-  await assert.rejects(transport.invoke('page.evaluate', { pageId: 'page' }), error => error.code === 'Configuration' && error.requestState === 'not_sent');
+  await assert.rejects(transport.invoke('eval', { pageId: 'page', code: 42 }), error => error.code === 'Configuration' && error.requestState === 'not_sent');
   await assert.rejects(evaluate(transport, 'null', { timeoutMs: 0 }), error => error.code === 'DeadlineExceeded' && error.requestState === 'not_sent');
   assert.equal(transport.pending.size, 0);
   assert.deepEqual(await evaluate(transport), { result: null });
@@ -465,7 +468,7 @@ test('startup abort before spawn and handshake deadline are typed', { timeout: 5
 test('tracked native completion survives dispatched local abort without replay', { timeout: 5000 }, async t => {
   const transport = await start(t, 'late', { EOKA_TRANSPORT_TEST_IN_FLIGHT: '1' });
   const controller = new AbortController();
-  const tracked = transport.invokeTracked('page.evaluate', { pageId: 'page', function: 'null' }, { signal: controller.signal, operationId });
+  const tracked = transport.invokeTracked('eval', { pageId: 'page', code: 'null', function: true }, { signal: controller.signal, operationId });
   controller.abort();
   await assert.rejects(tracked.result, error => error.code === 'Aborted' && error.requestState === 'may_have_been_sent');
   assert.equal(transport.pending.size, 1);
@@ -478,13 +481,13 @@ test('tracked unsent work and peer failures settle both promises', { timeout: 50
   const transport = await start(t, 'malformed');
   const controller = new AbortController();
   controller.abort();
-  const unsent = transport.invokeTracked('page.evaluate', { pageId: 'page', function: 'null' }, { signal: controller.signal });
+  const unsent = transport.invokeTracked('eval', { pageId: 'page', code: 'null', function: true }, { signal: controller.signal });
   const unsentResults = await Promise.allSettled([unsent.result, unsent.completion]);
   for (const result of unsentResults) {
     assert.equal(result.status, 'rejected');
     assert.equal(result.reason.requestState, 'not_sent');
   }
-  const sent = transport.invokeTracked('page.evaluate', { pageId: 'page', function: 'null' });
+  const sent = transport.invokeTracked('eval', { pageId: 'page', code: 'null', function: true });
   const sentResults = await Promise.allSettled([sent.result, sent.completion]);
   for (const result of sentResults) {
     assert.equal(result.status, 'rejected');
@@ -496,7 +499,7 @@ test('tracked unsent work and peer failures settle both promises', { timeout: 50
 test('teardown settles abandoned tracked native completion', { timeout: 5000 }, async t => {
   const transport = await start(t, 'late');
   const controller = new AbortController();
-  const tracked = transport.invokeTracked('page.evaluate', { pageId: 'page', function: 'null' }, { signal: controller.signal });
+  const tracked = transport.invokeTracked('eval', { pageId: 'page', code: 'null', function: true }, { signal: controller.signal });
   controller.abort();
   await assert.rejects(tracked.result, error => error.code === 'Aborted');
   const completion = assert.rejects(tracked.completion, error => error.code === 'Closed' && error.requestState === 'may_have_been_sent');
@@ -507,13 +510,13 @@ test('teardown settles abandoned tracked native completion', { timeout: 5000 }, 
 
 test('quiescence rejects local waits while allowing bounded exact-tab cleanup after native completion', { timeout: 5000 }, async t => {
   const transport = await start(t, 'late', { EOKA_TRANSPORT_TEST_IN_FLIGHT: '1' });
-  const tracked = transport.invokeTracked('page.evaluate', { pageId: 'page', function: 'null' });
+  const tracked = transport.invokeTracked('eval', { pageId: 'page', code: 'null', function: true });
   transport.quiesce();
   await assert.rejects(tracked.result, error => error.code === 'Closed' && error.requestState === 'may_have_been_sent');
   await assert.rejects(evaluate(transport), error => error.code === 'Closed' && error.requestState === 'not_sent');
   assert.deepEqual(await tracked.completion, { result: null });
   assert.deepEqual(await transport.invokeCleanup('browser.close_tab', { pageId: 'exact-page' }, { timeoutMs: 1000 }), {});
-  await assert.rejects(transport.invokeCleanup('page.evaluate', { pageId: 'page', function: 'null' }), error => error.code === 'Configuration' && error.requestState === 'not_sent');
+  await assert.rejects(transport.invokeCleanup('eval', { pageId: 'page', code: 'null', function: true }), error => error.code === 'Configuration' && error.requestState === 'not_sent');
   await transport.close();
   clean(transport);
 });

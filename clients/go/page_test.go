@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"math"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -30,22 +31,12 @@ func TestPageNoResultMethods(t *testing.T) {
 		_ = json.Unmarshal(params, &request)
 		if method == "actions.perform" {
 			a := request["action"].(map[string]any)
-			switch a["kind"] {
-			case "navigate":
-				method = "page.goto"
-			case "click":
-				method = "page.click"
-				if a["human"] == true {
-					method = "page.human_click"
-				}
-			case "fill":
-				method = "page.fill"
-			case "select_option":
-				method = "page.select"
-			case "type":
-				method = "page.type_into"
-			default:
-				method = "page." + a["kind"].(string)
+			method = "action " + a["kind"].(string)
+			if a["human"] == true {
+				method += " human"
+			}
+			if mode, ok := a["input_mode"].(string); ok {
+				method += " " + mode
 			}
 		}
 		seen[method] = true
@@ -60,26 +51,30 @@ func TestPageNoResultMethods(t *testing.T) {
 		name string
 		call func() error
 	}{
-		{"page.goto", func() error { return page.Goto(ctx, "https://example.com") }},
-		{"page.click", func() error { return page.Click(ctx, "#go") }},
-		{"page.human_click", func() error { return page.HumanClick(ctx, "#go") }},
-		{"page.fill", func() error { return page.Fill(ctx, "#user", "bob") }},
-		{"page.fill", func() error { return page.HumanFill(ctx, "#user", "bob") }},
-		{"page.type_into", func() error { return page.TypeInto(ctx, "#user", "bob") }},
+		{"action navigate", func() error { return page.Goto(ctx, "https://example.com") }},
+		{"action click", func() error { return page.Click(ctx, "#go") }},
+		{"action click human", func() error { return page.HumanClick(ctx, "#go") }},
+		{"action click", func() error { return page.ClickText(ctx, "Go") }},
+		{"action click human", func() error { return page.HumanClickText(ctx, "Go") }},
+		{"action fill", func() error { return page.Fill(ctx, "#user", "bob") }},
+		{"action fill sequential", func() error { return page.HumanFill(ctx, "#user", "bob") }},
+		{"action fill bulk", func() error { return page.FillWithMode(ctx, "#user", "bob", "bulk") }},
+		{"action type", func() error { return page.TypeInto(ctx, "#user", "bob") }},
 		{"wait", func() error { return page.WaitFor(ctx, "#go", time.Second) }},
 		{"wait", func() error { return page.WaitForVisible(ctx, "#go", time.Second) }},
 		{"wait", func() error { return page.WaitForText(ctx, "hello", time.Second) }},
-		{"page.execute", func() error { return page.Execute(ctx, "1+1") }},
-		{"page.select", func() error { return page.Select(ctx, "#opt", "a") }},
-		{"page.hover", func() error { return page.Hover(ctx, "#go") }},
-		{"page.press_key", func() error { return page.PressKey(ctx, "Enter") }},
+		{"exec", func() error { return page.Execute(ctx, "1+1") }},
+		{"exec", func() error { return page.ExecuteRaw(ctx, "void 0") }},
+		{"action select_option", func() error { return page.Select(ctx, "#opt", "a") }},
+		{"action hover", func() error { return page.Hover(ctx, "#go") }},
+		{"action press_key", func() error { return page.PressKey(ctx, "Enter") }},
 		{"mouse.down", func() error { return page.MouseDown(ctx, 10, 20, MouseButtonLeft) }},
 		{"mouse.move", func() error { return page.MouseMove(ctx, 20, 30) }},
 		{"mouse.up", func() error { return page.MouseUp(ctx, 20, 30, MouseButtonLeft) }},
 		{"key.down", func() error { return page.KeyDown(ctx, "Shift") }},
 		{"key.up", func() error { return page.KeyUp(ctx, "Shift") }},
 		{"release_all_inputs", func() error { return page.ReleaseAllInputs(ctx) }},
-		{"page.close", func() error { return page.Close(ctx) }},
+		{"browser.close_tab", func() error { return page.Close(ctx) }},
 	}
 
 	for _, c := range checks {
@@ -159,16 +154,20 @@ func TestPageGetAttribute(t *testing.T) {
 func TestPageEvaluate(t *testing.T) {
 	page := newFakePage(t, func(id int64, method string, params json.RawMessage) (any, *rpcError) {
 		var p struct {
-			JS string `json:"function"`
+			JS       string `json:"code"`
+			Function bool   `json:"function"`
 		}
 		_ = json.Unmarshal(params, &p)
+		if method != "eval" || !p.Function {
+			return nil, &rpcError{Code: ErrCodeInvalidParams, Message: string(params)}
+		}
 		switch p.JS {
 		case "()=>1+1":
-			return map[string]any{"result": 2}, nil
+			return 2, nil
 		case "()=>document.title":
-			return map[string]any{"result": "Example Domain"}, nil
+			return "Example Domain", nil
 		}
-		return map[string]any{"result": nil}, nil
+		return nil, nil
 	})
 
 	ctx := context.Background()
@@ -191,7 +190,7 @@ func TestPageEvaluate(t *testing.T) {
 
 func TestPageFetch(t *testing.T) {
 	page := newFakePage(t, func(id int64, method string, params json.RawMessage) (any, *rpcError) {
-		if method != "page.fetch" {
+		if method != "fetch" {
 			return nil, &rpcError{Code: ErrCodeUnknownMethod, Message: method}
 		}
 		var request struct {
@@ -199,16 +198,18 @@ func TestPageFetch(t *testing.T) {
 			Method  string            `json:"method"`
 			Headers map[string]string `json:"headers"`
 			Body    string            `json:"body"`
+			MaxBody int               `json:"max_body"`
 		}
 		if err := json.Unmarshal(params, &request); err != nil {
 			t.Fatal(err)
 		}
-		if request.URL != "https://example.com/api" || request.Method != "POST" || request.Headers["Accept"] != "application/json" || request.Body != `{"ok":true}` {
+		if request.URL != "https://example.com/api" || request.Method != "POST" || request.Headers["Accept"] != "application/json" || request.Body != `{"ok":true}` || request.MaxBody != maxFetchBytes {
 			t.Fatalf("unexpected fetch request: %+v", request)
 		}
 		return map[string]any{
-			"url": "https://example.com/api", "status": 201, "ok": true,
+			"url": "https://example.com/api", "status": 201, "statusText": "Created", "type": "basic", "redirected": false,
 			"headers": map[string]string{"content-type": "application/json"}, "body": `{"id":1}`,
+			"truncated": false, "bytesRead": 8, "bodyOmitted": nil,
 		}, nil
 	})
 
@@ -220,6 +221,28 @@ func TestPageFetch(t *testing.T) {
 	}
 	if !response.OK || response.Status != 201 || response.Body != `{"id":1}` {
 		t.Fatalf("unexpected fetch response: %+v", response)
+	}
+}
+
+func TestPageFetchKeepsOpaqueBodiesAndRefusesTruncatedOrBinaryOnes(t *testing.T) {
+	replies := []map[string]any{
+		{"url": "https://a.test/", "status": 302, "headers": map[string]string{}, "body": "", "truncated": false, "bodyOmitted": "opaque"},
+		{"url": "https://a.test/", "status": 200, "headers": map[string]string{}, "body": "x", "truncated": true, "bodyOmitted": nil},
+		{"url": "https://a.test/", "status": 200, "headers": map[string]string{}, "body": "", "truncated": false, "bodyOmitted": "binary"},
+	}
+	var calls atomic.Int32
+	page := newFakePage(t, func(id int64, method string, params json.RawMessage) (any, *rpcError) {
+		return replies[calls.Add(1)-1], nil
+	})
+	ctx := context.Background()
+	response, err := page.Fetch(ctx, "https://a.test/", FetchOptions{Redirect: "manual"})
+	if err != nil || response.Status != 302 || response.OK {
+		t.Fatalf("opaque fetch = %+v, %v", response, err)
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		if _, err := page.Fetch(ctx, "https://a.test/", FetchOptions{}); err == nil {
+			t.Fatal("expected a truncated or binary body to fail")
+		}
 	}
 }
 
@@ -315,6 +338,9 @@ func TestPageState(t *testing.T) {
 func TestPageScreenshot(t *testing.T) {
 	want := []byte("\x89PNGfake-image-bytes")
 	page := newFakePage(t, func(id int64, method string, params json.RawMessage) (any, *rpcError) {
+		if method != "screenshot" || string(params) != `{"inline":true,"pageId":"P1"}` {
+			return nil, &rpcError{Code: ErrCodeInvalidParams, Message: method + " " + string(params)}
+		}
 		return map[string]any{"dataBase64": base64.StdEncoding.EncodeToString(want)}, nil
 	})
 
@@ -324,6 +350,19 @@ func TestPageScreenshot(t *testing.T) {
 	}
 	if string(got) != string(want) {
 		t.Fatalf("Screenshot bytes mismatch: got %q, want %q", got, want)
+	}
+}
+
+func TestPageCloseReportsCleanupFailureAsAnError(t *testing.T) {
+	page := newFakePage(t, func(id int64, method string, params json.RawMessage) (any, *rpcError) {
+		if method != "browser.close_tab" {
+			return nil, &rpcError{Code: ErrCodeUnknownMethod, Message: method}
+		}
+		return map[string]any{"cleanupError": "held input was not released"}, nil
+	})
+	err := page.Close(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "held input was not released") {
+		t.Fatalf("Close = %v", err)
 	}
 }
 
@@ -342,21 +381,28 @@ func TestPageViewportSendsCSSDimensionsAndScaleAndReset(t *testing.T) {
 	var sets, resets atomic.Int32
 	page := newFakePage(t, func(id int64, method string, params json.RawMessage) (any, *rpcError) {
 		switch method {
-		case "page.set_viewport":
-			sets.Add(1)
+		case "emulate":
 			var request struct {
-				PageID string  `json:"pageId"`
-				Width  int     `json:"width"`
-				Height int     `json:"height"`
-				Scale  float64 `json:"deviceScaleFactor"`
+				PageID  string  `json:"pageId"`
+				Width   int     `json:"width"`
+				Height  int     `json:"height"`
+				Scale   float64 `json:"dpr"`
+				Desktop bool    `json:"desktop"`
+				Reset   bool    `json:"reset"`
 			}
-			if err := json.Unmarshal(params, &request); err != nil || request.PageID != "P1" || request.Width != 640 || request.Height != 360 || request.Scale != 2 {
-				t.Errorf("viewport wire = %s, %v", params, err)
+			if err := json.Unmarshal(params, &request); err != nil || request.PageID != "P1" {
+				t.Errorf("emulate wire = %s, %v", params, err)
 			}
-		case "page.reset_viewport":
-			resets.Add(1)
-			if string(params) != `{"pageId":"P1"}` {
-				t.Errorf("reset wire = %s", params)
+			if request.Reset {
+				resets.Add(1)
+				if string(params) != `{"pageId":"P1","reset":true}` {
+					t.Errorf("reset wire = %s", params)
+				}
+			} else {
+				sets.Add(1)
+				if !request.Desktop || request.Width != 640 || request.Height != 360 || request.Scale != 2 {
+					t.Errorf("viewport wire = %s", params)
+				}
 			}
 		default:
 			return nil, &rpcError{Code: ErrCodeUnknownMethod, Message: method}

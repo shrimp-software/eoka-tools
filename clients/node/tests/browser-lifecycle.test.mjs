@@ -138,9 +138,9 @@ test('environment explicit paths bypass managed installation while handshake sup
   f.track(browser);
   assert.equal(browser.hasCapability('lifecycleFixture'), true);
   assert.equal(browser.hasCapability('installation'), false);
-  assert.equal(browser.supports('page.execute'), false);
-  await assert.rejects(browser.invoke('page.execute', { pageId: 'existing-tab', js: '1' }));
-  assert.equal((await f.events()).some(event => event.method === 'page.execute'), false);
+  assert.equal(browser.supports('exec'), false);
+  await assert.rejects(browser.invoke('exec', { pageId: 'existing-tab', code: '1' }));
+  assert.equal((await f.events()).some(event => event.method === 'exec'), false);
   await assert.rejects(access(join(f.directory, 'unused-cache')), { code: 'ENOENT' });
 });
 

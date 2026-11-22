@@ -50,6 +50,63 @@ pub struct ScreenshotArgs {
     #[serde(default)]
     #[schemars(description = "Capture the whole scrollable page instead of the viewport.")]
     pub full_page: bool,
+    #[serde(default)]
+    #[schemars(
+        description = "Return the image as base64 dataBase64 instead of writing a file; conflicts with output and annotate."
+    )]
+    pub inline: bool,
+}
+
+impl ScreenshotArgs {
+    pub fn validate(&self) -> Result<(), crate::sidecar::ServerError> {
+        crate::sidecar::validate_screenshot(
+            self.format,
+            self.quality,
+            self.clip.as_ref(),
+            Some(self.full_page),
+        )?;
+        if self.inline && (self.output.is_some() || self.annotate) {
+            return Err(crate::sidecar::ServerError::invalid_params(
+                "inline cannot be combined with output or annotate",
+            ));
+        }
+        if self.annotate
+            && (self.format.is_some()
+                || self.quality.is_some()
+                || self.clip.is_some()
+                || self.full_page)
+        {
+            return Err(crate::sidecar::ServerError::invalid_params(
+                "annotate cannot be combined with format, quality, clip or full page",
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn options(&self) -> eoka::ScreenshotOptions {
+        crate::sidecar::screenshot_options(
+            self.format,
+            self.quality,
+            self.clip.as_ref(),
+            Some(self.full_page),
+        )
+    }
+
+    pub fn mime_type(&self) -> &'static str {
+        match self.format.unwrap_or(crate::sidecar::ScreenshotFormat::Png) {
+            crate::sidecar::ScreenshotFormat::Png => "image/png",
+            crate::sidecar::ScreenshotFormat::Jpeg => "image/jpeg",
+            crate::sidecar::ScreenshotFormat::Webp => "image/webp",
+        }
+    }
+
+    pub fn extension(&self) -> &'static str {
+        match self.format.unwrap_or(crate::sidecar::ScreenshotFormat::Png) {
+            crate::sidecar::ScreenshotFormat::Png => "png",
+            crate::sidecar::ScreenshotFormat::Jpeg => "jpg",
+            crate::sidecar::ScreenshotFormat::Webp => "webp",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
@@ -197,6 +254,16 @@ pub struct ScriptArgs {
     pub max_size: Option<usize>,
     #[serde(default)]
     pub no_await: bool,
+    #[serde(default)]
+    #[schemars(
+        description = "Treat code as function source and call it with arguments as written, without expression or statement wrapping; conflicts with raw."
+    )]
+    pub function: bool,
+    #[serde(default)]
+    #[schemars(
+        description = "With raw, return the expression's value as strict JSON, failing on values JSON cannot represent."
+    )]
+    pub json: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]

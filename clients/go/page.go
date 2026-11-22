@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -58,6 +59,8 @@ type FetchResponse struct {
 	Body    string            `json:"body"`
 }
 
+const maxFetchBytes = 16 * 1024 * 1024
+
 func (p *Page) ID() string { return p.id }
 
 func (p *Page) Invoke(ctx context.Context, method string, params map[string]any, result any) error {
@@ -79,45 +82,45 @@ func (p *Page) SetViewport(ctx context.Context, width, height int, scale float64
 	if err := validateScale(scale); err != nil {
 		return err
 	}
-	return p.call(ctx, "page.set_viewport", map[string]any{
-		"width": width, "height": height, "deviceScaleFactor": scale,
+	return p.call(ctx, "emulate", map[string]any{
+		"width": width, "height": height, "dpr": scale, "desktop": true,
 	}, nil)
 }
 
 func (p *Page) ResetViewport(ctx context.Context) error {
-	return p.call(ctx, "page.reset_viewport", nil, nil)
+	return p.call(ctx, "emulate", map[string]any{"reset": true}, nil)
 }
 
 func (p *Page) Goto(ctx context.Context, url string, options ...ActionOptions) error {
-	return p.performLegacy(ctx, "page.goto", map[string]any{"url": url}, options)
+	return p.performAndWait(ctx, map[string]any{"kind": "navigate", "url": url}, options)
 }
 
 func (p *Page) Click(ctx context.Context, selector string, options ...ActionOptions) error {
-	return p.performLegacy(ctx, "page.click", map[string]any{"selector": selector}, options)
+	return p.performAndWait(ctx, clickAction(cssTarget(selector), false), options)
 }
 
 func (p *Page) ClickText(ctx context.Context, text string, options ...ActionOptions) error {
-	return p.performLegacy(ctx, "page.click_text", map[string]any{"text": text}, options)
+	return p.performAndWait(ctx, clickAction(textTarget(text), false), options)
 }
 
 func (p *Page) HumanClick(ctx context.Context, selector string, options ...ActionOptions) error {
-	return p.performLegacy(ctx, "page.human_click", map[string]any{"selector": selector}, options)
+	return p.performAndWait(ctx, clickAction(cssTarget(selector), true), options)
 }
 
 func (p *Page) HumanClickText(ctx context.Context, text string, options ...ActionOptions) error {
-	return p.performLegacy(ctx, "page.human_click_text", map[string]any{"text": text}, options)
+	return p.performAndWait(ctx, clickAction(textTarget(text), true), options)
 }
 
 func (p *Page) Fill(ctx context.Context, selector, value string, options ...ActionOptions) error {
-	return p.performLegacy(ctx, "page.fill", map[string]any{"selector": selector, "value": value}, options)
+	return p.performAndWait(ctx, fillAction(selector, value, ""), options)
 }
 
 func (p *Page) HumanFill(ctx context.Context, selector, value string, options ...ActionOptions) error {
-	return p.performLegacy(ctx, "page.human_fill", map[string]any{"selector": selector, "value": value}, options)
+	return p.performAndWait(ctx, fillAction(selector, value, "sequential"), options)
 }
 
 func (p *Page) TypeInto(ctx context.Context, selector, text string, options ...ActionOptions) error {
-	return p.performLegacy(ctx, "page.type_into", map[string]any{"selector": selector, "text": text}, options)
+	return p.performAndWait(ctx, typeAction(selector, text, ""), options)
 }
 
 func (p *Page) Text(ctx context.Context) (string, error) {
@@ -193,11 +196,9 @@ func (p *Page) WaitForText(ctx context.Context, text string, timeout time.Durati
 }
 
 func (p *Page) Evaluate(ctx context.Context, function string, arguments ...any) (json.RawMessage, error) {
-	var res struct {
-		Result json.RawMessage `json:"result"`
-	}
-	err := p.call(ctx, "page.evaluate", map[string]any{"function": function, "arguments": append([]any{}, arguments...)}, &res)
-	return res.Result, err
+	var result json.RawMessage
+	err := p.call(ctx, "eval", map[string]any{"code": function, "function": true, "arguments": append([]any{}, arguments...)}, &result)
+	return result, err
 }
 
 func EvaluateAs[T any](ctx context.Context, page *Page, js string) (T, error) {
@@ -216,7 +217,7 @@ func EvaluateAs[T any](ctx context.Context, page *Page, js string) (T, error) {
 }
 
 func (p *Page) Execute(ctx context.Context, function string, arguments ...any) error {
-	return p.call(ctx, "page.execute", map[string]any{"function": function, "arguments": append([]any{}, arguments...)}, nil)
+	return p.call(ctx, "exec", map[string]any{"code": function, "function": true, "arguments": append([]any{}, arguments...)}, nil)
 }
 
 func (p *Page) Fetch(ctx context.Context, url string, options FetchOptions) (FetchResponse, error) {
@@ -233,9 +234,31 @@ func (p *Page) Fetch(ctx context.Context, url string, options FetchOptions) (Fet
 	if options.Redirect != "" {
 		params["redirect"] = options.Redirect
 	}
-	var response FetchResponse
-	err := p.call(ctx, "page.fetch", params, &response)
-	return response, err
+	params["max_body"] = maxFetchBytes
+	var response struct {
+		URL         string            `json:"url"`
+		Status      int               `json:"status"`
+		Headers     map[string]string `json:"headers"`
+		Body        string            `json:"body"`
+		Truncated   bool              `json:"truncated"`
+		BodyOmitted *string           `json:"bodyOmitted"`
+	}
+	if err := p.call(ctx, "fetch", params, &response); err != nil {
+		return FetchResponse{}, err
+	}
+	if response.Truncated {
+		return FetchResponse{}, fmt.Errorf("eoka: fetch response body exceeds %d bytes", maxFetchBytes)
+	}
+	if response.BodyOmitted != nil && *response.BodyOmitted == "binary" {
+		return FetchResponse{}, errors.New("eoka: fetch response body is binary and was omitted")
+	}
+	return FetchResponse{
+		URL:     response.URL,
+		Status:  response.Status,
+		OK:      response.Status >= 200 && response.Status < 300,
+		Headers: response.Headers,
+		Body:    response.Body,
+	}, nil
 }
 
 type TurnstileResult struct {
@@ -303,7 +326,7 @@ func (p *Page) Screenshot(ctx context.Context) ([]byte, error) {
 	var res struct {
 		DataBase64 string `json:"dataBase64"`
 	}
-	if err := p.call(ctx, "page.screenshot", nil, &res); err != nil {
+	if err := p.call(ctx, "screenshot", map[string]any{"inline": true}, &res); err != nil {
 		return nil, err
 	}
 	data, err := base64.StdEncoding.DecodeString(res.DataBase64)
@@ -314,15 +337,15 @@ func (p *Page) Screenshot(ctx context.Context) ([]byte, error) {
 }
 
 func (p *Page) Select(ctx context.Context, selector, value string, options ...ActionOptions) error {
-	return p.performLegacy(ctx, "page.select", map[string]any{"selector": selector, "value": value}, options)
+	return p.performAndWait(ctx, map[string]any{"kind": "select_option", "target": cssTarget(selector), "value": value}, options)
 }
 
 func (p *Page) Hover(ctx context.Context, selector string, options ...ActionOptions) error {
-	return p.performLegacy(ctx, "page.hover", map[string]any{"selector": selector}, options)
+	return p.performAndWait(ctx, map[string]any{"kind": "hover", "target": cssTarget(selector)}, options)
 }
 
 func (p *Page) PressKey(ctx context.Context, key string, options ...ActionOptions) error {
-	return p.performLegacy(ctx, "page.press_key", map[string]any{"key": key}, options)
+	return p.performAndWait(ctx, map[string]any{"kind": "press_key", "key": key}, options)
 }
 
 func (p *Page) MouseDown(ctx context.Context, x, y float64, button MouseButton) error {
@@ -350,25 +373,60 @@ func (p *Page) ReleaseAllInputs(ctx context.Context) error {
 }
 
 func (p *Page) Close(ctx context.Context) error {
-	return p.call(ctx, "page.close", nil, nil)
+	var closed struct {
+		CleanupError *string `json:"cleanupError"`
+	}
+	if err := p.call(ctx, "browser.close_tab", nil, &closed); err != nil {
+		return err
+	}
+	if closed.CleanupError != nil {
+		return fmt.Errorf("eoka: tab closed but cleanup failed: %s", *closed.CleanupError)
+	}
+	return nil
 }
 
 func (p *Page) EvaluateRaw(ctx context.Context, js string) (json.RawMessage, error) {
-	var result struct {
-		Result json.RawMessage `json:"result"`
-	}
-	err := p.call(ctx, "page.evaluate_raw", map[string]any{"js": js}, &result)
-	return result.Result, err
+	var result json.RawMessage
+	err := p.call(ctx, "eval", map[string]any{"code": js, "raw": true, "json": true}, &result)
+	return result, err
 }
 
 func (p *Page) ExecuteRaw(ctx context.Context, js string) error {
-	return p.call(ctx, "page.execute_raw", map[string]any{"js": js}, nil)
+	return p.call(ctx, "exec", map[string]any{"code": js, "raw": true}, nil)
 }
 
 func (p *Page) FillWithMode(ctx context.Context, selector, value, inputMode string, options ...ActionOptions) error {
-	return p.performLegacy(ctx, "page.fill", map[string]any{"selector": selector, "value": value, "inputMode": inputMode}, options)
+	return p.performAndWait(ctx, fillAction(selector, value, inputMode), options)
 }
 
 func (p *Page) TypeWithMode(ctx context.Context, selector, text, inputMode string, options ...ActionOptions) error {
-	return p.performLegacy(ctx, "page.type_into", map[string]any{"selector": selector, "text": text, "inputMode": inputMode}, options)
+	return p.performAndWait(ctx, typeAction(selector, text, inputMode), options)
+}
+
+func cssTarget(selector string) map[string]any {
+	return map[string]any{"query": map[string]any{"kind": "css", "selector": selector}}
+}
+
+func textTarget(text string) map[string]any {
+	return map[string]any{"query": map[string]any{"kind": "text", "text": text}}
+}
+
+func clickAction(target map[string]any, human bool) map[string]any {
+	return map[string]any{"kind": "click", "target": target, "human": human}
+}
+
+func fillAction(selector, value, inputMode string) map[string]any {
+	action := map[string]any{"kind": "fill", "target": cssTarget(selector), "value": value}
+	if inputMode != "" {
+		action["input_mode"] = inputMode
+	}
+	return action
+}
+
+func typeAction(selector, text, inputMode string) map[string]any {
+	action := map[string]any{"kind": "type", "target": cssTarget(selector), "text": text}
+	if inputMode != "" {
+		action["input_mode"] = inputMode
+	}
+	return action
 }

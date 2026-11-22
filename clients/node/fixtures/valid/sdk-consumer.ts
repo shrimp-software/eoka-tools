@@ -92,7 +92,7 @@ export const waitOptions: WaitOptions = { waitTimeoutMs: 1000, timeoutMs: 2000 }
 export const callOptions: CallOptions = { signal: new AbortController().signal, timeoutMs: 2000 };
 export const details: ErrorDetails = { operationId: performOptions.operationId! };
 export const wireError: ServerError = { code: "InvalidParams", message: "Invalid request" };
-export const response: ProtocolResponse<"page.evaluate"> = { id: 1, result: { result: { answer: 42 } } };
+export const response: ProtocolResponse<"eval"> = { id: 1, result: { answer: 42 } };
 
 export function describeBlocker(error: EokaError): string | undefined {
   const blocker: PageBlocker | undefined = error.blocker;
@@ -114,13 +114,13 @@ export async function useClient<M extends MethodName>(client: InvokeClient, meth
   return client.invoke(method, params, callOptions);
 }
 
-export async function usePage(page: Page): Promise<{ receipt: ActionReceipt; record: OperationRecord; evaluation: MethodResults["page.evaluate"] }> {
+export async function usePage(page: Page): Promise<{ receipt: ActionReceipt; record: OperationRecord; evaluation: MethodResults["eval"] }> {
   const receipt = await page.fill(locator, "Ada", performOptions);
   const operation: Operation = await page.perform(action, performOptions);
   const record = await operation.wait(waitOptions);
   await operation.get(callOptions);
   await page.operation(operation.id).get(callOptions);
-  const evaluation = await page.invoke("page.evaluate", { pageId: page.id, function: "()=>({ answer: 42 })" });
+  const evaluation = await page.invoke("eval", { pageId: page.id, code: "()=>({ answer: 42 })", function: true });
   const sum: number = await page.evaluate((a: number, b: number) => a + b, [2, 3]);
   const awaited: { answer: number } = await page.evaluate(async () => ({ answer: 42 }), [], callOptions);
   const dynamic: unknown = await page.evaluate("()=>({ answer: 42 })");
@@ -160,7 +160,7 @@ export async function useBrowser(): Promise<void> {
   try {
     const page: Page = await browser.newPage("https://example.com/", { timeoutMs: 15000 });
     const receipt: ActionReceipt = await page.goto("https://example.com/", { timeoutMs: 15000 });
-    const supported: boolean = browser.supports("page.evaluate");
+    const supported: boolean = browser.supports("eval");
     const ownership: "owned" | "borrowed" = browser.ownership;
     const records: OperationRecord[] = await browser.operations();
     void [receipt, supported, ownership, records];
@@ -170,7 +170,7 @@ export async function useBrowser(): Promise<void> {
 }
 
 export function runConsumer() {
-  if (protocolVersion.major !== wireVersion.major || !methodNames.includes("page.evaluate")) {
+  if (protocolVersion.major !== wireVersion.major || !methodNames.includes("eval")) {
     throw new Error("Generated protocol exports disagree");
   }
   const error = new InstallationError("BrowserNotInstalled", "Offline cache is not prepared", details);

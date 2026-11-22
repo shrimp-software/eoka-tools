@@ -195,64 +195,28 @@ impl Engine {
         &mut self,
         capture: ScreenshotArgs,
     ) -> Result<Response, EngineError> {
-        let annotate_flag = capture.annotate;
-        let output = capture.output.as_deref();
-
+        capture.validate().map_err(|error| error.message)?;
+        if !capture.annotate {
+            let page = self.require_tab()?.page.clone();
+            return Ok(Response::ok(
+                super::page_ops::screenshot(&page, &capture).await?,
+            ));
+        }
         let (tab, viewport_only) = self.tab_with_config()?;
-
-        let params = eoka_protocol::sidecar::ScreenshotParams {
-            page_id: String::new(),
-            format: capture.format,
-            quality: capture.quality,
-            clip: capture.clip,
-            full_page: capture.full_page.then_some(true),
-        };
-        params.validate().map_err(|error| error.message)?;
-        let plain = params.format.is_none()
-            && params.quality.is_none()
-            && params.clip.is_none()
-            && params.full_page.is_none();
-        if annotate_flag && !plain {
-            return Err(
-                "--annotate cannot be combined with format, quality, clip or full page".into(),
-            );
+        if tab.elements.is_empty() {
+            tab.elements = observe::observe(&tab.page, viewport_only).await?;
         }
-        let extension = match params.format {
-            Some(eoka_protocol::sidecar::ScreenshotFormat::Jpeg) => "jpg",
-            Some(eoka_protocol::sidecar::ScreenshotFormat::Webp) => "webp",
-            _ => "png",
-        };
-
-        let png = if annotate_flag {
-            if tab.elements.is_empty() {
-                tab.elements = observe::observe(&tab.page, viewport_only).await?;
-            }
-            annotate::annotated_screenshot(&tab.page, &tab.elements).await?
-        } else {
-            crate::capture::screenshot(&tab.page, &params.options()).await?
-        };
-
-        let path = match output {
-            Some(p) => std::path::PathBuf::from(p),
-            None => {
-                let ts = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis();
-                std::env::temp_dir().join(format!("eoka-screenshot-{ts}.{extension}"))
-            }
-        };
-
-        std::fs::write(&path, &png)?;
-
-        let mut result = json!({ "path": path.to_string_lossy(), "size": png.len() });
-        if annotate_flag {
-            let mut list = String::new();
-            for el in &tab.elements {
-                let _ = writeln!(list, "{}", el);
-            }
-            result["elements"] = Value::String(list);
+        let page = &tab.page;
+        let elements = &tab.elements;
+        let mut result = super::page_ops::publish_screenshot(&capture, async {
+            Ok(annotate::annotated_screenshot(page, elements).await?)
+        })
+        .await?;
+        let mut list = String::new();
+        for el in elements {
+            let _ = writeln!(list, "{}", el);
         }
+        result["elements"] = Value::String(list);
         Ok(Response::ok(result))
     }
 
@@ -261,52 +225,34 @@ impl Engine {
         args: &EmulateArgs,
     ) -> Result<Response, EngineError> {
         self.ensure_browser().await?;
-        let reset = args.reset;
         let tab = self.require_tab_mut()?;
-        let session = tab.page.session();
-
-        if reset {
-            session
-                .send::<_, Value>("Emulation.clearDeviceMetricsOverride", &json!({}))
-                .await?;
-            let _ = session
-                .send::<_, Value>(
-                    "Emulation.setTouchEmulationEnabled",
-                    &json!({ "enabled": false }),
-                )
-                .await;
-            return Ok(Response::ok_text("Device emulation cleared"));
+        if args.reset || args.desktop {
+            let page = tab.page.clone();
+            return Ok(super::page_ops::viewport(&page, args).await?);
         }
-
-        let width = args.width;
-        let height = args.height;
-        let dpr = args.dpr;
-        let mobile = !args.desktop;
-
+        let session = tab.page.session();
         session
             .send::<_, Value>(
                 "Emulation.setDeviceMetricsOverride",
                 &json!({
-                    "width": width,
-                    "height": height,
-                    "deviceScaleFactor": dpr,
-                    "mobile": mobile,
+                    "width": args.width,
+                    "height": args.height,
+                    "deviceScaleFactor": args.dpr,
+                    "mobile": true,
                 }),
             )
             .await?;
-
         let _ = session
             .send::<_, Value>(
                 "Emulation.setTouchEmulationEnabled",
-                &json!({ "enabled": mobile, "maxTouchPoints": 5 }),
+                &json!({ "enabled": true, "maxTouchPoints": 5 }),
             )
             .await;
-
         Ok(Response::ok(json!({
-            "width": width,
-            "height": height,
-            "dpr": dpr,
-            "mobile": mobile,
+            "width": args.width,
+            "height": args.height,
+            "dpr": args.dpr,
+            "mobile": true,
         })))
     }
 

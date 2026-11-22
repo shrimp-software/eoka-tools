@@ -24,13 +24,12 @@ test("canonical operations array decodes with its durable operation and action r
 });
 
 test("canonical evaluation preserves dynamic JSON without manufacturing an object result", () => {
-  const evaluation = decodeMethodResult(bundle, "page.evaluate", evaluationWire);
-  assert.deepEqual(evaluation.result, { answer: 42, items: [1, "two", null, { nested: true }] });
+  const evaluation = decodeMethodResult(bundle, "eval", evaluationWire);
+  assert.deepEqual(evaluation, { answer: 42, items: [1, "two", null, { nested: true }] });
   for (const value of [null, true, 42, "text", [1, null], { nested: { arbitrary: true } }]) {
-    const decoded = decodeMethodResult(bundle, "page.evaluate", JSON.stringify({ id: 2, result: { result: value } }));
-    assert.deepEqual(decoded.result, value);
+    const decoded = decodeMethodResult(bundle, "eval", JSON.stringify({ id: 2, result: value }));
+    assert.deepEqual(decoded, value);
   }
-  assert.throws(() => decodeMethodResult(bundle, "page.evaluate", JSON.stringify({ id: 2, result: 42 })), /Invalid page.evaluate result/);
 });
 
 test("the consumer refuses unsafe IDs, error/success ambiguity and unavailable methods", () => {
@@ -40,10 +39,11 @@ test("the consumer refuses unsafe IDs, error/success ambiguity and unavailable m
 });
 
 test("canonical method schemas reject invalid arguments and preserve null optionals", () => {
-  const evaluate = new Ajv2020({ strict: false, validateFormats: false }).compile(bundle.methods["page.evaluate"].params);
-  assert.equal(evaluate({ pageId: "page-1", function: "()=>42" }), true);
-  assert.equal(evaluate({ pageId: "page-1" }), false);
-  assert.equal(evaluate({ pageId: 7, function: "()=>42" }), false);
+  const evaluate = new Ajv2020({ strict: false, validateFormats: false }).compile(bundle.methods["eval"].params);
+  assert.equal(evaluate({ pageId: "page-1", code: "()=>42", function: true }), true);
+  assert.equal(evaluate({ code: "()=>42" }), false);
+  assert.equal(evaluate({ pageId: 7, code: "()=>42" }), false);
+  assert.equal(evaluate({ pageId: "page-1", code: 42 }), false);
   const list = new Ajv2020({ strict: false, validateFormats: false }).compile(bundle.methods["operations.list"].params);
   assert.equal(list({ limit: 10, before_ms: null }), true);
   assert.equal(list({ limit: -1 }), false);
@@ -62,16 +62,16 @@ test("browser session metadata requires truthful ownership and version fields", 
   }
 });
 
-test("viewport schemas reject invalid CSS dimensions and device scale factors", () => {
-  const viewport = new Ajv2020({ strict: false, validateFormats: false }).compile(bundle.methods["page.set_viewport"].params);
-  const valid = { pageId: "page-1", width: 640, height: 360, deviceScaleFactor: 2 };
+test("viewport schemas reject malformed CSS dimensions and device scale factors", () => {
+  const viewport = new Ajv2020({ strict: false, validateFormats: false }).compile(bundle.methods["emulate"].params);
+  const valid = { pageId: "page-1", width: 640, height: 360, dpr: 2, desktop: true };
   assert.equal(viewport(valid), true);
+  assert.equal(viewport({ pageId: "page-1", reset: true }), true);
   for (const invalid of [
-    { ...valid, width: 0 },
     { ...valid, height: -1 },
-    { ...valid, width: 2147483648 },
-    { ...valid, deviceScaleFactor: 0 },
-    { ...valid, deviceScaleFactor: -1 },
-    { ...valid, deviceScaleFactor: "2" },
+    { ...valid, width: 1.5 },
+    { ...valid, width: 4294967296 },
+    { ...valid, dpr: "2" },
+    { ...valid, desktop: "yes" },
   ]) assert.equal(viewport(invalid), false);
 });

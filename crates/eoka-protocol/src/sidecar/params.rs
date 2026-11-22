@@ -28,9 +28,6 @@ fn default_headless() -> bool {
 fn default_sandbox() -> bool {
     true
 }
-fn default_device_scale_factor() -> f64 {
-    1.0
-}
 
 pub(super) fn positive_scale_schema(_: &mut SchemaGenerator) -> Schema {
     json!({"type":"number","exclusiveMinimum":0})
@@ -71,17 +68,6 @@ dto!(BrowserSessionResult {
     ownership: BrowserOwnership,
     browser_version: String,
 });
-dto!(SetViewportParams {
-    page_id: String,
-    #[schemars(range(min = 1, max = 2147483647))]
-    width: u32,
-    #[schemars(range(min = 1, max = 2147483647))]
-    height: u32,
-    #[serde(default = "default_device_scale_factor")]
-    #[schemars(schema_with = "positive_scale_schema")]
-    device_scale_factor: f64,
-});
-
 pub fn validate_viewport(width: u32, height: u32, scale: f64) -> Result<(), ServerError> {
     if width == 0 || height == 0 || width > i32::MAX as u32 || height > i32::MAX as u32 {
         return Err(ServerError::invalid_params(
@@ -159,61 +145,6 @@ fn default_turnstile_timeout_ms() -> u64 {
 }
 fn default_cloudflare_interval_ms() -> u64 {
     500
-}
-dto!(JsParams {
-    page_id: String,
-    function: String,
-    #[serde(default)] arguments: Vec<Value>,
-});
-dto!(RawJsParams {
-    page_id: String,
-    js: String
-});
-
-dto!(FetchParams {
-    page_id: String, url: String,
-    #[serde(default = "default_fetch_method")] method: String,
-    #[serde(default)] headers: BTreeMap<String, String>,
-    #[serde(default)] body: Option<String>,
-    #[serde(default = "default_fetch_redirect")]
-    #[schemars(regex(pattern = "^(follow|error|manual)$"))] redirect: String,
-});
-dto!(BoundedFetchParams {
-    #[serde(flatten)]
-    request: FetchParams,
-    #[serde(default = "default_bounded_fetch_bytes")]
-    #[schemars(range(max = 1048576))]
-    max_bytes: usize,
-});
-
-impl BoundedFetchParams {
-    pub fn validate(&self) -> Result<(), ServerError> {
-        if self.max_bytes > MAX_BOUNDED_FETCH_BYTES {
-            return Err(ServerError::invalid_params(
-                "maxBytes must not exceed 1048576 bytes",
-            ));
-        }
-        if !matches!(
-            self.request.redirect.as_str(),
-            "follow" | "manual" | "error"
-        ) {
-            return Err(ServerError::invalid_params(
-                "redirect must be follow, manual, or error",
-            ));
-        }
-        Ok(())
-    }
-}
-
-fn default_bounded_fetch_bytes() -> usize {
-    8192
-}
-
-fn default_fetch_method() -> String {
-    "GET".into()
-}
-fn default_fetch_redirect() -> String {
-    "follow".into()
 }
 dto!(RestoreStateParams {
     page_id: String,
@@ -305,25 +236,8 @@ dto!(Tab {
 });
 dto!(TabsResult { tabs: Vec<Tab> });
 dto!(CloseTabResult { #[serde(skip_serializing_if = "Option::is_none")] cleanup_error: Option<String> });
-dto!(EvaluateResult { result: Value });
 dto!(CaptureStateResult {
     state: BrowserState
-});
-dto!(ScreenshotResult {
-    data_base64: String
-});
-dto!(FetchResult { url: String, status: u16, ok: bool, headers: BTreeMap<String, String>, body: String });
-dto!(BoundedFetchResult {
-    url: String,
-    status: u16,
-    status_text: String,
-    r#type: String,
-    redirected: bool,
-    headers: HashMap<String, String>,
-    body: String,
-    truncated: bool,
-    bytes_read: usize,
-    body_omitted: Option<String>,
 });
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -353,22 +267,6 @@ macro_rules! action_params {
 action_params!(ActionPerformParams {
     action: crate::Action
 });
-action_params!(GotoParams { url: String });
-action_params!(ClickParams { selector: String });
-action_params!(ClickTextParams { text: String });
-action_params!(FillParams {
-    selector: String,
-    value: String,
-    #[serde(default)]
-    input_mode: crate::InputMode
-});
-action_params!(TypeIntoParams {
-    selector: String,
-    text: String,
-    #[serde(default)]
-    input_mode: crate::InputMode
-});
-action_params!(PressKeyParams { key: String });
 dto!(AgentObserveParams {
     page_id: String,
     #[serde(flatten)]

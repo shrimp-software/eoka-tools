@@ -174,7 +174,7 @@ fn catalog_operations_run_on_the_addressed_page_and_report_structured_errors() {
     assert!(opened.get("result").is_some(), "{opened}");
     let baseline = server.request(
         109,
-        "page.fetch",
+        "fetch",
         json!({"pageId":first,"url":format!("http://{address}/data")}),
     );
     assert_eq!(baseline["result"]["status"], 200, "{baseline}");
@@ -187,7 +187,7 @@ fn catalog_operations_run_on_the_addressed_page_and_report_structured_errors() {
     let started = Instant::now();
     let direct = server.request(
         111,
-        "page.fetch",
+        "fetch",
         json!({"pageId":first,"url":format!("http://{address}/data")}),
     );
     assert_eq!(direct["result"]["status"], 200, "{direct}");
@@ -539,26 +539,26 @@ fn hand_written_sidecar_methods_match_the_lock() {
             json!({"pageId":p,"text":"absent words","timeout":300}),
         ),
         (
-            "page.evaluate",
-            json!({"pageId":p,"function":"(a, b) => a + b","arguments":[2,3]}),
+            "eval",
+            json!({"pageId":p,"function":true,"code":"(a, b) => a + b","arguments":[2,3]}),
         ),
         (
-            "page.evaluate",
-            json!({"pageId":p,"function":"() => { throw new Error('boom') }"}),
+            "eval",
+            json!({"pageId":p,"function":true,"code":"() => { throw new Error('boom') }"}),
         ),
         (
-            "page.execute",
-            json!({"pageId":p,"function":"() => { document.title = 'fixture' }"}),
+            "exec",
+            json!({"pageId":p,"function":true,"code":"() => { document.title = 'fixture' }"}),
         ),
         (
-            "page.evaluate_raw",
-            json!({"pageId":p,"js":"({a: 1, b: [true, null]})"}),
+            "eval",
+            json!({"pageId":p,"raw":true,"json":true,"code":"({a: 1, b: [true, null]})"}),
         ),
         (
-            "page.evaluate_raw",
-            json!({"pageId":p,"js":"undefinedName.x"}),
+            "eval",
+            json!({"pageId":p,"raw":true,"json":true,"code":"undefinedName.x"}),
         ),
-        ("page.execute_raw", json!({"pageId":p,"js":"void 0"})),
+        ("exec", json!({"pageId":p,"raw":true,"code":"void 0"})),
         ("frames", json!({"pageId":p})),
         (
             "frame_eval",
@@ -569,26 +569,23 @@ fn hand_written_sidecar_methods_match_the_lock() {
             json!({"pageId":p,"selector":"#missing","timeout_ms":300}),
         ),
         ("captcha.turnstile", json!({"pageId":p,"timeout_ms":300})),
+        ("fetch", json!({"pageId":p,"url":format!("{origin}/data")})),
         (
-            "page.fetch",
-            json!({"pageId":p,"url":format!("{origin}/data")}),
-        ),
-        (
-            "page.fetch_bounded",
-            json!({"pageId":p,"url":format!("{origin}/data"),"maxBytes":1}),
+            "fetch",
+            json!({"pageId":p,"url":format!("{origin}/data"),"max_body":1}),
         ),
         ("page.capture_state", json!({"pageId":p})),
-        ("page.screenshot", json!({"pageId":p})),
+        ("screenshot", json!({"pageId":p,"inline":true})),
         (
-            "page.screenshot",
-            json!({"pageId":p,"format":"png","quality":5}),
+            "screenshot",
+            json!({"pageId":p,"inline":true,"format":"png","quality":5}),
         ),
-        ("page.screenshot_to_file", json!({"pageId":p,"path":shot})),
+        ("screenshot", json!({"pageId":p,"output":shot})),
         (
-            "page.set_viewport",
-            json!({"pageId":p,"width":640,"height":360,"deviceScaleFactor":2.0}),
+            "emulate",
+            json!({"pageId":p,"width":640,"height":360,"dpr":2.0,"desktop":true}),
         ),
-        ("page.reset_viewport", json!({"pageId":p})),
+        ("emulate", json!({"pageId":p,"reset":true})),
         ("mouse.move", json!({"pageId":p,"x":10,"y":10})),
         (
             "mouse.down",
@@ -609,7 +606,6 @@ fn hand_written_sidecar_methods_match_the_lock() {
         ("dialog.dismiss", json!({"pageId":p})),
         ("browser.tabs", json!({})),
         ("browser.close_tab", json!({"pageId":"no-such-page"})),
-        ("page.close", json!({"pageId":"no-such-page"})),
     ];
     let root_path = root.path().to_string_lossy().into_owned();
     let mut rendered = String::new();

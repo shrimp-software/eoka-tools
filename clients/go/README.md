@@ -21,7 +21,7 @@ import eoka "github.com/shrimp-software/eoka-tools/clients/go"
 ## Prerequisites
 
 You need a Chrome/Chromium install and an `eoka-server` binary implementing
-sidecar protocol **3.0**. The client locates the binary in this order:
+sidecar protocol **4.0**. The client locates the binary in this order:
 
 1. `eoka.WithServerPath("/path/to/eoka-server")` passed to `Launch` or `Connect`, if given.
 2. The `EOKA_SERVER_BIN` environment variable, if set.
@@ -45,7 +45,7 @@ the resulting server.
 
 ## Action migration
 
-`Launch` and `Connect` send `server.hello` with protocol 3.0 before creating
+`Launch` and `Connect` send `server.hello` with protocol 4.0 before creating
 a browser session. The client requires major 3; server/core
 package versions are diagnostic information, not substitutes for protocol
 compatibility. `Browser.ServerInfo()` returns the negotiated versions, supported

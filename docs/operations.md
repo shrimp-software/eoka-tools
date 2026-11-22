@@ -146,10 +146,11 @@ gone; these queries do not launch Chrome.
 
 ## Sidecar capture and recording
 
-`page.screenshot` returns at most 16 MiB of image bytes as base64; larger captures
-must use `page.screenshot_to_file`. Both support PNG, JPEG and WebP, CSS-pixel
-clips and full-page capture. Viewport DPR is the only scale multiplier. File
-paths must be absolute and their parent directory must already exist.
+`screenshot` with `inline: true` returns at most 16 MiB of image bytes as base64;
+larger captures must be written to a file with `output`. Both support PNG, JPEG
+and WebP, CSS-pixel clips and full-page capture. Viewport DPR is the only scale
+multiplier. Sidecar file paths must be absolute and their parent directory must
+already exist.
 
 Screenshot files and native recordings use exclusive, private staging files in
 the destination directory. The server flushes, synchronizes and closes the file

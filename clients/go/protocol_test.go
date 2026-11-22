@@ -19,7 +19,7 @@ func TestHelloAcceptsCompatibleMinorAndNegotiatesLimits(t *testing.T) {
 			return nil, &rpcError{Code: ErrCodeUnknownMethod, Message: method}
 		}
 		var request map[string]json.RawMessage
-		if err := json.Unmarshal(params, &request); err != nil || string(request["protocol"]) != `{"major":3,"minor":0}` || len(request) != 1 {
+		if err := json.Unmarshal(params, &request); err != nil || string(request["protocol"]) != `{"major":4,"minor":0}` || len(request) != 1 {
 			t.Errorf("hello params = %s, error = %v", params, err)
 		}
 		return info, nil
@@ -49,9 +49,9 @@ func TestProtocol13PreservesLegacyScreenshotAndRecordingErrorEvidence(t *testing
 		switch method {
 		case "server.hello":
 			return info, nil
-		case "page.screenshot":
+		case "screenshot":
 			var request map[string]any
-			if err := json.Unmarshal(params, &request); err != nil || request["pageId"] != "p" || len(request) != 1 {
+			if err := json.Unmarshal(params, &request); err != nil || request["pageId"] != "p" || request["inline"] != true || len(request) != 2 {
 				t.Errorf("legacy screenshot params = %s, error = %v", params, err)
 			}
 			return map[string]any{"dataBase64": "AAEC"}, nil
@@ -92,8 +92,8 @@ func TestHelloNeverRaisesLocalTransportCeilings(t *testing.T) {
 
 func TestHelloRejectsIncompatibleOrIncompleteServers(t *testing.T) {
 	cases := map[string]func(*ServerInfo){
-		"major mismatch":          func(info *ServerInfo) { info.Protocol.Major = 4 },
-		"old major":               func(info *ServerInfo) { info.Protocol.Major = 2 },
+		"major mismatch":          func(info *ServerInfo) { info.Protocol.Major = 5 },
+		"old major":               func(info *ServerInfo) { info.Protocol.Major = 3 },
 		"no server version":       func(info *ServerInfo) { info.ServerVersion = "" },
 		"no core version":         func(info *ServerInfo) { info.CoreVersion = "" },
 		"invalid message bound":   func(info *ServerInfo) { info.Limits.MaxMessageBytes = 0 },

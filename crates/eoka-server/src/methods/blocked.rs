@@ -28,25 +28,9 @@ fn navigates(action: &Value) -> bool {
 pub(crate) fn policy(method: &str, params: &Value) -> Policy {
     match method {
         "page.capture_state" => Policy::Read,
-        "page.evaluate" | "page.execute" | "page.evaluate_raw" | "page.execute_raw"
-        | "page.fetch" | "page.fetch_bounded" => Policy::Script,
-        "page.screenshot" | "page.screenshot_to_file" => Policy::Capture,
         "agent.observe" => Policy::Observe,
-        "page.goto" => Policy::Navigate,
         "actions.perform" | "agent.step" if navigates(&params["action"]) => Policy::Navigate,
-        "actions.perform"
-        | "agent.step"
-        | "page.click"
-        | "page.click_text"
-        | "page.human_click"
-        | "page.human_click_text"
-        | "page.fill"
-        | "page.human_fill"
-        | "page.type_into"
-        | "page.select"
-        | "page.hover"
-        | "page.press_key"
-        | "page.solve_captcha" => Policy::Gate,
+        "actions.perform" | "agent.step" | "page.solve_captcha" => Policy::Gate,
         _ => Policy::Free,
     }
 }
@@ -193,9 +177,6 @@ mod tests {
             "recording.get",
             "recording.stop",
             "recording.cancel",
-            "page.close",
-            "page.set_viewport",
-            "page.reset_viewport",
             "page.restore_state",
         ];
         let registered = eoka_protocol::sidecar::method_names()
@@ -221,31 +202,20 @@ mod tests {
                 );
             }
         }
-        assert_eq!(policy("page.goto", &json!({})), Policy::Navigate);
         assert_eq!(
             policy("actions.perform", &json!({"action":{"kind":"fill"}})),
             Policy::Gate
         );
         assert_eq!(policy("page.capture_state", &json!({})), Policy::Read);
-        assert_eq!(policy("page.evaluate", &json!({})), Policy::Script);
-        assert_eq!(policy("page.screenshot", &json!({})), Policy::Capture);
         assert_eq!(policy("console", &json!({})), Policy::Free);
     }
 
     #[test]
     fn admissions_and_agent_calls_end_themselves_when_a_dialog_opens() {
-        for method in [
-            "actions.perform",
-            "page.goto",
-            "page.click",
-            "page.fill",
-            "page.press_key",
-            "agent.step",
-            "agent.observe",
-        ] {
+        for method in ["actions.perform", "agent.step", "agent.observe"] {
             assert!(ends_itself(method), "{method}");
         }
-        for method in ["page.capture_state", "page.evaluate", "page.screenshot"] {
+        for method in ["page.capture_state", "eval", "screenshot"] {
             assert!(!ends_itself(method), "{method}");
         }
     }
@@ -258,7 +228,7 @@ mod tests {
             url: "https://example.test/".into(),
             since: Instant::now(),
         });
-        let error = blocked(&dialog, "page.evaluate", Stage::NotStarted);
+        let error = blocked(&dialog, "eval", Stage::NotStarted);
         assert_eq!(error.code, eoka_protocol::sidecar::ErrorCode::DialogOpen);
         assert!(
             error.message.contains("dialog is open"),
@@ -266,7 +236,7 @@ mod tests {
             error.message
         );
         assert!(error.message.contains("are you sure?"), "{}", error.message);
-        assert!(error.message.contains("`page.evaluate` was not started"));
+        assert!(error.message.contains("`eval` was not started"));
         let data = *error.data.unwrap();
         let detail = data.detail.unwrap();
         assert_eq!(detail.code, "dialog_open");
@@ -281,15 +251,13 @@ mod tests {
             url: Some("https://slow.test/hang".into()),
             since: Instant::now(),
         });
-        let error = blocked(&navigation, "page.evaluate", Stage::ActionInterrupted);
+        let error = blocked(&navigation, "eval", Stage::ActionInterrupted);
         assert_eq!(
             error.code,
             eoka_protocol::sidecar::ErrorCode::NavigationPending
         );
         assert!(error.message.contains("https://slow.test/hang"));
-        assert!(error
-            .message
-            .contains("`page.evaluate` returned without a result"));
+        assert!(error.message.contains("`eval` returned without a result"));
         assert!(matches!(
             error.data.unwrap().blocker,
             Some(PageBlocker::Navigation { url: Some(ref url), .. }) if url == "https://slow.test/hang"

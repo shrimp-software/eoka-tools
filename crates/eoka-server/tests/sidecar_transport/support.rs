@@ -219,13 +219,13 @@ pub(crate) fn process_running(pid: u32) -> bool {
 pub(crate) fn page_metrics(server: &mut Sidecar, id: u64, page: &str) -> Value {
     let response = server.request(
         id,
-        "page.evaluate_raw",
+        "eval",
         json!({
-            "pageId":page,"js":"({width:innerWidth,height:innerHeight,scale:devicePixelRatio})"
+            "pageId":page,"raw":true,"json":true,"code":"({width:innerWidth,height:innerHeight,scale:devicePixelRatio})"
         }),
     );
     assert!(response.get("result").is_some(), "{response}");
-    response["result"]["result"].clone()
+    response["result"].clone()
 }
 
 pub(crate) fn assert_png_dimensions(
@@ -235,7 +235,7 @@ pub(crate) fn assert_png_dimensions(
     expected: (u32, u32),
 ) {
     use base64::Engine;
-    let response = server.request(id, "page.screenshot", json!({"pageId":page}));
+    let response = server.request(id, "screenshot", json!({"pageId":page,"inline":true}));
     let png = base64::engine::general_purpose::STANDARD
         .decode(response["result"]["dataBase64"].as_str().unwrap())
         .unwrap();
@@ -362,10 +362,10 @@ pub(crate) fn png(reply: &Value) -> Vec<u8> {
 pub(crate) fn visibility(server: &mut Sidecar, id: u64, page: &str) -> Value {
     let seen = server.request(
         id,
-        "page.evaluate",
-        json!({"pageId":page,"function":"()=>({now:document.visibilityState,changes:window.visibilityChanges})"}),
+        "eval",
+        json!({"pageId":page,"function":true,"code":"()=>({now:document.visibilityState,changes:window.visibilityChanges})"}),
     );
-    seen["result"]["result"].clone()
+    seen["result"].clone()
 }
 
 pub(crate) const QUICK: Duration = Duration::from_millis(2000);
@@ -491,7 +491,10 @@ impl Blocked {
     }
 
     pub(crate) fn evaluate(&mut self, page: &str, function: &str) -> Value {
-        self.ok("page.evaluate", json!({"pageId":page,"function":function}))["result"].clone()
+        self.ok(
+            "eval",
+            json!({"pageId":page,"function":true,"code":function}),
+        )
     }
 
     pub(crate) fn painted(&mut self, page: &str) -> u64 {
@@ -524,8 +527,8 @@ impl Blocked {
     pub(crate) fn clear(&mut self, pages: &[&str]) {
         for page in pages {
             self.ok(
-                "page.execute",
-                json!({"pageId":page,"function":"()=>{for(const id of ['outcome','twice','dragged'])document.getElementById(id).textContent='';window.scrollTo(0,0)}"}),
+                "exec",
+                json!({"pageId":page,"function":true,"code":"()=>{for(const id of ['outcome','twice','dragged'])document.getElementById(id).textContent='';window.scrollTo(0,0)}"}),
             );
         }
     }
@@ -563,16 +566,16 @@ impl Blocked {
 
     pub(crate) fn open_alert(&mut self, page: &str) {
         self.ok(
-            "page.execute",
-            json!({"pageId":page,"function":"()=>{setTimeout(()=>alert('are you sure?'),0)}"}),
+            "exec",
+            json!({"pageId":page,"function":true,"code":"()=>{setTimeout(()=>alert('are you sure?'),0)}"}),
         );
         std::thread::sleep(Duration::from_millis(300));
     }
 
     pub(crate) fn stall_navigation(&mut self, page: &str) {
         self.ok(
-            "page.execute",
-            json!({"pageId":page,"function":"()=>{setTimeout(()=>{location.href='/hang'},0)}"}),
+            "exec",
+            json!({"pageId":page,"function":true,"code":"()=>{setTimeout(()=>{location.href='/hang'},0)}"}),
         );
     }
 
@@ -687,8 +690,8 @@ pub(crate) fn behind_and_front(tabs: &mut Blocked, path: &str) -> (String, Strin
     std::thread::sleep(Duration::from_secs(3));
     for page in [&behind, &front] {
         tabs.ok(
-            "page.execute",
-            json!({"pageId":page,"function":"()=>{window.changes=[]}"}),
+            "exec",
+            json!({"pageId":page,"function":true,"code":"()=>{window.changes=[]}"}),
         );
     }
     assert_eq!(tabs.seen(&behind)["now"], "hidden");

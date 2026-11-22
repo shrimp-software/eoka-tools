@@ -64,6 +64,7 @@ fn hello_negotiates_real_versions_without_launch_and_rejects_mismatch() {
             3,
             json!({"major":PROTOCOL_VERSION.major,"minor":PROTOCOL_VERSION.minor + 1}),
         ),
+        (6, json!({"major":3,"minor":0})),
     ] {
         assert_eq!(
             server.request(id, "server.hello", json!({"protocol":protocol}))["error"]["code"],
@@ -72,7 +73,7 @@ fn hello_negotiates_real_versions_without_launch_and_rejects_mismatch() {
     }
     assert!(!state.exists());
     assert!(server
-        .request(4, "server.hello", json!({"protocol":{"major":3,"minor":0}}))
+        .request(4, "server.hello", json!({"protocol":{"major":4,"minor":0}}))
         .get("result")
         .is_some());
     server.shutdown(5);
@@ -82,7 +83,7 @@ fn hello_negotiates_real_versions_without_launch_and_rejects_mismatch() {
 fn framing_handles_fragmented_utf8_multiple_lines_and_numeric_ids() {
     let (_root, state, scratch) = directories();
     let mut server = Sidecar::start(&state, &scratch);
-    let input = "{\"id\":1,\"method\":\"unknown.é\",\"params\":{}}\n{\"id\":2,\"method\":\"server.hello\",\"params\":{\"protocol\":{\"major\":3,\"minor\":0}}}\n";
+    let input = "{\"id\":1,\"method\":\"unknown.é\",\"params\":{}}\n{\"id\":2,\"method\":\"server.hello\",\"params\":{\"protocol\":{\"major\":4,\"minor\":0}}}\n";
     for byte in input.as_bytes() {
         server.input.as_mut().unwrap().write_all(&[*byte]).unwrap();
         server.input.as_mut().unwrap().flush().unwrap();
@@ -101,7 +102,7 @@ fn framing_handles_fragmented_utf8_multiple_lines_and_numeric_ids() {
         json!(9_007_199_254_740_992_u64),
     ] {
         server.send(
-            json!({"id":id,"method":"server.hello","params":{"protocol":{"major":3,"minor":0}}}),
+            json!({"id":id,"method":"server.hello","params":{"protocol":{"major":4,"minor":0}}}),
         );
         let response = server.reply();
         assert_eq!(response["id"], Value::Null);
@@ -132,7 +133,7 @@ fn oversized_input_is_bounded_and_framing_recovers() {
     assert_eq!(response["error"]["code"], "MessageTooLarge");
     assert_eq!(response["id"], Value::Null);
     assert!(server
-        .request(2, "server.hello", json!({"protocol":{"major":3,"minor":0}}))
+        .request(2, "server.hello", json!({"protocol":{"major":4,"minor":0}}))
         .get("result")
         .is_some());
     server.shutdown(3);
@@ -191,12 +192,12 @@ fn managed_validation_and_invalid_executables_never_launch_a_fallback() {
             json!({"wsEndpoint":"ws://127.0.0.1/devtools/browser/id","sandbox":true}),
         ),
         (
-            "page.set_viewport",
-            json!({"pageId":"unknown","width":0,"height":360}),
+            "emulate",
+            json!({"pageId":"unknown","width":-1,"height":360,"desktop":true}),
         ),
         (
-            "page.set_viewport",
-            json!({"pageId":"unknown","width":640,"height":360,"deviceScaleFactor":-1}),
+            "emulate",
+            json!({"pageId":"unknown","width":640,"height":360,"deviceScaleFactor":1}),
         ),
     ] {
         let response = server.request(id, method, params);
@@ -254,7 +255,7 @@ fn closed_stdout_triggers_cleanup_even_with_stdin_still_open() {
         replies,
     };
     server
-        .send(json!({"id":1,"method":"server.hello","params":{"protocol":{"major":3,"minor":0}}}));
+        .send(json!({"id":1,"method":"server.hello","params":{"protocol":{"major":4,"minor":0}}}));
     let deadline = Instant::now() + Duration::from_secs(30);
     while server.child.try_wait().unwrap().is_none() {
         assert!(

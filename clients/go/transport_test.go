@@ -39,7 +39,7 @@ func TestTransportErrorMapping(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	err := tr.call(ctx, "page.click", map[string]any{"pageId": "p1", "selector": "#go"}, nil)
+	err := tr.call(ctx, "exists", map[string]any{"pageId": "p1", "selector": "#go"}, nil)
 	if err == nil {
 		t.Fatal("expected an error")
 	}

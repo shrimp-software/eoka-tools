@@ -10,8 +10,8 @@ import { duration, maximumTimer, serverGraceMs } from './duration.js';
 import { ConfigurationError, EokaError, type ErrorDetails } from './errors.js';
 import type {
   Action, ActionOptions as WireActionOptions, ActionReceipt, AgentAction, AgentMode, AgentObservation,
-  AgentStepResult, BrowserState, Expectation, LocatorSpec, MethodName,
-  MethodParams, MethodResults, OperationRecord, InputMode, Destination,
+  AgentStepResult, Artifact, BrowserState, Expectation, LocatorSpec, MethodName,
+  MethodParams, MethodResults, OperationRecord, InputMode, Destination, ScreenshotClip, ScreenshotFormat,
 } from './generated/protocol.js';
 import { Operation, OperationError, operationFailure, validateOperationRecord, type WaitOptions } from './operations.js';
 import { Recording, RecordingError, recordingFailure, requireCaptureCapability, validateRecordingRecord } from './recording.js';
@@ -50,17 +50,25 @@ export interface AgentStepOptions extends AgentObserveOptions {
 
 export interface ShadowClickResult { frameId: string; selector: string; x: number; y: number }
 export interface TurnstileResult { clicks: number; elapsedMs: number }
-export type FetchOptions = Pick<MethodParams['page.fetch'], 'method' | 'headers' | 'body' | 'redirect'>;
-export type BoundedFetchOptions = Pick<MethodParams['page.fetch_bounded'], 'method' | 'headers' | 'body' | 'redirect' | 'maxBytes'>;
-export type ViewportOptions = Pick<MethodParams['page.set_viewport'], 'width' | 'height' | 'deviceScaleFactor'>;
-export type ScreenshotOptions = Pick<MethodParams['page.screenshot'], 'format' | 'quality' | 'clip' | 'fullPage'>;
-export type ScreenshotFileOptions = ScreenshotOptions & Pick<MethodParams['page.screenshot_to_file'], 'path'> & CallOptions;
+export interface FetchOptions { method?: string; headers?: Record<string, string>; body?: string | null; redirect?: string }
+export interface BoundedFetchOptions extends FetchOptions { maxBytes?: number }
+export interface FetchResult { url: string; status: number; ok: boolean; headers: Record<string, string>; body: string }
+export interface BoundedFetchResult {
+  url: string; status: number; statusText: string; type: string; redirected: boolean;
+  headers: Record<string, string>; body: string; truncated: boolean; bytesRead: number; bodyOmitted?: string | null;
+}
+export interface ViewportOptions { width: number; height: number; deviceScaleFactor?: number }
+export interface ScreenshotOptions { format?: ScreenshotFormat | null; quality?: number | null; clip?: ScreenshotClip | null; fullPage?: boolean | null }
+export type ScreenshotFileOptions = ScreenshotOptions & { path: string } & CallOptions;
+export type ScreenshotFile = Artifact & { size: number };
 export type RecordOptions = Pick<MethodParams['recording.start'], 'path' | 'fps' | 'maxWidth' | 'maxHeight'> & CallOptions & { recordingId?: string };
 
 const recordingIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const actionOptionKeys = Object.keys(bundle.types.ActionOptions.properties);
 const defaultActionTimeoutMs = bundle.types.ActionOptions.properties.timeout_ms.default;
 const maximumWaitMs = bundle.methods['operations.wait'].params.properties.timeout_ms.maximum;
+const maximumFetchBytes = bundle.methods.fetch.params.properties.max_body.maximum;
+const defaultBoundedFetchBytes = 8192;
 
 function locator(target: LocatorInput): LocatorSpec {
   return typeof target === 'string' ? { query: { kind: 'css', selector: target } } : target;
@@ -90,6 +98,24 @@ function actionBudget(options: PerformOptions): { actionMs: number | undefined; 
   if (requested !== undefined && localMs !== undefined) return { actionMs: requested, localMs, settleMs: 0 };
   const actionMs = requested ?? (localMs === undefined ? defaultActionTimeoutMs : Math.ceil(localMs));
   return { actionMs, localMs: actionMs === 0 ? 0 : Math.min(maximumTimer, actionMs + serverGraceMs), settleMs: serverGraceMs / 2 };
+}
+
+function fetchParams(pageId: string, url: string, options: BoundedFetchOptions, maxBody: number): MethodParams['fetch'] {
+  const { maxBytes: _maxBytes, ...request } = options;
+  return { ...request, pageId, url, max_body: maxBody };
+}
+
+function captureParams(pageId: string, capture: ScreenshotOptions): MethodParams['screenshot'] {
+  const { fullPage, ...rest } = capture;
+  return { ...rest, pageId, ...(fullPage == null ? {} : { full_page: fullPage }) };
+}
+
+function localCallOptions(options: CallOptions): CallOptions {
+  const local: CallOptions = {};
+  if (options.signal !== undefined) local.signal = options.signal;
+  if (options.timeoutMs !== undefined) local.timeoutMs = options.timeoutMs;
+  if (options.operationId !== undefined) local.operationId = options.operationId;
+  return local;
 }
 
 function functionSource(fn: string | PageFunction, method: string): string {
@@ -263,19 +289,19 @@ export class Page implements InvokeClient {
   evaluate<R>(fn: PageFunction<R>, args?: unknown[], options?: CallOptions): Promise<Awaited<R>>;
   evaluate(fn: string, args?: unknown[], options?: CallOptions): Promise<unknown>;
   async evaluate(fn: string | PageFunction, args: unknown[] = [], options?: CallOptions): Promise<unknown> {
-    return (await this.invoke('page.evaluate', { pageId: this.id, function: functionSource(fn, 'page.evaluate'), arguments: args }, options)).result;
+    return this.invoke('eval', { pageId: this.id, code: functionSource(fn, 'page.evaluate'), function: true, arguments: args }, options);
   }
 
   async evaluateRaw(js: string, options?: CallOptions): Promise<unknown> {
-    return (await this.invoke('page.evaluate_raw', { pageId: this.id, js }, options)).result;
+    return this.invoke('eval', { pageId: this.id, code: js, raw: true, json: true }, options);
   }
 
   async execute(fn: string | PageFunction, args: unknown[] = [], options?: CallOptions): Promise<void> {
-    await this.invoke('page.execute', { pageId: this.id, function: functionSource(fn, 'page.execute'), arguments: args }, options);
+    await this.invoke('exec', { pageId: this.id, code: functionSource(fn, 'page.execute'), function: true, arguments: args }, options);
   }
 
   async executeRaw(js: string, options?: CallOptions): Promise<void> {
-    await this.invoke('page.execute_raw', { pageId: this.id, js }, options);
+    await this.invoke('exec', { pageId: this.id, code: js, raw: true }, options);
   }
 
   async frames(options?: CallOptions): Promise<MethodResults['frames']> {
@@ -313,32 +339,30 @@ export class Page implements InvokeClient {
     await this.invoke('page.restore_state', { pageId: this.id, state }, options);
   }
 
-  fetch(url: string, fetchOptions: FetchOptions = {}, options?: CallOptions): Promise<MethodResults['page.fetch']> {
-    return this.invoke('page.fetch', { ...fetchOptions, pageId: this.id, url }, options);
+  async fetch(url: string, fetchOptions: FetchOptions = {}, options?: CallOptions): Promise<FetchResult> {
+    const response = await this.invoke('fetch', fetchParams(this.id, url, fetchOptions, maximumFetchBytes), options) as BoundedFetchResult;
+    if (response.truncated || response.bodyOmitted === 'binary') {
+      throw new EokaError('FetchBodyUnavailable', `The response body ${response.truncated ? `exceeds ${maximumFetchBytes} bytes` : 'is binary'}; use fetchBounded to inspect it.`, { requestState: 'acknowledged', data: response });
+    }
+    const { url: finalUrl, status, headers, body } = response;
+    return { url: finalUrl, status, ok: status >= 200 && status < 300, headers, body };
   }
 
-  fetchBounded(url: string, fetchOptions: BoundedFetchOptions = {}, options?: CallOptions): Promise<MethodResults['page.fetch_bounded']> {
-    return this.invoke('page.fetch_bounded', { ...fetchOptions, pageId: this.id, url }, options);
+  async fetchBounded(url: string, fetchOptions: BoundedFetchOptions = {}, options?: CallOptions): Promise<BoundedFetchResult> {
+    return await this.invoke('fetch', fetchParams(this.id, url, fetchOptions, fetchOptions.maxBytes ?? defaultBoundedFetchBytes), options) as BoundedFetchResult;
   }
 
   async screenshot(options: ScreenshotOptions & CallOptions = {}): Promise<Buffer> {
-    requireCaptureCapability(this.client, 'page.screenshot', 'screenshotOptions');
+    requireCaptureCapability(this.client, 'screenshot', 'screenshotOptions');
     const { signal, timeoutMs, operationId, ...capture } = options;
-    const localOptions: CallOptions = {};
-    if (signal !== undefined) localOptions.signal = signal;
-    if (timeoutMs !== undefined) localOptions.timeoutMs = timeoutMs;
-    if (operationId !== undefined) localOptions.operationId = operationId;
-    return Buffer.from((await this.invoke('page.screenshot', { ...capture, pageId: this.id }, localOptions)).dataBase64, 'base64');
+    const shot = await this.invoke('screenshot', { ...captureParams(this.id, capture), inline: true }, localCallOptions(options)) as { dataBase64: string };
+    return Buffer.from(shot.dataBase64, 'base64');
   }
 
-  async screenshotToFile(options: ScreenshotFileOptions): Promise<MethodResults['page.screenshot_to_file']> {
-    requireCaptureCapability(this.client, 'page.screenshot_to_file', 'screenshotFile');
+  async screenshotToFile(options: ScreenshotFileOptions): Promise<ScreenshotFile> {
+    requireCaptureCapability(this.client, 'screenshot', 'screenshotFile');
     const { signal, timeoutMs, operationId, path, ...capture } = options;
-    const localOptions: CallOptions = {};
-    if (signal !== undefined) localOptions.signal = signal;
-    if (timeoutMs !== undefined) localOptions.timeoutMs = timeoutMs;
-    if (operationId !== undefined) localOptions.operationId = operationId;
-    return this.invoke('page.screenshot_to_file', { ...capture, pageId: this.id, path: resolve(path) }, localOptions);
+    return await this.invoke('screenshot', { ...captureParams(this.id, capture), output: resolve(path) }, localCallOptions(options)) as ScreenshotFile;
   }
 
   async record(options: RecordOptions): Promise<Recording> {
@@ -367,11 +391,12 @@ export class Page implements InvokeClient {
   }
 
   async setViewport(viewport: ViewportOptions, options?: CallOptions): Promise<void> {
-    await this.invoke('page.set_viewport', { ...viewport, pageId: this.id }, options);
+    const { width, height, deviceScaleFactor = 1 } = viewport;
+    await this.invoke('emulate', { pageId: this.id, width, height, dpr: deviceScaleFactor, desktop: true }, options);
   }
 
   async resetViewport(options?: CallOptions): Promise<void> {
-    await this.invoke('page.reset_viewport', { pageId: this.id }, options);
+    await this.invoke('emulate', { pageId: this.id, reset: true }, options);
   }
 
   observe(options: AgentObserveOptions = {}): Promise<AgentObservation> {
@@ -409,7 +434,10 @@ export class Page implements InvokeClient {
   }
 
   async close(options?: CallOptions): Promise<void> {
-    await this.invoke('page.close', { pageId: this.id }, options);
+    const closed = await this.invoke('browser.close_tab', { pageId: this.id }, options);
+    if (closed.cleanupError != null) {
+      throw new EokaError('CleanupFailed', `The tab closed but cleanup failed: ${closed.cleanupError}`, { requestState: 'acknowledged', data: closed });
+    }
   }
 }
 

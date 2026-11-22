@@ -130,40 +130,10 @@ func (b *Browser) CancelOperation(ctx context.Context, id string) (OperationReco
 	return record, err
 }
 
-func (p *Page) performLegacy(ctx context.Context, method string, params map[string]any, options []ActionOptions) error {
+func (p *Page) performAndWait(ctx context.Context, action map[string]any, options []ActionOptions) error {
 	id, err := NewOperationID()
 	if err != nil {
 		return err
-	}
-	action := map[string]any{}
-	selector := func() map[string]any {
-		return map[string]any{"query": map[string]any{"kind": "css", "selector": params["selector"]}}
-	}
-	switch method {
-	case "page.goto":
-		action = map[string]any{"kind": "navigate", "url": params["url"]}
-	case "page.click", "page.human_click":
-		action = map[string]any{"kind": "click", "target": selector(), "human": method == "page.human_click"}
-	case "page.click_text", "page.human_click_text":
-		action = map[string]any{"kind": "click", "target": map[string]any{"query": map[string]any{"kind": "text", "text": params["text"]}}, "human": method == "page.human_click_text"}
-	case "page.fill", "page.human_fill":
-		action = map[string]any{"kind": "fill", "target": selector(), "value": params["value"]}
-		if mode, ok := params["inputMode"]; ok {
-			action["input_mode"] = mode
-		}
-	case "page.type_into":
-		action = map[string]any{"kind": "type", "target": selector(), "text": params["text"]}
-		if mode, ok := params["inputMode"]; ok {
-			action["input_mode"] = mode
-		}
-	case "page.select":
-		action = map[string]any{"kind": "select_option", "target": selector(), "value": params["value"]}
-	case "page.hover":
-		action = map[string]any{"kind": "hover", "target": selector()}
-	case "page.press_key":
-		action = map[string]any{"kind": "press_key", "key": params["key"]}
-	default:
-		return fmt.Errorf("unsupported action %s", method)
 	}
 	option := ActionOptions{}
 	if len(options) > 0 {

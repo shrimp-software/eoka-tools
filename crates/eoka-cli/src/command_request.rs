@@ -122,9 +122,12 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
             full_page,
             clip,
         } => Request::Screenshot(ScreenshotArgs {
-            output: output
-                .as_ref()
-                .map(|path| path.to_string_lossy().to_string()),
+            output: output.map(|path| {
+                std::path::absolute(&path)
+                    .unwrap_or(path)
+                    .to_string_lossy()
+                    .to_string()
+            }),
             annotate,
             format: format.as_deref().map(|format| match format {
                 "jpeg" => eoka_protocol::sidecar::ScreenshotFormat::Jpeg,
@@ -134,6 +137,7 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
             quality,
             clip,
             full_page,
+            inline: false,
         }),
         Command::Recording { action } => {
             let id = |id: &String| eoka_protocol::RecordingIdArgs {
@@ -279,6 +283,8 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
                 file: file.as_ref().map(|path| path.to_string_lossy().to_string()),
                 max_size,
                 no_await,
+                function: false,
+                json: false,
             };
             if no_return {
                 Request::Exec(args)
@@ -302,6 +308,8 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
             file: file.as_ref().map(|path| path.to_string_lossy().to_string()),
             max_size: None,
             no_await,
+            function: false,
+            json: false,
         }),
         Command::Frames => Request::Frames,
         Command::FrameEval { frame, code, file } => Request::FrameEval(FrameEvalArgs {

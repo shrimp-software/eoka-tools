@@ -162,14 +162,6 @@ export type ScreenshotClip = { "height": number; "width": number; "x": number; "
 
 export type ScreenshotFormat = (("png" | "jpeg" | "webp") & string);
 
-export type ScreenshotParams = { "clip"?: (ScreenshotParams__ScreenshotClip | null); "format"?: (ScreenshotParams__ScreenshotFormat | null); "fullPage"?: (boolean | null); "pageId": string; "quality"?: (number | null); [key: string]: unknown; };
-export type ScreenshotParams__ScreenshotClip = { "height": number; "width": number; "x": number; "y": number; [key: string]: unknown; };
-export type ScreenshotParams__ScreenshotFormat = (("png" | "jpeg" | "webp") & string);
-
-export type ScreenshotToFileParams = { "clip"?: (ScreenshotToFileParams__ScreenshotClip | null); "format"?: (ScreenshotToFileParams__ScreenshotFormat | null); "fullPage"?: (boolean | null); "pageId": string; "path": string; "quality"?: (number | null); [key: string]: unknown; };
-export type ScreenshotToFileParams__ScreenshotClip = { "height": number; "width": number; "x": number; "y": number; [key: string]: unknown; };
-export type ScreenshotToFileParams__ScreenshotFormat = (("png" | "jpeg" | "webp") & string);
-
 export type ServerError = { "code": ServerError__ErrorCode; "data"?: (ServerError__ErrorData | null); "message": string; [key: string]: unknown; };
 export type ServerError__ActionOutcome = (("not_dispatched" & string) | ("outcome_unknown" & string) | ("verified_complete" & string));
 export type ServerError__ActionReceipt = { "action": string; "already_satisfied": boolean; "cleanup_pending": boolean; "destination_target_id"?: (string | null); "dispatch": ServerError__DispatchState; "download_guid"?: (string | null); "elapsed_ms": number; "finished_at_ms": number; "outcome": ServerError__ActionOutcome; "preparation_may_have_executed": boolean; "started_at_ms": number; "target_id": string; "verification"?: (string | null); [key: string]: unknown; };
@@ -373,11 +365,11 @@ export type MethodErrorsParams = { "clear"?: boolean; "pageId": string; [key: st
 
 export type MethodErrorsResult = unknown;
 
-export type MethodEvalParams = { "arguments"?: Array<unknown>; "code"?: (string | null); "file"?: (string | null); "max_size"?: (number | null); "no_await"?: boolean; "pageId": string; "raw"?: boolean; [key: string]: unknown; };
+export type MethodEvalParams = { "arguments"?: Array<unknown>; "code"?: (string | null); "file"?: (string | null); "function"?: boolean; "json"?: boolean; "max_size"?: (number | null); "no_await"?: boolean; "pageId": string; "raw"?: boolean; [key: string]: unknown; };
 
 export type MethodEvalResult = unknown;
 
-export type MethodExecParams = { "arguments"?: Array<unknown>; "code"?: (string | null); "file"?: (string | null); "max_size"?: (number | null); "no_await"?: boolean; "pageId": string; "raw"?: boolean; [key: string]: unknown; };
+export type MethodExecParams = { "arguments"?: Array<unknown>; "code"?: (string | null); "file"?: (string | null); "function"?: boolean; "json"?: boolean; "max_size"?: (number | null); "no_await"?: boolean; "pageId": string; "raw"?: boolean; [key: string]: unknown; };
 
 export type MethodExecResult = unknown;
 
@@ -608,256 +600,16 @@ export type MethodPageCaptureStateResult = { "state": MethodPageCaptureStateResu
 export type MethodPageCaptureStateResult__BrowserState = { "cookies": Array<MethodPageCaptureStateResult__SessionCookie>; "localStorage"?: Record<string, string>; "sessionStorage"?: Record<string, string>; "url": string; "userAgent": string; [key: string]: unknown; };
 export type MethodPageCaptureStateResult__SessionCookie = { "domain": string; "expires"?: (number | null); "http_only": boolean; "name": string; "path": string; "same_site"?: (string | null); "secure": boolean; "value": string; [key: string]: unknown; };
 
-export type MethodPageClickParams = { "operation_id": string; "options"?: MethodPageClickParams__ActionOptions; "pageId": string; "selector": string; [key: string]: unknown; };
-export type MethodPageClickParams__ActionOptions = { "destination"?: MethodPageClickParams__Destination; "expect"?: (MethodPageClickParams__Expectation | null); "timeout_ms"?: number; "wait_for_target"?: boolean; [key: string]: unknown; };
-export type MethodPageClickParams__Destination = (("current" & string) | ("new_tab" & string) | ("current_or_new" & string));
-export type MethodPageClickParams__Expectation = ({ "kind": ("document_ready" & string); [key: string]: unknown; } | { "conditions": Array<MethodPageClickParams__Expectation>; "kind": ("all" & string); [key: string]: unknown; } | { "enabled": boolean; "kind": ("enabled" & string); "target": MethodPageClickParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("download_started" & string); [key: string]: unknown; } | { "kind": ("focused" & string); "target": MethodPageClickParams__LocatorSpec; [key: string]: unknown; } | { "contains"?: boolean; "kind": ("url" & string); "value": string; [key: string]: unknown; } | { "kind": ("visible" & string); "target": MethodPageClickParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("hidden" & string); "target": MethodPageClickParams__LocatorSpec; [key: string]: unknown; } | { "contains"?: boolean; "kind": ("text" & string); "target": MethodPageClickParams__LocatorSpec; "value": string; [key: string]: unknown; } | { "kind": ("value" & string); "target": MethodPageClickParams__LocatorSpec; "value": string; [key: string]: unknown; } | { "checked": boolean; "kind": ("checked" & string); "target": MethodPageClickParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("selected" & string); "target": MethodPageClickParams__LocatorSpec; "values": Array<string>; [key: string]: unknown; });
-export type MethodPageClickParams__LocatorQuery = ({ "id": number; "kind": ("node" & string); [key: string]: unknown; } | { "kind": ("css" & string); "selector": string; [key: string]: unknown; } | { "exact"?: boolean; "kind": ("text" & string); "text": string; [key: string]: unknown; } | { "kind": ("placeholder" & string); "text": string; [key: string]: unknown; } | { "kind": ("role" & string); "role": string; [key: string]: unknown; } | { "id": number; "kind": ("backend_node" & string); [key: string]: unknown; });
-export type MethodPageClickParams__LocatorSpec = { "frame_id"?: (string | null); "index"?: (number | null); "query": MethodPageClickParams__LocatorQuery; [key: string]: unknown; };
-
-export type MethodPageClickResult = { "action": string; "dispatch_intent": boolean; "error"?: (MethodPageClickResult__ErrorDetail | null); "error_code"?: (string | null); "finished_at_ms"?: (number | null); "id": string; "outcome": MethodPageClickResult__ActionOutcome; "preparation_intent": boolean; "receipt"?: (MethodPageClickResult__ActionReceipt | null); "runtime_id": string; "started_at_ms": number; "state": MethodPageClickResult__OperationState; "target_id": string; [key: string]: unknown; };
-export type MethodPageClickResult__ActionOutcome = (("not_dispatched" & string) | ("outcome_unknown" & string) | ("verified_complete" & string));
-export type MethodPageClickResult__ActionReceipt = { "action": string; "already_satisfied": boolean; "cleanup_pending": boolean; "destination_target_id"?: (string | null); "dispatch": MethodPageClickResult__DispatchState; "download_guid"?: (string | null); "elapsed_ms": number; "finished_at_ms": number; "outcome": MethodPageClickResult__ActionOutcome; "preparation_may_have_executed": boolean; "started_at_ms": number; "target_id": string; "verification"?: (string | null); [key: string]: unknown; };
-export type MethodPageClickResult__ActionStatus = (("not_attempted" | "may_have_executed") & string);
-export type MethodPageClickResult__DispatchState = (("not_sent" & string) | ("may_have_been_sent" & string) | ("acknowledged" & string));
-export type MethodPageClickResult__ErrorContext = { "action_status"?: (MethodPageClickResult__ActionStatus | null); "download_id"?: (string | null); "operation_id"?: (string | null); "page"?: (MethodPageClickResult__PageContext | null); "phase"?: (string | null); [key: string]: unknown; };
-export type MethodPageClickResult__ErrorDetail = { "code": string; "context"?: (MethodPageClickResult__ErrorContext | null); "hint"?: (string | null); "message": string; "retryable"?: (boolean | null); [key: string]: unknown; };
-export type MethodPageClickResult__OperationState = (("running" | "finished" | "interrupted" | "expired") & string);
-export type MethodPageClickResult__PageContext = { "headings": Array<string>; "messages": Array<string>; "ready_state": string; "tab_id": string; "text_excerpt": string; "title": string; "truncated": boolean; "url": string; [key: string]: unknown; };
-
-export type MethodPageClickTextParams = { "operation_id": string; "options"?: MethodPageClickTextParams__ActionOptions; "pageId": string; "text": string; [key: string]: unknown; };
-export type MethodPageClickTextParams__ActionOptions = { "destination"?: MethodPageClickTextParams__Destination; "expect"?: (MethodPageClickTextParams__Expectation | null); "timeout_ms"?: number; "wait_for_target"?: boolean; [key: string]: unknown; };
-export type MethodPageClickTextParams__Destination = (("current" & string) | ("new_tab" & string) | ("current_or_new" & string));
-export type MethodPageClickTextParams__Expectation = ({ "kind": ("document_ready" & string); [key: string]: unknown; } | { "conditions": Array<MethodPageClickTextParams__Expectation>; "kind": ("all" & string); [key: string]: unknown; } | { "enabled": boolean; "kind": ("enabled" & string); "target": MethodPageClickTextParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("download_started" & string); [key: string]: unknown; } | { "kind": ("focused" & string); "target": MethodPageClickTextParams__LocatorSpec; [key: string]: unknown; } | { "contains"?: boolean; "kind": ("url" & string); "value": string; [key: string]: unknown; } | { "kind": ("visible" & string); "target": MethodPageClickTextParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("hidden" & string); "target": MethodPageClickTextParams__LocatorSpec; [key: string]: unknown; } | { "contains"?: boolean; "kind": ("text" & string); "target": MethodPageClickTextParams__LocatorSpec; "value": string; [key: string]: unknown; } | { "kind": ("value" & string); "target": MethodPageClickTextParams__LocatorSpec; "value": string; [key: string]: unknown; } | { "checked": boolean; "kind": ("checked" & string); "target": MethodPageClickTextParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("selected" & string); "target": MethodPageClickTextParams__LocatorSpec; "values": Array<string>; [key: string]: unknown; });
-export type MethodPageClickTextParams__LocatorQuery = ({ "id": number; "kind": ("node" & string); [key: string]: unknown; } | { "kind": ("css" & string); "selector": string; [key: string]: unknown; } | { "exact"?: boolean; "kind": ("text" & string); "text": string; [key: string]: unknown; } | { "kind": ("placeholder" & string); "text": string; [key: string]: unknown; } | { "kind": ("role" & string); "role": string; [key: string]: unknown; } | { "id": number; "kind": ("backend_node" & string); [key: string]: unknown; });
-export type MethodPageClickTextParams__LocatorSpec = { "frame_id"?: (string | null); "index"?: (number | null); "query": MethodPageClickTextParams__LocatorQuery; [key: string]: unknown; };
-
-export type MethodPageClickTextResult = { "action": string; "dispatch_intent": boolean; "error"?: (MethodPageClickTextResult__ErrorDetail | null); "error_code"?: (string | null); "finished_at_ms"?: (number | null); "id": string; "outcome": MethodPageClickTextResult__ActionOutcome; "preparation_intent": boolean; "receipt"?: (MethodPageClickTextResult__ActionReceipt | null); "runtime_id": string; "started_at_ms": number; "state": MethodPageClickTextResult__OperationState; "target_id": string; [key: string]: unknown; };
-export type MethodPageClickTextResult__ActionOutcome = (("not_dispatched" & string) | ("outcome_unknown" & string) | ("verified_complete" & string));
-export type MethodPageClickTextResult__ActionReceipt = { "action": string; "already_satisfied": boolean; "cleanup_pending": boolean; "destination_target_id"?: (string | null); "dispatch": MethodPageClickTextResult__DispatchState; "download_guid"?: (string | null); "elapsed_ms": number; "finished_at_ms": number; "outcome": MethodPageClickTextResult__ActionOutcome; "preparation_may_have_executed": boolean; "started_at_ms": number; "target_id": string; "verification"?: (string | null); [key: string]: unknown; };
-export type MethodPageClickTextResult__ActionStatus = (("not_attempted" | "may_have_executed") & string);
-export type MethodPageClickTextResult__DispatchState = (("not_sent" & string) | ("may_have_been_sent" & string) | ("acknowledged" & string));
-export type MethodPageClickTextResult__ErrorContext = { "action_status"?: (MethodPageClickTextResult__ActionStatus | null); "download_id"?: (string | null); "operation_id"?: (string | null); "page"?: (MethodPageClickTextResult__PageContext | null); "phase"?: (string | null); [key: string]: unknown; };
-export type MethodPageClickTextResult__ErrorDetail = { "code": string; "context"?: (MethodPageClickTextResult__ErrorContext | null); "hint"?: (string | null); "message": string; "retryable"?: (boolean | null); [key: string]: unknown; };
-export type MethodPageClickTextResult__OperationState = (("running" | "finished" | "interrupted" | "expired") & string);
-export type MethodPageClickTextResult__PageContext = { "headings": Array<string>; "messages": Array<string>; "ready_state": string; "tab_id": string; "text_excerpt": string; "title": string; "truncated": boolean; "url": string; [key: string]: unknown; };
-
-export type MethodPageCloseParams = { "pageId": string; [key: string]: unknown; };
-
-export type MethodPageCloseResult = Record<string, never>;
-
-export type MethodPageEvaluateParams = { "arguments"?: Array<unknown>; "function": string; "pageId": string; [key: string]: unknown; };
-
-export type MethodPageEvaluateResult = { "result": unknown; [key: string]: unknown; };
-
-export type MethodPageEvaluateRawParams = { "js": string; "pageId": string; [key: string]: unknown; };
-
-export type MethodPageEvaluateRawResult = { "result": unknown; [key: string]: unknown; };
-
-export type MethodPageExecuteParams = { "arguments"?: Array<unknown>; "function": string; "pageId": string; [key: string]: unknown; };
-
-export type MethodPageExecuteResult = Record<string, never>;
-
-export type MethodPageExecuteRawParams = { "js": string; "pageId": string; [key: string]: unknown; };
-
-export type MethodPageExecuteRawResult = Record<string, never>;
-
-export type MethodPageFetchParams = { "body"?: (string | null); "headers"?: Record<string, string>; "method"?: string; "pageId": string; "redirect"?: string; "url": string; [key: string]: unknown; };
-
-export type MethodPageFetchResult = { "body": string; "headers": Record<string, string>; "ok": boolean; "status": number; "url": string; [key: string]: unknown; };
-
-export type MethodPageFetchBoundedParams = { "body"?: (string | null); "headers"?: Record<string, string>; "maxBytes"?: number; "method"?: string; "pageId": string; "redirect"?: string; "url": string; [key: string]: unknown; };
-
-export type MethodPageFetchBoundedResult = { "body": string; "bodyOmitted"?: (string | null); "bytesRead": number; "headers": Record<string, string>; "redirected": boolean; "status": number; "statusText": string; "truncated": boolean; "type": string; "url": string; [key: string]: unknown; };
-
-export type MethodPageFillParams = { "inputMode"?: MethodPageFillParams__InputMode; "operation_id": string; "options"?: MethodPageFillParams__ActionOptions; "pageId": string; "selector": string; "value": string; [key: string]: unknown; };
-export type MethodPageFillParams__ActionOptions = { "destination"?: MethodPageFillParams__Destination; "expect"?: (MethodPageFillParams__Expectation | null); "timeout_ms"?: number; "wait_for_target"?: boolean; [key: string]: unknown; };
-export type MethodPageFillParams__Destination = (("current" & string) | ("new_tab" & string) | ("current_or_new" & string));
-export type MethodPageFillParams__Expectation = ({ "kind": ("document_ready" & string); [key: string]: unknown; } | { "conditions": Array<MethodPageFillParams__Expectation>; "kind": ("all" & string); [key: string]: unknown; } | { "enabled": boolean; "kind": ("enabled" & string); "target": MethodPageFillParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("download_started" & string); [key: string]: unknown; } | { "kind": ("focused" & string); "target": MethodPageFillParams__LocatorSpec; [key: string]: unknown; } | { "contains"?: boolean; "kind": ("url" & string); "value": string; [key: string]: unknown; } | { "kind": ("visible" & string); "target": MethodPageFillParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("hidden" & string); "target": MethodPageFillParams__LocatorSpec; [key: string]: unknown; } | { "contains"?: boolean; "kind": ("text" & string); "target": MethodPageFillParams__LocatorSpec; "value": string; [key: string]: unknown; } | { "kind": ("value" & string); "target": MethodPageFillParams__LocatorSpec; "value": string; [key: string]: unknown; } | { "checked": boolean; "kind": ("checked" & string); "target": MethodPageFillParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("selected" & string); "target": MethodPageFillParams__LocatorSpec; "values": Array<string>; [key: string]: unknown; });
-export type MethodPageFillParams__InputMode = (("sequential" & string) | ("bulk" & string));
-export type MethodPageFillParams__LocatorQuery = ({ "id": number; "kind": ("node" & string); [key: string]: unknown; } | { "kind": ("css" & string); "selector": string; [key: string]: unknown; } | { "exact"?: boolean; "kind": ("text" & string); "text": string; [key: string]: unknown; } | { "kind": ("placeholder" & string); "text": string; [key: string]: unknown; } | { "kind": ("role" & string); "role": string; [key: string]: unknown; } | { "id": number; "kind": ("backend_node" & string); [key: string]: unknown; });
-export type MethodPageFillParams__LocatorSpec = { "frame_id"?: (string | null); "index"?: (number | null); "query": MethodPageFillParams__LocatorQuery; [key: string]: unknown; };
-
-export type MethodPageFillResult = { "action": string; "dispatch_intent": boolean; "error"?: (MethodPageFillResult__ErrorDetail | null); "error_code"?: (string | null); "finished_at_ms"?: (number | null); "id": string; "outcome": MethodPageFillResult__ActionOutcome; "preparation_intent": boolean; "receipt"?: (MethodPageFillResult__ActionReceipt | null); "runtime_id": string; "started_at_ms": number; "state": MethodPageFillResult__OperationState; "target_id": string; [key: string]: unknown; };
-export type MethodPageFillResult__ActionOutcome = (("not_dispatched" & string) | ("outcome_unknown" & string) | ("verified_complete" & string));
-export type MethodPageFillResult__ActionReceipt = { "action": string; "already_satisfied": boolean; "cleanup_pending": boolean; "destination_target_id"?: (string | null); "dispatch": MethodPageFillResult__DispatchState; "download_guid"?: (string | null); "elapsed_ms": number; "finished_at_ms": number; "outcome": MethodPageFillResult__ActionOutcome; "preparation_may_have_executed": boolean; "started_at_ms": number; "target_id": string; "verification"?: (string | null); [key: string]: unknown; };
-export type MethodPageFillResult__ActionStatus = (("not_attempted" | "may_have_executed") & string);
-export type MethodPageFillResult__DispatchState = (("not_sent" & string) | ("may_have_been_sent" & string) | ("acknowledged" & string));
-export type MethodPageFillResult__ErrorContext = { "action_status"?: (MethodPageFillResult__ActionStatus | null); "download_id"?: (string | null); "operation_id"?: (string | null); "page"?: (MethodPageFillResult__PageContext | null); "phase"?: (string | null); [key: string]: unknown; };
-export type MethodPageFillResult__ErrorDetail = { "code": string; "context"?: (MethodPageFillResult__ErrorContext | null); "hint"?: (string | null); "message": string; "retryable"?: (boolean | null); [key: string]: unknown; };
-export type MethodPageFillResult__OperationState = (("running" | "finished" | "interrupted" | "expired") & string);
-export type MethodPageFillResult__PageContext = { "headings": Array<string>; "messages": Array<string>; "ready_state": string; "tab_id": string; "text_excerpt": string; "title": string; "truncated": boolean; "url": string; [key: string]: unknown; };
-
-export type MethodPageGotoParams = { "operation_id": string; "options"?: MethodPageGotoParams__ActionOptions; "pageId": string; "url": string; [key: string]: unknown; };
-export type MethodPageGotoParams__ActionOptions = { "destination"?: MethodPageGotoParams__Destination; "expect"?: (MethodPageGotoParams__Expectation | null); "timeout_ms"?: number; "wait_for_target"?: boolean; [key: string]: unknown; };
-export type MethodPageGotoParams__Destination = (("current" & string) | ("new_tab" & string) | ("current_or_new" & string));
-export type MethodPageGotoParams__Expectation = ({ "kind": ("document_ready" & string); [key: string]: unknown; } | { "conditions": Array<MethodPageGotoParams__Expectation>; "kind": ("all" & string); [key: string]: unknown; } | { "enabled": boolean; "kind": ("enabled" & string); "target": MethodPageGotoParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("download_started" & string); [key: string]: unknown; } | { "kind": ("focused" & string); "target": MethodPageGotoParams__LocatorSpec; [key: string]: unknown; } | { "contains"?: boolean; "kind": ("url" & string); "value": string; [key: string]: unknown; } | { "kind": ("visible" & string); "target": MethodPageGotoParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("hidden" & string); "target": MethodPageGotoParams__LocatorSpec; [key: string]: unknown; } | { "contains"?: boolean; "kind": ("text" & string); "target": MethodPageGotoParams__LocatorSpec; "value": string; [key: string]: unknown; } | { "kind": ("value" & string); "target": MethodPageGotoParams__LocatorSpec; "value": string; [key: string]: unknown; } | { "checked": boolean; "kind": ("checked" & string); "target": MethodPageGotoParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("selected" & string); "target": MethodPageGotoParams__LocatorSpec; "values": Array<string>; [key: string]: unknown; });
-export type MethodPageGotoParams__LocatorQuery = ({ "id": number; "kind": ("node" & string); [key: string]: unknown; } | { "kind": ("css" & string); "selector": string; [key: string]: unknown; } | { "exact"?: boolean; "kind": ("text" & string); "text": string; [key: string]: unknown; } | { "kind": ("placeholder" & string); "text": string; [key: string]: unknown; } | { "kind": ("role" & string); "role": string; [key: string]: unknown; } | { "id": number; "kind": ("backend_node" & string); [key: string]: unknown; });
-export type MethodPageGotoParams__LocatorSpec = { "frame_id"?: (string | null); "index"?: (number | null); "query": MethodPageGotoParams__LocatorQuery; [key: string]: unknown; };
-
-export type MethodPageGotoResult = { "action": string; "dispatch_intent": boolean; "error"?: (MethodPageGotoResult__ErrorDetail | null); "error_code"?: (string | null); "finished_at_ms"?: (number | null); "id": string; "outcome": MethodPageGotoResult__ActionOutcome; "preparation_intent": boolean; "receipt"?: (MethodPageGotoResult__ActionReceipt | null); "runtime_id": string; "started_at_ms": number; "state": MethodPageGotoResult__OperationState; "target_id": string; [key: string]: unknown; };
-export type MethodPageGotoResult__ActionOutcome = (("not_dispatched" & string) | ("outcome_unknown" & string) | ("verified_complete" & string));
-export type MethodPageGotoResult__ActionReceipt = { "action": string; "already_satisfied": boolean; "cleanup_pending": boolean; "destination_target_id"?: (string | null); "dispatch": MethodPageGotoResult__DispatchState; "download_guid"?: (string | null); "elapsed_ms": number; "finished_at_ms": number; "outcome": MethodPageGotoResult__ActionOutcome; "preparation_may_have_executed": boolean; "started_at_ms": number; "target_id": string; "verification"?: (string | null); [key: string]: unknown; };
-export type MethodPageGotoResult__ActionStatus = (("not_attempted" | "may_have_executed") & string);
-export type MethodPageGotoResult__DispatchState = (("not_sent" & string) | ("may_have_been_sent" & string) | ("acknowledged" & string));
-export type MethodPageGotoResult__ErrorContext = { "action_status"?: (MethodPageGotoResult__ActionStatus | null); "download_id"?: (string | null); "operation_id"?: (string | null); "page"?: (MethodPageGotoResult__PageContext | null); "phase"?: (string | null); [key: string]: unknown; };
-export type MethodPageGotoResult__ErrorDetail = { "code": string; "context"?: (MethodPageGotoResult__ErrorContext | null); "hint"?: (string | null); "message": string; "retryable"?: (boolean | null); [key: string]: unknown; };
-export type MethodPageGotoResult__OperationState = (("running" | "finished" | "interrupted" | "expired") & string);
-export type MethodPageGotoResult__PageContext = { "headings": Array<string>; "messages": Array<string>; "ready_state": string; "tab_id": string; "text_excerpt": string; "title": string; "truncated": boolean; "url": string; [key: string]: unknown; };
-
-export type MethodPageHoverParams = { "operation_id": string; "options"?: MethodPageHoverParams__ActionOptions; "pageId": string; "selector": string; [key: string]: unknown; };
-export type MethodPageHoverParams__ActionOptions = { "destination"?: MethodPageHoverParams__Destination; "expect"?: (MethodPageHoverParams__Expectation | null); "timeout_ms"?: number; "wait_for_target"?: boolean; [key: string]: unknown; };
-export type MethodPageHoverParams__Destination = (("current" & string) | ("new_tab" & string) | ("current_or_new" & string));
-export type MethodPageHoverParams__Expectation = ({ "kind": ("document_ready" & string); [key: string]: unknown; } | { "conditions": Array<MethodPageHoverParams__Expectation>; "kind": ("all" & string); [key: string]: unknown; } | { "enabled": boolean; "kind": ("enabled" & string); "target": MethodPageHoverParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("download_started" & string); [key: string]: unknown; } | { "kind": ("focused" & string); "target": MethodPageHoverParams__LocatorSpec; [key: string]: unknown; } | { "contains"?: boolean; "kind": ("url" & string); "value": string; [key: string]: unknown; } | { "kind": ("visible" & string); "target": MethodPageHoverParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("hidden" & string); "target": MethodPageHoverParams__LocatorSpec; [key: string]: unknown; } | { "contains"?: boolean; "kind": ("text" & string); "target": MethodPageHoverParams__LocatorSpec; "value": string; [key: string]: unknown; } | { "kind": ("value" & string); "target": MethodPageHoverParams__LocatorSpec; "value": string; [key: string]: unknown; } | { "checked": boolean; "kind": ("checked" & string); "target": MethodPageHoverParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("selected" & string); "target": MethodPageHoverParams__LocatorSpec; "values": Array<string>; [key: string]: unknown; });
-export type MethodPageHoverParams__LocatorQuery = ({ "id": number; "kind": ("node" & string); [key: string]: unknown; } | { "kind": ("css" & string); "selector": string; [key: string]: unknown; } | { "exact"?: boolean; "kind": ("text" & string); "text": string; [key: string]: unknown; } | { "kind": ("placeholder" & string); "text": string; [key: string]: unknown; } | { "kind": ("role" & string); "role": string; [key: string]: unknown; } | { "id": number; "kind": ("backend_node" & string); [key: string]: unknown; });
-export type MethodPageHoverParams__LocatorSpec = { "frame_id"?: (string | null); "index"?: (number | null); "query": MethodPageHoverParams__LocatorQuery; [key: string]: unknown; };
-
-export type MethodPageHoverResult = { "action": string; "dispatch_intent": boolean; "error"?: (MethodPageHoverResult__ErrorDetail | null); "error_code"?: (string | null); "finished_at_ms"?: (number | null); "id": string; "outcome": MethodPageHoverResult__ActionOutcome; "preparation_intent": boolean; "receipt"?: (MethodPageHoverResult__ActionReceipt | null); "runtime_id": string; "started_at_ms": number; "state": MethodPageHoverResult__OperationState; "target_id": string; [key: string]: unknown; };
-export type MethodPageHoverResult__ActionOutcome = (("not_dispatched" & string) | ("outcome_unknown" & string) | ("verified_complete" & string));
-export type MethodPageHoverResult__ActionReceipt = { "action": string; "already_satisfied": boolean; "cleanup_pending": boolean; "destination_target_id"?: (string | null); "dispatch": MethodPageHoverResult__DispatchState; "download_guid"?: (string | null); "elapsed_ms": number; "finished_at_ms": number; "outcome": MethodPageHoverResult__ActionOutcome; "preparation_may_have_executed": boolean; "started_at_ms": number; "target_id": string; "verification"?: (string | null); [key: string]: unknown; };
-export type MethodPageHoverResult__ActionStatus = (("not_attempted" | "may_have_executed") & string);
-export type MethodPageHoverResult__DispatchState = (("not_sent" & string) | ("may_have_been_sent" & string) | ("acknowledged" & string));
-export type MethodPageHoverResult__ErrorContext = { "action_status"?: (MethodPageHoverResult__ActionStatus | null); "download_id"?: (string | null); "operation_id"?: (string | null); "page"?: (MethodPageHoverResult__PageContext | null); "phase"?: (string | null); [key: string]: unknown; };
-export type MethodPageHoverResult__ErrorDetail = { "code": string; "context"?: (MethodPageHoverResult__ErrorContext | null); "hint"?: (string | null); "message": string; "retryable"?: (boolean | null); [key: string]: unknown; };
-export type MethodPageHoverResult__OperationState = (("running" | "finished" | "interrupted" | "expired") & string);
-export type MethodPageHoverResult__PageContext = { "headings": Array<string>; "messages": Array<string>; "ready_state": string; "tab_id": string; "text_excerpt": string; "title": string; "truncated": boolean; "url": string; [key: string]: unknown; };
-
-export type MethodPageHumanClickParams = { "operation_id": string; "options"?: MethodPageHumanClickParams__ActionOptions; "pageId": string; "selector": string; [key: string]: unknown; };
-export type MethodPageHumanClickParams__ActionOptions = { "destination"?: MethodPageHumanClickParams__Destination; "expect"?: (MethodPageHumanClickParams__Expectation | null); "timeout_ms"?: number; "wait_for_target"?: boolean; [key: string]: unknown; };
-export type MethodPageHumanClickParams__Destination = (("current" & string) | ("new_tab" & string) | ("current_or_new" & string));
-export type MethodPageHumanClickParams__Expectation = ({ "kind": ("document_ready" & string); [key: string]: unknown; } | { "conditions": Array<MethodPageHumanClickParams__Expectation>; "kind": ("all" & string); [key: string]: unknown; } | { "enabled": boolean; "kind": ("enabled" & string); "target": MethodPageHumanClickParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("download_started" & string); [key: string]: unknown; } | { "kind": ("focused" & string); "target": MethodPageHumanClickParams__LocatorSpec; [key: string]: unknown; } | { "contains"?: boolean; "kind": ("url" & string); "value": string; [key: string]: unknown; } | { "kind": ("visible" & string); "target": MethodPageHumanClickParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("hidden" & string); "target": MethodPageHumanClickParams__LocatorSpec; [key: string]: unknown; } | { "contains"?: boolean; "kind": ("text" & string); "target": MethodPageHumanClickParams__LocatorSpec; "value": string; [key: string]: unknown; } | { "kind": ("value" & string); "target": MethodPageHumanClickParams__LocatorSpec; "value": string; [key: string]: unknown; } | { "checked": boolean; "kind": ("checked" & string); "target": MethodPageHumanClickParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("selected" & string); "target": MethodPageHumanClickParams__LocatorSpec; "values": Array<string>; [key: string]: unknown; });
-export type MethodPageHumanClickParams__LocatorQuery = ({ "id": number; "kind": ("node" & string); [key: string]: unknown; } | { "kind": ("css" & string); "selector": string; [key: string]: unknown; } | { "exact"?: boolean; "kind": ("text" & string); "text": string; [key: string]: unknown; } | { "kind": ("placeholder" & string); "text": string; [key: string]: unknown; } | { "kind": ("role" & string); "role": string; [key: string]: unknown; } | { "id": number; "kind": ("backend_node" & string); [key: string]: unknown; });
-export type MethodPageHumanClickParams__LocatorSpec = { "frame_id"?: (string | null); "index"?: (number | null); "query": MethodPageHumanClickParams__LocatorQuery; [key: string]: unknown; };
-
-export type MethodPageHumanClickResult = { "action": string; "dispatch_intent": boolean; "error"?: (MethodPageHumanClickResult__ErrorDetail | null); "error_code"?: (string | null); "finished_at_ms"?: (number | null); "id": string; "outcome": MethodPageHumanClickResult__ActionOutcome; "preparation_intent": boolean; "receipt"?: (MethodPageHumanClickResult__ActionReceipt | null); "runtime_id": string; "started_at_ms": number; "state": MethodPageHumanClickResult__OperationState; "target_id": string; [key: string]: unknown; };
-export type MethodPageHumanClickResult__ActionOutcome = (("not_dispatched" & string) | ("outcome_unknown" & string) | ("verified_complete" & string));
-export type MethodPageHumanClickResult__ActionReceipt = { "action": string; "already_satisfied": boolean; "cleanup_pending": boolean; "destination_target_id"?: (string | null); "dispatch": MethodPageHumanClickResult__DispatchState; "download_guid"?: (string | null); "elapsed_ms": number; "finished_at_ms": number; "outcome": MethodPageHumanClickResult__ActionOutcome; "preparation_may_have_executed": boolean; "started_at_ms": number; "target_id": string; "verification"?: (string | null); [key: string]: unknown; };
-export type MethodPageHumanClickResult__ActionStatus = (("not_attempted" | "may_have_executed") & string);
-export type MethodPageHumanClickResult__DispatchState = (("not_sent" & string) | ("may_have_been_sent" & string) | ("acknowledged" & string));
-export type MethodPageHumanClickResult__ErrorContext = { "action_status"?: (MethodPageHumanClickResult__ActionStatus | null); "download_id"?: (string | null); "operation_id"?: (string | null); "page"?: (MethodPageHumanClickResult__PageContext | null); "phase"?: (string | null); [key: string]: unknown; };
-export type MethodPageHumanClickResult__ErrorDetail = { "code": string; "context"?: (MethodPageHumanClickResult__ErrorContext | null); "hint"?: (string | null); "message": string; "retryable"?: (boolean | null); [key: string]: unknown; };
-export type MethodPageHumanClickResult__OperationState = (("running" | "finished" | "interrupted" | "expired") & string);
-export type MethodPageHumanClickResult__PageContext = { "headings": Array<string>; "messages": Array<string>; "ready_state": string; "tab_id": string; "text_excerpt": string; "title": string; "truncated": boolean; "url": string; [key: string]: unknown; };
-
-export type MethodPageHumanClickTextParams = { "operation_id": string; "options"?: MethodPageHumanClickTextParams__ActionOptions; "pageId": string; "text": string; [key: string]: unknown; };
-export type MethodPageHumanClickTextParams__ActionOptions = { "destination"?: MethodPageHumanClickTextParams__Destination; "expect"?: (MethodPageHumanClickTextParams__Expectation | null); "timeout_ms"?: number; "wait_for_target"?: boolean; [key: string]: unknown; };
-export type MethodPageHumanClickTextParams__Destination = (("current" & string) | ("new_tab" & string) | ("current_or_new" & string));
-export type MethodPageHumanClickTextParams__Expectation = ({ "kind": ("document_ready" & string); [key: string]: unknown; } | { "conditions": Array<MethodPageHumanClickTextParams__Expectation>; "kind": ("all" & string); [key: string]: unknown; } | { "enabled": boolean; "kind": ("enabled" & string); "target": MethodPageHumanClickTextParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("download_started" & string); [key: string]: unknown; } | { "kind": ("focused" & string); "target": MethodPageHumanClickTextParams__LocatorSpec; [key: string]: unknown; } | { "contains"?: boolean; "kind": ("url" & string); "value": string; [key: string]: unknown; } | { "kind": ("visible" & string); "target": MethodPageHumanClickTextParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("hidden" & string); "target": MethodPageHumanClickTextParams__LocatorSpec; [key: string]: unknown; } | { "contains"?: boolean; "kind": ("text" & string); "target": MethodPageHumanClickTextParams__LocatorSpec; "value": string; [key: string]: unknown; } | { "kind": ("value" & string); "target": MethodPageHumanClickTextParams__LocatorSpec; "value": string; [key: string]: unknown; } | { "checked": boolean; "kind": ("checked" & string); "target": MethodPageHumanClickTextParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("selected" & string); "target": MethodPageHumanClickTextParams__LocatorSpec; "values": Array<string>; [key: string]: unknown; });
-export type MethodPageHumanClickTextParams__LocatorQuery = ({ "id": number; "kind": ("node" & string); [key: string]: unknown; } | { "kind": ("css" & string); "selector": string; [key: string]: unknown; } | { "exact"?: boolean; "kind": ("text" & string); "text": string; [key: string]: unknown; } | { "kind": ("placeholder" & string); "text": string; [key: string]: unknown; } | { "kind": ("role" & string); "role": string; [key: string]: unknown; } | { "id": number; "kind": ("backend_node" & string); [key: string]: unknown; });
-export type MethodPageHumanClickTextParams__LocatorSpec = { "frame_id"?: (string | null); "index"?: (number | null); "query": MethodPageHumanClickTextParams__LocatorQuery; [key: string]: unknown; };
-
-export type MethodPageHumanClickTextResult = { "action": string; "dispatch_intent": boolean; "error"?: (MethodPageHumanClickTextResult__ErrorDetail | null); "error_code"?: (string | null); "finished_at_ms"?: (number | null); "id": string; "outcome": MethodPageHumanClickTextResult__ActionOutcome; "preparation_intent": boolean; "receipt"?: (MethodPageHumanClickTextResult__ActionReceipt | null); "runtime_id": string; "started_at_ms": number; "state": MethodPageHumanClickTextResult__OperationState; "target_id": string; [key: string]: unknown; };
-export type MethodPageHumanClickTextResult__ActionOutcome = (("not_dispatched" & string) | ("outcome_unknown" & string) | ("verified_complete" & string));
-export type MethodPageHumanClickTextResult__ActionReceipt = { "action": string; "already_satisfied": boolean; "cleanup_pending": boolean; "destination_target_id"?: (string | null); "dispatch": MethodPageHumanClickTextResult__DispatchState; "download_guid"?: (string | null); "elapsed_ms": number; "finished_at_ms": number; "outcome": MethodPageHumanClickTextResult__ActionOutcome; "preparation_may_have_executed": boolean; "started_at_ms": number; "target_id": string; "verification"?: (string | null); [key: string]: unknown; };
-export type MethodPageHumanClickTextResult__ActionStatus = (("not_attempted" | "may_have_executed") & string);
-export type MethodPageHumanClickTextResult__DispatchState = (("not_sent" & string) | ("may_have_been_sent" & string) | ("acknowledged" & string));
-export type MethodPageHumanClickTextResult__ErrorContext = { "action_status"?: (MethodPageHumanClickTextResult__ActionStatus | null); "download_id"?: (string | null); "operation_id"?: (string | null); "page"?: (MethodPageHumanClickTextResult__PageContext | null); "phase"?: (string | null); [key: string]: unknown; };
-export type MethodPageHumanClickTextResult__ErrorDetail = { "code": string; "context"?: (MethodPageHumanClickTextResult__ErrorContext | null); "hint"?: (string | null); "message": string; "retryable"?: (boolean | null); [key: string]: unknown; };
-export type MethodPageHumanClickTextResult__OperationState = (("running" | "finished" | "interrupted" | "expired") & string);
-export type MethodPageHumanClickTextResult__PageContext = { "headings": Array<string>; "messages": Array<string>; "ready_state": string; "tab_id": string; "text_excerpt": string; "title": string; "truncated": boolean; "url": string; [key: string]: unknown; };
-
-export type MethodPageHumanFillParams = { "inputMode"?: MethodPageHumanFillParams__InputMode; "operation_id": string; "options"?: MethodPageHumanFillParams__ActionOptions; "pageId": string; "selector": string; "value": string; [key: string]: unknown; };
-export type MethodPageHumanFillParams__ActionOptions = { "destination"?: MethodPageHumanFillParams__Destination; "expect"?: (MethodPageHumanFillParams__Expectation | null); "timeout_ms"?: number; "wait_for_target"?: boolean; [key: string]: unknown; };
-export type MethodPageHumanFillParams__Destination = (("current" & string) | ("new_tab" & string) | ("current_or_new" & string));
-export type MethodPageHumanFillParams__Expectation = ({ "kind": ("document_ready" & string); [key: string]: unknown; } | { "conditions": Array<MethodPageHumanFillParams__Expectation>; "kind": ("all" & string); [key: string]: unknown; } | { "enabled": boolean; "kind": ("enabled" & string); "target": MethodPageHumanFillParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("download_started" & string); [key: string]: unknown; } | { "kind": ("focused" & string); "target": MethodPageHumanFillParams__LocatorSpec; [key: string]: unknown; } | { "contains"?: boolean; "kind": ("url" & string); "value": string; [key: string]: unknown; } | { "kind": ("visible" & string); "target": MethodPageHumanFillParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("hidden" & string); "target": MethodPageHumanFillParams__LocatorSpec; [key: string]: unknown; } | { "contains"?: boolean; "kind": ("text" & string); "target": MethodPageHumanFillParams__LocatorSpec; "value": string; [key: string]: unknown; } | { "kind": ("value" & string); "target": MethodPageHumanFillParams__LocatorSpec; "value": string; [key: string]: unknown; } | { "checked": boolean; "kind": ("checked" & string); "target": MethodPageHumanFillParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("selected" & string); "target": MethodPageHumanFillParams__LocatorSpec; "values": Array<string>; [key: string]: unknown; });
-export type MethodPageHumanFillParams__InputMode = (("sequential" & string) | ("bulk" & string));
-export type MethodPageHumanFillParams__LocatorQuery = ({ "id": number; "kind": ("node" & string); [key: string]: unknown; } | { "kind": ("css" & string); "selector": string; [key: string]: unknown; } | { "exact"?: boolean; "kind": ("text" & string); "text": string; [key: string]: unknown; } | { "kind": ("placeholder" & string); "text": string; [key: string]: unknown; } | { "kind": ("role" & string); "role": string; [key: string]: unknown; } | { "id": number; "kind": ("backend_node" & string); [key: string]: unknown; });
-export type MethodPageHumanFillParams__LocatorSpec = { "frame_id"?: (string | null); "index"?: (number | null); "query": MethodPageHumanFillParams__LocatorQuery; [key: string]: unknown; };
-
-export type MethodPageHumanFillResult = { "action": string; "dispatch_intent": boolean; "error"?: (MethodPageHumanFillResult__ErrorDetail | null); "error_code"?: (string | null); "finished_at_ms"?: (number | null); "id": string; "outcome": MethodPageHumanFillResult__ActionOutcome; "preparation_intent": boolean; "receipt"?: (MethodPageHumanFillResult__ActionReceipt | null); "runtime_id": string; "started_at_ms": number; "state": MethodPageHumanFillResult__OperationState; "target_id": string; [key: string]: unknown; };
-export type MethodPageHumanFillResult__ActionOutcome = (("not_dispatched" & string) | ("outcome_unknown" & string) | ("verified_complete" & string));
-export type MethodPageHumanFillResult__ActionReceipt = { "action": string; "already_satisfied": boolean; "cleanup_pending": boolean; "destination_target_id"?: (string | null); "dispatch": MethodPageHumanFillResult__DispatchState; "download_guid"?: (string | null); "elapsed_ms": number; "finished_at_ms": number; "outcome": MethodPageHumanFillResult__ActionOutcome; "preparation_may_have_executed": boolean; "started_at_ms": number; "target_id": string; "verification"?: (string | null); [key: string]: unknown; };
-export type MethodPageHumanFillResult__ActionStatus = (("not_attempted" | "may_have_executed") & string);
-export type MethodPageHumanFillResult__DispatchState = (("not_sent" & string) | ("may_have_been_sent" & string) | ("acknowledged" & string));
-export type MethodPageHumanFillResult__ErrorContext = { "action_status"?: (MethodPageHumanFillResult__ActionStatus | null); "download_id"?: (string | null); "operation_id"?: (string | null); "page"?: (MethodPageHumanFillResult__PageContext | null); "phase"?: (string | null); [key: string]: unknown; };
-export type MethodPageHumanFillResult__ErrorDetail = { "code": string; "context"?: (MethodPageHumanFillResult__ErrorContext | null); "hint"?: (string | null); "message": string; "retryable"?: (boolean | null); [key: string]: unknown; };
-export type MethodPageHumanFillResult__OperationState = (("running" | "finished" | "interrupted" | "expired") & string);
-export type MethodPageHumanFillResult__PageContext = { "headings": Array<string>; "messages": Array<string>; "ready_state": string; "tab_id": string; "text_excerpt": string; "title": string; "truncated": boolean; "url": string; [key: string]: unknown; };
-
-export type MethodPagePressKeyParams = { "key": string; "operation_id": string; "options"?: MethodPagePressKeyParams__ActionOptions; "pageId": string; [key: string]: unknown; };
-export type MethodPagePressKeyParams__ActionOptions = { "destination"?: MethodPagePressKeyParams__Destination; "expect"?: (MethodPagePressKeyParams__Expectation | null); "timeout_ms"?: number; "wait_for_target"?: boolean; [key: string]: unknown; };
-export type MethodPagePressKeyParams__Destination = (("current" & string) | ("new_tab" & string) | ("current_or_new" & string));
-export type MethodPagePressKeyParams__Expectation = ({ "kind": ("document_ready" & string); [key: string]: unknown; } | { "conditions": Array<MethodPagePressKeyParams__Expectation>; "kind": ("all" & string); [key: string]: unknown; } | { "enabled": boolean; "kind": ("enabled" & string); "target": MethodPagePressKeyParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("download_started" & string); [key: string]: unknown; } | { "kind": ("focused" & string); "target": MethodPagePressKeyParams__LocatorSpec; [key: string]: unknown; } | { "contains"?: boolean; "kind": ("url" & string); "value": string; [key: string]: unknown; } | { "kind": ("visible" & string); "target": MethodPagePressKeyParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("hidden" & string); "target": MethodPagePressKeyParams__LocatorSpec; [key: string]: unknown; } | { "contains"?: boolean; "kind": ("text" & string); "target": MethodPagePressKeyParams__LocatorSpec; "value": string; [key: string]: unknown; } | { "kind": ("value" & string); "target": MethodPagePressKeyParams__LocatorSpec; "value": string; [key: string]: unknown; } | { "checked": boolean; "kind": ("checked" & string); "target": MethodPagePressKeyParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("selected" & string); "target": MethodPagePressKeyParams__LocatorSpec; "values": Array<string>; [key: string]: unknown; });
-export type MethodPagePressKeyParams__LocatorQuery = ({ "id": number; "kind": ("node" & string); [key: string]: unknown; } | { "kind": ("css" & string); "selector": string; [key: string]: unknown; } | { "exact"?: boolean; "kind": ("text" & string); "text": string; [key: string]: unknown; } | { "kind": ("placeholder" & string); "text": string; [key: string]: unknown; } | { "kind": ("role" & string); "role": string; [key: string]: unknown; } | { "id": number; "kind": ("backend_node" & string); [key: string]: unknown; });
-export type MethodPagePressKeyParams__LocatorSpec = { "frame_id"?: (string | null); "index"?: (number | null); "query": MethodPagePressKeyParams__LocatorQuery; [key: string]: unknown; };
-
-export type MethodPagePressKeyResult = { "action": string; "dispatch_intent": boolean; "error"?: (MethodPagePressKeyResult__ErrorDetail | null); "error_code"?: (string | null); "finished_at_ms"?: (number | null); "id": string; "outcome": MethodPagePressKeyResult__ActionOutcome; "preparation_intent": boolean; "receipt"?: (MethodPagePressKeyResult__ActionReceipt | null); "runtime_id": string; "started_at_ms": number; "state": MethodPagePressKeyResult__OperationState; "target_id": string; [key: string]: unknown; };
-export type MethodPagePressKeyResult__ActionOutcome = (("not_dispatched" & string) | ("outcome_unknown" & string) | ("verified_complete" & string));
-export type MethodPagePressKeyResult__ActionReceipt = { "action": string; "already_satisfied": boolean; "cleanup_pending": boolean; "destination_target_id"?: (string | null); "dispatch": MethodPagePressKeyResult__DispatchState; "download_guid"?: (string | null); "elapsed_ms": number; "finished_at_ms": number; "outcome": MethodPagePressKeyResult__ActionOutcome; "preparation_may_have_executed": boolean; "started_at_ms": number; "target_id": string; "verification"?: (string | null); [key: string]: unknown; };
-export type MethodPagePressKeyResult__ActionStatus = (("not_attempted" | "may_have_executed") & string);
-export type MethodPagePressKeyResult__DispatchState = (("not_sent" & string) | ("may_have_been_sent" & string) | ("acknowledged" & string));
-export type MethodPagePressKeyResult__ErrorContext = { "action_status"?: (MethodPagePressKeyResult__ActionStatus | null); "download_id"?: (string | null); "operation_id"?: (string | null); "page"?: (MethodPagePressKeyResult__PageContext | null); "phase"?: (string | null); [key: string]: unknown; };
-export type MethodPagePressKeyResult__ErrorDetail = { "code": string; "context"?: (MethodPagePressKeyResult__ErrorContext | null); "hint"?: (string | null); "message": string; "retryable"?: (boolean | null); [key: string]: unknown; };
-export type MethodPagePressKeyResult__OperationState = (("running" | "finished" | "interrupted" | "expired") & string);
-export type MethodPagePressKeyResult__PageContext = { "headings": Array<string>; "messages": Array<string>; "ready_state": string; "tab_id": string; "text_excerpt": string; "title": string; "truncated": boolean; "url": string; [key: string]: unknown; };
-
-export type MethodPageResetViewportParams = { "pageId": string; [key: string]: unknown; };
-
-export type MethodPageResetViewportResult = Record<string, never>;
-
 export type MethodPageRestoreStateParams = { "pageId": string; "state": MethodPageRestoreStateParams__BrowserState; [key: string]: unknown; };
 export type MethodPageRestoreStateParams__BrowserState = { "cookies": Array<MethodPageRestoreStateParams__SessionCookie>; "localStorage"?: Record<string, string>; "sessionStorage"?: Record<string, string>; "url": string; "userAgent": string; [key: string]: unknown; };
 export type MethodPageRestoreStateParams__SessionCookie = { "domain": string; "expires"?: (number | null); "http_only": boolean; "name": string; "path": string; "same_site"?: (string | null); "secure": boolean; "value": string; [key: string]: unknown; };
 
 export type MethodPageRestoreStateResult = Record<string, never>;
 
-export type MethodPageScreenshotParams = { "clip"?: (MethodPageScreenshotParams__ScreenshotClip | null); "format"?: (MethodPageScreenshotParams__ScreenshotFormat | null); "fullPage"?: (boolean | null); "pageId": string; "quality"?: (number | null); [key: string]: unknown; };
-export type MethodPageScreenshotParams__ScreenshotClip = { "height": number; "width": number; "x": number; "y": number; [key: string]: unknown; };
-export type MethodPageScreenshotParams__ScreenshotFormat = (("png" | "jpeg" | "webp") & string);
-
-export type MethodPageScreenshotResult = { "dataBase64": string; [key: string]: unknown; };
-
-export type MethodPageScreenshotToFileParams = { "clip"?: (MethodPageScreenshotToFileParams__ScreenshotClip | null); "format"?: (MethodPageScreenshotToFileParams__ScreenshotFormat | null); "fullPage"?: (boolean | null); "pageId": string; "path": string; "quality"?: (number | null); [key: string]: unknown; };
-export type MethodPageScreenshotToFileParams__ScreenshotClip = { "height": number; "width": number; "x": number; "y": number; [key: string]: unknown; };
-export type MethodPageScreenshotToFileParams__ScreenshotFormat = (("png" | "jpeg" | "webp") & string);
-
-export type MethodPageScreenshotToFileResult = { "bytes": number; "container"?: (MethodPageScreenshotToFileResult__ArtifactContainer | null); "mimeType": string; "path": string; [key: string]: unknown; };
-export type MethodPageScreenshotToFileResult__ArtifactContainer = ("mp4" & string);
-
-export type MethodPageSelectParams = { "inputMode"?: MethodPageSelectParams__InputMode; "operation_id": string; "options"?: MethodPageSelectParams__ActionOptions; "pageId": string; "selector": string; "value": string; [key: string]: unknown; };
-export type MethodPageSelectParams__ActionOptions = { "destination"?: MethodPageSelectParams__Destination; "expect"?: (MethodPageSelectParams__Expectation | null); "timeout_ms"?: number; "wait_for_target"?: boolean; [key: string]: unknown; };
-export type MethodPageSelectParams__Destination = (("current" & string) | ("new_tab" & string) | ("current_or_new" & string));
-export type MethodPageSelectParams__Expectation = ({ "kind": ("document_ready" & string); [key: string]: unknown; } | { "conditions": Array<MethodPageSelectParams__Expectation>; "kind": ("all" & string); [key: string]: unknown; } | { "enabled": boolean; "kind": ("enabled" & string); "target": MethodPageSelectParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("download_started" & string); [key: string]: unknown; } | { "kind": ("focused" & string); "target": MethodPageSelectParams__LocatorSpec; [key: string]: unknown; } | { "contains"?: boolean; "kind": ("url" & string); "value": string; [key: string]: unknown; } | { "kind": ("visible" & string); "target": MethodPageSelectParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("hidden" & string); "target": MethodPageSelectParams__LocatorSpec; [key: string]: unknown; } | { "contains"?: boolean; "kind": ("text" & string); "target": MethodPageSelectParams__LocatorSpec; "value": string; [key: string]: unknown; } | { "kind": ("value" & string); "target": MethodPageSelectParams__LocatorSpec; "value": string; [key: string]: unknown; } | { "checked": boolean; "kind": ("checked" & string); "target": MethodPageSelectParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("selected" & string); "target": MethodPageSelectParams__LocatorSpec; "values": Array<string>; [key: string]: unknown; });
-export type MethodPageSelectParams__InputMode = (("sequential" & string) | ("bulk" & string));
-export type MethodPageSelectParams__LocatorQuery = ({ "id": number; "kind": ("node" & string); [key: string]: unknown; } | { "kind": ("css" & string); "selector": string; [key: string]: unknown; } | { "exact"?: boolean; "kind": ("text" & string); "text": string; [key: string]: unknown; } | { "kind": ("placeholder" & string); "text": string; [key: string]: unknown; } | { "kind": ("role" & string); "role": string; [key: string]: unknown; } | { "id": number; "kind": ("backend_node" & string); [key: string]: unknown; });
-export type MethodPageSelectParams__LocatorSpec = { "frame_id"?: (string | null); "index"?: (number | null); "query": MethodPageSelectParams__LocatorQuery; [key: string]: unknown; };
-
-export type MethodPageSelectResult = { "action": string; "dispatch_intent": boolean; "error"?: (MethodPageSelectResult__ErrorDetail | null); "error_code"?: (string | null); "finished_at_ms"?: (number | null); "id": string; "outcome": MethodPageSelectResult__ActionOutcome; "preparation_intent": boolean; "receipt"?: (MethodPageSelectResult__ActionReceipt | null); "runtime_id": string; "started_at_ms": number; "state": MethodPageSelectResult__OperationState; "target_id": string; [key: string]: unknown; };
-export type MethodPageSelectResult__ActionOutcome = (("not_dispatched" & string) | ("outcome_unknown" & string) | ("verified_complete" & string));
-export type MethodPageSelectResult__ActionReceipt = { "action": string; "already_satisfied": boolean; "cleanup_pending": boolean; "destination_target_id"?: (string | null); "dispatch": MethodPageSelectResult__DispatchState; "download_guid"?: (string | null); "elapsed_ms": number; "finished_at_ms": number; "outcome": MethodPageSelectResult__ActionOutcome; "preparation_may_have_executed": boolean; "started_at_ms": number; "target_id": string; "verification"?: (string | null); [key: string]: unknown; };
-export type MethodPageSelectResult__ActionStatus = (("not_attempted" | "may_have_executed") & string);
-export type MethodPageSelectResult__DispatchState = (("not_sent" & string) | ("may_have_been_sent" & string) | ("acknowledged" & string));
-export type MethodPageSelectResult__ErrorContext = { "action_status"?: (MethodPageSelectResult__ActionStatus | null); "download_id"?: (string | null); "operation_id"?: (string | null); "page"?: (MethodPageSelectResult__PageContext | null); "phase"?: (string | null); [key: string]: unknown; };
-export type MethodPageSelectResult__ErrorDetail = { "code": string; "context"?: (MethodPageSelectResult__ErrorContext | null); "hint"?: (string | null); "message": string; "retryable"?: (boolean | null); [key: string]: unknown; };
-export type MethodPageSelectResult__OperationState = (("running" | "finished" | "interrupted" | "expired") & string);
-export type MethodPageSelectResult__PageContext = { "headings": Array<string>; "messages": Array<string>; "ready_state": string; "tab_id": string; "text_excerpt": string; "title": string; "truncated": boolean; "url": string; [key: string]: unknown; };
-
-export type MethodPageSetViewportParams = { "deviceScaleFactor"?: number; "height": number; "pageId": string; "width": number; [key: string]: unknown; };
-
-export type MethodPageSetViewportResult = Record<string, never>;
-
 export type MethodPageSolveCaptchaParams = { "apiDomain"?: (string | null); "apiKey": string; "callback"?: (string | null); "captchaMode": string; "captchaType": string; "enterprisePayload"?: unknown; "pageId": string; "websiteKey": string; "websiteURL": string; [key: string]: unknown; };
 
 export type MethodPageSolveCaptchaResult = { "injection": MethodPageSolveCaptchaResult__CaptchaInjection; [key: string]: unknown; };
 export type MethodPageSolveCaptchaResult__CaptchaInjection = { "callbacks": Array<string>; "created": Array<string>; "errors": Array<string>; "kind": string; "solverUserAgent"?: (string | null); "updated_count": number; [key: string]: unknown; };
-
-export type MethodPageTypeIntoParams = { "inputMode"?: MethodPageTypeIntoParams__InputMode; "operation_id": string; "options"?: MethodPageTypeIntoParams__ActionOptions; "pageId": string; "selector": string; "text": string; [key: string]: unknown; };
-export type MethodPageTypeIntoParams__ActionOptions = { "destination"?: MethodPageTypeIntoParams__Destination; "expect"?: (MethodPageTypeIntoParams__Expectation | null); "timeout_ms"?: number; "wait_for_target"?: boolean; [key: string]: unknown; };
-export type MethodPageTypeIntoParams__Destination = (("current" & string) | ("new_tab" & string) | ("current_or_new" & string));
-export type MethodPageTypeIntoParams__Expectation = ({ "kind": ("document_ready" & string); [key: string]: unknown; } | { "conditions": Array<MethodPageTypeIntoParams__Expectation>; "kind": ("all" & string); [key: string]: unknown; } | { "enabled": boolean; "kind": ("enabled" & string); "target": MethodPageTypeIntoParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("download_started" & string); [key: string]: unknown; } | { "kind": ("focused" & string); "target": MethodPageTypeIntoParams__LocatorSpec; [key: string]: unknown; } | { "contains"?: boolean; "kind": ("url" & string); "value": string; [key: string]: unknown; } | { "kind": ("visible" & string); "target": MethodPageTypeIntoParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("hidden" & string); "target": MethodPageTypeIntoParams__LocatorSpec; [key: string]: unknown; } | { "contains"?: boolean; "kind": ("text" & string); "target": MethodPageTypeIntoParams__LocatorSpec; "value": string; [key: string]: unknown; } | { "kind": ("value" & string); "target": MethodPageTypeIntoParams__LocatorSpec; "value": string; [key: string]: unknown; } | { "checked": boolean; "kind": ("checked" & string); "target": MethodPageTypeIntoParams__LocatorSpec; [key: string]: unknown; } | { "kind": ("selected" & string); "target": MethodPageTypeIntoParams__LocatorSpec; "values": Array<string>; [key: string]: unknown; });
-export type MethodPageTypeIntoParams__InputMode = (("sequential" & string) | ("bulk" & string));
-export type MethodPageTypeIntoParams__LocatorQuery = ({ "id": number; "kind": ("node" & string); [key: string]: unknown; } | { "kind": ("css" & string); "selector": string; [key: string]: unknown; } | { "exact"?: boolean; "kind": ("text" & string); "text": string; [key: string]: unknown; } | { "kind": ("placeholder" & string); "text": string; [key: string]: unknown; } | { "kind": ("role" & string); "role": string; [key: string]: unknown; } | { "id": number; "kind": ("backend_node" & string); [key: string]: unknown; });
-export type MethodPageTypeIntoParams__LocatorSpec = { "frame_id"?: (string | null); "index"?: (number | null); "query": MethodPageTypeIntoParams__LocatorQuery; [key: string]: unknown; };
-
-export type MethodPageTypeIntoResult = { "action": string; "dispatch_intent": boolean; "error"?: (MethodPageTypeIntoResult__ErrorDetail | null); "error_code"?: (string | null); "finished_at_ms"?: (number | null); "id": string; "outcome": MethodPageTypeIntoResult__ActionOutcome; "preparation_intent": boolean; "receipt"?: (MethodPageTypeIntoResult__ActionReceipt | null); "runtime_id": string; "started_at_ms": number; "state": MethodPageTypeIntoResult__OperationState; "target_id": string; [key: string]: unknown; };
-export type MethodPageTypeIntoResult__ActionOutcome = (("not_dispatched" & string) | ("outcome_unknown" & string) | ("verified_complete" & string));
-export type MethodPageTypeIntoResult__ActionReceipt = { "action": string; "already_satisfied": boolean; "cleanup_pending": boolean; "destination_target_id"?: (string | null); "dispatch": MethodPageTypeIntoResult__DispatchState; "download_guid"?: (string | null); "elapsed_ms": number; "finished_at_ms": number; "outcome": MethodPageTypeIntoResult__ActionOutcome; "preparation_may_have_executed": boolean; "started_at_ms": number; "target_id": string; "verification"?: (string | null); [key: string]: unknown; };
-export type MethodPageTypeIntoResult__ActionStatus = (("not_attempted" | "may_have_executed") & string);
-export type MethodPageTypeIntoResult__DispatchState = (("not_sent" & string) | ("may_have_been_sent" & string) | ("acknowledged" & string));
-export type MethodPageTypeIntoResult__ErrorContext = { "action_status"?: (MethodPageTypeIntoResult__ActionStatus | null); "download_id"?: (string | null); "operation_id"?: (string | null); "page"?: (MethodPageTypeIntoResult__PageContext | null); "phase"?: (string | null); [key: string]: unknown; };
-export type MethodPageTypeIntoResult__ErrorDetail = { "code": string; "context"?: (MethodPageTypeIntoResult__ErrorContext | null); "hint"?: (string | null); "message": string; "retryable"?: (boolean | null); [key: string]: unknown; };
-export type MethodPageTypeIntoResult__OperationState = (("running" | "finished" | "interrupted" | "expired") & string);
-export type MethodPageTypeIntoResult__PageContext = { "headings": Array<string>; "messages": Array<string>; "ready_state": string; "tab_id": string; "text_excerpt": string; "title": string; "truncated": boolean; "url": string; [key: string]: unknown; };
 
 export type MethodRecordingCancelParams = { "recordingId": string; [key: string]: unknown; };
 
@@ -911,7 +663,7 @@ export type MethodSaveStateParams = { "pageId": string; "path": string; [key: st
 
 export type MethodSaveStateResult = unknown;
 
-export type MethodScreenshotParams = { "annotate"?: boolean; "clip"?: (MethodScreenshotParams__ScreenshotClip | null); "format"?: (MethodScreenshotParams__ScreenshotFormat | null); "full_page"?: boolean; "output"?: (string | null); "pageId": string; "quality"?: (number | null); [key: string]: unknown; };
+export type MethodScreenshotParams = { "annotate"?: boolean; "clip"?: (MethodScreenshotParams__ScreenshotClip | null); "format"?: (MethodScreenshotParams__ScreenshotFormat | null); "full_page"?: boolean; "inline"?: boolean; "output"?: (string | null); "pageId": string; "quality"?: (number | null); [key: string]: unknown; };
 export type MethodScreenshotParams__ScreenshotClip = { "height": number; "width": number; "x": number; "y": number; [key: string]: unknown; };
 export type MethodScreenshotParams__ScreenshotFormat = (("png" | "jpeg" | "webp") & string);
 
@@ -1074,30 +826,8 @@ export type MethodParams = {
   "operations.list": MethodOperationsListParams;
   "operations.wait": MethodOperationsWaitParams;
   "page.capture_state": MethodPageCaptureStateParams;
-  "page.click": MethodPageClickParams;
-  "page.click_text": MethodPageClickTextParams;
-  "page.close": MethodPageCloseParams;
-  "page.evaluate": MethodPageEvaluateParams;
-  "page.evaluate_raw": MethodPageEvaluateRawParams;
-  "page.execute": MethodPageExecuteParams;
-  "page.execute_raw": MethodPageExecuteRawParams;
-  "page.fetch": MethodPageFetchParams;
-  "page.fetch_bounded": MethodPageFetchBoundedParams;
-  "page.fill": MethodPageFillParams;
-  "page.goto": MethodPageGotoParams;
-  "page.hover": MethodPageHoverParams;
-  "page.human_click": MethodPageHumanClickParams;
-  "page.human_click_text": MethodPageHumanClickTextParams;
-  "page.human_fill": MethodPageHumanFillParams;
-  "page.press_key": MethodPagePressKeyParams;
-  "page.reset_viewport": MethodPageResetViewportParams;
   "page.restore_state": MethodPageRestoreStateParams;
-  "page.screenshot": MethodPageScreenshotParams;
-  "page.screenshot_to_file": MethodPageScreenshotToFileParams;
-  "page.select": MethodPageSelectParams;
-  "page.set_viewport": MethodPageSetViewportParams;
   "page.solve_captcha": MethodPageSolveCaptchaParams;
-  "page.type_into": MethodPageTypeIntoParams;
   "recording.cancel": MethodRecordingCancelParams;
   "recording.get": MethodRecordingGetParams;
   "recording.start": MethodRecordingStartParams;
@@ -1204,30 +934,8 @@ export type MethodResults = {
   "operations.list": MethodOperationsListResult;
   "operations.wait": MethodOperationsWaitResult;
   "page.capture_state": MethodPageCaptureStateResult;
-  "page.click": MethodPageClickResult;
-  "page.click_text": MethodPageClickTextResult;
-  "page.close": MethodPageCloseResult;
-  "page.evaluate": MethodPageEvaluateResult;
-  "page.evaluate_raw": MethodPageEvaluateRawResult;
-  "page.execute": MethodPageExecuteResult;
-  "page.execute_raw": MethodPageExecuteRawResult;
-  "page.fetch": MethodPageFetchResult;
-  "page.fetch_bounded": MethodPageFetchBoundedResult;
-  "page.fill": MethodPageFillResult;
-  "page.goto": MethodPageGotoResult;
-  "page.hover": MethodPageHoverResult;
-  "page.human_click": MethodPageHumanClickResult;
-  "page.human_click_text": MethodPageHumanClickTextResult;
-  "page.human_fill": MethodPageHumanFillResult;
-  "page.press_key": MethodPagePressKeyResult;
-  "page.reset_viewport": MethodPageResetViewportResult;
   "page.restore_state": MethodPageRestoreStateResult;
-  "page.screenshot": MethodPageScreenshotResult;
-  "page.screenshot_to_file": MethodPageScreenshotToFileResult;
-  "page.select": MethodPageSelectResult;
-  "page.set_viewport": MethodPageSetViewportResult;
   "page.solve_captcha": MethodPageSolveCaptchaResult;
-  "page.type_into": MethodPageTypeIntoResult;
   "recording.cancel": MethodRecordingCancelResult;
   "recording.get": MethodRecordingGetResult;
   "recording.start": MethodRecordingStartResult;
@@ -1268,5 +976,5 @@ export type ProtocolErrorResponse = { id: number | null; error: ServerError; res
 
 export type ProtocolResponse<M extends MethodName = MethodName> = ProtocolSuccessResponse<M> | ProtocolErrorResponse;
 
-export const protocolVersion = {"major":3,"minor":0} as const;
-export const methodNames = ["actions.perform","agent.observe","agent.step","back","browser.close","browser.close_tab","browser.connect","browser.launch","browser.new_page","browser.tabs","captcha.datadome","captcha.detect","captcha.inject","captcha.turnstile","clear_cookies","click","click_shadow","clone_from","console","content","cookies","delete_cookie","dialog.accept","dialog.dismiss","double_click","download.cancel","download.get","download.list","download.start","download.wait","dump_storage","emulate","errors","eval","exec","exists","fake_camera","fetch","fill","find","forward","frame_eval","frames","get_attribute","get_text","headers","hover","info","intercept.add","intercept.list","intercept.log","intercept.remove","js.allow","js.block","js.list","js.mode","js.remove","key","key.down","key.up","load_state","mouse.down","mouse.move","mouse.up","network.clear","network.export","network.log","network.record.start","network.record.status","network.record.stop","network.show","network.wait","observe","open","operations.cancel","operations.get","operations.list","operations.wait","page.capture_state","page.click","page.click_text","page.close","page.evaluate","page.evaluate_raw","page.execute","page.execute_raw","page.fetch","page.fetch_bounded","page.fill","page.goto","page.hover","page.human_click","page.human_click_text","page.human_fill","page.press_key","page.reset_viewport","page.restore_state","page.screenshot","page.screenshot_to_file","page.select","page.set_viewport","page.solve_captcha","page.type_into","recording.cancel","recording.get","recording.start","recording.stop","release_all_inputs","reload","save_state","screenshot","scroll","select","server.hello","server.shutdown","set_cookie","set_storage","snapshot","spa.info","spa.navigate","storage","text","wait","wasm.find","wasm.info","wasm.read","wasm.write"] as const;
+export const protocolVersion = {"major":4,"minor":0} as const;
+export const methodNames = ["actions.perform","agent.observe","agent.step","back","browser.close","browser.close_tab","browser.connect","browser.launch","browser.new_page","browser.tabs","captcha.datadome","captcha.detect","captcha.inject","captcha.turnstile","clear_cookies","click","click_shadow","clone_from","console","content","cookies","delete_cookie","dialog.accept","dialog.dismiss","double_click","download.cancel","download.get","download.list","download.start","download.wait","dump_storage","emulate","errors","eval","exec","exists","fake_camera","fetch","fill","find","forward","frame_eval","frames","get_attribute","get_text","headers","hover","info","intercept.add","intercept.list","intercept.log","intercept.remove","js.allow","js.block","js.list","js.mode","js.remove","key","key.down","key.up","load_state","mouse.down","mouse.move","mouse.up","network.clear","network.export","network.log","network.record.start","network.record.status","network.record.stop","network.show","network.wait","observe","open","operations.cancel","operations.get","operations.list","operations.wait","page.capture_state","page.restore_state","page.solve_captcha","recording.cancel","recording.get","recording.start","recording.stop","release_all_inputs","reload","save_state","screenshot","scroll","select","server.hello","server.shutdown","set_cookie","set_storage","snapshot","spa.info","spa.navigate","storage","text","wait","wasm.find","wasm.info","wasm.read","wasm.write"] as const;

@@ -1,30 +1,11 @@
 use crate::state::AppState;
-use eoka::{Action, ActionOptions, LocatorSpec};
-use eoka_protocol::sidecar::{
-    validate_safe_numbers, ActionPerformParams, ClickParams, ClickTextParams, ErrorData,
-    FillParams, GotoParams, PressKeyParams, ServerError, TypeIntoParams,
-};
+use eoka_protocol::sidecar::{validate_safe_numbers, ActionPerformParams, ErrorData, ServerError};
 use eoka_protocol::{ErrorDetail, OperationIdArgs, OperationListArgs, OperationWaitArgs};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 
 pub fn supports(method: &str) -> bool {
-    supports_control(method)
-        || matches!(
-            method,
-            "actions.perform"
-                | "page.goto"
-                | "page.click"
-                | "page.click_text"
-                | "page.human_click"
-                | "page.human_click_text"
-                | "page.fill"
-                | "page.human_fill"
-                | "page.type_into"
-                | "page.select"
-                | "page.hover"
-                | "page.press_key"
-        )
+    method == "actions.perform" || supports_control(method)
 }
 
 pub(crate) fn supports_control(method: &str) -> bool {
@@ -75,108 +56,18 @@ pub async fn dispatch(state: &AppState, method: &str, params: Value) -> Result<V
     if supports_control(method) {
         return control(&state.operations, method, params).await;
     }
-    let (page_id, id, action, options) = admission(method, params)?;
-    let page = state.page(&page_id)?;
+    if method != "actions.perform" {
+        return Err(ServerError::unknown_method(method));
+    }
+    let args: ActionPerformParams = parse(params)?;
+    let page = state.page(&args.page_id)?;
+    let id = args.operation_id;
     let record = state
         .operations
-        .submit(page, id.clone(), action, options)
+        .submit(page, id.clone(), args.action, args.options)
         .await
         .map_err(|error| operation_error(error, Some(id)))?;
     encode(record)
-}
-
-fn admission(
-    method: &str,
-    params: Value,
-) -> Result<(String, String, Action, ActionOptions), ServerError> {
-    Ok(match method {
-        "actions.perform" => {
-            let args: ActionPerformParams = parse(params)?;
-            (args.page_id, args.operation_id, args.action, args.options)
-        }
-        "page.goto" => {
-            let args: GotoParams = parse(params)?;
-            (
-                args.page_id,
-                args.operation_id,
-                Action::Navigate {
-                    url: args.url,
-                    referrer: None,
-                },
-                args.options,
-            )
-        }
-        "page.click" | "page.human_click" | "page.hover" => {
-            let args: ClickParams = parse(params)?;
-            let target = LocatorSpec::css(args.selector);
-            let action = if method == "page.hover" {
-                Action::Hover {
-                    target,
-                    human: false,
-                }
-            } else {
-                Action::Click {
-                    target,
-                    human: method == "page.human_click",
-                    double: false,
-                }
-            };
-            (args.page_id, args.operation_id, action, args.options)
-        }
-        "page.click_text" | "page.human_click_text" => {
-            let args: ClickTextParams = parse(params)?;
-            (
-                args.page_id,
-                args.operation_id,
-                Action::Click {
-                    target: LocatorSpec::text(args.text),
-                    human: method == "page.human_click_text",
-                    double: false,
-                },
-                args.options,
-            )
-        }
-        "page.fill" | "page.human_fill" | "page.select" => {
-            let args: FillParams = parse(params)?;
-            let target = LocatorSpec::css(args.selector);
-            let action = if method == "page.select" {
-                Action::SelectOption {
-                    target,
-                    value: args.value,
-                }
-            } else {
-                Action::Fill {
-                    target,
-                    value: args.value,
-                    input_mode: args.input_mode,
-                }
-            };
-            (args.page_id, args.operation_id, action, args.options)
-        }
-        "page.type_into" => {
-            let args: TypeIntoParams = parse(params)?;
-            (
-                args.page_id,
-                args.operation_id,
-                Action::Type {
-                    target: LocatorSpec::css(args.selector),
-                    text: args.text,
-                    input_mode: args.input_mode,
-                },
-                args.options,
-            )
-        }
-        "page.press_key" => {
-            let args: PressKeyParams = parse(params)?;
-            (
-                args.page_id,
-                args.operation_id,
-                Action::PressKey { key: args.key },
-                args.options,
-            )
-        }
-        _ => return Err(ServerError::unknown_method(method)),
-    })
 }
 
 pub async fn wait(manager: &super::OperationManager, params: Value) -> Result<Value, ServerError> {

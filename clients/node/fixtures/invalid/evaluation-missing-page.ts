@@ -1,3 +1,3 @@
 import type { MethodParams } from "../../src/generated/protocol.js";
-const params: MethodParams["page.evaluate"] = { pageId: "page-1" };
+const params: MethodParams["eval"] = { code: "42" };
 export { params };

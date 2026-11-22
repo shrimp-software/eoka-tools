@@ -127,7 +127,7 @@ input.on('line', async line => {
   }
   if (mode === 'silent') return;
   if (mode === 'echo-error') {
-    process.stdout.write(`${JSON.stringify({ id: request.id, error: JSON.parse(request.params.function) })}\n`);
+    process.stdout.write(`${JSON.stringify({ id: request.id, error: JSON.parse(request.params.code) })}\n`);
     return;
   }
   if (mode === 'concurrency') {
@@ -147,7 +147,7 @@ input.on('line', async line => {
   if (mode === 'malformed') process.stdout.write('{broken}\n');
   else if (mode === 'empty-frame') process.stdout.write('\n');
   else if (mode === 'empty-crlf') process.stdout.write('\r\n');
-  else if (mode.startsWith('boundary-') && request.method === 'page.evaluate') {
+  else if (mode.startsWith('boundary-') && request.method === 'eval') {
     const overhead = Buffer.byteLength(JSON.stringify({ id: request.id, result: { result: '' } }));
     const result = 'x'.repeat(maxMessageBytes + Number(mode.includes('oversized')) - overhead);
     const frame = Buffer.from(`${JSON.stringify({ id: request.id, result: { result } })}${mode.includes('crlf') ? '\r\n' : '\n'}`);
@@ -196,10 +196,10 @@ input.on('line', async line => {
     started_at_ms: 1, finished_at_ms: 2, dispatch_intent: true, preparation_intent: true,
     outcome: 'verified_complete', state: 'finished', receipt: receipt({ verification: null }),
   });
-  else if (mode === 'out-of-order' && request.method === 'page.evaluate') {
+  else if (mode === 'out-of-order' && request.method === 'eval') {
     pair.push(request);
     if (pair.length === 2) {
-      for (const item of pair.reverse()) reply(item.id, { result: JSON.parse(item.params.function) });
+      for (const item of pair.reverse()) reply(item.id, { result: JSON.parse(item.params.code) });
       pair = [];
     }
   } else if (mode === 'split-utf8') {
@@ -209,5 +209,5 @@ input.on('line', async line => {
       await new Promise(resolve => setTimeout(resolve, 1));
     }
   } else if (request.method === 'operations.list') reply(request.id, []);
-  else reply(request.id, { result: JSON.parse(request.params.function) });
+  else reply(request.id, { result: JSON.parse(request.params.code) });
 });

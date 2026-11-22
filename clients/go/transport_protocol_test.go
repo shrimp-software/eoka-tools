@@ -87,7 +87,7 @@ func TestTransportSplitUTF8AndResultShapes(t *testing.T) {
 			ctx := callContext(t)
 			done := make(chan error, 1)
 			var got json.RawMessage
-			go func() { done <- tr.call(ctx, "page.evaluate", map[string]any{}, &got) }()
+			go func() { done <- tr.call(ctx, "eval", map[string]any{}, &got) }()
 			request := wireRequest(t, requests)
 			line := fmt.Sprintf("{\"id\":%d,\"result\":%s}\n", request.ID, result)
 			for i := 0; i < len(line); i++ {
@@ -248,7 +248,7 @@ func TestTransportBoundsMessages(t *testing.T) {
 		tr.mu.Lock()
 		tr.messageLimit = 128
 		tr.mu.Unlock()
-		if err := tr.call(callContext(t), "page.execute", map[string]any{"js": strings.Repeat("x", 128)}, nil); !HasCode(err, ErrCodeMessageTooLarge) {
+		if err := tr.call(callContext(t), "exec", map[string]any{"code": strings.Repeat("x", 128)}, nil); !HasCode(err, ErrCodeMessageTooLarge) {
 			t.Fatalf("oversized request error = %v", err)
 		}
 		tr.mu.Lock()

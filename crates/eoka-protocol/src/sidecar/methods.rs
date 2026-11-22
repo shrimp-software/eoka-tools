@@ -126,44 +126,19 @@ methods! {
     "operations.cancel" => OperationIdArgs => crate::OperationRecord,
     "agent.observe" => AgentObserveParams => crate::AgentObservation,
     "agent.step" => AgentStepParams => crate::AgentStepResult,
-    "page.goto" => GotoParams => crate::OperationRecord,
-    "page.click" => ClickParams => crate::OperationRecord,
-    "page.click_text" => ClickTextParams => crate::OperationRecord,
-    "page.human_click" => ClickParams => crate::OperationRecord,
-    "page.human_click_text" => ClickTextParams => crate::OperationRecord,
-    "page.fill" => FillParams => crate::OperationRecord,
-    "page.human_fill" => FillParams => crate::OperationRecord,
-    "page.type_into" => TypeIntoParams => crate::OperationRecord,
-    "page.select" => FillParams => crate::OperationRecord,
-    "page.hover" => ClickParams => crate::OperationRecord,
-    "page.press_key" => PressKeyParams => crate::OperationRecord,
-    "page.evaluate" => JsParams => EvaluateResult,
-    "page.execute" => JsParams => Empty,
-    "page.evaluate_raw" => RawJsParams => EvaluateResult,
-    "page.execute_raw" => RawJsParams => Empty,
-    "page.fetch" => FetchParams => FetchResult,
-    "page.fetch_bounded" => BoundedFetchParams, BoundedFetchParams::validate => BoundedFetchResult,
     "page.capture_state" => PageIdParams => CaptureStateResult,
     "page.restore_state" => RestoreStateParams => Empty,
-    "page.screenshot" => ScreenshotParams, ScreenshotParams::validate => ScreenshotResult,
-    "page.screenshot_to_file" => ScreenshotToFileParams, ScreenshotToFileParams::validate => Artifact,
     "recording.start" => RecordingStartParams, RecordingStartParams::validate => RecordingRecord,
     "recording.get" => RecordingIdParams, RecordingIdParams::validate => RecordingRecord,
     "recording.stop" => RecordingIdParams, RecordingIdParams::validate => RecordingRecord,
     "recording.cancel" => RecordingIdParams, RecordingIdParams::validate => RecordingRecord,
-    "page.set_viewport" => SetViewportParams, |params: &SetViewportParams| {
-        validate_viewport(params.width, params.height, params.device_scale_factor)
-    } => Empty,
-    "page.reset_viewport" => PageIdParams => Empty,
     "page.solve_captcha" => SolveCaptchaParams => SolveCaptchaResult,
-    "page.close" => PageIdParams => Empty,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MethodRole {
     Lifecycle,
     Shared,
-    Action,
     Distinct(&'static str),
 }
 
@@ -171,35 +146,10 @@ pub fn method_role(method: &str) -> Option<MethodRole> {
     use MethodRole::*;
     Some(match method {
         "server.hello" | "server.shutdown" | "browser.launch" | "browser.connect"
-        | "browser.new_page" | "browser.tabs" | "browser.close_tab" | "browser.close"
-        | "page.close" => Lifecycle,
+        | "browser.new_page" | "browser.tabs" | "browser.close_tab" | "browser.close" => Lifecycle,
         "actions.perform" | "operations.get" | "operations.list" | "operations.wait"
         | "operations.cancel" | "agent.observe" | "agent.step" | "recording.start"
         | "recording.get" | "recording.stop" | "recording.cancel" => Shared,
-        "page.goto"
-        | "page.click"
-        | "page.click_text"
-        | "page.human_click"
-        | "page.human_click_text"
-        | "page.fill"
-        | "page.human_fill"
-        | "page.type_into"
-        | "page.select"
-        | "page.hover"
-        | "page.press_key" => Action,
-        "page.evaluate" | "page.evaluate_raw" | "page.execute" | "page.execute_raw" => {
-            Distinct("bounded function evaluation with typed results; eval and exec take a script")
-        }
-        "page.fetch" | "page.fetch_bounded" => {
-            Distinct("typed response and streaming byte bound; catalog fetch truncates text")
-        }
-        "page.set_viewport" | "page.reset_viewport" => {
-            Distinct("plain viewport metrics; emulate also turns on mobile and touch emulation")
-        }
-        "page.screenshot" => Distinct("returns image bytes; catalog screenshot writes a file"),
-        "page.screenshot_to_file" => {
-            Distinct("atomic publication with partial-file evidence on failure")
-        }
         "page.capture_state" | "page.restore_state" => {
             Distinct("in-memory state; catalog save_state and load_state use a file")
         }
@@ -336,7 +286,6 @@ pub fn schema_bundle() -> Value {
             "AgentStepResult": schema::<crate::AgentStepResult>(), "BrowserState": schema::<BrowserState>(),
             "AgentAction": schema::<crate::AgentAction>(), "AgentMode": schema::<crate::AgentMode>(),
             "ScreenshotFormat": schema::<ScreenshotFormat>(), "ScreenshotClip": schema::<ScreenshotClip>(),
-            "ScreenshotParams": schema::<ScreenshotParams>(), "ScreenshotToFileParams": schema::<ScreenshotToFileParams>(),
             "Artifact": schema::<Artifact>(), "ArtifactContainer": schema::<ArtifactContainer>(),
             "RecordingStartParams": schema::<RecordingStartParams>(), "RecordingIdParams": schema::<RecordingIdParams>(),
             "RecordingRecord": schema::<RecordingRecord>(), "RecordingState": schema::<RecordingState>(),
