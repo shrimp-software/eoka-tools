@@ -8,7 +8,8 @@ use std::time::Duration;
 const REPOSITORY: &str = "shrimp-software/eoka-tools";
 const API_BASE: &str = "https://api.github.com";
 const DOWNLOAD_BASE: &str = "https://github.com/shrimp-software/eoka-tools/releases/download";
-const TAG_PREFIX: &str = "eoka-cli-v";
+const TAG_PREFIX: &str = "v";
+const BINARIES_IN_INSTALL_ORDER: [&str; 2] = ["eoka-mcp", "eoka"];
 const MAX_ARCHIVE_BYTES: usize = 256 * 1024 * 1024;
 const MAX_METADATA_BYTES: usize = 4 * 1024 * 1024;
 const WRITER_STILL_OPEN_RETRIES: u32 = 20;
@@ -100,7 +101,7 @@ async fn latest_version(client: &ureq::Agent, api_base: &str) -> Result<Version,
         .filter_map(|release| release["tag_name"].as_str()?.strip_prefix(TAG_PREFIX))
         .filter_map(Version::parse)
         .max()
-        .ok_or_else(|| "No published eoka-cli release was found".to_string())
+        .ok_or_else(|| "No published eoka release was found".to_string())
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -125,7 +126,7 @@ async fn download_verified(
     version: Version,
     target: &str,
 ) -> Result<Vec<u8>, String> {
-    let asset = format!("eoka-cli-{target}.tar.gz");
+    let asset = format!("eoka-{target}.tar.gz");
     let release = format!("{download_base}/{TAG_PREFIX}{version}");
     let sums = get_bytes(client, &format!("{release}/SHA256SUMS"), MAX_METADATA_BYTES).await?;
     let expected = expected_checksum(&String::from_utf8_lossy(&sums), &asset)
@@ -140,19 +141,23 @@ async fn download_verified(
     Ok(archive)
 }
 
-fn extract_binary(archive: &[u8]) -> Result<Vec<u8>, String> {
+fn extract_binaries(archive: &[u8]) -> Result<[Vec<u8>; 2], String> {
     let invalid = |error: std::io::Error| format!("Release archive is invalid: {error}");
     let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(archive));
-    let mut binary = None;
+    let mut binaries: [Option<Vec<u8>>; 2] = [None, None];
     for entry in tar.entries().map_err(invalid)? {
         let mut entry = entry.map_err(invalid)?;
         let path = entry.path().map_err(invalid)?.into_owned();
-        if path != Path::new("eoka") || !entry.header().entry_type().is_file() || binary.is_some() {
-            return Err(format!(
-                "Release archive has an unexpected entry: {}",
-                path.display()
-            ));
-        }
+        let slot = BINARIES_IN_INSTALL_ORDER
+            .iter()
+            .position(|name| path == Path::new(name))
+            .filter(|&slot| entry.header().entry_type().is_file() && binaries[slot].is_none())
+            .ok_or_else(|| {
+                format!(
+                    "Release archive has an unexpected entry: {}",
+                    path.display()
+                )
+            })?;
         let mut bytes = Vec::new();
         entry
             .by_ref()
@@ -162,9 +167,14 @@ fn extract_binary(archive: &[u8]) -> Result<Vec<u8>, String> {
         if bytes.len() > MAX_ARCHIVE_BYTES {
             return Err("Release binary exceeds the size limit".to_string());
         }
-        binary = Some(bytes);
+        binaries[slot] = Some(bytes);
     }
-    binary.ok_or_else(|| "Release archive does not contain eoka".to_string())
+    let [mcp, eoka] = binaries;
+    let missing = |name: &str| format!("Release archive does not contain {name}");
+    Ok([
+        mcp.ok_or_else(|| missing("eoka-mcp"))?,
+        eoka.ok_or_else(|| missing("eoka"))?,
+    ])
 }
 
 fn run_binary(path: &Path, arguments: &[&str]) -> std::io::Result<std::process::Output> {
@@ -208,37 +218,54 @@ fn refresh_skill_with(binary: &Path) -> Value {
         })
 }
 
-fn install(binary: &[u8], dest: &Path, version: Version) -> Result<(), String> {
+fn stage(binary: &[u8], staged: &Path) -> Result<(), String> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o755)
+        .open(staged)
+        .map_err(|error| format!("Cannot write {}: {error}", staged.display()))?;
+    file.write_all(binary)
+        .and_then(|()| file.sync_all())
+        .map_err(|error| format!("Cannot write {}: {error}", staged.display()))
+}
+
+fn install(binaries: &[Vec<u8>; 2], dest: &Path, version: Version) -> Result<(), String> {
     let directory = dest
         .parent()
         .ok_or_else(|| format!("{} has no parent directory", dest.display()))?;
-    let staged = directory.join(format!(".eoka-update-{}", std::process::id()));
-    let _ = std::fs::remove_file(&staged);
+    let destinations = BINARIES_IN_INSTALL_ORDER.map(|name| match name {
+        "eoka" => dest.to_path_buf(),
+        other => directory.join(other),
+    });
+    let staged = BINARIES_IN_INSTALL_ORDER
+        .map(|name| directory.join(format!(".{name}-update-{}", std::process::id())));
+    for path in &staged {
+        let _ = std::fs::remove_file(path);
+    }
     let result = (|| {
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o755)
-            .open(&staged)
-            .map_err(|error| format!("Cannot write to {}: {error}", directory.display()))?;
-        file.write_all(binary)
-            .and_then(|()| file.sync_all())
-            .map_err(|error| format!("Cannot write {}: {error}", staged.display()))?;
-        drop(file);
-        let reported = probe_version(&staged)?;
-        let expected = format!("eoka {version}");
-        if reported != expected {
-            return Err(format!(
-                "Downloaded binary reports '{reported}', expected '{expected}'. Nothing was installed."
-            ));
+        for ((name, binary), path) in BINARIES_IN_INSTALL_ORDER.iter().zip(binaries).zip(&staged) {
+            stage(binary, path)?;
+            let reported = probe_version(path)?;
+            let expected = format!("{name} {version}");
+            if reported != expected {
+                return Err(format!(
+                    "Downloaded {name} reports '{reported}', expected '{expected}'. Nothing was installed."
+                ));
+            }
         }
-        std::fs::rename(&staged, dest)
-            .map_err(|error| format!("Cannot replace {}: {error}", dest.display()))
+        for (path, destination) in staged.iter().zip(&destinations) {
+            std::fs::rename(path, destination)
+                .map_err(|error| format!("Cannot replace {}: {error}", destination.display()))?;
+        }
+        Ok(())
     })();
     if result.is_err() {
-        let _ = std::fs::remove_file(&staged);
+        for path in &staged {
+            let _ = std::fs::remove_file(path);
+        }
     }
     result
 }
@@ -331,7 +358,7 @@ async fn update(args: &UpdateArgs) -> Result<Value, String> {
             )
         })?;
         let archive = download_verified(&client, DOWNLOAD_BASE, latest, target).await?;
-        install(&extract_binary(&archive)?, &dest, latest)?;
+        install(&extract_binaries(&archive)?, &dest, latest)?;
     }
     let installed = if updated { latest } else { current };
     let skill = if args.keep_skill {
@@ -422,18 +449,19 @@ mod tests {
         builder.into_inner().unwrap().finish().unwrap()
     }
 
-    fn script(version: &str) -> Vec<u8> {
-        format!("#!/bin/sh\necho 'eoka {version}'\n").into_bytes()
+    fn script(name: &str, version: &str) -> Vec<u8> {
+        format!("#!/bin/sh\necho '{name} {version}'\n").into_bytes()
+    }
+
+    fn release(version: &str) -> [Vec<u8>; 2] {
+        BINARIES_IN_INSTALL_ORDER.map(|name| script(name, version))
     }
 
     fn release_routes(version: &str, archive: &[u8], sums: String) -> HashMap<String, Vec<u8>> {
-        let asset = format!("eoka-cli-{TARGET}.tar.gz");
+        let asset = format!("eoka-{TARGET}.tar.gz");
         HashMap::from([
-            (format!("/eoka-cli-v{version}/{asset}"), archive.to_vec()),
-            (
-                format!("/eoka-cli-v{version}/SHA256SUMS"),
-                sums.into_bytes(),
-            ),
+            (format!("/v{version}/{asset}"), archive.to_vec()),
+            (format!("/v{version}/SHA256SUMS"), sums.into_bytes()),
         ])
     }
 
@@ -454,12 +482,12 @@ mod tests {
     #[tokio::test]
     async fn latest_version_ignores_other_tags_drafts_and_prereleases() {
         let releases = json!([
-            {"tag_name": "eoka-server-v9.0.0", "draft": false, "prerelease": false},
-            {"tag_name": "eoka-cli-v0.9.1", "draft": false, "prerelease": false},
-            {"tag_name": "eoka-cli-v0.10.3", "draft": false, "prerelease": false},
-            {"tag_name": "eoka-cli-v0.11.0", "draft": true, "prerelease": false},
-            {"tag_name": "eoka-cli-v0.12.0", "draft": false, "prerelease": true},
-            {"tag_name": "eoka-cli-vnext", "draft": false, "prerelease": false},
+            {"tag_name": "eoka-cli-v9.0.0", "draft": false, "prerelease": false},
+            {"tag_name": "v0.9.1", "draft": false, "prerelease": false},
+            {"tag_name": "v0.10.3", "draft": false, "prerelease": false},
+            {"tag_name": "v0.11.0", "draft": true, "prerelease": false},
+            {"tag_name": "v0.12.0", "draft": false, "prerelease": true},
+            {"tag_name": "vnext", "draft": false, "prerelease": false},
         ]);
         let base = serve(HashMap::from([(
             format!("/repos/{REPOSITORY}/releases"),
@@ -481,8 +509,8 @@ mod tests {
 
     #[tokio::test]
     async fn download_requires_a_matching_checksum() {
-        let tarball = archive(&[("eoka", &script("1.2.3"))]);
-        let asset = format!("eoka-cli-{TARGET}.tar.gz");
+        let tarball = archive(&[("eoka", &script("eoka", "1.2.3"))]);
+        let asset = format!("eoka-{TARGET}.tar.gz");
         let client = http_client().unwrap();
         let version = Version(1, 2, 3);
 
@@ -498,7 +526,7 @@ mod tests {
             .unwrap_err();
         assert!(error.contains("Checksum mismatch"), "{error}");
 
-        let other = format!("{}  eoka-cli-other.tar.gz\n", sha256_hex(&tarball));
+        let other = format!("{}  eoka-other.tar.gz\n", sha256_hex(&tarball));
         let base = serve(release_routes("1.2.3", &tarball, other)).await;
         let error = download_verified(&client, &base, version, TARGET)
             .await
@@ -507,43 +535,96 @@ mod tests {
     }
 
     #[test]
-    fn extract_accepts_only_a_single_eoka_file() {
-        let binary = script("1.2.3");
+    fn extract_requires_exactly_eoka_and_eoka_mcp() {
+        let eoka = script("eoka", "1.2.3");
+        let mcp = script("eoka-mcp", "1.2.3");
+        let both = [("eoka", eoka.as_slice()), ("eoka-mcp", mcp.as_slice())];
         assert_eq!(
-            extract_binary(&archive(&[("eoka", &binary)])),
-            Ok(binary.clone())
+            extract_binaries(&archive(&both)),
+            Ok([mcp.clone(), eoka.clone()])
         );
         for entries in [
-            vec![("eoka-evil", binary.as_slice())],
-            vec![("eoka", binary.as_slice()), ("eoka", binary.as_slice())],
-            vec![("eoka", binary.as_slice()), ("extra", b"x".as_slice())],
-            vec![("bin/eoka", binary.as_slice())],
+            vec![("eoka-evil", eoka.as_slice())],
+            vec![("eoka", eoka.as_slice()), ("eoka", eoka.as_slice())],
+            vec![
+                ("eoka", eoka.as_slice()),
+                ("eoka-mcp", mcp.as_slice()),
+                ("extra", b"x".as_slice()),
+            ],
+            vec![("bin/eoka", eoka.as_slice())],
         ] {
-            let error = extract_binary(&archive(&entries)).unwrap_err();
+            let error = extract_binaries(&archive(&entries)).unwrap_err();
             assert!(error.contains("unexpected entry"), "{error}");
         }
-        assert!(extract_binary(&archive(&[])).is_err());
-        assert!(extract_binary(b"not a tarball").is_err());
+        for (entries, missing) in [
+            (vec![("eoka", eoka.as_slice())], "eoka-mcp"),
+            (vec![("eoka-mcp", mcp.as_slice())], "eoka"),
+        ] {
+            let error = extract_binaries(&archive(&entries)).unwrap_err();
+            assert!(error.ends_with(&format!("contain {missing}")), "{error}");
+        }
+        assert!(extract_binaries(&archive(&[])).is_err());
+        assert!(extract_binaries(b"not a tarball").is_err());
+    }
+
+    fn directory_names(directory: &Path) -> Vec<String> {
+        let mut names: Vec<_> = std::fs::read_dir(directory)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().to_string())
+            .collect();
+        names.sort();
+        names
     }
 
     #[test]
-    fn install_replaces_only_a_binary_reporting_the_expected_version() {
+    fn install_replaces_both_binaries_only_when_both_report_the_expected_version() {
+        let directory = tempfile::tempdir().unwrap();
+        let dest = directory.path().join("eoka");
+        let mcp = directory.path().join("eoka-mcp");
+        std::fs::write(&dest, "old").unwrap();
+        std::fs::write(&mcp, "old").unwrap();
+
+        for (binaries, wrong) in [
+            (
+                [script("eoka-mcp", "9.9.9"), script("eoka", "1.2.3")],
+                "eoka-mcp 9.9.9",
+            ),
+            (
+                [script("eoka-mcp", "1.2.3"), script("eoka", "9.9.9")],
+                "eoka 9.9.9",
+            ),
+            (
+                [script("eoka", "1.2.3"), script("eoka", "1.2.3")],
+                "eoka 1.2.3",
+            ),
+        ] {
+            let error = install(&binaries, &dest, Version(1, 2, 3)).unwrap_err();
+            assert!(error.contains(&format!("reports '{wrong}'")), "{error}");
+            assert_eq!(std::fs::read(&dest).unwrap(), b"old");
+            assert_eq!(std::fs::read(&mcp).unwrap(), b"old");
+            assert_eq!(directory_names(directory.path()), ["eoka", "eoka-mcp"]);
+        }
+
+        install(&release("1.2.3"), &dest, Version(1, 2, 3)).unwrap();
+        assert_eq!(probe_version(&dest).unwrap(), "eoka 1.2.3");
+        assert_eq!(probe_version(&mcp).unwrap(), "eoka-mcp 1.2.3");
+        assert_eq!(
+            directory_names(directory.path()),
+            ["eoka", "eoka-mcp"],
+            "staging files must not be left behind"
+        );
+    }
+
+    #[test]
+    fn install_adds_eoka_mcp_beside_an_eoka_that_had_none() {
         let directory = tempfile::tempdir().unwrap();
         let dest = directory.path().join("eoka");
         std::fs::write(&dest, "old").unwrap();
-
-        let error = install(&script("9.9.9"), &dest, Version(1, 2, 3)).unwrap_err();
-        assert!(error.contains("reports 'eoka 9.9.9'"), "{error}");
-        assert_eq!(std::fs::read(&dest).unwrap(), b"old");
-
-        install(&script("1.2.3"), &dest, Version(1, 2, 3)).unwrap();
-        assert_eq!(std::fs::read(&dest).unwrap(), script("1.2.3"));
-        assert_eq!(probe_version(&dest).unwrap(), "eoka 1.2.3");
-        let names: Vec<_> = std::fs::read_dir(directory.path())
-            .unwrap()
-            .map(|entry| entry.unwrap().file_name())
-            .collect();
-        assert_eq!(names, ["eoka"], "staging file must not be left behind");
+        install(&release("1.2.3"), &dest, Version(1, 2, 3)).unwrap();
+        assert_eq!(
+            probe_version(&directory.path().join("eoka-mcp")).unwrap(),
+            "eoka-mcp 1.2.3"
+        );
     }
 
     #[test]

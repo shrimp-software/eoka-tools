@@ -10,7 +10,7 @@ on:
       - 'clients/node/package.json'
       - 'clients/node/package-lock.json'
       - '.github/workflows/qualify-node-release.yml'
-      - '.github/workflows/publish-node.yml'
+      - '.github/workflows/release.yml'
   workflow_dispatch:
     inputs:
       source_ref:

@@ -665,12 +665,11 @@ dependencies = [
 
 [[package]]
 name = "eoka-cli"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "clap",
  "eoka",
- "eoka-mcp",
  "eoka-protocol",
  "eoka-sdk",
  "eoka-server",
@@ -692,7 +691,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-email"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "imap",
  "mailparse",
@@ -706,7 +705,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-mcp"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "eoka-protocol",
@@ -722,7 +721,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-protocol"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "clap",
  "eoka",
@@ -735,7 +734,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-runner"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "clap",
  "eoka",
@@ -755,7 +754,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-sdk"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "eoka-protocol",
@@ -767,7 +766,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-server"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -798,7 +797,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-solvers"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "base64 0.23.1",
  "eoka",
@@ -817,7 +816,7 @@ dependencies = [
 
 [[package]]
 name = "eoka-tack"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "async-trait",
  "eoka-protocol",

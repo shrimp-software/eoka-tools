@@ -13,7 +13,7 @@ import (
 	"strings"
 )
 
-const serverReleaseVersion = "0.25.0"
+const serverReleaseVersion = "0.26.0"
 
 const defaultReleaseBaseURL = "https://github.com/shrimp-software/eoka-tools/releases/download"
 
@@ -43,7 +43,7 @@ func assetSuffixFor(goos, goarch string) (string, error) {
 }
 
 func releaseAssetURL(path string) string {
-	return fmt.Sprintf("%s/eoka-server-v%s/%s", releaseBaseURL, serverReleaseVersion, path)
+	return fmt.Sprintf("%s/v%s/%s", releaseBaseURL, serverReleaseVersion, path)
 }
 
 func fetchRelease(ctx context.Context, path string) ([]byte, error) {
@@ -89,7 +89,7 @@ func ensureServerBinary(ctx context.Context) (string, error) {
 		return dest, nil
 	}
 
-	checksums, err := fetchRelease(ctx, "checksums.txt")
+	checksums, err := fetchRelease(ctx, "SHA256SUMS")
 	if err != nil {
 		return "", err
 	}

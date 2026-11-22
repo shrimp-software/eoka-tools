@@ -13,8 +13,8 @@ path = "src/main.rs"
 
 [features]
 default = ["anti-captcha", "datadome", "tack"]
-anti-captcha = ["eoka-server/anti-captcha", "eoka-solvers/anti-captcha", "eoka-mcp/anti-captcha"]
-datadome = ["eoka-server/datadome", "eoka-mcp/datadome"]
+anti-captcha = ["eoka-server/anti-captcha", "eoka-solvers/anti-captcha"]
+datadome = ["eoka-server/datadome"]
 tack = ["dep:eoka-tack", "dep:tack-core", "dep:tack-runtime-quickjs"]
 
 [dependencies]
@@ -22,7 +22,6 @@ uuid = { version = "1", features = ["v4"] }
 eoka-protocol = { workspace = true, features = ["clap"] }
 eoka-server = { workspace = true }
 eoka-sdk = { workspace = true }
-eoka-mcp = { workspace = true }
 eoka-tack = { workspace = true, optional = true }
 eoka-solvers = { workspace = true }
 eoka = { workspace = true }

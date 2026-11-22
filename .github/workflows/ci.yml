@@ -76,6 +76,9 @@ jobs:
           for package in eoka-solvers eoka-server eoka-mcp eoka-cli; do
             cargo clippy --locked -p "$package" --all-targets --no-default-features -- -D warnings
           done
+      - name: CLI does not depend on eoka-mcp
+        if: env.RUST == 'true'
+        run: "! cargo tree -p eoka-cli -e normal --depth 1 | grep -q eoka-mcp"
       - name: Dependency policy
         if: env.RUST == 'true'
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1

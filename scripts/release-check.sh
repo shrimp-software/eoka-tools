@@ -60,7 +60,8 @@ cargo package --workspace --allow-dirty --no-verify
 
 cat <<MSG
 
-Release check passed. To release, run node scripts/bump-release.mjs X.Y.Z,
-merge it to main and approve the npm deployment. tack-rs ${tack_version}
+Release check passed. To release, run node scripts/bump-release.mjs X.Y.Z
+and merge it to main. That tags vX.Y.Z and starts release.yml; approve its
+npm deployment. tack-rs ${tack_version}
 and eoka ${eoka_version} must already be on crates.io.
 MSG

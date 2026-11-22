@@ -4,8 +4,9 @@ Feature notes for the `eoka` CLI. Run `eoka <command> --help` for every flag.
 
 ## Install, update and the agent skill
 
-Install the latest released CLI binary without a Rust toolchain (Linux and
-macOS). The script verifies the download against the release `SHA256SUMS`;
+Install the latest released `eoka` and `eoka-mcp` binaries without a Rust
+toolchain (Linux and macOS). The script verifies the release's
+`eoka-<target>.tar.gz` against its `SHA256SUMS`;
 set `EOKA_VERSION` to pin a release and `EOKA_INSTALL_DIR` to change the
 destination (default `~/.local/bin`):
 
@@ -15,7 +16,7 @@ curl -fsSL https://raw.githubusercontent.com/shrimp-software/eoka-tools/main/cra
 
 Update an installed CLI to the latest GitHub release (Linux and macOS, x86_64
 and aarch64). The download is verified against the release `SHA256SUMS` before
-the running binary is replaced. Installed copies of the agent skill are then
+`eoka-mcp` beside the running binary and then the running binary are replaced. Installed copies of the agent skill are then
 rewritten to match the installed binary:
 
 ```sh
