@@ -458,3 +458,42 @@ fn network_record_exports_local_fetch_to_har() {
     let _ = std::fs::remove_file(har_path);
     let _ = std::fs::remove_file(json_path);
 }
+
+#[test]
+fn eoka_mcp_answers_the_mcp_handshake_on_stdio() {
+    use std::process::Stdio;
+    let mut child = Command::new(eoka_bin())
+        .arg("mcp")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("failed to spawn eoka mcp");
+    let mut stdin = child.stdin.take().unwrap();
+    for message in [
+        serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"cli-e2e","version":"0"}}}),
+        serde_json::json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+        serde_json::json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}),
+    ] {
+        writeln!(stdin, "{message}").unwrap();
+    }
+    let mut reader = std::io::BufReader::new(child.stdout.take().unwrap());
+    let mut line = String::new();
+    let mut replies = Vec::new();
+    while replies.len() < 2 {
+        line.clear();
+        assert!(
+            std::io::BufRead::read_line(&mut reader, &mut line).unwrap() > 0,
+            "eoka mcp closed stdout"
+        );
+        replies.push(serde_json::from_str::<serde_json::Value>(&line).unwrap());
+    }
+    drop(stdin);
+    let _ = child.wait();
+    assert_eq!(
+        replies[0]["result"]["serverInfo"]["version"],
+        env!("CARGO_PKG_VERSION")
+    );
+    let tools = replies[1]["result"]["tools"].as_array().unwrap();
+    assert!(tools.iter().any(|tool| tool["name"] == "navigate"));
+}

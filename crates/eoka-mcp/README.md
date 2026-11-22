@@ -1,15 +1,19 @@
 # eoka-mcp
 
-Stdio MCP server for Eoka browser automation. The MCP binary supports MCP `2026-07-28` with stateless `server/discover` requests. Shared browser primitives and the Rust `Session` API live in `eoka-server`.
+Stdio MCP server for Eoka browser automation, run by the `eoka` CLI as `eoka mcp`. It supports MCP `2026-07-28` with stateless `server/discover` requests. Shared browser primitives and the Rust `Session` API live in `eoka-server`.
 
 Part of the [eoka-tools](https://github.com/shrimp-software/eoka-tools) workspace.
 
 ## MCP Server
 
+Install the CLI (prebuilt binaries for Linux and macOS, no Rust needed), then register it:
+
 ```sh
-cargo install eoka-mcp
-claude mcp add eoka -- eoka-mcp
+curl -fsSL https://raw.githubusercontent.com/shrimp-software/eoka-tools/main/crates/eoka-cli/scripts/install.sh | sh
+claude mcp add eoka -- eoka mcp
 ```
+
+This crate is the library behind `eoka mcp`; Rust programs can call `eoka_mcp::run_server()` to serve it themselves.
 
 Includes CAPTCHA tools. For AWS WAF, provide `website_key`, `iv`, and `context` from `window.gokuProps`; use the returned `token` as the `aws-waf-token` cookie and retain the returned `user_agent`.
 

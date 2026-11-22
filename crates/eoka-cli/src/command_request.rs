@@ -473,6 +473,7 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
         Command::Captcha {
             action: CaptchaAction::Solve(_),
         }
+        | Command::Mcp
         | Command::Sessions
         | Command::Status
         | Command::Doctor

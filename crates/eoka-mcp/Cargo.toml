@@ -11,10 +11,6 @@ documentation = "https://docs.rs/eoka-mcp"
 readme = "README.md"
 authors.workspace = true
 
-[[bin]]
-name = "eoka-mcp"
-path = "src/main.rs"
-
 [features]
 default = ["anti-captcha", "datadome"]
 anti-captcha = ["eoka-server/anti-captcha", "eoka-solvers/anti-captcha"]
