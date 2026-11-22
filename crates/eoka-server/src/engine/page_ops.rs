@@ -320,8 +320,9 @@ async fn wait(page: &Page, args: &WaitArgs) -> Result<Response, ServerError> {
         };
         return Ok(Response::ok_text(format!("\"{selector}\" is {outcome}")));
     }
-    if args.load.as_deref().is_some() {
-        page.wait_for_network_idle(500, timeout).await?;
+    if args.network_idle.is_some() || args.load.is_some() {
+        page.wait_for_network_idle(args.network_idle.unwrap_or(500), timeout)
+            .await?;
         return Ok(Response::ok_text("Network idle"));
     }
     Err(ServerError::invalid_params(

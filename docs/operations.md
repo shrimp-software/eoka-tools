@@ -58,7 +58,8 @@ names. MCP convenience actions require `operation_id`; MCP batches accept an
 array of complete action requests, wait sequentially, and stop at the first
 unverified result. Each record remains independently inspectable.
 MCP `click_intercept_nav` now returns an admitted operation and requires the
-same ID/expectation fields. Its page diagnostic captures only history
+same ID/expectation fields; it is `click` with `intercept_nav` set, which any
+client can send. Its page diagnostic captures only history
 push/replace calls; read `window.__eoka_nav` after waiting. JavaScript cannot
 reliably replace Chrome's `location` navigation methods.
 

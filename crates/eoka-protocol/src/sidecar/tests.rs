@@ -7,6 +7,9 @@ fn capture_validation_preserves_defaults_and_rejects_conflicts() {
     let args = |value: Value| -> crate::ScreenshotArgs { serde_json::from_value(value).unwrap() };
     assert!(validate_params("screenshot", &json!({"pageId":"p","inline":true})).is_ok());
     assert!(args(json!({})).validate().is_ok());
+    assert!(args(json!({"inline":true,"annotate":true}))
+        .validate()
+        .is_ok());
     for format in ["jpeg", "webp"] {
         assert!(args(
             json!({"format":format,"quality":0,"clip":{"x":0,"y":1,"width":1.5,"height":2}})
@@ -21,7 +24,6 @@ fn capture_validation_preserves_defaults_and_rejects_conflicts() {
         json!({"clip":{"x":0,"y":0,"width":0,"height":1}}),
         json!({"clip":{"x":0,"y":0,"width":1,"height":1},"full_page":true}),
         json!({"inline":true,"output":"/tmp/capture.png"}),
-        json!({"inline":true,"annotate":true}),
         json!({"annotate":true,"full_page":true}),
     ] {
         assert_eq!(

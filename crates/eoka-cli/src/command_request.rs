@@ -99,8 +99,8 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
                 .as_ref()
                 .map(|path| path.to_string_lossy().to_string()),
         }),
-        Command::Back => Request::Back,
-        Command::Forward => Request::Forward,
+        Command::Back => Request::Back(Default::default()),
+        Command::Forward => Request::Forward(Default::default()),
         Command::Reload => Request::Reload,
         Command::Snapshot { interactive, all } => {
             Request::Snapshot(SnapshotArgs { interactive, all })
@@ -211,9 +211,12 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
             frame_id: frame,
             timeout_ms,
         }),
-        Command::Click { target } => Request::Click(TargetArgs {
-            operation: Default::default(),
-            target,
+        Command::Click { target } => Request::Click(eoka_protocol::ClickArgs {
+            element: TargetArgs {
+                operation: Default::default(),
+                target,
+            },
+            intercept_nav: None,
         }),
         Command::DoubleClick { target } => Request::DblClick(TargetArgs {
             operation: Default::default(),
@@ -407,6 +410,7 @@ pub(crate) fn command_to_request(cmd: &Command, agent_mode: bool) -> Request {
                 "hidden" => eoka_protocol::WaitSelectorState::Hidden,
                 _ => eoka_protocol::WaitSelectorState::Visible,
             }),
+            network_idle: None,
             timeout,
         }),
         Command::SpaInfo => Request::SpaInfo,

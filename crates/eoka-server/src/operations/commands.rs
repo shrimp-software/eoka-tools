@@ -87,6 +87,7 @@ pub fn is_action(cmd: &str) -> bool {
             | "back"
             | "forward"
             | "reload"
+            | "history_go"
             | "action_perform"
     )
 }
@@ -128,6 +129,12 @@ pub fn action(cmd: &str, args: &Value, target: Option<LocatorSpec>) -> Result<Ac
         "back" => Action::Back,
         "forward" => Action::Forward,
         "reload" => Action::Reload,
+        "history_go" => Action::History {
+            delta: args["delta"]
+                .as_i64()
+                .and_then(|delta| i32::try_from(delta).ok())
+                .ok_or_else(|| anyhow!("Missing delta"))?,
+        },
         _ => return Err(anyhow!("Unsupported action")),
     })
 }
@@ -189,6 +196,13 @@ impl super::OperationManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn history_go_is_a_history_action_by_delta() {
+        let history = action("history_go", &serde_json::json!({"delta": -2}), None).unwrap();
+        assert!(matches!(history, Action::History { delta: -2 }));
+        assert!(action("history_go", &serde_json::json!({}), None).is_err());
+    }
 
     #[test]
     fn failed_admission_preserves_recovery_id_and_uncertainty() {

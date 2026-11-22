@@ -23,7 +23,9 @@ pub use context::*;
 pub use datadome::*;
 pub use download::*;
 pub use launch_spec::{auto_connect, resolve_cdp_spec, resolve_proxy_spec, LaunchSpec};
-pub use metadata::{OperationCapability, OperationExposure, ToolManifestEntry};
+pub use metadata::{
+    OperationCapability, OperationExposure, OperationNeeds, OperationReply, ToolManifestEntry,
+};
 pub use operations::*;
 pub use response::{ErrorDetail, Response, ResponseMeta};
 pub use results::*;

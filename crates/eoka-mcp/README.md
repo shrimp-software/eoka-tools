@@ -27,6 +27,14 @@ selector and expectation waits), `emulate`, `frames`, the `network_*`,
 `intercept_*`, `js_*` and `wasm_*` families, and more. A new catalog operation
 appears here without a server change.
 
+Every tool takes its description, input schema and annotations from the catalog.
+A few established names are aliases over a catalog operation: `navigate` is
+`open`, `extract` is `eval`, `batch` is `actions.batch`, the
+`local_storage_*` and `session_storage_*` tools fix `session_storage`, the
+`wait_*` tools show only their own `wait` fields, `screenshot` is an annotated
+inline capture returned as an image, and `click_intercept_nav` is `click` with
+`intercept_nav`.
+
 Operations marked opt-in in the catalog are listed only when
 `EOKA_MCP_ALL_TOOLS=1` is set. That set includes recording, shadow-root clicks,
 and the operations that reach outside the page: `clone_from` (copies cookies and

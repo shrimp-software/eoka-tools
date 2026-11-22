@@ -254,7 +254,7 @@ async fn intercepted_click_keeps_durable_identity_and_does_not_replay() {
             "click_intercept_nav",
             json!({
                 "target": "css:#save",
-                "allow_nav": false,
+                "intercept_nav": "block",
                 "operation_id": id,
                 "expect": {"kind": "text", "target": {"query": {"kind": "css", "selector": "#status"}}, "value": "Saved"},
                 "timeout_ms": 3000
@@ -554,7 +554,7 @@ async fn operation_tools_answer_while_another_tool_holds_the_browser() {
     let waiting = answer(
         &client,
         "wait_for_text",
-        json!({"text": "never shown", "timeout_ms": 8000}),
+        json!({"text": "never shown", "timeout": 8000}),
     );
     let asked = async {
         tokio::time::sleep(Duration::from_millis(500)).await;

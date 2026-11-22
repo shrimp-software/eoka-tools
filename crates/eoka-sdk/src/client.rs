@@ -90,8 +90,8 @@ impl EokaClient {
         fn perform(request: eoka_protocol::ActionPerformArgs) => ActionPerform;
         fn agent_step(args: eoka_protocol::AgentStepArgs) => AgentStep;
         fn open(args: OpenArgs) => Open;
-        fn back() => Back;
-        fn forward() => Forward;
+        fn back(args: eoka_protocol::ActionSettings) => Back;
+        fn forward(args: eoka_protocol::ActionSettings) => Forward;
         fn reload() => Reload;
         fn snapshot(args: SnapshotArgs) => Snapshot;
         fn observe(args: ObserveArgs) => Observe;
@@ -102,7 +102,7 @@ impl EokaClient {
         fn frame_eval(args: FrameEvalArgs) => FrameEval;
         fn text() => Text;
         fn find(args: TextArgs) => Find;
-        fn click(args: TargetArgs) => Click;
+        fn click(args: eoka_protocol::ClickArgs) => Click;
         fn double_click(args: TargetArgs) => DblClick;
         fn fill(args: FillArgs) => Fill;
         fn select(args: SelectArgs) => Select;
@@ -337,8 +337,9 @@ fn reply_budget(request: &Request, command_limit_ms: Option<u64>) -> Duration {
         | Request::Select(_)
         | Request::Hover(_)
         | Request::Key(_)
-        | Request::Back
-        | Request::Forward
+        | Request::Back(_)
+        | Request::Forward(_)
+        | Request::HistoryGo(_)
         | Request::Reload => Some(number(&args["timeout_ms"]).unwrap_or(30_000)),
         Request::DownloadStart(_) => number(&args["start_timeout_ms"]).or(Some(30_000)),
         _ => None,

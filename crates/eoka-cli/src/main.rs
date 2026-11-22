@@ -318,16 +318,17 @@ async fn main() {
                 args.action_timeout_ms = timeout;
             }
         }
-        eoka_protocol::Request::Click(args)
-        | eoka_protocol::Request::DblClick(args)
-        | eoka_protocol::Request::Hover(args) => args.operation = settings,
+        eoka_protocol::Request::Click(args) => args.element.operation = settings,
+        eoka_protocol::Request::DblClick(args) | eoka_protocol::Request::Hover(args) => {
+            args.operation = settings
+        }
         eoka_protocol::Request::Fill(args) => args.operation = settings,
         eoka_protocol::Request::Open(args) => args.operation = settings,
         eoka_protocol::Request::Wait(args) => args.expect = settings.expect,
         eoka_protocol::Request::Select(args) => args.operation = settings,
         eoka_protocol::Request::Key(args) => args.operation = settings,
-        eoka_protocol::Request::Back
-        | eoka_protocol::Request::Forward
+        eoka_protocol::Request::Back(_)
+        | eoka_protocol::Request::Forward(_)
         | eoka_protocol::Request::Reload => {
             request = eoka_protocol::Request::ActionCommand(eoka_protocol::ActionCommandArgs {
                 operation_id: settings

@@ -7,9 +7,12 @@ async fn a_request_and_its_reply_round_trip_as_sidecar_frames() {
     let (client_read, mut client_write) = tokio::io::split(client);
     let mut server_read = tokio::io::BufReader::new(server_read);
     let mut client_read = tokio::io::BufReader::new(client_read);
-    let click = Request::Click(TargetArgs {
-        operation: Default::default(),
-        target: "@e1".into(),
+    let click = Request::Click(ClickArgs {
+        element: TargetArgs {
+            operation: Default::default(),
+            target: "@e1".into(),
+        },
+        intercept_nav: None,
     });
     wire::write_frame(&mut client_write, &wire::request(&click))
         .await
@@ -337,6 +340,8 @@ impl OperationSpec {
             }),
             "captcha_detect" => serde_json::json!({}),
             "captcha_inject" => serde_json::json!({"token":"token"}),
+            "action_batch" => serde_json::json!({"actions":[]}),
+            "history_go" => serde_json::json!({"delta":-1}),
             _ => serde_json::json!({}),
         }
     }

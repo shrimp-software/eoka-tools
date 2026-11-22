@@ -18,6 +18,21 @@ impl OperationExposure {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OperationNeeds {
+    Nothing,
+    Browser,
+    Page,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OperationReply {
+    Unwrapped,
+    Envelope,
+    Action,
+    Image,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OperationCapability {
     Navigation,
     Observation,

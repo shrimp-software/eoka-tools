@@ -486,9 +486,11 @@ fn daemon_backed_cli_commands_map_to_cataloged_protocol_operations() {
         .collect();
 
     let not_cli_commands = [
-        "session_hello",  // sent by every client connection, not a command
-        "action_command", // envelope `main` wraps around back/forward/reload
-        "shutdown",       // `eoka kill` signals the daemon instead
+        "session_hello",
+        "action_command",
+        "action_batch",
+        "history_go",
+        "shutdown",
     ];
     let unreachable: Vec<&str> = eoka_protocol::all_operations()
         .iter()
