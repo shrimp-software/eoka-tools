@@ -1,6 +1,6 @@
 # eoka-mcp
 
-Stdio MCP server for Eoka browser automation, run by the `eoka` CLI as `eoka mcp`. It supports MCP `2026-07-28` with stateless `server/discover` requests. Shared browser primitives and the Rust `Session` API live in `eoka-server`.
+Stdio MCP server for Eoka browser automation, run by the `eoka` CLI as `eoka mcp`. It supports MCP `2026-07-28` with stateless `server/discover` requests. Shared browser primitives live in `eoka-server`.
 
 Part of the [eoka-tools](https://github.com/shrimp-software/eoka-tools) workspace.
 

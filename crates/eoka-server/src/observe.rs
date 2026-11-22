@@ -31,39 +31,28 @@ pub fn parse_raw_elements(json_str: &str) -> std::result::Result<Vec<Interactive
     Ok(raw
         .into_iter()
         .enumerate()
-        .map(|(i, r)| {
-            let fingerprint = InteractiveElement::compute_fingerprint(
-                &r.tag,
-                &r.text,
-                r.role.as_deref(),
-                r.input_type.as_deref(),
-                r.placeholder.as_deref(),
-                &r.selector,
-            );
-            InteractiveElement {
-                index: i,
-                tag: r.tag,
-                role: r.role,
-                text: r.text,
-                placeholder: r.placeholder,
-                input_type: r.input_type,
-                selector: r.selector,
-                checked: r.checked,
-                disabled: r.disabled,
-                visible: true,
-                value: if r.value.is_empty() {
-                    None
-                } else {
-                    Some(r.value)
-                },
-                bbox: crate::eoka::BoundingBox {
-                    x: r.x,
-                    y: r.y,
-                    width: r.width,
-                    height: r.height,
-                },
-                fingerprint,
-            }
+        .map(|(i, r)| InteractiveElement {
+            index: i,
+            tag: r.tag,
+            role: r.role,
+            text: r.text,
+            placeholder: r.placeholder,
+            input_type: r.input_type,
+            selector: r.selector,
+            checked: r.checked,
+            disabled: r.disabled,
+            visible: true,
+            value: if r.value.is_empty() {
+                None
+            } else {
+                Some(r.value)
+            },
+            bbox: crate::eoka::BoundingBox {
+                x: r.x,
+                y: r.y,
+                width: r.width,
+                height: r.height,
+            },
         })
         .collect())
 }
@@ -233,27 +222,5 @@ mod tests {
     fn invalid_json() {
         assert!(parse_raw_elements("not json").is_err());
         assert!(parse_raw_elements("{\"bad\": true}").is_err());
-    }
-
-    #[test]
-    fn fingerprint_consistency() {
-        let json = r#"[{
-            "tag": "button",
-            "role": null,
-            "text": "Submit",
-            "placeholder": null,
-            "input_type": null,
-            "selector": "button.primary",
-            "checked": false,
-            "value": "",
-            "x": 100,
-            "y": 200,
-            "width": 80,
-            "height": 30
-        }]"#;
-        let e1 = parse_raw_elements(json).unwrap();
-        let e2 = parse_raw_elements(json).unwrap();
-        assert_eq!(e1[0].fingerprint, e2[0].fingerprint);
-        assert_ne!(e1[0].fingerprint, 0);
     }
 }

@@ -1,6 +1,3 @@
-use crate::eoka::{Page, Result};
-use serde::Deserialize;
-
 #[derive(Debug, Clone)]
 pub enum Target {
     Index(usize),
@@ -63,49 +60,6 @@ impl LivePattern {
         }
         LivePattern::Text(s.into())
     }
-
-    fn as_js_args(&self) -> (&'static str, &str) {
-        match self {
-            LivePattern::Text(v) => ("text", v),
-            LivePattern::Placeholder(v) => ("placeholder", v),
-            LivePattern::Role(v) => ("role", v),
-            LivePattern::Css(v) => ("css", v),
-            LivePattern::Id(v) => ("id", v),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, Clone, Default)]
-pub struct BBox {
-    pub x: f64,
-    pub y: f64,
-    pub width: f64,
-    pub height: f64,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct Resolved {
-    pub selector: String,
-    pub tag: String,
-    pub text: String,
-    pub found: bool,
-    #[serde(default)]
-    pub error: Option<String>,
-    #[serde(default)]
-    pub bbox: BBox,
-}
-
-const RESOLVE_JS: &str = include_str!("js/resolve.js");
-
-pub async fn resolve(page: &Page, pattern: &LivePattern) -> Result<Resolved> {
-    let (t, v) = pattern.as_js_args();
-    let js = format!(
-        "{}({},{})",
-        RESOLVE_JS,
-        serde_json::to_string(t).unwrap(),
-        serde_json::to_string(v).unwrap()
-    );
-    page.evaluate(&js).await
 }
 
 #[cfg(test)]
@@ -200,26 +154,5 @@ mod tests {
         } else {
             panic!("Expected Placeholder");
         }
-    }
-
-    #[test]
-    fn as_js_args() {
-        assert_eq!(
-            LivePattern::Text("foo".into()).as_js_args(),
-            ("text", "foo")
-        );
-        assert_eq!(
-            LivePattern::Placeholder("bar".into()).as_js_args(),
-            ("placeholder", "bar")
-        );
-        assert_eq!(
-            LivePattern::Css("div.x".into()).as_js_args(),
-            ("css", "div.x")
-        );
-        assert_eq!(LivePattern::Id("myid".into()).as_js_args(), ("id", "myid"));
-        assert_eq!(
-            LivePattern::Role("button".into()).as_js_args(),
-            ("role", "button")
-        );
     }
 }
