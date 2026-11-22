@@ -1,6 +1,5 @@
 use crate::eoka::{Page, Result};
 use serde::Deserialize;
-use serde_json::{json, Value};
 use std::fmt::Write;
 
 use crate::InteractiveElement;
@@ -94,7 +93,7 @@ pub async fn inspect(
     page: &Page,
     viewport_only: bool,
     args: &eoka_protocol::ObserveArgs,
-) -> std::result::Result<(Vec<InteractiveElement>, Value), String> {
+) -> std::result::Result<(Vec<InteractiveElement>, eoka_protocol::ObserveResult), String> {
     validate_filter(args.filter.as_deref())?;
     let elements = observe(page, viewport_only)
         .await
@@ -126,20 +125,35 @@ pub async fn inspect(
     for el in selected {
         let _ = writeln!(text, "{el}");
         if args.structured {
-            objects.push(json!({
-                "index": el.index, "selector": el.selector, "text": el.text,
-                "role": el.role, "tag": el.tag, "visible": el.visible,
-                "disabled": el.disabled, "checked": el.checked,
-                "placeholder": el.placeholder, "input_type": el.input_type,
-                "value": el.value,
-                "bbox": {"x":el.bbox.x,"y":el.bbox.y,"width":el.bbox.width,"height":el.bbox.height}
-            }));
+            objects.push(eoka_protocol::ObservedElement {
+                index: el.index,
+                selector: el.selector.clone(),
+                text: el.text.clone(),
+                role: el.role.clone(),
+                tag: el.tag.clone(),
+                visible: el.visible,
+                disabled: el.disabled,
+                checked: el.checked,
+                placeholder: el.placeholder.clone(),
+                input_type: el.input_type.clone(),
+                value: el.value.clone(),
+                bbox: eoka_protocol::ElementBox {
+                    x: el.bbox.x,
+                    y: el.bbox.y,
+                    width: el.bbox.width,
+                    height: el.bbox.height,
+                },
+            });
         }
     }
     let data = if args.structured {
-        json!({"text":text,"elements":objects,"page":context})
+        eoka_protocol::ObserveResult::Structured(eoka_protocol::StructuredObservation {
+            text,
+            elements: objects,
+            page: context,
+        })
     } else {
-        Value::String(text)
+        eoka_protocol::ObserveResult::Text(text)
     };
     Ok((elements, data))
 }

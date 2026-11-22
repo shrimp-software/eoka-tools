@@ -537,8 +537,85 @@ async fn every_mcp_tool_answers() {
     let _ = client.cancel().await;
     served.abort();
     let _ = std::fs::remove_dir_all(&scratch);
+    let decoded = super::decoded::take();
+    let drift: Vec<String> = decoded
+        .iter()
+        .filter_map(|(cmd, outcome)| {
+            outcome
+                .as_ref()
+                .err()
+                .map(|error| format!("{cmd}: {error}"))
+        })
+        .collect();
+    assert!(
+        drift.is_empty(),
+        "engine replies drifted from their declared result types:\n{}",
+        drift.join("\n")
+    );
+    let decoded: std::collections::BTreeSet<&str> =
+        decoded.iter().map(|(cmd, _)| cmd.as_str()).collect();
+    let undecoded: Vec<&str> = eoka_protocol::all_operations()
+        .iter()
+        .map(|operation| operation.cmd)
+        .filter(|cmd| !decoded.contains(cmd))
+        .collect();
+    assert_eq!(
+        undecoded, UNDECODED_ENGINE_RESULTS,
+        "the set of operations whose engine replies this sweep decodes changed"
+    );
     assert_locked("replies.jsonl", &transcript);
 }
+
+const UNDECODED_ENGINE_RESULTS: &[&str] = &[
+    "session_hello",
+    "back",
+    "forward",
+    "history_go",
+    "reload",
+    "emulate",
+    "get_attribute",
+    "click_shadow",
+    "recording_start",
+    "recording_get",
+    "recording_stop",
+    "recording_cancel",
+    "click",
+    "dblclick",
+    "fill",
+    "select",
+    "hover",
+    "key",
+    "frames",
+    "frame_eval",
+    "headers",
+    "tab_attach",
+    "clone_from",
+    "fake_camera",
+    "wasm_info",
+    "wasm_read",
+    "wasm_write",
+    "wasm_find",
+    "intercept_add",
+    "intercept_list",
+    "intercept_remove",
+    "intercept_log",
+    "js_mode",
+    "js_allow",
+    "js_block",
+    "js_remove",
+    "js_list",
+    "network_record_start",
+    "network_record_stop",
+    "network_record_status",
+    "network_log",
+    "network_show",
+    "network_wait",
+    "network_export",
+    "network_clear",
+    "shutdown",
+    "captcha_datadome",
+    "captcha_turnstile",
+];
 
 #[tokio::test]
 #[ignore = "requires Chrome; an operation the engine admitted is cancelled from an MCP tool"]

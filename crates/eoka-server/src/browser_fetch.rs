@@ -43,7 +43,7 @@ pub async fn fetch(page: &Page, args: FetchArgs) -> Response {
             return Response::ok_text(result.body);
         }
     }
-    let value = match serde_json::to_value(result) {
+    let value = match serde_json::to_value(eoka_protocol::FetchedResponse::from(result)) {
         Ok(value) => value,
         Err(error) => return Response::err(error.to_string()),
     };

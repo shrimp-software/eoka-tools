@@ -4,17 +4,20 @@ impl Engine {
     pub(super) async fn cmd_cookies(&mut self) -> Result<Response, EngineError> {
         let tab = self.require_tab()?;
         let cookies = tab.page.cookies().await?;
-        let json: Vec<Value> = cookies
+        let cookies: Vec<eoka_protocol::Cookie> = cookies
             .into_iter()
-            .map(|c| {
-                json!({
-                    "name": c.name, "value": c.value, "domain": c.domain,
-                    "path": c.path, "httpOnly": c.http_only, "secure": c.secure,
-                    "sameSite": c.same_site, "expires": c.expires,
-                })
+            .map(|c| eoka_protocol::Cookie {
+                name: c.name,
+                value: c.value,
+                domain: c.domain,
+                path: c.path,
+                http_only: c.http_only,
+                secure: c.secure,
+                same_site: c.same_site,
+                expires: c.expires,
             })
             .collect();
-        Ok(Response::ok(Value::Array(json)))
+        Ok(typed(cookies))
     }
 
     pub(super) async fn cmd_set_cookie(

@@ -67,6 +67,22 @@ pub struct OperationRecord {
     pub error: Option<crate::ErrorDetail>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionResult {
+    #[serde(flatten)]
+    pub record: OperationRecord,
+    pub status: OperationStatus,
+}
+
+impl From<OperationRecord> for ActionResult {
+    fn from(record: OperationRecord) -> Self {
+        Self {
+            status: record.status(),
+            record,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum OperationStatus {

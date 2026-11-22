@@ -9,6 +9,7 @@ mod datadome;
 mod download;
 pub mod launch_spec;
 mod metadata;
+mod network;
 mod operations;
 mod response;
 mod results;
@@ -26,6 +27,7 @@ pub use launch_spec::{auto_connect, resolve_cdp_spec, resolve_proxy_spec, Launch
 pub use metadata::{
     OperationCapability, OperationExposure, OperationNeeds, OperationReply, ToolManifestEntry,
 };
+pub use network::*;
 pub use operations::*;
 pub use response::{ErrorDetail, Response, ResponseMeta};
 pub use results::*;

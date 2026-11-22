@@ -210,11 +210,11 @@ daemon. The schema bundle lists them under `catalogMethods`.
 
 - Params are the operation's catalog input plus a required string `pageId`.
   Catalog fields are snake_case. An unknown field is `InvalidParams`, not ignored.
-- The result is the operation's `data` value. Operations the SDKs read from
-  (`text`, `content`, `info`, `get_text`, `get_attribute`, `exists`, `frames`,
-  `frame_eval`, `click_shadow`, `wait`, `captcha.turnstile`, `mouse.*`, `key.*`,
-  `release_all_inputs`) have typed results in the schema bundle; the rest are
-  untyped JSON.
+- The result is the operation's `data` value. Every operation declares its result
+  type in the schema bundle. Only `eval` is untyped, because its result is the
+  value the page's JavaScript returned. Some results take more than one shape:
+  `emulate`, `observe`, `scroll`, `screenshot`, `storage` and `fetch` are
+  unions, and action results are the operation record plus its `status`.
 - Page reads, waits, held input, `click_shadow` and `captcha.turnstile` run on
   their page alone: a slow request on one page never delays them on another.
 - Failures return an `Operation` error carrying the catalog `ErrorDetail`.

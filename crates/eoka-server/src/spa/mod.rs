@@ -18,6 +18,19 @@ pub enum RouterType {
     Unknown,
 }
 
+impl From<RouterType> for eoka_protocol::SpaRouter {
+    fn from(router: RouterType) -> Self {
+        match router {
+            RouterType::ReactRouter => Self::ReactRouter,
+            RouterType::NextJs => Self::NextJs,
+            RouterType::VueRouter => Self::VueRouter,
+            RouterType::AngularRouter => Self::AngularRouter,
+            RouterType::HistoryApi => Self::HistoryApi,
+            RouterType::Unknown => Self::Unknown,
+        }
+    }
+}
+
 impl std::fmt::Display for RouterType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

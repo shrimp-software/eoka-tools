@@ -66,33 +66,25 @@ impl Engine {
         if clear {
             let _ = recorder.clear().await?;
         }
-        let status = recorder.start(&session, config).await?;
-        Ok(Response::ok(status))
+        Ok(typed(recorder.start(&session, config).await?))
     }
 
     pub(super) async fn cmd_network_record_stop(&mut self) -> Result<Response, EngineError> {
         let Some(recorder) = self.network.clone() else {
-            return Ok(Response::ok(json!({ "active": false })));
+            return Ok(typed(self.network_idle()));
         };
         let session = self
             .state
             .as_ref()
             .and_then(|state| state.current_tab())
             .map(|tab| tab.page.session().clone());
-        Ok(Response::ok(recorder.stop(session).await?))
+        Ok(typed(recorder.stop(session).await?))
     }
 
     pub(super) async fn cmd_network_record_status(&mut self) -> Result<Response, EngineError> {
         match self.network.as_ref() {
-            Some(recorder) => Ok(Response::ok(recorder.status().await)),
-            None => Ok(Response::ok(json!({
-                "meta": self.network_empty_meta(),
-                "status": {
-                    "active": false,
-                    "entry_count": 0,
-                    "in_flight": 0,
-                },
-            }))),
+            Some(recorder) => Ok(typed(recorder.status().await)),
+            None => Ok(typed(self.network_idle())),
         }
     }
 
@@ -100,21 +92,28 @@ impl Engine {
         &mut self,
         args: &NetworkLogArgs,
     ) -> Result<Response, EngineError> {
-        let Some(recorder) = self.network.as_ref() else {
-            return Ok(Response::ok(json!({
-                "meta": self.network_empty_meta(),
-                "entries": [],
-                "count": 0,
-                "filters": args,
-            })));
-        };
         let limit = args.limit.unwrap_or(100).min(1000);
+        let Some(recorder) = self.network.as_ref() else {
+            return Ok(typed(eoka_protocol::NetworkLog {
+                meta: self.network_empty_meta(),
+                count: 0,
+                entries: Vec::new(),
+                filters: eoka_protocol::NetworkLogFilters {
+                    limit,
+                    pattern: args.pattern.clone(),
+                    method: args.method.clone(),
+                    status: args.status,
+                    since: args.since,
+                    compact: args.compact,
+                },
+            }));
+        };
         let pattern = args.pattern.as_deref();
         let method = args.method.as_deref();
         let status = args.status;
         let since = args.since;
         let compact = args.compact;
-        Ok(Response::ok(
+        Ok(typed(
             recorder
                 .log(limit, pattern, method, status, since, compact)
                 .await,
@@ -137,7 +136,7 @@ impl Engine {
         recorder
             .show(id, body, max_body)
             .await
-            .map(Response::ok)
+            .map(typed)
             .ok_or_else(|| format!("Network entry #{} not found", id).into())
     }
 
@@ -151,7 +150,7 @@ impl Engine {
         let Some(recorder) = self.network.as_ref() else {
             return Err("No network recorder has been started".into());
         };
-        Ok(Response::ok(
+        Ok(typed(
             recorder
                 .export(std::path::Path::new(path), format, settle_ms)
                 .await?,
@@ -174,7 +173,7 @@ impl Engine {
         recorder
             .wait(pattern, method, status, since, include_existing, timeout)
             .await
-            .map(Response::ok)
+            .map(typed)
             .ok_or_else(|| {
                 format!("Timed out waiting {}ms for matching network entry", timeout).into()
             })
@@ -182,30 +181,37 @@ impl Engine {
 
     pub(super) async fn cmd_network_clear(&mut self) -> Result<Response, EngineError> {
         match self.network.as_ref() {
-            Some(recorder) => Ok(Response::ok(recorder.clear().await?)),
-            None => Ok(Response::ok(json!({
-                "meta": self.network_empty_meta(),
-                "cleared": true,
-            }))),
+            Some(recorder) => Ok(typed(recorder.clear().await?)),
+            None => Ok(typed(eoka_protocol::NetworkCleared {
+                cleared: true,
+                meta: self.network_empty_meta(),
+            })),
         }
     }
 
-    pub(super) fn network_empty_meta(&self) -> Value {
-        json!({
-            "namespace": format!("session:{}", self.session_name),
-            "active": false,
-            "entry_count": 0,
-            "in_flight": 0,
-            "last_id": 0,
-            "next_since": 0,
-            "body_pending": 0,
-            "body_failed": 0,
-            "warnings": [],
-            "suggested_commands": [
-                "eoka network record start",
-                "eoka network log --since 0 --compact",
+    fn network_idle(&self) -> eoka_protocol::NetworkRecording {
+        eoka_protocol::NetworkRecording {
+            meta: self.network_empty_meta(),
+            status: network::idle_status(),
+        }
+    }
+
+    pub(super) fn network_empty_meta(&self) -> eoka_protocol::NetworkMeta {
+        eoka_protocol::NetworkMeta {
+            namespace: format!("session:{}", self.session_name),
+            active: false,
+            entry_count: 0,
+            in_flight: 0,
+            last_id: 0,
+            next_since: 0,
+            body_pending: 0,
+            body_failed: 0,
+            warnings: Vec::new(),
+            suggested_commands: vec![
+                "eoka network record start".into(),
+                "eoka network log --since 0 --compact".into(),
             ],
-        })
+        }
     }
 
     pub(super) async fn cmd_intercept_add(
@@ -230,7 +236,7 @@ impl Engine {
 
     pub(super) async fn cmd_intercept_list(&mut self) -> Result<Response, EngineError> {
         self.drain_fetch_events().await;
-        Ok(Response::ok(self.intercept.list_json()))
+        Ok(typed(self.intercept.list()))
     }
 
     pub(super) async fn cmd_intercept_remove(
@@ -280,10 +286,10 @@ impl Engine {
                 .await;
         }
         let clear = args.clear;
-        let result = self.intercept.log_json();
+        let result = self.intercept.log();
         if clear {
             self.intercept.clear_log();
         }
-        Ok(Response::ok(result))
+        Ok(typed(result))
     }
 }

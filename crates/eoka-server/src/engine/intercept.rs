@@ -1,5 +1,6 @@
 use std::{collections::VecDeque, path::PathBuf};
 
+use eoka_protocol::{InterceptLogRecord, InterceptRuleSummary};
 use serde_json::{json, Value};
 
 use super::network::url_matches;
@@ -151,42 +152,40 @@ impl InterceptState {
         }
     }
 
-    pub fn list_json(&self) -> Value {
-        let rules: Vec<Value> = self
-            .rules
+    pub fn list(&self) -> Vec<InterceptRuleSummary> {
+        self.rules
             .iter()
-            .map(|r| {
-                json!({
-                    "id": r.id,
-                    "pattern": r.url_pattern,
-                    "capture": r.capture_path.as_ref().map(|p| p.to_string_lossy().to_string()),
-                    "respond": r.respond_path.as_ref().map(|p| p.to_string_lossy().to_string()),
-                    "status": r.respond_status,
-                })
+            .map(|r| InterceptRuleSummary {
+                id: r.id,
+                pattern: r.url_pattern.clone(),
+                capture: r
+                    .capture_path
+                    .as_ref()
+                    .map(|p| p.to_string_lossy().to_string()),
+                respond: r
+                    .respond_path
+                    .as_ref()
+                    .map(|p| p.to_string_lossy().to_string()),
+                status: r.respond_status,
             })
-            .collect();
-        Value::Array(rules)
+            .collect()
     }
 
-    pub fn log_json(&self) -> Value {
-        let entries: Vec<Value> = self
-            .log
+    pub fn log(&self) -> Vec<InterceptLogRecord> {
+        self.log
             .entries
             .iter()
-            .map(|e| {
-                json!({
-                    "rule_id": e.rule_id,
-                    "url": e.url,
-                    "method": e.method,
-                    "has_body": e.has_body,
-                    "action": e.action,
-                    "session_id": e.session_id,
-                    "network_id": e.network_id,
-                    "network_entry_id": e.network_entry_id,
-                })
+            .map(|e| InterceptLogRecord {
+                rule_id: e.rule_id,
+                url: e.url.clone(),
+                method: e.method.clone(),
+                has_body: e.has_body,
+                action: e.action.clone(),
+                session_id: e.session_id.clone(),
+                network_id: e.network_id.clone(),
+                network_entry_id: e.network_entry_id,
             })
-            .collect();
-        Value::Array(entries)
+            .collect()
     }
 }
 
@@ -216,15 +215,12 @@ mod tests {
             state.add_log(entry.clone());
             state.add_log(entry);
         }
-        let logs = state.log_json();
-        assert_eq!(logs.as_array().unwrap().len(), MAX_LOG_ENTRIES);
-        assert_eq!(logs[0]["rule_id"], MAX_LOG_ENTRIES * 5 / 2);
-        assert_eq!(
-            logs[MAX_LOG_ENTRIES - 1]["rule_id"],
-            MAX_LOG_ENTRIES * 3 - 1
-        );
+        let logs = state.log();
+        assert_eq!(logs.len(), MAX_LOG_ENTRIES);
+        assert_eq!(logs[0].rule_id, MAX_LOG_ENTRIES * 5 / 2);
+        assert_eq!(logs[MAX_LOG_ENTRIES - 1].rule_id, MAX_LOG_ENTRIES * 3 - 1);
         state.clear_log();
-        assert_eq!(state.log_json(), json!([]));
+        assert!(state.log().is_empty());
     }
 
     #[tokio::test]
@@ -249,7 +245,7 @@ mod tests {
                 std::future::ready(Some(42))
             })
             .await;
-        assert_eq!(state.log_json()[0]["network_entry_id"], 42);
+        assert_eq!(state.log()[0].network_entry_id, Some(42));
         state
             .resolve_network_links(|_, _, _, _| async {
                 panic!("already resolved entries must not be queried again");

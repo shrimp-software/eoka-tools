@@ -1,5 +1,4 @@
-use eoka_protocol::{DomainArgs, ModeArgs};
-use serde_json::{json, Value};
+use eoka_protocol::{DomainArgs, ModeArgs, ScriptMode, ScriptPolicy};
 
 use super::Engine;
 use super::EngineError;
@@ -71,15 +70,15 @@ impl ScriptPolicyState {
         self.allow.len() + self.block.len() < before
     }
 
-    pub fn status_json(&self) -> Value {
-        json!({
-            "mode": match self.mode {
-                ScriptPolicyMode::AllowAll => "allow-all",
-                ScriptPolicyMode::BlockAll => "block-all",
+    pub fn status(&self) -> ScriptPolicy {
+        ScriptPolicy {
+            mode: match self.mode {
+                ScriptPolicyMode::AllowAll => ScriptMode::AllowAll,
+                ScriptPolicyMode::BlockAll => ScriptMode::BlockAll,
             },
-            "allow": self.allow,
-            "block": self.block,
-        })
+            allow: self.allow.clone(),
+            block: self.block.clone(),
+        }
     }
 }
 
@@ -110,7 +109,7 @@ impl Engine {
     pub(super) async fn cmd_js_mode(&mut self, args: &ModeArgs) -> Result<Response, EngineError> {
         let mode = parse_mode(args.mode.as_str())?;
         self.script_policy.set_mode(mode);
-        Ok(Response::ok(self.script_policy.status_json()))
+        Ok(super::typed(self.script_policy.status()))
     }
 
     pub(super) async fn cmd_js_allow(
@@ -119,7 +118,7 @@ impl Engine {
     ) -> Result<Response, EngineError> {
         let domain = args.domain.clone();
         self.script_policy.add_allow(domain);
-        Ok(Response::ok(self.script_policy.status_json()))
+        Ok(super::typed(self.script_policy.status()))
     }
 
     pub(super) async fn cmd_js_block(
@@ -128,7 +127,7 @@ impl Engine {
     ) -> Result<Response, EngineError> {
         let domain = args.domain.clone();
         self.script_policy.add_block(domain);
-        Ok(Response::ok(self.script_policy.status_json()))
+        Ok(super::typed(self.script_policy.status()))
     }
 
     pub(super) async fn cmd_js_remove(
@@ -137,14 +136,14 @@ impl Engine {
     ) -> Result<Response, EngineError> {
         let domain = args.domain.as_str();
         if self.script_policy.remove(domain) {
-            Ok(Response::ok(self.script_policy.status_json()))
+            Ok(super::typed(self.script_policy.status()))
         } else {
             Err(format!("'{}' not found in either list", domain).into())
         }
     }
 
     pub(super) async fn cmd_js_list(&mut self) -> Result<Response, EngineError> {
-        Ok(Response::ok(self.script_policy.status_json()))
+        Ok(super::typed(self.script_policy.status()))
     }
 }
 

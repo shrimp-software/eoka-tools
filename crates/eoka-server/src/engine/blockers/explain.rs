@@ -25,20 +25,18 @@ impl Blocker {
         }
     }
 
-    pub fn summary(&self) -> Value {
+    pub fn summary(&self) -> eoka_protocol::BlockerSummary {
         match self {
-            Blocker::Dialog(dialog) => json!({
-                "kind": "dialog",
-                "dialog_type": dialog.kind,
-                "message": dialog.message.chars().take(200).collect::<String>(),
-                "url": dialog.url,
-                "for_ms": dialog.since.elapsed().as_millis() as u64,
-            }),
-            Blocker::Navigation(navigation) => json!({
-                "kind": "navigation",
-                "url": navigation.url,
-                "for_ms": navigation.since.elapsed().as_millis() as u64,
-            }),
+            Blocker::Dialog(dialog) => eoka_protocol::BlockerSummary::Dialog {
+                dialog_type: dialog.kind.clone(),
+                message: dialog.message.chars().take(200).collect(),
+                url: dialog.url.clone(),
+                for_ms: dialog.since.elapsed().as_millis() as u64,
+            },
+            Blocker::Navigation(navigation) => eoka_protocol::BlockerSummary::Navigation {
+                url: navigation.url.clone(),
+                for_ms: navigation.since.elapsed().as_millis() as u64,
+            },
         }
     }
 

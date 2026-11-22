@@ -2,9 +2,13 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::hash::Hash;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde_json::{json, Map, Value};
+use eoka_protocol::{
+    NetworkBody, NetworkBodySummary, NetworkEntryDetail, NetworkLogEntry, NetworkRequestDetail,
+    NetworkResponseDetail, NetworkStatus,
+};
+use serde_json::{Map, Number, Value};
 
-use super::body::{body_json, body_summary, limit_body_json, BodyCaptureExt};
+use super::body::{body_json, body_summary, limit_body, BodyCaptureExt};
 
 const DEFAULT_BODY_LIMIT: usize = 10 * 1024 * 1024;
 const DEFAULT_BODY_POOL_LIMIT: usize = 512 * 1024 * 1024;
@@ -95,103 +99,105 @@ impl NetworkEntry {
                 .unwrap_or(0)
     }
 
-    pub(super) fn log_json(&self) -> Value {
-        json!({
-            "id": self.id,
-            "url": self.url,
-            "method": self.method,
-            "status": self.status,
-            "resource_type": self.resource_type,
-            "duration_ms": self.duration_ms(),
-            "request_body": body_summary(self.request_post_data.as_ref()),
-            "response_body": body_summary(self.response_body.as_ref()),
-            "complete": self.complete,
-            "failed": self.failure_text,
-        })
-    }
-
-    pub(super) fn full_json(&self) -> Value {
-        json!({
-            "id": self.id,
-            "session_id": self.session_id,
-            "target_id": self.target_id,
-            "request_id": self.request_id,
-            "hop": self.hop,
-            "url": self.url,
-            "method": self.method,
-            "resource_type": self.resource_type,
-            "started_at": self.wall_time,
-            "duration_ms": self.duration_ms(),
-            "request": {
-                "headers": self.request_headers,
-                "headers_text": self.request_headers_text,
-                "post_data": body_json(self.request_post_data.as_ref()),
-            },
-            "response": {
-                "status": self.status,
-                "status_text": self.status_text,
-                "protocol": self.protocol,
-                "mime_type": self.mime_type,
-                "headers": self.response_headers,
-                "headers_text": self.response_headers_text,
-                "remote_ip": self.remote_ip,
-                "remote_port": self.remote_port,
-                "encoded_data_length": self.encoded_data_length,
-                "timing": self.response_timing,
-                "redirect_url": self.redirect_url,
-                "body": body_json(self.response_body.as_ref()),
-            },
-            "failure": self.failure_text,
-            "canceled": self.canceled,
-            "complete": self.complete,
-        })
-    }
-
-    pub(super) fn metadata_json(&self) -> Value {
-        json!({
-            "id": self.id,
-            "session_id": self.session_id,
-            "target_id": self.target_id,
-            "request_id": self.request_id,
-            "hop": self.hop,
-            "url": self.url,
-            "method": self.method,
-            "resource_type": self.resource_type,
-            "started_at": self.wall_time,
-            "duration_ms": self.duration_ms(),
-            "request": {
-                "headers": self.request_headers,
-                "headers_text": self.request_headers_text,
-                "post_data": body_summary(self.request_post_data.as_ref()),
-            },
-            "response": {
-                "status": self.status,
-                "status_text": self.status_text,
-                "protocol": self.protocol,
-                "mime_type": self.mime_type,
-                "headers": self.response_headers,
-                "headers_text": self.response_headers_text,
-                "remote_ip": self.remote_ip,
-                "remote_port": self.remote_port,
-                "encoded_data_length": self.encoded_data_length,
-                "timing": self.response_timing,
-                "redirect_url": self.redirect_url,
-                "body": body_summary(self.response_body.as_ref()),
-            },
-            "failure": self.failure_text,
-            "canceled": self.canceled,
-            "complete": self.complete,
-        })
-    }
-
-    pub(super) fn full_json_with_body_limit(&self, max_body: Option<usize>) -> Value {
-        let mut value = self.full_json();
-        if let Some(max_body) = max_body {
-            limit_body_json(&mut value["request"]["post_data"], max_body);
-            limit_body_json(&mut value["response"]["body"], max_body);
+    pub(super) fn log_entry(&self) -> NetworkLogEntry {
+        NetworkLogEntry {
+            id: self.id,
+            url: self.url.clone(),
+            method: self.method.clone(),
+            status: self.status,
+            resource_type: self.resource_type.clone(),
+            duration_ms: self.duration_ms(),
+            request_body: body_summary(self.request_post_data.as_ref()),
+            response_body: body_summary(self.response_body.as_ref()),
+            complete: self.complete,
+            failed: self.failure_text.clone(),
         }
-        value
     }
+
+    pub(super) fn full_detail(&self) -> NetworkEntryDetail<NetworkBody> {
+        self.detail(body_json)
+    }
+
+    pub(super) fn metadata_detail(&self) -> NetworkEntryDetail<NetworkBodySummary> {
+        self.detail(body_summary)
+    }
+
+    fn detail<B>(&self, body: fn(Option<&BodyCapture>) -> Option<B>) -> NetworkEntryDetail<B> {
+        NetworkEntryDetail {
+            id: self.id,
+            session_id: self.session_id.clone(),
+            target_id: self.target_id.clone(),
+            request_id: self.request_id.clone(),
+            hop: self.hop,
+            url: self.url.clone(),
+            method: self.method.clone(),
+            resource_type: self.resource_type.clone(),
+            started_at: self.wall_time,
+            duration_ms: self.duration_ms(),
+            request: NetworkRequestDetail {
+                headers: header_map(&self.request_headers),
+                headers_text: self.request_headers_text.clone(),
+                post_data: body(self.request_post_data.as_ref()),
+            },
+            response: NetworkResponseDetail {
+                status: self.status,
+                status_text: self.status_text.clone(),
+                protocol: self.protocol.clone(),
+                mime_type: self.mime_type.clone(),
+                headers: header_map(&self.response_headers),
+                headers_text: self.response_headers_text.clone(),
+                remote_ip: self.remote_ip.clone(),
+                remote_port: self.remote_port,
+                encoded_data_length: self.encoded_data_length,
+                timing: self.response_timing.as_ref().map(timing_map),
+                redirect_url: self.redirect_url.clone(),
+                body: body(self.response_body.as_ref()),
+            },
+            failure: self.failure_text.clone(),
+            canceled: self.canceled,
+            complete: self.complete,
+        }
+    }
+
+    pub(super) fn full_detail_with_body_limit(
+        &self,
+        max_body: Option<usize>,
+    ) -> NetworkEntryDetail<NetworkBody> {
+        let mut detail = self.full_detail();
+        if let Some(max_body) = max_body {
+            for body in [
+                detail.request.post_data.as_mut(),
+                detail.response.body.as_mut(),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                limit_body(body, max_body);
+            }
+        }
+        detail
+    }
+}
+
+fn header_map(headers: &Map<String, Value>) -> BTreeMap<String, String> {
+    headers
+        .iter()
+        .map(|(name, value)| {
+            let value = value
+                .as_str()
+                .map_or_else(|| value.to_string(), str::to_owned);
+            (name.clone(), value)
+        })
+        .collect()
+}
+
+fn timing_map(timing: &Value) -> BTreeMap<String, Number> {
+    timing
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter_map(|(name, value)| value.as_number().map(|n| (name.clone(), n.clone())))
+        .collect()
 }
 
 #[derive(Default)]
@@ -374,25 +380,25 @@ impl NetworkStore {
         }
     }
 
-    pub(super) fn status_json(&self) -> Value {
-        json!({
-            "active": self.active,
-            "session_id": self.session_id,
-            "target_id": self.target_id,
-            "patterns": self.config.patterns,
-            "entry_count": self.entries.len(),
-            "in_flight": self.active_by_key.len(),
-            "captured_body_bytes": self.body_bytes,
-            "body_pending": self.body_pending,
-            "body_failed": self.body_failed,
-            "body_limit_bytes": self.config.body_pool_bytes,
-            "per_body_limit_bytes": self.config.max_body_bytes,
-            "lagged_events": self.lagged_events,
-            "dropped_events": self.dropped_events,
-            "started_at": self.started_at,
-            "last_id": self.next_id,
-            "next_since": self.next_id,
-        })
+    pub(super) fn status(&self) -> NetworkStatus {
+        NetworkStatus {
+            active: self.active,
+            session_id: self.session_id.clone(),
+            target_id: self.target_id.clone(),
+            patterns: self.config.patterns.clone(),
+            entry_count: self.entries.len(),
+            in_flight: self.active_by_key.len(),
+            captured_body_bytes: self.body_bytes,
+            body_pending: self.body_pending,
+            body_failed: self.body_failed,
+            body_limit_bytes: self.config.body_pool_bytes,
+            per_body_limit_bytes: self.config.max_body_bytes,
+            lagged_events: self.lagged_events,
+            dropped_events: self.dropped_events,
+            started_at: self.started_at,
+            last_id: self.next_id,
+            next_since: self.next_id,
+        }
     }
 
     fn index_entry(&mut self, entry: &NetworkEntry) {

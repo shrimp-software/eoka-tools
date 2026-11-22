@@ -47,7 +47,7 @@ use eoka::cdp::{
 use serde_json::{json, Value};
 
 use eoka_protocol::launch_spec::LaunchSpec;
-use eoka_protocol::{Request, Response};
+use eoka_protocol::{Request, Response, SessionHello, SessionMode};
 use intercept::{InterceptLog, InterceptLogEntry, InterceptRule, InterceptState};
 use network::{NetworkConfig, NetworkRecorder};
 use persist::{capture_state, ensure_console_capture, restore_cookies, restore_state, SavedState};
@@ -77,6 +77,13 @@ fn recording_response(
                 .filter(|v| !v.is_null());
             Ok(response)
         }
+    }
+}
+
+fn typed(value: impl serde::Serialize) -> Response {
+    match serde_json::to_value(value) {
+        Ok(value) => Response::ok(value),
+        Err(error) => Response::err(error.to_string()),
     }
 }
 
@@ -468,6 +475,26 @@ impl Engine {
             .ok_or_else(|| "No browser open. Use 'open' first.".to_string())
     }
 
+    pub fn hello(&self) -> SessionHello {
+        let mode = match self.spec {
+            LaunchSpec::Launch { headless: true, .. } => SessionMode::Headless,
+            LaunchSpec::Launch {
+                headless: false, ..
+            } => SessionMode::Headed,
+            LaunchSpec::Connect { .. } => SessionMode::Connect,
+            LaunchSpec::Reuse => SessionMode::Reuse,
+        };
+        SessionHello {
+            protocol: eoka_protocol::sidecar::PROTOCOL_VERSION,
+            server_version: host_version().to_owned(),
+            session: self.session_name.clone(),
+            mode,
+            configuration_fingerprint: self.spec.configuration_fingerprint(),
+            command_limit_ms: None,
+            activity: None,
+        }
+    }
+
     pub async fn handle(&mut self, request: Request) -> Response {
         let cmd = request.cmd();
         let args = &request.args_json();
@@ -487,17 +514,7 @@ impl Engine {
 
     async fn handle_command(&mut self, request: Request, args: &Value) -> Response {
         if matches!(request, Request::SessionHello) {
-            let mode = match self.spec {
-                LaunchSpec::Launch { headless: true, .. } => "headless",
-                LaunchSpec::Launch {
-                    headless: false, ..
-                } => "headed",
-                LaunchSpec::Connect { .. } => "connect",
-                LaunchSpec::Reuse => "reuse",
-            };
-            return Response::ok(
-                json!({"protocol": eoka_protocol::sidecar::PROTOCOL_VERSION, "serverVersion": host_version(), "session": self.session_name, "mode": mode, "configurationFingerprint": self.spec.configuration_fingerprint()}),
-            );
+            return typed(self.hello());
         }
         if let Err(error) = crate::url_policy::ensure_args_allowed(args) {
             return Response::err(error);

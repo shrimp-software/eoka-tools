@@ -274,6 +274,14 @@ fn every_catalog_operation_answers_through_the_sidecar() {
         ),
         ("console", json!({}), true),
         ("errors", json!({}), true),
+        (
+            "exec",
+            json!({"code":"() => { console.warn('sweep-marker'); setTimeout(() => { throw new Error('sweep-error'); }, 0); }"}),
+            true,
+        ),
+        ("wait", json!({"ms":100}), true),
+        ("console", json!({}), true),
+        ("errors", json!({}), true),
         ("set_cookie", json!({"name":"sid","value":"1"}), true),
         ("cookies", json!({}), true),
         ("delete_cookie", json!({"name":"sid"}), true),
@@ -378,10 +386,15 @@ fn every_catalog_operation_answers_through_the_sidecar() {
             json!({"selector":"#absent","timeout_ms":300}),
             false,
         ),
-        ("wasm.info", json!({}), false),
-        ("wasm.read", json!({"addr":"0x0","len":4}), false),
-        ("wasm.write", json!({"addr":"0x0","hex":"00"}), false),
-        ("wasm.find", json!({"pattern":"00"}), false),
+        (
+            "exec",
+            json!({"code":"() => { window.sweepMemory = new WebAssembly.Memory({initial: 1}); }"}),
+            true,
+        ),
+        ("wasm.info", json!({}), true),
+        ("wasm.read", json!({"addr":"0x0","len":4}), true),
+        ("wasm.write", json!({"addr":"0x0","hex":"00"}), true),
+        ("wasm.find", json!({"pattern":"00"}), true),
         ("download.list", json!({}), true),
         ("download.get", json!({"id":"missing"}), false),
         (
@@ -404,6 +417,7 @@ fn every_catalog_operation_answers_through_the_sidecar() {
     ];
 
     let mut called = std::collections::BTreeSet::new();
+    let mut decoded = std::collections::BTreeSet::new();
     let mut problems = Vec::new();
     for (index, (method, params, must_succeed)) in calls.into_iter().enumerate() {
         called.insert(method);
@@ -413,6 +427,9 @@ fn every_catalog_operation_answers_through_the_sidecar() {
         let response = server.request(1000 + index as u64, method, params);
         let elapsed = started.elapsed();
         let summary: String = response.to_string().chars().take(260).collect();
+        if response.get("result").is_some() {
+            decoded.insert(method);
+        }
         if elapsed > Duration::from_secs(20) {
             problems.push(format!("#{index} {method} took {elapsed:?}: {summary}"));
         }
@@ -442,8 +459,28 @@ fn every_catalog_operation_answers_through_the_sidecar() {
         .collect();
     assert!(missing.is_empty(), "sweep does not call {missing:?}");
     assert!(problems.is_empty(), "{}", problems.join("\n"));
+    let undecoded: Vec<&str> = eoka_protocol::sidecar::catalog_operations()
+        .map(|operation| operation.path)
+        .filter(|path| !decoded.contains(path) && !UNDECODED_SIDECAR_RESULTS.contains(path))
+        .collect();
+    assert!(
+        undecoded.is_empty(),
+        "the sweep no longer checks the results of {undecoded:?} against their declared types"
+    );
     server.shutdown(5001);
 }
+
+const UNDECODED_SIDECAR_RESULTS: &[&str] = &[
+    "click_shadow",
+    "download.get",
+    "download.wait",
+    "download.cancel",
+    "clone_from",
+    "fake_camera",
+    "network.wait",
+    "dialog.accept",
+    "dialog.dismiss",
+];
 
 #[test]
 #[ignore = "requires Chrome; catalog open on a browser the sidecar does not own"]

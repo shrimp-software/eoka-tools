@@ -188,7 +188,7 @@ impl Engine {
         let (tab, viewport_only) = self.tab_with_config()?;
         let (elements, data) = observe::inspect(&tab.page, viewport_only, args).await?;
         tab.elements = elements;
-        Ok(Response::ok(data))
+        Ok(typed(data))
     }
 
     pub(super) async fn cmd_screenshot(
@@ -198,9 +198,7 @@ impl Engine {
         capture.validate().map_err(|error| error.message)?;
         if !capture.annotate {
             let page = self.require_tab()?.page.clone();
-            return Ok(Response::ok(
-                super::page_ops::screenshot(&page, &capture).await?,
-            ));
+            return Ok(typed(super::page_ops::screenshot(&page, &capture).await?));
         }
         let (tab, viewport_only) = self.tab_with_config()?;
         if tab.elements.is_empty() {
@@ -216,8 +214,11 @@ impl Engine {
         for el in elements {
             let _ = writeln!(list, "{}", el);
         }
-        result["elements"] = Value::String(list);
-        Ok(Response::ok(result))
+        match &mut result {
+            eoka_protocol::ScreenshotResult::Inline(inline) => inline.elements = Some(list),
+            eoka_protocol::ScreenshotResult::File(file) => file.elements = Some(list),
+        }
+        Ok(typed(result))
     }
 
     pub(super) async fn cmd_emulate(
@@ -248,12 +249,12 @@ impl Engine {
                 &json!({ "enabled": true, "maxTouchPoints": 5 }),
             )
             .await;
-        Ok(Response::ok(json!({
-            "width": args.width,
-            "height": args.height,
-            "dpr": args.dpr,
-            "mobile": true,
-        })))
+        Ok(typed(eoka_protocol::Viewport {
+            width: args.width,
+            height: args.height,
+            dpr: args.dpr,
+            mobile: true,
+        }))
     }
 
     pub(super) async fn cmd_recording_start(
@@ -305,14 +306,12 @@ impl Engine {
 
     pub(super) async fn cmd_captcha_detect(&mut self) -> Result<Response, EngineError> {
         let page = &self.require_tab()?.page;
-        Ok(Response::ok(
-            match crate::captcha::detect_captcha_on_page(page).await {
-                Some(info) => {
-                    json!({"detected": true, "type": info.captcha_type, "sitekey": info.sitekey})
-                }
-                None => json!({"detected": false}),
-            },
-        ))
+        let info = crate::captcha::detect_captcha_on_page(page).await;
+        Ok(typed(eoka_protocol::CaptchaDetection {
+            detected: info.is_some(),
+            captcha_type: info.as_ref().map(|info| info.captcha_type.clone()),
+            sitekey: info.map(|info| info.sitekey),
+        }))
     }
 
     pub(super) async fn cmd_find(&mut self, args: &TextArgs) -> Result<Response, EngineError> {
@@ -406,25 +405,21 @@ impl Engine {
             let tab = self.require_tab()?;
             tab.page.evaluate(&js).await?
         };
-        let mut parsed: Value = serde_json::from_str(&result)?;
+        let mut injected = eoka_protocol::CaptchaInjectResult {
+            injection: serde_json::from_str(&result)?,
+            click_after: None,
+            next_action: None,
+        };
         if let Some(target) = click_after {
             let (tab, viewport_only) = self.tab_with_config()?;
-            let desc = click_once(tab, &target, viewport_only).await?;
-            if let Value::Object(ref mut object) = parsed {
-                object.insert(
-                    "click_after".into(),
-                    json!({ "target": target, "clicked": desc }),
-                );
-            }
-        } else if let Value::Object(ref mut object) = parsed {
-            object.insert(
-                "next_action".into(),
-                Value::String(
-                    "If the page does not advance after callbacks run, click the continuation control again or pass --click-after.".into(),
-                ),
+            let clicked = click_once(tab, &target, viewport_only).await?;
+            injected.click_after = Some(eoka_protocol::ClickAfter { target, clicked });
+        } else {
+            injected.next_action = Some(
+                "If the page does not advance after callbacks run, click the continuation control again or pass --click-after.".into(),
             );
         }
-        Ok(Response::ok(parsed))
+        Ok(typed(injected))
     }
 
     pub(super) async fn cmd_fetch(&mut self, args: FetchArgs) -> Result<Response, EngineError> {
@@ -512,11 +507,11 @@ impl Engine {
         let info = crate::spa::detect_router(&tab.page)
             .await
             .map_err(|e: eoka::Error| e.to_string())?;
-        Ok(Response::ok(json!({
-            "router_type": format!("{:?}", info.router_type),
-            "current_path": info.current_path,
-            "can_navigate": info.can_navigate,
-        })))
+        Ok(typed(eoka_protocol::SpaInfo {
+            router_type: info.router_type.into(),
+            current_path: info.current_path,
+            can_navigate: info.can_navigate,
+        }))
     }
 
     pub(super) async fn cmd_spa_navigate(
