@@ -5,6 +5,7 @@ use serde_json::{json, Value};
 use super::target::json_str;
 use super::Engine;
 use super::EngineError;
+use eoka_protocol::sidecar::ServerError;
 use eoka_protocol::Response;
 
 pub(super) enum Script {
@@ -12,6 +13,10 @@ pub(super) enum Script {
     Exec(eoka_protocol::ScriptArgs),
     FrameEval(eoka_protocol::FrameEvalArgs),
 }
+
+pub(crate) const SIDECAR_EVALUATION_BYTES: usize = 16 * 1024 * 1024 - 4096;
+const FUNCTION_RESULT_BYTES: usize = 1_048_576;
+const ENGINE_EVALUATION_BYTES: usize = FUNCTION_RESULT_BYTES;
 
 impl Engine {
     pub(super) async fn script(
@@ -32,8 +37,18 @@ impl Engine {
             None,
             async {
                 match script {
-                    Script::Eval(args) => self.cmd_eval(&args).await,
-                    Script::Exec(args) => self.cmd_exec(&args).await,
+                    Script::Eval(args) => {
+                        let page = self.require_tab()?.page.clone();
+                        evaluate(&page, &args, ENGINE_EVALUATION_BYTES)
+                            .await
+                            .map_err(|error| error.message.into())
+                    }
+                    Script::Exec(args) => {
+                        let page = self.require_tab()?.page.clone();
+                        execute(&page, &args)
+                            .await
+                            .map_err(|error| error.message.into())
+                    }
                     Script::FrameEval(args) => self.cmd_frame_eval(&args).await,
                 }
             },
@@ -43,90 +58,6 @@ impl Engine {
             return Err("Request interception cleanup failed".into());
         }
         result
-    }
-
-    async fn cmd_eval(&mut self, args: &ScriptArgs) -> Result<Response, EngineError> {
-        let code = resolve_js(args.file.as_deref(), args.code.as_deref())?;
-        let max_size = args.max_size;
-        if !args.raw {
-            if args.no_await {
-                return Err(
-                    "Function evaluation awaits completion; no-await also requires raw".into(),
-                );
-            }
-            let page = &self.require_tab()?.page;
-            let code = prepare_script(page, &code, &args.arguments).await?;
-            let value: Value = page
-                .evaluate_function(&code, &args.arguments)
-                .await
-                .map_err(|e| e.to_string())?;
-            let size = serde_json::to_vec(&value).map_err(|e| e.to_string())?.len();
-            if size > max_size.unwrap_or(1_048_576).min(1_048_576) {
-                return Err("Evaluation result exceeds its JSON byte limit".into());
-            }
-            return Ok(Response::ok(value));
-        }
-        let await_promise = !args.no_await;
-        let session = self.require_tab()?.page.session().clone();
-
-        if let Some(max) = max_size {
-            let result: Value = session
-                .send(
-                    "Runtime.evaluate",
-                    &json!({
-                        "expression": build_limited_eval_js(&code, max),
-                        "returnByValue": true,
-                        "awaitPromise": await_promise,
-                    }),
-                )
-                .await
-                .map_err(|e| e.to_string())?;
-            return Ok(Response::ok_text(runtime_eval_string_value(&result)?));
-        }
-
-        let result: Value = session
-            .send(
-                "Runtime.evaluate",
-                &json!({
-                    "expression": code,
-                    "returnByValue": false,
-                    "awaitPromise": await_promise,
-                }),
-            )
-            .await
-            .map_err(|e| e.to_string())?;
-        Ok(Response::ok_text(
-            format_runtime_eval_result(&session, &result).await?,
-        ))
-    }
-
-    async fn cmd_exec(&mut self, args: &ScriptArgs) -> Result<Response, EngineError> {
-        let code = resolve_js(args.file.as_deref(), args.code.as_deref())?;
-        let tab = self.require_tab()?;
-        if args.no_await {
-            if !args.raw {
-                return Err(
-                    "Function execution awaits completion; no-await also requires raw".into(),
-                );
-            }
-            tab.page
-                .execute_sync(&code)
-                .await
-                .map_err(|error| error.to_string())?;
-            return Ok(Response::err_detail(eoka_protocol::ErrorDetail::new("outcome_unknown", "Raw execution dispatched; asynchronous completion was not awaited. Inspect the page before further input.")));
-        } else if args.raw {
-            tab.page
-                .execute(&code)
-                .await
-                .map_err(|error| error.to_string())?;
-        } else {
-            let code = prepare_script(&tab.page, &code, &args.arguments).await?;
-            tab.page
-                .execute_function(&code, &args.arguments)
-                .await
-                .map_err(|error| error.to_string())?;
-        }
-        Ok(Response::ok_text("Executed successfully"))
     }
 
     async fn cmd_frame_eval(&mut self, args: &FrameEvalArgs) -> Result<Response, EngineError> {
@@ -151,6 +82,120 @@ impl Engine {
         .map_err(|e| e.to_string())?;
         Ok(serde_json::to_string(&value).map(Response::ok_text)?)
     }
+}
+
+pub(crate) async fn evaluate(
+    page: &eoka::Page,
+    args: &ScriptArgs,
+    limit: usize,
+) -> Result<Response, ServerError> {
+    let code = resolve_js(args.file.as_deref(), args.code.as_deref())
+        .map_err(ServerError::invalid_params)?;
+    check_modes(args)?;
+    if !args.raw {
+        let limit = args
+            .max_size
+            .unwrap_or(FUNCTION_RESULT_BYTES)
+            .min(FUNCTION_RESULT_BYTES);
+        if args.no_await {
+            return Err(ServerError::invalid_params(
+                "Function evaluation awaits completion; no-await also requires raw",
+            ));
+        }
+        let code = if args.function {
+            code
+        } else {
+            prepare_script(page, &code, &args.arguments).await?
+        };
+        let value: Value = page
+            .evaluate_json(
+                &eoka::Page::function_expression(&code, &args.arguments)?,
+                limit,
+            )
+            .await?;
+        return Ok(Response::ok(value));
+    }
+    if args.json {
+        if args.no_await {
+            return Err(ServerError::invalid_params(
+                "Strict JSON evaluation awaits completion; no-await conflicts with json",
+            ));
+        }
+        let limit = args.max_size.unwrap_or(limit).min(limit);
+        let value: Value = page.evaluate_json(&code, limit).await?;
+        return Ok(Response::ok(value));
+    }
+    let await_promise = !args.no_await;
+    let session = page.session().clone();
+    if let Some(max) = args.max_size {
+        let result: Value = session
+            .send(
+                "Runtime.evaluate",
+                &json!({
+                    "expression": build_limited_eval_js(&code, max),
+                    "returnByValue": true,
+                    "awaitPromise": await_promise,
+                }),
+            )
+            .await?;
+        return Ok(Response::ok_text(
+            runtime_eval_string_value(&result).map_err(ServerError::internal)?,
+        ));
+    }
+    let result: Value = session
+        .send(
+            "Runtime.evaluate",
+            &json!({
+                "expression": code,
+                "returnByValue": false,
+                "awaitPromise": await_promise,
+            }),
+        )
+        .await?;
+    Ok(Response::ok_text(
+        format_runtime_eval_result(&session, &result)
+            .await
+            .map_err(ServerError::internal)?,
+    ))
+}
+
+pub(crate) async fn execute(page: &eoka::Page, args: &ScriptArgs) -> Result<Response, ServerError> {
+    let code = resolve_js(args.file.as_deref(), args.code.as_deref())
+        .map_err(ServerError::invalid_params)?;
+    check_modes(args)?;
+    if args.json {
+        return Err(ServerError::invalid_params("json applies only to eval"));
+    }
+    if args.no_await {
+        if !args.raw {
+            return Err(ServerError::invalid_params(
+                "Function execution awaits completion; no-await also requires raw",
+            ));
+        }
+        page.execute_sync(&code).await?;
+        return Ok(Response::err_detail(eoka_protocol::ErrorDetail::new("outcome_unknown", "Raw execution dispatched; asynchronous completion was not awaited. Inspect the page before further input.")));
+    }
+    if args.raw {
+        page.execute(&code).await?;
+    } else {
+        let code = if args.function {
+            code
+        } else {
+            prepare_script(page, &code, &args.arguments).await?
+        };
+        page.execute_function(&code, &args.arguments).await?;
+    }
+    Ok(Response::ok_text("Executed successfully"))
+}
+
+fn check_modes(args: &ScriptArgs) -> Result<(), ServerError> {
+    if args.function && args.raw {
+        return Err(ServerError::invalid_params("function conflicts with raw"));
+    }
+    if args.json && !args.raw {
+        return Err(ServerError::invalid_params("json requires raw"));
+    }
+    Ok(())
 }
 
 async fn format_runtime_eval_result(
@@ -312,22 +357,23 @@ async fn prepare_script(
     page: &eoka::Page,
     source: &str,
     arguments: &[Value],
-) -> Result<String, EngineError> {
+) -> Result<String, ServerError> {
     let callable = callable_script(source);
     let callable_error = match syntax_error(page, &callable).await? {
         None => return Ok(callable),
         Some(error) => error,
     };
     if !arguments.is_empty() {
-        return Err(format!(
+        return Err(ServerError::invalid_params(format!(
             "arguments need code that is a function, such as (a, b) => a + b: {callable_error}"
-        )
-        .into());
+        )));
     }
     let statements = statement_script(source);
     match syntax_error(page, &statements).await? {
         None => Ok(statements),
-        Some(error) => Err(format!("JavaScript does not parse: {error}").into()),
+        Some(error) => Err(ServerError::invalid_params(format!(
+            "JavaScript does not parse: {error}"
+        ))),
     }
 }
 
@@ -342,14 +388,14 @@ fn statement_script(source: &str) -> String {
     format!("(async () => {{\n{source}\n}})")
 }
 
-async fn syntax_error(page: &eoka::Page, script: &str) -> Result<Option<String>, EngineError> {
-    let encoded = serde_json::to_string(script).map_err(|error| error.to_string())?;
+async fn syntax_error(page: &eoka::Page, script: &str) -> Result<Option<String>, ServerError> {
+    let encoded =
+        serde_json::to_string(script).map_err(|error| ServerError::internal(error.to_string()))?;
     Ok(page
         .evaluate_sync(&format!(
             "(() => {{ try {{ new Function({encoded}); return null; }} catch (error) {{ return error instanceof SyntaxError ? String(error) : null; }} }})()"
         ))
-        .await
-        .map_err(|error| error.to_string())?)
+        .await?)
 }
 
 fn resolve_js(file: Option<&str>, code: Option<&str>) -> Result<String, String> {
@@ -455,5 +501,61 @@ mod tests {
         .unwrap();
 
         assert_eq!(text, "abc...(truncated 20 chars)");
+    }
+
+    #[tokio::test]
+    #[ignore = "requires Chrome"]
+    async fn evaluation_preserves_json_and_rejects_non_json_values() {
+        let browser = eoka::Browser::launch().await.unwrap();
+        let page = browser.new_blank_page().await.unwrap();
+        for (expression, expected) in [
+            ("null", serde_json::Value::Null),
+            ("false", serde_json::json!(false)),
+            ("0", serde_json::json!(0)),
+            ("''", serde_json::json!("")),
+            (
+                "Promise.resolve({items:[1,null,true],nested:{value:'ok'}})",
+                serde_json::json!({"items":[1,null,true],"nested":{"value":"ok"}}),
+            ),
+            (
+                "(() => { const child = {n:1}; return [child,child]; })()",
+                serde_json::json!([{"n":1},{"n":1}]),
+            ),
+            (
+                "({['__proto__']:{safe:true}})",
+                serde_json::json!({"__proto__":{"safe":true}}),
+            ),
+        ] {
+            let result: Value = page
+                .evaluate_json(expression, SIDECAR_EVALUATION_BYTES)
+                .await
+                .unwrap();
+            assert_eq!(result, expected);
+        }
+        for expression in [
+            "undefined",
+            "NaN",
+            "Infinity",
+            "9007199254740992",
+            "1n",
+            "() => 1",
+            "Symbol('x')",
+            "({nested:undefined})",
+            "[1,,2]",
+            "new Date()",
+            "new Map()",
+            "({[Symbol('key')]:1})",
+            "(() => { const value = {}; value.self = value; return value; })()",
+        ] {
+            assert!(
+                page.evaluate_json::<Value>(expression, SIDECAR_EVALUATION_BYTES)
+                    .await
+                    .is_err(),
+                "{expression}"
+            );
+        }
+        page.execute("undefined").await.unwrap();
+        drop(page);
+        browser.close().await.unwrap();
     }
 }

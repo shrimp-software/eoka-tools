@@ -61,7 +61,7 @@ pub async fn dispatch_shared(
 pub fn clears_a_blocked_page(state: &AppState, method: &str, params: &Value) -> bool {
     match method {
         "dialog.accept" | "dialog.dismiss" => true,
-        "page.close" | "browser.close_tab" => params
+        "browser.close_tab" => params
             .get("pageId")
             .and_then(Value::as_str)
             .and_then(|id| state.page(id).ok())
@@ -138,7 +138,7 @@ async fn route(state: &AppState, method: &str, params: Value) -> Result<Value, S
     if matches!(method, "browser.tabs" | "browser.close") {
         validate_params(method, &params)?;
     }
-    if matches!(method, "browser.close_tab" | "page.close") {
+    if method == "browser.close_tab" {
         if let Some(page_id) = params.get("pageId").and_then(Value::as_str) {
             state.operations.stop_target(page_id).await;
         }
@@ -151,16 +151,8 @@ async fn route(state: &AppState, method: &str, params: Value) -> Result<Value, S
         "browser.close_tab" => browser::close_tab(state, params).await,
         "browser.close" => browser::close(state, params).await,
 
-        "page.evaluate" => page::evaluate(state, params).await,
-        "page.execute" => page::execute(state, params).await,
-        "page.evaluate_raw" => page::evaluate_raw(state, params).await,
-        "page.execute_raw" => page::execute_raw(state, params).await,
-        "page.fetch" => page::fetch(state, params).await,
-        "page.fetch_bounded" => page::fetch_bounded(state, params).await,
         "page.capture_state" => page::capture_state(state, params).await,
         "page.restore_state" => page::restore_state(state, params).await,
-        "page.screenshot" => page::screenshot(state, params).await,
-        "page.screenshot_to_file" => page::screenshot_to_file(state, params).await,
         "recording.start" => {
             let params: eoka_protocol::sidecar::RecordingStartParams =
                 serde_json::from_value(params)
@@ -169,11 +161,8 @@ async fn route(state: &AppState, method: &str, params: Value) -> Result<Value, S
             let record = state.recordings.start(params, page).await?;
             serde_json::to_value(record).map_err(|error| ServerError::internal(error.to_string()))
         }
-        "page.set_viewport" => page::set_viewport(state, params).await,
-        "page.reset_viewport" => page::reset_viewport(state, params).await,
         #[cfg(feature = "anti-captcha")]
         "page.solve_captcha" => page::solve_captcha(state, params).await,
-        "page.close" => page::close(state, params).await,
 
         _ => Err(ServerError::unknown_method(method)),
     }

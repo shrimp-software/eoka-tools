@@ -10,32 +10,31 @@ fn pages_run_requests_concurrently_and_each_page_keeps_its_order() {
     let mut inbox = Inbox::default();
     let pause = "()=>new Promise(resolve=>setTimeout(()=>resolve(1),1000))";
     let started = Instant::now();
-    server
-        .send(json!({"id":10,"method":"page.evaluate","params":{"pageId":first,"function":pause}}));
     server.send(
-        json!({"id":11,"method":"page.evaluate","params":{"pageId":second,"function":pause}}),
+        json!({"id":10,"method":"eval","params":{"pageId":first,"function":true,"code":pause}}),
+    );
+    server.send(
+        json!({"id":11,"method":"eval","params":{"pageId":second,"function":true,"code":pause}}),
     );
     for id in [10, 11] {
         let reply = inbox.take(&server, id, Duration::from_secs(20)).unwrap();
-        assert_eq!(reply["result"]["result"], 1, "{reply}");
+        assert_eq!(reply["result"], 1, "{reply}");
     }
     let elapsed = started.elapsed();
     assert!(elapsed >= Duration::from_millis(1000), "{elapsed:?}");
     assert!(elapsed < Duration::from_millis(1600), "{elapsed:?}");
-    server.send(json!({"id":12,"method":"page.evaluate","params":{"pageId":first,
-        "function":"()=>new Promise(resolve=>setTimeout(()=>{window.seen=['slow'];resolve(1)},300))"}}));
     server.send(
-        json!({"id":13,"method":"page.evaluate","params":{"pageId":first,
-        "function":"()=>{(window.seen??=[]).push('fast');return window.seen}"}}),
+        json!({"id":12,"method":"eval","params":{"pageId":first,"function":true,
+        "code":"()=>new Promise(resolve=>setTimeout(()=>{window.seen=['slow'];resolve(1)},300))"}}),
+    );
+    server.send(
+        json!({"id":13,"method":"eval","params":{"pageId":first,"function":true,
+        "code":"()=>{(window.seen??=[]).push('fast');return window.seen}"}}),
     );
     server.send(json!({"id":14,"method":"info","params":{"pageId":first}}));
     assert!(inbox.take(&server, 12, Duration::from_secs(20)).is_some());
     let ordered = inbox.take(&server, 13, Duration::from_secs(20)).unwrap();
-    assert_eq!(
-        ordered["result"]["result"],
-        json!(["slow", "fast"]),
-        "{ordered}"
-    );
+    assert_eq!(ordered["result"], json!(["slow", "fast"]), "{ordered}");
     let title = inbox.take(&server, 14, Duration::from_secs(20)).unwrap();
     assert_eq!(title["result"]["title"], "fixture");
     server.shutdown(15);
@@ -49,7 +48,7 @@ fn a_page_stuck_in_a_script_does_not_delay_other_pages_or_new_pages() {
     let mut server = Sidecar::start(&state, &scratch);
     let (stuck, other) = two_fixture_pages(&mut server, &root.path().join("profile"), &origin);
     let mut inbox = Inbox::default();
-    server.send(json!({"id":10,"method":"page.evaluate","params":{"pageId":stuck,"function":"()=>new Promise(()=>{})"}}));
+    server.send(json!({"id":10,"method":"eval","params":{"pageId":stuck,"function":true,"code":"()=>new Promise(()=>{})"}}));
     std::thread::sleep(Duration::from_millis(200));
     let (title, elapsed) = inbox.timed(&mut server, 11, "info", json!({"pageId":other}));
     assert_eq!(title["result"]["title"], "fixture", "{title}");
@@ -212,7 +211,7 @@ fn closing_one_tab_leaves_an_operation_on_another_tab_running() {
     assert!(closed.get("result").is_some(), "{closed}");
     let record = server.request(12, "operations.get", json!({"id":operation}));
     assert_eq!(record["result"]["state"], "running", "{record}");
-    let closed = server.request(13, "page.close", json!({"pageId":acting}));
+    let closed = server.request(13, "browser.close_tab", json!({"pageId":acting}));
     assert!(closed.get("result").is_some(), "{closed}");
     let record = server.request(14, "operations.get", json!({"id":operation}));
     assert_eq!(record["result"]["state"], "finished", "{record}");
@@ -234,8 +233,8 @@ fn diagnostics_keep_their_wording_and_file_output_names_the_occupied_path() {
         let operation = uuid::Uuid::new_v4().to_string();
         let record = server.request(
             id,
-            "page.fill",
-            json!({"pageId":page,"operation_id":operation,"selector":"#missing","value":value,"options":{"timeout_ms":500}}),
+            "actions.perform",
+            json!({"pageId":page,"operation_id":operation,"action":{"kind":"fill","target":{"query":{"kind":"css","selector":"#missing"}},"value":value},"options":{"timeout_ms":500}}),
         );
         assert_eq!(record["result"]["id"], operation, "{record}");
         let finished = server.request(
@@ -260,11 +259,7 @@ fn diagnostics_keep_their_wording_and_file_output_names_the_occupied_path() {
     let directory = std::fs::canonicalize(root.path()).unwrap();
     let occupied = directory.join("occupied.png");
     std::fs::write(&occupied, b"keep").unwrap();
-    let refused = server.request(
-        12,
-        "page.screenshot_to_file",
-        json!({"pageId":page,"path":occupied}),
-    );
+    let refused = server.request(12, "screenshot", json!({"pageId":page,"output":occupied}));
     assert_eq!(refused["error"]["code"], "FileOutput", "{refused}");
     let message = refused["error"]["message"].as_str().unwrap();
     assert!(message.contains(occupied.to_str().unwrap()), "{message}");
@@ -308,16 +303,20 @@ fn a_tab_behind_another_is_captured_promptly_and_stays_behind() {
     for (id, page) in [(5, &behind), (6, &front)] {
         let watched = server.request(
             id,
-            "page.execute",
-            json!({"pageId":page,"function":"()=>{window.visibilityChanges=[];document.addEventListener('visibilitychange',()=>window.visibilityChanges.push(document.visibilityState))}"}),
+            "exec",
+            json!({"pageId":page,"function":true,"code":"()=>{window.visibilityChanges=[];document.addEventListener('visibilitychange',()=>window.visibilityChanges.push(document.visibilityState))}"}),
         );
         assert!(watched.get("result").is_some(), "{watched}");
     }
     std::thread::sleep(Duration::from_secs(3));
     let mut inbox = Inbox::default();
 
-    let (first, elapsed) =
-        inbox.timed(&mut server, 10, "page.screenshot", json!({"pageId":behind}));
+    let (first, elapsed) = inbox.timed(
+        &mut server,
+        10,
+        "screenshot",
+        json!({"pageId":behind,"inline":true}),
+    );
     assert!(elapsed < prompt, "{elapsed:?}");
     let before = png(&first);
     let output = std::fs::canonicalize(root.path())
@@ -326,19 +325,24 @@ fn a_tab_behind_another_is_captured_promptly_and_stays_behind() {
     let (saved, elapsed) = inbox.timed(
         &mut server,
         11,
-        "page.screenshot_to_file",
-        json!({"pageId":behind,"path":output}),
+        "screenshot",
+        json!({"pageId":behind,"output":output}),
     );
     assert!(elapsed < prompt, "{elapsed:?}");
     assert!(saved["result"]["bytes"].as_u64().unwrap() > 0, "{saved}");
     assert_eq!(&std::fs::read(&output).unwrap()[..8], PNG_SIGNATURE);
-    let (ahead, elapsed) = inbox.timed(&mut server, 12, "page.screenshot", json!({"pageId":front}));
+    let (ahead, elapsed) = inbox.timed(
+        &mut server,
+        12,
+        "screenshot",
+        json!({"pageId":front,"inline":true}),
+    );
     assert!(elapsed < prompt, "{elapsed:?}");
     png(&ahead);
 
     let started = Instant::now();
-    server.send(json!({"id":13,"method":"page.screenshot","params":{"pageId":behind}}));
-    server.send(json!({"id":14,"method":"page.screenshot","params":{"pageId":front}}));
+    server.send(json!({"id":13,"method":"screenshot","params":{"pageId":behind,"inline":true}}));
+    server.send(json!({"id":14,"method":"screenshot","params":{"pageId":front,"inline":true}}));
     for id in [13, 14] {
         png(&inbox.take(&server, id, Duration::from_secs(40)).unwrap());
     }
@@ -346,20 +350,24 @@ fn a_tab_behind_another_is_captured_promptly_and_stays_behind() {
 
     let painted = server.request(
         15,
-        "page.execute",
-        json!({"pageId":behind,"function":"()=>{document.body.style.background='rgb(200,0,0)'}"}),
+        "exec",
+        json!({"pageId":behind,"function":true,"code":"()=>{document.body.style.background='rgb(200,0,0)'}"}),
     );
     assert!(painted.get("result").is_some(), "{painted}");
     std::thread::sleep(Duration::from_secs(3));
-    let (repainted, elapsed) =
-        inbox.timed(&mut server, 16, "page.screenshot", json!({"pageId":behind}));
+    let (repainted, elapsed) = inbox.timed(
+        &mut server,
+        16,
+        "screenshot",
+        json!({"pageId":behind,"inline":true}),
+    );
     assert!(elapsed < prompt, "{elapsed:?}");
     assert_ne!(png(&repainted), before, "a stale frame was captured");
     let (whole, elapsed) = inbox.timed(
         &mut server,
         17,
-        "page.screenshot",
-        json!({"pageId":behind,"fullPage":true,"format":"jpeg","quality":40}),
+        "screenshot",
+        json!({"pageId":behind,"inline":true,"full_page":true,"format":"jpeg","quality":40}),
     );
     assert!(elapsed < prompt, "{elapsed:?}");
     assert!(
@@ -402,13 +410,17 @@ fn a_tab_behind_another_is_captured_promptly_and_stays_behind() {
     assert_eq!(record["result"]["state"], "running", "{record}");
     let animated = server.request(
         31,
-        "page.execute",
-        json!({"pageId":behind,"function":"()=>{let n=0;setInterval(()=>{document.body.style.background=++n%2?'rgb(0,0,200)':'rgb(0,200,0)'},100)}"}),
+        "exec",
+        json!({"pageId":behind,"function":true,"code":"()=>{let n=0;setInterval(()=>{document.body.style.background=++n%2?'rgb(0,0,200)':'rgb(0,200,0)'},100)}"}),
     );
     assert!(animated.get("result").is_some(), "{animated}");
     std::thread::sleep(Duration::from_millis(1500));
-    let (during, elapsed) =
-        inbox.timed(&mut server, 32, "page.screenshot", json!({"pageId":behind}));
+    let (during, elapsed) = inbox.timed(
+        &mut server,
+        32,
+        "screenshot",
+        json!({"pageId":behind,"inline":true}),
+    );
     assert!(elapsed < prompt, "{elapsed:?}");
     png(&during);
     std::thread::sleep(Duration::from_millis(1000));

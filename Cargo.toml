@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.20.0"
+version = "0.21.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/shrimp-software/eoka-tools"
@@ -14,13 +14,13 @@ authors = ["cbxss"]
 # [workspace.package] version; scripts/bump-release.mjs writes it here too.
 # eoka-server pins eoka exactly so its release binaries match qualification.
 eoka = "0.10.2"
-eoka-solvers = { version = "0.20.0", path = "crates/eoka-solvers", default-features = false }
-eoka-email = { version = "0.20.0", path = "crates/eoka-email" }
-eoka-protocol = { version = "0.20.0", path = "crates/eoka-protocol" }
-eoka-sdk = { version = "0.20.0", path = "crates/eoka-sdk" }
-eoka-server = { version = "0.20.0", path = "crates/eoka-server", default-features = false }
-eoka-tack = { version = "0.20.0", path = "crates/eoka-tack" }
-eoka-mcp = { version = "0.20.0", path = "crates/eoka-mcp", default-features = false }
+eoka-solvers = { version = "0.21.0", path = "crates/eoka-solvers", default-features = false }
+eoka-email = { version = "0.21.0", path = "crates/eoka-email" }
+eoka-protocol = { version = "0.21.0", path = "crates/eoka-protocol" }
+eoka-sdk = { version = "0.21.0", path = "crates/eoka-sdk" }
+eoka-server = { version = "0.21.0", path = "crates/eoka-server", default-features = false }
+eoka-tack = { version = "0.21.0", path = "crates/eoka-tack" }
+eoka-mcp = { version = "0.21.0", path = "crates/eoka-mcp", default-features = false }
 anyhow = "1"
 async-trait = "0.1"
 clap = { version = "4", features = ["derive", "env"] }

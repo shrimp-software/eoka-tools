@@ -53,7 +53,7 @@ func newFakeBrowser(t *testing.T, handle fakeHandler) *Browser {
 
 func fakeServerInfo() ServerInfo {
 	return ServerInfo{
-		Protocol:      ProtocolVersion{Major: 3, Minor: 0},
+		Protocol:      ProtocolVersion{Major: 4, Minor: 0},
 		ServerVersion: "test-server",
 		CoreVersion:   "test-core",
 		Methods: []string{
@@ -62,11 +62,10 @@ func fakeServerInfo() ServerInfo {
 			"actions.perform", "operations.get", "operations.wait", "operations.cancel",
 			"agent.observe", "agent.step", "text", "content", "info",
 			"get_text", "get_attribute", "exists", "wait",
-			"page.evaluate", "page.execute", "page.fetch", "page.solve_captcha", "captcha.turnstile",
-			"page.capture_state", "page.restore_state", "page.screenshot",
+			"eval", "exec", "fetch", "page.solve_captcha", "captcha.turnstile",
+			"page.capture_state", "page.restore_state", "screenshot",
 			"mouse.down", "mouse.move", "mouse.up",
-			"key.down", "key.up", "release_all_inputs", "page.close",
-			"page.set_viewport", "page.reset_viewport",
+			"key.down", "key.up", "release_all_inputs", "emulate",
 		},
 		Capabilities: []string{"durableActions", "operationCancellation", "gracefulShutdown",
 			"explicitExecutablePath", "browserAttachment", "runtimeIsolation", "sandboxControl", "viewportEmulation",

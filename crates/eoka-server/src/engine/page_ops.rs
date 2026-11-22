@@ -1,12 +1,16 @@
+use std::future::Future;
 use std::time::Duration;
 
+use base64::Engine as _;
 use eoka::{MouseButton, Page};
-use eoka_protocol::sidecar::ServerError;
+use eoka_protocol::sidecar::{ErrorCode, ServerError};
 use eoka_protocol::{
-    AttributeValue, CaptchaTurnstileResult, Existence, FrameSummary, PageInfo, Request, Response,
-    ShadowClick, WaitArgs, WaitSelectorState,
+    AttributeValue, CaptchaTurnstileResult, EmulateArgs, Existence, FrameSummary, PageInfo,
+    Request, Response, ScreenshotArgs, ShadowClick, WaitArgs, WaitSelectorState,
 };
-use serde_json::Value;
+use serde_json::{json, Value};
+
+use crate::artifacts::StagedArtifact;
 
 use crate::operations::OperationManager;
 
@@ -33,7 +37,12 @@ macro_rules! page_request {
 pub(crate) use page_request;
 
 pub fn runs_on_page(request: &Request) -> bool {
-    matches!(request, page_request!())
+    match request {
+        page_request!() | Request::Eval(_) | Request::Exec(_) | Request::Fetch(_) => true,
+        Request::Screenshot(args) => !args.annotate,
+        Request::Emulate(args) => args.desktop || args.reset,
+        _ => false,
+    }
 }
 
 pub async fn on_page(
@@ -137,11 +146,126 @@ pub(super) async fn execute(page: &Page, request: Request) -> Result<Response, S
                 elapsed_ms: receipt.elapsed.as_millis() as u64,
             })
         }
+        Request::Eval(args) => {
+            super::eval::evaluate(page, &args, super::eval::SIDECAR_EVALUATION_BYTES).await
+        }
+        Request::Exec(args) => super::eval::execute(page, &args).await,
+        Request::Fetch(args) => match crate::url_policy::ensure_url_allowed(&args.url) {
+            Ok(()) => Ok(crate::browser_fetch::fetch(page, args).await),
+            Err(error) => Ok(Response::err(error)),
+        },
+        Request::Screenshot(args) => {
+            if let Some(output) = args.output.as_deref() {
+                eoka_protocol::sidecar::validate_output_path(output)?;
+            }
+            screenshot(page, &args).await.map(Response::ok)
+        }
+        Request::Emulate(args) => viewport(page, &args).await,
         other => Err(ServerError::internal(format!(
             "{} does not run on a page alone",
             other.cmd()
         ))),
     }
+}
+
+pub(super) async fn screenshot(page: &Page, args: &ScreenshotArgs) -> Result<Value, ServerError> {
+    args.validate()?;
+    let options = args.options();
+    publish_screenshot(args, async {
+        Ok(crate::capture::screenshot(page, &options).await?)
+    })
+    .await
+}
+
+pub(super) async fn publish_screenshot(
+    args: &ScreenshotArgs,
+    capture: impl Future<Output = Result<Vec<u8>, ServerError>>,
+) -> Result<Value, ServerError> {
+    if args.inline {
+        return inline_screenshot(&capture.await?);
+    }
+    let output = match args.output.as_deref() {
+        Some(path) => std::path::absolute(path)
+            .map_err(|error| ServerError::invalid_params(error.to_string()))?,
+        None => std::env::temp_dir().join(format!(
+            "eoka-screenshot-{}.{}",
+            uuid::Uuid::new_v4(),
+            args.extension()
+        )),
+    };
+    let mut staging = StagedArtifact::prepare(&output.to_string_lossy())
+        .await
+        .map_err(|error| error.server_error())?;
+    let bytes = match capture.await {
+        Ok(bytes) => bytes,
+        Err(mut error) => {
+            error.data.get_or_insert_with(Default::default).partial_path =
+                Some(staging.partial.to_string_lossy().into_owned());
+            if let Err(cleanup) = staging.abandon().await {
+                error
+                    .message
+                    .push_str(&format!("; local file cleanup failed: {}", cleanup.message));
+            }
+            return Err(error);
+        }
+    };
+    for chunk in bytes.chunks(65_536) {
+        staging
+            .write(chunk)
+            .await
+            .map_err(|error| error.server_error())?;
+    }
+    let size = bytes.len();
+    drop(bytes);
+    staging.seal().await.map_err(|error| error.server_error())?;
+    let mime_type = args.mime_type();
+    let artifact = tokio::task::spawn_blocking(move || staging.publish(mime_type, None))
+        .await
+        .map_err(|error| ServerError::internal(error.to_string()))?
+        .map_err(|error| error.server_error())?;
+    Ok(json!({
+        "path": artifact.path,
+        "size": size,
+        "mimeType": artifact.mime_type,
+        "bytes": artifact.bytes,
+    }))
+}
+
+fn inline_screenshot(bytes: &[u8]) -> Result<Value, ServerError> {
+    if bytes.len() > eoka_protocol::sidecar::MAX_SCREENSHOT_BYTES {
+        return Err(ServerError::new(
+            ErrorCode::ScreenshotTooLarge,
+            "screenshot exceeds the 16 MiB inline limit; write it to a file with output instead",
+        ));
+    }
+    Ok(json!({ "dataBase64": base64::engine::general_purpose::STANDARD.encode(bytes) }))
+}
+
+pub(super) async fn viewport(page: &Page, args: &EmulateArgs) -> Result<Response, ServerError> {
+    if args.reset {
+        page.reset_viewport().await?;
+        disable_touch(page).await;
+        return Ok(Response::ok_text("Device emulation cleared"));
+    }
+    eoka_protocol::sidecar::validate_viewport(args.width, args.height, args.dpr)?;
+    page.set_viewport(args.width, args.height, args.dpr).await?;
+    disable_touch(page).await;
+    ok(json!({
+        "width": args.width,
+        "height": args.height,
+        "dpr": args.dpr,
+        "mobile": false,
+    }))
+}
+
+async fn disable_touch(page: &Page) {
+    let _ = page
+        .session()
+        .send::<_, Value>(
+            "Emulation.setTouchEmulationEnabled",
+            &json!({ "enabled": false }),
+        )
+        .await;
 }
 
 fn ok(value: impl serde::Serialize) -> Result<Response, ServerError> {
@@ -203,4 +327,48 @@ async fn wait(page: &Page, args: &WaitArgs) -> Result<Response, ServerError> {
     Err(ServerError::invalid_params(
         "Provide ms, --text, --url, --selector, or --load",
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_inline_screenshot_is_bounded_before_base64_expansion() {
+        let bytes = vec![0; eoka_protocol::sidecar::MAX_SCREENSHOT_BYTES + 1];
+        let error = inline_screenshot(&bytes).unwrap_err();
+        assert_eq!(error.code, ErrorCode::ScreenshotTooLarge);
+        assert!(error.message.contains("output"));
+        let value =
+            inline_screenshot(&bytes[..eoka_protocol::sidecar::MAX_SCREENSHOT_BYTES]).unwrap();
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(value["dataBase64"].as_str().unwrap())
+            .unwrap();
+        assert_eq!(decoded.len(), eoka_protocol::sidecar::MAX_SCREENSHOT_BYTES);
+    }
+
+    #[test]
+    fn folded_operations_run_on_their_page() {
+        let request = |cmd: &str, args: Value| eoka_protocol::request_from_cmd(cmd, args).unwrap();
+        for (cmd, args) in [
+            ("eval", json!({"code": "1"})),
+            ("exec", json!({"code": "1"})),
+            ("fetch", json!({"url": "https://a.test/"})),
+            ("screenshot", json!({})),
+            ("screenshot", json!({"inline": true})),
+            ("emulate", json!({"desktop": true})),
+            ("emulate", json!({"reset": true})),
+            ("text", json!({})),
+        ] {
+            assert!(runs_on_page(&request(cmd, args.clone())), "{cmd} {args}");
+        }
+        for (cmd, args) in [
+            ("screenshot", json!({"annotate": true})),
+            ("emulate", json!({})),
+            ("frame_eval", json!({"frame": "iframe", "code": "1"})),
+            ("open", json!({"url": "https://a.test/"})),
+        ] {
+            assert!(!runs_on_page(&request(cmd, args.clone())), "{cmd} {args}");
+        }
+    }
 }

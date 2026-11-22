@@ -1,4 +1,4 @@
 import type { Page } from "@cbxss/eoka";
 
 declare const page: Page;
-await page.invoke("page.evaluate", { pageId: page.id, js: 42 });
+await page.invoke("eval", { pageId: page.id, code: 42 });

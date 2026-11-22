@@ -40,14 +40,16 @@ consume those contracts. The Go client implements the same wire protocol.
   `browser.close` are barriers: each waits for every request received before it
   and holds back every request received after it until it finishes.
 - Requests that clear a blocked page do not wait for that page's queue:
-  `dialog.accept` and `dialog.dismiss` always start at once, and `page.close`
-  and `browser.close_tab` start at once while the page has an open dialog or a
+  `dialog.accept` and `dialog.dismiss` always start at once, and
+  `browser.close_tab` starts at once while the page has an open dialog or a
   pending navigation. Requests received after them for the same page still
   wait for them.
-- Catalog operations share one engine and run one at a time across pages; a slow
-  catalog operation delays catalog operations on other pages, not their
-  registered `page.*` methods. `agent.observe` and `agent.step` likewise share
-  one agent session.
+- Catalog operations that act on one page alone run on that page: the reads
+  and waits, held input, `click_shadow`, `captcha.turnstile`, `eval`, `exec`,
+  `fetch`, `screenshot` without `annotate`, and `emulate` with `desktop` or
+  `reset`. The other catalog operations share one engine and run one at a time
+  across pages, so a slow one delays only those operations on other pages.
+  `agent.observe` and `agent.step` likewise share one agent session.
 - Operation waiters and list snapshots run independently. Get/cancel for an
   already-admitted operation also bypass a blocked page; an unknown ID waits
   only for an earlier queued request carrying the same operation ID. List
@@ -62,7 +64,7 @@ consume those contracts. The Go client implements the same wire protocol.
 Before launching Chrome, clients send:
 
 ```json
-{"id":1,"method":"server.hello","params":{"protocol":{"major":3,"minor":0}}}
+{"id":1,"method":"server.hello","params":{"protocol":{"major":4,"minor":0}}}
 ```
 
 The result contains:
@@ -77,10 +79,12 @@ The result contains:
 | `limits.maxMessageBytes` | Maximum serialized message size |
 | `limits.maxInFlight` | Maximum in-flight requests |
 
-The server speaks protocol 3.0. A hello naming another major, or a minor newer
+The server speaks protocol 4.0. A hello naming another major, or a minor newer
 than the server's, returns `ProtocolMismatch` without launching a browser. There
 is no negotiation and no fallback: the Node and Go SDKs ship pinned to the
-matching server and send exactly `{major: 3, minor: 0}`.
+matching server and send exactly `{major: 4, minor: 0}`. Protocol 4.0 removed
+the `page.*` methods that duplicated catalog operations; their callers use the
+catalog operations described below.
 
 `durableActions`, `operationCancellation` and `gracefulShutdown` describe server
 behavior. `explicitExecutablePath`, `browserAttachment`, `runtimeIsolation`,
@@ -151,7 +155,7 @@ way:
 - A request for a page with an open dialog is refused before it starts. So is
   a request for a page whose navigation has waited five seconds, except waits
   and captures, which run, and navigations, which first stop the pending load
-  and then proceed; that is how a fresh `page.goto` or navigate action recovers
+  and then proceed; that is how a fresh navigate action recovers
   a stalled tab.
 - A request already in flight ends as soon as a dialog opens, or once a
   navigation that started under it has waited five seconds. Its message says it
@@ -165,7 +169,7 @@ way:
   the same way before their timeout is reported.
 - `dialog.accept` and `dialog.dismiss` answer the dialog directly and work
   while any other request is blocked. `release_all_inputs`,
-  `page.set_viewport`, `page.reset_viewport`, `page.restore_state`,
+  `emulate`, `page.restore_state`,
   `captcha.turnstile`, `recording.*` and tab close are never refused.
 - An operation that is running when a dialog opens on its page ends: its record
   is `finished` with `error_code` `dialog_open`, `outcome` `outcome_unknown`
@@ -244,12 +248,9 @@ Chrome. A sidecar client has the same local reach as the `eoka` CLI. Do not pass
 untrusted input through as method names or file paths.
 
 Every registered method declares a role in `eoka-protocol::sidecar::method_role`:
-lifecycle, shared with a catalog operation of the same name, a typed convenience
-over `actions.perform`, or distinct from the catalog for a stated reason. No
-registered method duplicates a catalog operation.
-
-`page.human_fill` is `page.fill`: the core library's fill has no human-like
-variant, so both send the same action.
+lifecycle, shared with a catalog operation of the same name, or distinct from
+the catalog for a stated reason. No registered method duplicates a catalog
+operation.
 
 The JavaScript policy is applied by catalog `open`, `reload` and `tab.new`. It is
 not applied to `back`, `forward` or a link that leaves the host, because the
@@ -332,8 +333,8 @@ not enable WebSocket TLS. Attachment is borrowed and leaves existing page
 metrics untouched. Existing page target IDs can be used immediately;
 `browser.tabs` reconciles handles for later-created or externally closed tabs.
 Closing the session, failed initialization, EOF and startup shutdown disconnect
-without closing borrowed Chrome or its tabs. Explicit `page.close` and
-`browser.close_tab` still intentionally close the requested tab.
+without closing borrowed Chrome or its tabs. An explicit `browser.close_tab`
+still intentionally closes the requested tab.
 
 Proxy fields are `server`, optional `username` and `password`. Do not put
 credentials in the server endpoint field.
@@ -358,48 +359,52 @@ Element handles do not cross this wire.
 - Reads and waits are catalog operations: `text`, `content`, `info`, `get_text`,
   `get_attribute`, `exists`, `frames` and `wait` (selector `state`, text, URL,
   load or a fixed `ms`).
-- Evaluation: `page.evaluate` returns `{result: <JSON value>}`;
-  `page.execute` discards the result. These accept `function` and JSON `arguments`; raw evaluation uses the explicit
-  `page.evaluate_raw` / `page.execute_raw` methods. These are JavaScript primitives,
-  not action-receipt-producing operations and not closure serialization.
-- Fetch: `page.fetch` performs browser-context fetch with page credentials and
-  preserves its existing result shape. The protocol response limit does not
-  turn this legacy method's `response.text()` into a bounded streaming download.
-- Bounded inspection: `page.fetch_bounded` accepts the fetch fields plus
-  `maxBytes` (default 8192, maximum 1,048,576 raw body bytes). It streams through
-  core bounded fetch, cancels at the retention limit, skips binary MIME bodies,
-  and treats zero as headers-only. The sidecar's smaller cap leaves headroom for
-  JSON escaping within CDP frames; it does not change the core library's limit.
-  Results include `url`, `status`, `statusText`, `type`, `redirected`, `headers`,
-  `body`, `truncated`, `bytesRead`, and nullable `bodyOmitted`
-  (`binary`, `headers_only`, or `opaque`). Incomplete trailing UTF-8 is omitted;
-  `bytesRead` counts retained raw bytes, not encoded output length. Reaching the
-  limit before observing EOF sets `truncated`, even if the body ends there.
+- Evaluation: `eval` returns the JSON value itself and `exec` discards it.
+  With `function: true`, `code` is function source called once with the JSON
+  `arguments`, without expression or statement wrapping. Without it, `code` is
+  an expression, a function or a statement body, as in the CLI. `raw: true` with
+  `json: true` evaluates `code` as a raw expression and returns its strict JSON
+  value; `raw` alone returns the CLI's text rendering. `function` conflicts with
+  `raw`, and `json` requires it. Script failures keep the `Cdp` code and
+  `data.cdp`. These are JavaScript primitives, not action-receipt-producing
+  operations and not closure serialization.
+- Fetch: `fetch` performs browser-context fetch with page credentials. It
+  accepts `url`, `method`, `headers`, `body`, `redirect` and `max_body`
+  (default 8192, maximum 16,777,216 raw body bytes). It streams through core
+  bounded fetch, cancels at the retention limit, skips binary MIME bodies, and
+  treats zero as headers-only. Results include `url`, `status`, `statusText`,
+  `type`, `redirected`, `headers`, `body`, `truncated`, `bytesRead`, and
+  nullable `bodyOmitted` (`binary`, `headers_only`, or `opaque`). Incomplete
+  trailing UTF-8 is omitted; `bytesRead` counts retained raw bytes, not encoded
+  output length. Reaching the limit before observing EOF sets `truncated`, even
+  if the body ends there. `file:` URLs are refused unless
+  `EOKA_ALLOW_FILE_URLS=1`.
 - State: `page.capture_state` and `page.restore_state` carry cookies, storage,
   URL and user-agent state. Treat this data as private authentication material.
-- Screenshots: `page.screenshot` preserves `{dataBase64}` and defaults to PNG.
-  It accepts `{pageId, format?, quality?, clip?, fullPage?}`. Formats are `png`,
-  `jpeg` and `webp`; quality is an integer from 0 through 100 for JPEG/WebP
-  only. Clip `{x,y,width,height}` uses finite CSS pixels, nonnegative origins
-  and positive sizes. Clip and full-page capture are mutually exclusive.
-  Viewport DPR is the sole render-scale control. Full-page capture uses CSS
-  layout dimensions and remains subject to Chrome image-size limits; dynamic
-  layout can change between captures. Raw in-memory output is capped at 16 MiB
-  and must fit the negotiated JSON message limit. `ScreenshotTooLarge` directs
-  callers to `page.screenshot_to_file`, which accepts the same capture fields
-  plus an absolute `path` and returns artifact metadata without base64.
-  A page behind another tab is captured in place: Chrome paints no frames for a
-  hidden tab, so the server holds a throwaway screencast on a second session of
-  that page for the duration of the capture. The page is not brought to the
-  front, no page's `visibilityState` changes, and pages can be captured
-  concurrently. The catalog `screenshot` operation behaves the same.
-- Viewport: `page.set_viewport` takes `{pageId, width, height, deviceScaleFactor?}`
-  with positive CSS dimensions up to 2,147,483,647 and finite positive DPR
-  (default 1), returning `{}`. `page.reset_viewport` takes `{pageId}` and returns
-  `{}` after clearing the override, restoring native window content dimensions
-  and DPR rather than the configured launch viewport. A 640×360 CSS viewport at
-  DPR 2 captures a 1280×720 PNG. Explicit changes also work on borrowed tabs and
-  remain in effect until reset; disconnect does not silently alter page metrics.
+- Screenshots: `screenshot` defaults to PNG and accepts `format`, `quality`,
+  `clip` and `full_page`. Formats are `png`, `jpeg` and `webp`; quality is an
+  integer from 0 through 100 for JPEG/WebP only. Clip `{x,y,width,height}` uses
+  finite CSS pixels, nonnegative origins and positive sizes. Clip and full-page
+  capture are mutually exclusive. Viewport DPR is the sole render-scale control.
+  Full-page capture uses CSS layout dimensions and remains subject to Chrome
+  image-size limits; dynamic layout can change between captures. `inline: true`
+  returns `{dataBase64}`, capped at 16 MiB of image bytes; a larger capture fails
+  with `ScreenshotTooLarge`. Otherwise the image is published to `output`, an
+  absolute path on the sidecar, or to a new temporary file, and the result is
+  `{path,size,mimeType,bytes}`. `inline` conflicts with `output` and
+  `annotate`. A page behind another tab is captured in place: Chrome paints no
+  frames for a hidden tab, so the server holds a throwaway screencast on a second
+  session of that page for the duration of the capture. The page is not brought
+  to the front, no page's `visibilityState` changes, and pages can be captured
+  concurrently.
+- Viewport: `emulate` with `desktop: true` takes `width`, `height` and `dpr`
+  (defaults 390, 844 and 2) with positive CSS dimensions up to 2,147,483,647 and
+  finite positive DPR, and returns `{width,height,dpr,mobile:false}`.
+  `emulate` with `reset: true` clears the override, restoring native window
+  content dimensions and DPR rather than the configured launch viewport. Without
+  either flag it emulates a touch device. A 640×360 CSS viewport at DPR 2
+  captures a 1280×720 PNG. Explicit changes also work on borrowed tabs and remain
+  in effect until reset; disconnect does not silently alter page metrics.
   Fractional host display scaling can quantize native CSS dimensions and DPR;
   measured DOM layout remains authoritative. Eoka coordinates viewport changes
   and captures across handles for the same browser endpoint within this process,
@@ -417,24 +422,25 @@ Element handles do not cross this wire.
   the page leaves the challenge and returns `{tab_id, clicks, elapsed_ms}`; a
   normal page returns zero clicks. It holds that page's request queue for up to
   `timeout_ms`.
-- Other implemented methods include `page.solve_captcha` and `page.close`.
+- Other implemented methods include `page.solve_captcha`. Close a page with
+  `browser.close_tab`.
 
 JSON results are dynamic data, not statically known application types. Type
 consumers must narrow them before use. Evaluation awaits promises and accepts
 null, booleans, strings, finite numbers, arrays and plain objects. Integer-valued
 numbers must be exactly representable in JavaScript. Undefined, BigInt,
 functions, symbols, cycles, array holes and non-JSON object types are rejected
-instead of silently fabricated or dropped. `page.execute` discards its return
+instead of silently fabricated or dropped. `exec` discards its return
 value and is the appropriate primitive for effects returning undefined.
-The serialized evaluation value is additionally limited to 16,773,120 UTF-8
-bytes (16 MiB minus 4 KiB), leaving room for the CDP response envelope below
+A function or expression result is limited to 1 MiB of JSON. A strict-JSON raw
+result is limited to 16,773,120 UTF-8 bytes (16 MiB minus 4 KiB), leaving room for the CDP response envelope below
 the core transport's frame limit. Evaluation checks this before returning
 the value over CDP and reports `MessageTooLarge` without disconnecting Chrome.
 This per-method ceiling is lower than the sidecar's 32 MiB message ceiling.
 
 ### File artifacts and native recording
 
-`page.screenshot_to_file` and recordings share non-overwrite file publication.
+`screenshot` file output and recordings share non-overwrite file publication.
 The server receives absolute paths resolved once by the caller, stages into an
 exclusive private file in the destination directory, flushes and closes it, then
 atomically publishes without replacing an existing destination. An artifact is
@@ -528,12 +534,6 @@ cleanup never terminates a borrowed browser.
 `operation_id`, a canonical `action`, and `options`. It returns an admitted
 operation record, not an unconditional success receipt.
 
-The sidecar also routes `page.goto`, `page.click`, `page.click_text`,
-`page.human_click`, `page.human_click_text`, `page.fill`, `page.human_fill`,
-`page.type_into`, `page.select`, `page.hover` and `page.press_key` through the
-same operation manager. These methods require an operation ID and return an
-operation record, not the empty objects documented by older protocol examples.
-
 | Method | Parameters | Result |
 | --- | --- | --- |
 | `operations.get` | `{id}` | Operation record |
@@ -563,7 +563,7 @@ A navigation that committed before its deadline is left to finish loading.
 navigation command gets no answer the load is stopped the same way and the
 error is returned.
 
-`page.close` and `browser.close_tab` cancel the running operations of that page
+`browser.close_tab` cancels the running operations of that page
 only. Operations on other pages keep running.
 
 An action on a page behind another tab runs in place. Chrome produces no frames

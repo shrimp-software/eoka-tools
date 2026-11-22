@@ -1,4 +1,4 @@
-{"frame":{"id":1,"method":"server.hello","params":{"protocol":{"major":3,"minor":0}}},"name":"hello"}
+{"frame":{"id":1,"method":"server.hello","params":{"protocol":{"major":4,"minor":0}}},"name":"hello"}
 {"frame":{"id":2,"method":"open","params":{"operation_id":"op-1","url":"https://example.com/"}},"name":"open"}
 {"frame":{"id":2,"method":"key.down","params":{"key":"Shift"}},"name":"key.down"}
 {"frame":{"id":2,"method":"tab.new","params":{}},"name":"tab.new"}

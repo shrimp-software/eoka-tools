@@ -205,7 +205,7 @@ pub async fn tabs(state: &AppState, _params: Value) -> Result<Value, ServerError
 
 const CLOSING_INPUT_RELEASE: std::time::Duration = std::time::Duration::from_secs(3);
 
-pub(crate) async fn close_tab_impl(
+async fn close_tab_impl(
     state: &AppState,
     page_id: &str,
 ) -> Result<Option<ServerError>, ServerError> {

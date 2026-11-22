@@ -84,8 +84,9 @@ fn pointer_actions_reach_a_tab_behind_another_promptly_and_it_stays_behind() {
     let typed = uuid::Uuid::new_v4().to_string();
     let started = Instant::now();
     tabs.ok(
-        "page.human_click",
-        json!({"pageId":behind,"operation_id":typed,"selector":"#go",
+        "actions.perform",
+        json!({"pageId":behind,"operation_id":typed,
+            "action":{"kind":"click","target":{"query":{"kind":"css","selector":"#go"}},"human":true},
             "options":{"expect":clicked,"timeout_ms":8000}}),
     );
     let record = tabs.ok("operations.wait", json!({"id":typed,"timeout_ms":9000}));
@@ -186,7 +187,7 @@ fn a_hidden_tab_is_given_frames_only_while_its_action_runs() {
     let waiting = tabs.admit(&behind, missing.clone(), Some(never.clone()), 30_000);
     std::thread::sleep(Duration::from_millis(500));
     assert!(tabs.painting(&behind));
-    let (shot, elapsed) = tabs.call("page.screenshot", json!({"pageId":behind}));
+    let (shot, elapsed) = tabs.call("screenshot", json!({"pageId":behind,"inline":true}));
     png(&shot);
     assert!(elapsed < Duration::from_secs(5), "{elapsed:?}");
     assert!(tabs.painting(&behind));
@@ -232,7 +233,7 @@ fn a_hidden_tab_is_given_frames_only_while_its_action_runs() {
 
     let waiting = tabs.admit(&behind, missing, Some(never), 30_000);
     std::thread::sleep(Duration::from_millis(500));
-    let (closed, elapsed) = tabs.call("page.close", json!({"pageId":behind}));
+    let (closed, elapsed) = tabs.call("browser.close_tab", json!({"pageId":behind}));
     assert!(closed.get("result").is_some(), "{closed}");
     assert!(elapsed < QUICK, "{elapsed:?}");
     let record = tabs.ok("operations.get", json!({"id":waiting}));

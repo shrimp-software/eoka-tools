@@ -18,14 +18,14 @@ JavaScript exact integer range; runtime validation rejects unsafe integers rathe
 than rounding. Responses contain exactly one `result` or `error`, including
 successful `null` results. Action and CDP errors retain structured evidence.
 
-Evaluation preserves the existing `{ "result": ... }` wire wrapper and accepts
-only JSON-compatible data. Explicit `null` is successful; undefined, functions,
-symbols, BigInt, non-finite or unsafe integral numbers, array holes, cycles and
-non-JSON objects are errors. `page.execute` discards its return value.
+`eval` returns the evaluated value itself and accepts only JSON-compatible data.
+Explicit `null` is successful; undefined, functions, symbols, BigInt,
+non-finite or unsafe integral numbers, array holes, cycles and non-JSON objects
+are errors. `exec` discards its return value.
 
-Protocol 1.3 preserves the screenshot `{dataBase64}` result while adding typed
-PNG/JPEG/WebP options and direct non-overwrite file output. In-memory screenshot
-bytes are bounded at 16 MiB. Artifact metadata reports absolute paths and
+`screenshot` returns `{dataBase64}` with `inline`, or publishes a file without
+overwriting, with typed PNG/JPEG/WebP options. Inline screenshot bytes are
+bounded at 16 MiB. Artifact metadata reports absolute paths and
 JavaScript-safe byte counts; native video is MP4 with Chrome-selected codec.
 
 Canonical recording start/get/stop/cancel DTOs use caller-known UUIDs and expose

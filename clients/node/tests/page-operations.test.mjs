@@ -470,7 +470,7 @@ test('evaluate and execute send a function as its source and keep strings and ar
   const calls = [];
   const page = new Page({ invoke: async (method, params, options) => {
     calls.push({ method, params, options });
-    return { result: 5 };
+    return 5;
   } }, 'tab');
   const add = (a, b) => a + b;
   async function named(value) { return value; }
@@ -479,13 +479,13 @@ test('evaluate and execute send a function as its source and keep strings and ar
   await page.evaluate('()=>1');
   await page.execute(() => { globalThis.touched = true; });
   await page.execute('()=>{}', [1]);
-  assert.deepEqual(calls.map(call => call.method), ['page.evaluate', 'page.evaluate', 'page.evaluate', 'page.execute', 'page.execute']);
-  assert.deepEqual(calls[0].params, { pageId: 'tab', function: '(a, b) => a + b', arguments: [2, 3] });
+  assert.deepEqual(calls.map(call => call.method), ['eval', 'eval', 'eval', 'exec', 'exec']);
+  assert.deepEqual(calls[0].params, { pageId: 'tab', code: '(a, b) => a + b', function: true, arguments: [2, 3] });
   assert.deepEqual(calls[0].options, { timeoutMs: 9 });
-  assert.equal(calls[1].params.function, 'async function named(value) { return value; }');
-  assert.deepEqual(calls[2].params, { pageId: 'tab', function: '()=>1', arguments: [] });
-  assert.equal(calls[3].params.function, '() => { globalThis.touched = true; }');
-  assert.deepEqual(calls[4].params, { pageId: 'tab', function: '()=>{}', arguments: [1] });
+  assert.equal(calls[1].params.code, 'async function named(value) { return value; }');
+  assert.deepEqual(calls[2].params, { pageId: 'tab', code: '()=>1', function: true, arguments: [] });
+  assert.equal(calls[3].params.code, '() => { globalThis.touched = true; }');
+  assert.deepEqual(calls[4].params, { pageId: 'tab', code: '()=>{}', function: true, arguments: [1] });
   for (const run of [() => page.evaluate(Math.max), () => page.execute(add.bind(null, 1))]) {
     await assert.rejects(run(), error => error instanceof ConfigurationError && error.requestState === 'not_sent' && /native and bound functions/.test(error.message));
   }
@@ -708,14 +708,32 @@ test('agent step fixes a durable operation ID before dispatch and never replays 
   assert.deepEqual(calls, ['agent.step', 'operations.get']);
 });
 
+test('fetch reads the catalog fetch result, keeps opaque bodies and refuses truncated or binary ones', async () => {
+  const replies = [
+    { url: 'https://a.test/', status: 302, statusText: '', type: 'opaqueredirect', redirected: false, headers: {}, body: '', truncated: false, bytesRead: 0, bodyOmitted: 'opaque' },
+    { url: 'https://a.test/', status: 200, statusText: 'OK', type: 'basic', redirected: false, headers: {}, body: 'x', truncated: true, bytesRead: 1, bodyOmitted: null },
+    { url: 'https://a.test/', status: 200, statusText: 'OK', type: 'basic', redirected: false, headers: {}, body: '', truncated: false, bytesRead: 0, bodyOmitted: 'binary' },
+  ];
+  const calls = [];
+  const page = new Page({ invoke: async (method, params) => {
+    calls.push({ method, params });
+    return replies.shift();
+  } }, 'tab');
+  assert.deepEqual(await page.fetch('https://a.test/', { redirect: 'manual' }), { url: 'https://a.test/', status: 302, ok: false, headers: {}, body: '' });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await assert.rejects(page.fetch('https://a.test/'), error => error.code === 'FetchBodyUnavailable');
+  }
+  assert.deepEqual(calls[0], { method: 'fetch', params: { redirect: 'manual', pageId: 'tab', url: 'https://a.test/', max_body: 16777216 } });
+});
+
 test('evaluation preserves dynamic JSON and propagates canonical non-JSON errors', async () => {
   let value;
   const unsupported = new ProtocolError('result is not JSON');
   const page = new Page({ invoke: async (method, params) => {
-    assert.equal(method, 'page.evaluate');
+    assert.equal(method, 'eval');
     assert.equal(params.pageId, 'tab');
-    if (params.function === 'unsupported') throw unsupported;
-    return { result: value };
+    if (params.code === 'unsupported') throw unsupported;
+    return value;
   } }, 'tab');
   for (value of [null, false, 42, 'text', [1, null], { nested: { value: true } }]) {
     assert.equal(await page.evaluate('expression'), value);
@@ -728,7 +746,7 @@ test('read wrappers decode canonical state and PNG bytes while raw invoke remain
   const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
   const page = new Page({ supports: () => true, hasCapability: name => name === 'screenshotOptions', invoke: async (method) => {
     if (method === 'page.capture_state') return { state };
-    if (method === 'page.screenshot') return { dataBase64: png.toString('base64') };
+    if (method === 'screenshot') return { dataBase64: png.toString('base64') };
     if (method === 'get_attribute') return { value: null };
     if (method === 'operations.list') return [completed()];
     throw new Error(`unexpected method ${method}`);

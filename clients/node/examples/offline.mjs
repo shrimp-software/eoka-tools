@@ -9,9 +9,9 @@ const browser = await Browser.launch({
 });
 try {
   const page = await browser.newPage("data:text/html,%3Ctitle%3Eeoka%20offline%3C/title%3E");
-  const result = await page.invoke("page.evaluate", { pageId: page.id, function: "()=>document.title" });
+  const title = await page.evaluate("()=>document.title");
   console.log(JSON.stringify({
-    title: result.result,
+    title,
     ownership: browser.ownership,
     browserVersion: browser.browserVersion,
   }, null, 2));

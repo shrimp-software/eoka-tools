@@ -194,8 +194,8 @@ fn eof_during_dispatched_action_preserves_durable_unknown_outcome_and_closes_chr
     let pid = browser_pid(&profile);
     let response = server.request(
         3,
-        "page.execute_raw",
-        json!({"pageId":page,"js":"document.body.innerHTML='<button id=button>click</button>'"}),
+        "exec",
+        json!({"pageId":page,"raw":true,"code":"document.body.innerHTML='<button id=button>click</button>'"}),
     );
     assert!(response.get("result").is_some(), "{response}");
     let operation = uuid::Uuid::new_v4().to_string();
@@ -261,17 +261,17 @@ fn oversized_evaluation_returns_structured_size_error_and_remains_usable() {
     ] {
         let response = server.request(
             id,
-            "page.evaluate_raw",
-            json!({"pageId":page,"js":expression}),
+            "eval",
+            json!({"pageId":page,"raw":true,"json":true,"code":expression}),
         );
         assert_eq!(response["error"]["code"], "MessageTooLarge", "{response}");
     }
     let response = server.request(
         6,
-        "page.evaluate_raw",
-        json!({"pageId":page,"js":"'x'.repeat(15 * 1024 * 1024)"}),
+        "eval",
+        json!({"pageId":page,"raw":true,"json":true,"code":"'x'.repeat(15 * 1024 * 1024)"}),
     );
-    let value = response["result"]["result"].as_str().unwrap();
+    let value = response["result"].as_str().unwrap();
     assert_eq!(value.len(), 15 * 1024 * 1024);
     assert!(value.bytes().all(|byte| byte == b'x'));
     assert!(server
@@ -459,12 +459,12 @@ fn explicit_executable_runtime_and_viewport_have_real_metadata_and_capture_pixel
     assert_eq!(
         server.request(
             5,
-            "page.set_viewport",
+            "emulate",
             json!({
-                "pageId":page,"width":800,"height":450,"deviceScaleFactor":1.5,
+                "pageId":page,"width":800,"height":450,"dpr":1.5,"desktop":true,
             })
         )["result"],
-        json!({})
+        json!({"width":800,"height":450,"dpr":1.5,"mobile":false})
     );
     assert_eq!(
         page_metrics(&mut server, 6, &page),
@@ -475,17 +475,17 @@ fn explicit_executable_runtime_and_viewport_have_real_metadata_and_capture_pixel
     assert_eq!(
         server.request(
             9,
-            "page.set_viewport",
+            "emulate",
             json!({
-                "pageId":page,"width":800,"height":450,"deviceScaleFactor":0,
+                "pageId":page,"width":800,"height":450,"dpr":0,"desktop":true,
             })
         )["error"]["code"],
         "InvalidParams"
     );
     assert_eq!(page_metrics(&mut server, 10, &page), before);
     assert_eq!(
-        server.request(11, "page.reset_viewport", json!({"pageId":page}))["result"],
-        json!({})
+        server.request(11, "emulate", json!({"pageId":page,"reset":true}))["result"],
+        json!("Device emulation cleared")
     );
     let native = page_metrics(&mut server, 12, &page);
     let native_width =
@@ -497,18 +497,18 @@ fn explicit_executable_runtime_and_viewport_have_real_metadata_and_capture_pixel
     assert_eq!(
         server.request(
             14,
-            "page.set_viewport",
+            "emulate",
             json!({
-                "pageId":page,"width":320,"height":200,
+                "pageId":page,"width":320,"height":200,"dpr":1,"desktop":true,
             })
-        )["result"],
-        json!({})
+        )["result"]["mobile"],
+        json!(false)
     );
     let resized = page_metrics(&mut server, 15, &page);
     assert_eq!(resized["width"].as_u64(), Some(320));
     assert_eq!(resized["height"].as_u64(), Some(200));
     assert_eq!(resized["scale"].as_f64(), Some(1.0));
-    server.request(16, "page.reset_viewport", json!({"pageId":page}));
+    server.request(16, "emulate", json!({"pageId":page,"reset":true}));
     assert_eq!(page_metrics(&mut server, 17, &page), native);
     server.shutdown(18);
     assert_eq!(std::fs::read_dir(&runtime).unwrap().count(), 0);
@@ -618,12 +618,12 @@ fn connected_external_browser_keeps_tabs_profile_and_releases_held_input() {
             assert_eq!(
                 borrower.request(
                     8,
-                    "page.set_viewport",
+                    "emulate",
                     json!({
-                        "pageId":original_id,"width":800,"height":450,"deviceScaleFactor":1.5,
+                        "pageId":original_id,"width":800,"height":450,"dpr":1.5,"desktop":true,
                     })
-                )["result"],
-                json!({})
+                )["result"]["mobile"],
+                json!(false)
             );
             assert_png_dimensions(&mut borrower, 9, &original_id, (1200, 675));
             assert_eq!(

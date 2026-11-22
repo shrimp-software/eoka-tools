@@ -4,42 +4,35 @@ const RECORDING_ID: &str = "b9b87b7a-cc6d-4a25-b098-73271cc9c4cb";
 
 #[test]
 fn capture_validation_preserves_defaults_and_rejects_conflicts() {
-    assert!(validate_params("page.screenshot", &json!({"pageId":"p"})).is_ok());
-    assert_eq!(
-        serde_json::to_value(ScreenshotResult {
-            data_base64: "AA==".into()
-        })
-        .unwrap(),
-        json!({"dataBase64":"AA=="})
-    );
+    let args = |value: Value| -> crate::ScreenshotArgs { serde_json::from_value(value).unwrap() };
+    assert!(validate_params("screenshot", &json!({"pageId":"p","inline":true})).is_ok());
+    assert!(args(json!({})).validate().is_ok());
     for format in ["jpeg", "webp"] {
-        assert!(validate_params("page.screenshot", &json!({"pageId":"p","format":format,"quality":0,"clip":{"x":0,"y":1,"width":1.5,"height":2}})).is_ok());
+        assert!(args(
+            json!({"format":format,"quality":0,"clip":{"x":0,"y":1,"width":1.5,"height":2}})
+        )
+        .validate()
+        .is_ok());
     }
-    for params in [
-        json!({"pageId":"p","quality":10}),
-        json!({"pageId":"p","format":"jpeg","quality":101}),
-        json!({"pageId":"p","format":"gif"}),
-        json!({"pageId":"p","clip":{"x":-1,"y":0,"width":1,"height":1}}),
-        json!({"pageId":"p","clip":{"x":0,"y":0,"width":0,"height":1}}),
-        json!({"pageId":"p","clip":{"x":0,"y":0,"width":1,"height":1},"fullPage":true}),
+    for value in [
+        json!({"quality":10}),
+        json!({"format":"jpeg","quality":101}),
+        json!({"clip":{"x":-1,"y":0,"width":1,"height":1}}),
+        json!({"clip":{"x":0,"y":0,"width":0,"height":1}}),
+        json!({"clip":{"x":0,"y":0,"width":1,"height":1},"full_page":true}),
+        json!({"inline":true,"output":"/tmp/capture.png"}),
+        json!({"inline":true,"annotate":true}),
+        json!({"annotate":true,"full_page":true}),
     ] {
         assert_eq!(
-            validate_params("page.screenshot", &params)
-                .unwrap_err()
-                .code,
-            ErrorCode::InvalidParams
+            args(value.clone()).validate().unwrap_err().code,
+            ErrorCode::InvalidParams,
+            "{value}"
         );
     }
-    assert!(validate_params(
-        "page.screenshot_to_file",
-        &json!({"pageId":"p","path":"/tmp/capture.png","fullPage":true})
-    )
-    .is_ok());
-    assert!(validate_params(
-        "page.screenshot_to_file",
-        &json!({"pageId":"p","path":"capture.png"})
-    )
-    .is_err());
+    assert!(validate_params("screenshot", &json!({"pageId":"p","format":"gif"})).is_err());
+    assert!(validate_output_path("/tmp/capture.png").is_ok());
+    assert!(validate_output_path("capture.png").is_err());
     for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         let clip = ScreenshotClip {
             x: 0.0,
@@ -63,7 +56,7 @@ fn every_registered_method_declares_its_role() {
                 method.name
             ),
             MethodRole::Distinct(reason) => assert!(!reason.is_empty()),
-            MethodRole::Lifecycle | MethodRole::Action => {}
+            MethodRole::Lifecycle => {}
         }
     }
     assert_eq!(method_role("page.not_a_method"), None);
@@ -238,24 +231,21 @@ fn recording_terminal_evidence_never_labels_partial_files_complete() {
 }
 
 #[test]
-fn bounded_fetch_limits_reject_unsafe_retention_before_browser_work() {
-    for max_bytes in [0, MAX_BOUNDED_FETCH_BYTES] {
+fn fetch_limits_reject_malformed_bounds_before_browser_work() {
+    for max_body in [0, 16_777_216] {
         validate_params(
-            "page.fetch_bounded",
-            &json!({"pageId":"page","url":"/text","maxBytes":max_bytes}),
+            "fetch",
+            &json!({"pageId":"page","url":"/text","max_body":max_body}),
         )
         .unwrap();
     }
     for params in [
-        json!({"pageId":"page","url":"/text","maxBytes":MAX_BOUNDED_FETCH_BYTES + 1}),
-        json!({"pageId":"page","url":"/text","maxBytes":-1}),
-        json!({"pageId":"page","url":"/text","maxBytes":1.5}),
-        json!({"pageId":"page","url":"/text","redirect":"unbounded"}),
+        json!({"pageId":"page","url":"/text","max_body":-1}),
+        json!({"pageId":"page","url":"/text","max_body":1.5}),
+        json!({"pageId":"page","url":"/text","maxBytes":8192}),
     ] {
         assert_eq!(
-            validate_params("page.fetch_bounded", &params)
-                .unwrap_err()
-                .code,
+            validate_params("fetch", &params).unwrap_err().code,
             ErrorCode::InvalidParams
         );
     }
@@ -337,9 +327,9 @@ fn blocked_page_errors_carry_their_own_codes_and_what_blocks_the_page() {
 
 #[test]
 fn hello_names_one_protocol_version() {
-    assert_eq!(PROTOCOL_VERSION, ProtocolVersion { major: 3, minor: 0 });
+    assert_eq!(PROTOCOL_VERSION, ProtocolVersion { major: 4, minor: 0 });
     let hello: HelloParams =
-        serde_json::from_value(json!({"protocol": {"major": 3, "minor": 0}})).unwrap();
+        serde_json::from_value(json!({"protocol": {"major": 4, "minor": 0}})).unwrap();
     assert_eq!(hello.protocol, PROTOCOL_VERSION);
     assert!(validate_params("server.hello", &json!({"protocol": PROTOCOL_VERSION})).is_ok());
 }
@@ -467,9 +457,23 @@ fn click_shadow_needs_a_selector() {
 
 #[test]
 fn canonical_params_reject_missing_actions_and_unsafe_nested_integers() {
-    assert!(validate_params("page.click", &json!({"pageId":"p","selector":"button"})).is_err());
-    let params = json!({"pageId":"p","selector":"button","operation_id":"operation","options":{"timeout_ms":30000}});
-    assert!(validate_params("page.click", &params).is_ok());
+    let click = json!({"kind":"click","target":{"query":{"kind":"css","selector":"button"}}});
+    assert!(validate_params("actions.perform", &json!({"pageId":"p","action":click})).is_err());
+    let params = json!({"pageId":"p","action":click,"operation_id":"operation","options":{"timeout_ms":30000}});
+    assert!(validate_params("actions.perform", &params).is_ok());
+    for method in [
+        "page.click",
+        "page.goto",
+        "page.evaluate",
+        "page.screenshot",
+        "page.close",
+    ] {
+        assert_eq!(
+            validate_params(method, &params).unwrap_err().code,
+            ErrorCode::UnknownMethod,
+            "{method}"
+        );
+    }
     assert!(validate_params("actions.perform", &json!({"pageId":"p","operation_id":"operation","action":{"kind":"navigate","url":"https://example.test","referrer":null},"options":{"timeout_ms":MAX_SAFE_INTEGER + 1}})).is_err());
     assert!(
         validate_safe_numbers(&json!({"nested":[{"value":-(MAX_SAFE_INTEGER as i64)-1}]})).is_err()
@@ -534,15 +538,9 @@ fn managed_params_validate_paths_dimensions_and_scale_before_browser_work() {
     )
     .is_ok());
     assert!(validate_params("browser.launch", &json!({"deviceScaleFactor":1.5})).is_ok());
-    for params in [
-        json!({"pageId":"p","width":0,"height":360}),
-        json!({"pageId":"p","width":640,"height":2147483648_u64}),
-        json!({"pageId":"p","width":640,"height":360,"deviceScaleFactor":-1}),
-    ] {
+    for (width, height, scale) in [(0, 360, 1.0), (640, u32::MAX, 1.0), (640, 360, -1.0)] {
         assert_eq!(
-            validate_params("page.set_viewport", &params)
-                .unwrap_err()
-                .code,
+            validate_viewport(width, height, scale).unwrap_err().code,
             ErrorCode::InvalidParams
         );
     }
@@ -552,11 +550,7 @@ fn managed_params_validate_paths_dimensions_and_scale_before_browser_work() {
             ErrorCode::InvalidParams
         );
     }
-    assert!(validate_params(
-        "page.set_viewport",
-        &json!({"pageId":"p","width":640,"height":360})
-    )
-    .is_ok());
+    assert!(validate_viewport(640, 360, 1.0).is_ok());
     assert!(validate_params(
         "browser.connect",
         &json!({"wsEndpoint":"ws://localhost/devtools/browser/id","sandbox":true})
@@ -589,13 +583,8 @@ fn actual_result_schemas_preserve_array_dynamic_json_and_numeric_bounds() {
         .as_str()
         .unwrap()
         .ends_with("/OperationRecord"));
-    let dynamic = &bundle["methods"]["page.evaluate"]["result"];
-    let decoded: EvaluateResult =
-        serde_json::from_value(json!({"result":[null,false,{"value":3}]})).unwrap();
-    assert_eq!(decoded.result, json!([null,false,{"value":3}]));
-    assert!(
-        dynamic["properties"]["result"].is_boolean() || dynamic["properties"]["result"].is_object()
-    );
+    let dynamic = &bundle["methods"]["eval"]["result"];
+    assert!(dynamic.is_boolean() || dynamic.is_object(), "{dynamic}");
     let launch = &bundle["methods"]["browser.launch"]["params"];
     assert_eq!(
         launch["properties"]["viewportWidth"]["maximum"].as_f64(),

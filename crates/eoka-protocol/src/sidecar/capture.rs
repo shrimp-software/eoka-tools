@@ -18,25 +18,7 @@ dto!(ScreenshotClip {
     #[schemars(schema_with = "positive_scale_schema")]
     height: f64,
 });
-dto!(ScreenshotParams {
-    page_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")] format: Option<ScreenshotFormat>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(range(max = 100))] quality: Option<u8>,
-    #[serde(skip_serializing_if = "Option::is_none")] clip: Option<ScreenshotClip>,
-    #[serde(skip_serializing_if = "Option::is_none")] full_page: Option<bool>,
-});
-dto!(ScreenshotToFileParams {
-    page_id: String,
-    path: String,
-    #[serde(skip_serializing_if = "Option::is_none")] format: Option<ScreenshotFormat>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(range(max = 100))] quality: Option<u8>,
-    #[serde(skip_serializing_if = "Option::is_none")] clip: Option<ScreenshotClip>,
-    #[serde(skip_serializing_if = "Option::is_none")] full_page: Option<bool>,
-});
-
-fn screenshot_options(
+pub fn screenshot_options(
     format: Option<ScreenshotFormat>,
     quality: Option<u8>,
     clip: Option<&ScreenshotClip>,
@@ -59,7 +41,7 @@ fn screenshot_options(
     }
 }
 
-pub(super) fn validate_screenshot(
+pub fn validate_screenshot(
     format: Option<ScreenshotFormat>,
     quality: Option<u8>,
     clip: Option<&ScreenshotClip>,
@@ -95,52 +77,13 @@ pub(super) fn validate_screenshot(
     Ok(())
 }
 
-fn validate_output_path(path: &str) -> Result<(), ServerError> {
+pub fn validate_output_path(path: &str) -> Result<(), ServerError> {
     if !std::path::Path::new(path).is_absolute() || path.as_bytes().contains(&0) {
         return Err(ServerError::invalid_params(
             "path must be an absolute file path without NUL bytes",
         ));
     }
     Ok(())
-}
-
-impl ScreenshotParams {
-    pub fn validate(&self) -> Result<(), ServerError> {
-        validate_screenshot(
-            self.format,
-            self.quality,
-            self.clip.as_ref(),
-            self.full_page,
-        )
-    }
-    pub fn options(&self) -> eoka::ScreenshotOptions {
-        screenshot_options(
-            self.format,
-            self.quality,
-            self.clip.as_ref(),
-            self.full_page,
-        )
-    }
-}
-
-impl ScreenshotToFileParams {
-    pub fn validate(&self) -> Result<(), ServerError> {
-        validate_screenshot(
-            self.format,
-            self.quality,
-            self.clip.as_ref(),
-            self.full_page,
-        )?;
-        validate_output_path(&self.path)
-    }
-    pub fn options(&self) -> eoka::ScreenshotOptions {
-        screenshot_options(
-            self.format,
-            self.quality,
-            self.clip.as_ref(),
-            self.full_page,
-        )
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

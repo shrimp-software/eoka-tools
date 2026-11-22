@@ -160,8 +160,8 @@ fn page(page: &str, label: &str, behaviour: &str) -> Value {
 #[tokio::test]
 async fn requests_for_different_pages_are_in_flight_together() {
     let mut harness = Harness::start();
-    harness.send(1, "page.evaluate", page("a", "a", "rendezvous"));
-    harness.send(2, "page.evaluate", page("b", "b", "rendezvous"));
+    harness.send(1, "eval", page("a", "a", "rendezvous"));
+    harness.send(2, "eval", page("b", "b", "rendezvous"));
     let replies = harness.replies(2).await;
     assert_eq!(replies[0]["result"]["label"], "a");
     assert_eq!(replies[1]["result"]["label"], "b");
@@ -171,7 +171,7 @@ async fn requests_for_different_pages_are_in_flight_together() {
 #[tokio::test]
 async fn a_page_that_never_answers_delays_only_its_own_requests() {
     let mut harness = Harness::start();
-    harness.send(1, "page.evaluate", page("a", "stuck", "never"));
+    harness.send(1, "eval", page("a", "stuck", "never"));
     harness.send(2, "info", page("a", "behind stuck", "answer"));
     harness.send(3, "info", page("b", "other page", "answer"));
     harness.send(4, "browser.new_page", json!({ "label": "new page" }));
@@ -220,12 +220,12 @@ async fn one_page_runs_its_requests_in_admission_order() {
     for (id, ms) in [(1, 60), (2, 30), (3, 1), (4, 15), (5, 0)] {
         harness.send(
             id,
-            "page.evaluate",
+            "eval",
             json!({ "pageId": "a", "label": id.to_string(), "behaviour": "sleep", "ms": ms }),
         );
         harness.send(
             id + 10,
-            "page.evaluate",
+            "eval",
             json!({ "pageId": "b", "label": (id + 10).to_string(), "behaviour": "sleep", "ms": 60 - ms }),
         );
     }
@@ -246,7 +246,7 @@ async fn one_page_runs_its_requests_in_admission_order() {
 #[tokio::test]
 async fn browser_lifecycle_waits_for_earlier_requests_and_ends_the_session() {
     let mut harness = Harness::start();
-    harness.send(1, "page.evaluate", page("a", "earlier", "gate"));
+    harness.send(1, "eval", page("a", "earlier", "gate"));
     harness.send(
         2,
         "browser.close",
@@ -306,7 +306,7 @@ async fn shutdown_lets_protected_requests_finish_and_interrupts_the_rest() {
         "actions.perform",
         json!({ "pageId": "a", "label": "admission", "behaviour": "gate" }),
     );
-    harness.send(2, "page.evaluate", page("b", "ordinary", "never"));
+    harness.send(2, "eval", page("b", "ordinary", "never"));
     harness.send(
         3,
         "page.fill",
@@ -464,8 +464,8 @@ fn requests_are_routed_by_the_page_they_address() {
     }
     for method in [
         "info",
-        "page.evaluate",
-        "page.close",
+        "eval",
+        "text",
         "browser.close_tab",
         "actions.perform",
         "agent.step",
