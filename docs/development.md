@@ -83,8 +83,9 @@ without a version bump publishes nothing. CI runs
 Dependabot releases itself. It only proposes versions published at least a
 day ago. `dependabot-merge.yml` approves and auto-merges its minor and patch
 updates once CI OK passes; major updates wait for review. `auto-release.yml`
-then opens a `release: x.y.(z+1)` PR for updates outside `.github/` and
-merges it the same way, after any release in flight has finished. Both act
+then opens a `release: x.y.(z+1)` PR for updates outside `.github/`, waits
+for its required checks and merges it with the owner's review bypass, after
+any release in flight has finished. Both act
 through `RELEASE_TOKEN`, a fine-grained token of the repository owner stored
 as an Actions and a Dependabot secret, because merges made with
 `GITHUB_TOKEN` start no workflows.

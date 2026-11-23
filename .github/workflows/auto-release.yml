@@ -23,7 +23,7 @@ concurrency:
 jobs:
   bump:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -95,4 +95,10 @@ jobs:
             gh pr create --head auto-release --base main --title "release: $next" \
               --body "Patch release for the Dependabot updates merged since v$VERSION. Merges itself once CI OK passes."
           fi
-          gh pr merge auto-release --auto --squash
+          # The PR is the token owner's own, so it can't be approved and
+          # auto-merge would wait for a review forever. Wait for the required
+          # checks, then merge with the owner's review bypass. CI OK is
+          # still enforced for admins.
+          sleep 30
+          gh pr checks auto-release --required --watch --fail-fast --interval 30
+          gh pr merge auto-release --squash --admin
