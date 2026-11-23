@@ -87,6 +87,30 @@ const artifacts = [
   ["src/generated/catalog.ts", nodeCatalog],
   ["../go/catalog_generated.go", goCatalog],
 ];
+// The method reference in docs/protocol.md: every registered method with its
+// params and result type, and the catalog operation names.
+const docPath = resolve(repositoryRoot, "docs/protocol.md");
+const [docStart, docEnd] = ["<!-- generated:methods -->", "<!-- /generated:methods -->"];
+const fields = schema => Object.keys(schema.properties ?? {}).sort()
+  .map(name => (schema.required ?? []).includes(name) ? `\`${name}\`` : `\`${name}?\``).join(", ") || "none";
+const typeName = title => title.replace(/^Array_of_(.+)$/, "$1[]");
+const registered = Object.keys(bundle.methods).filter(method => !catalog.includes(method)).sort();
+const methodTable = [
+  docStart,
+  "<!-- Generated from the schema bundle by clients/node/scripts/generate-protocol.mjs. Do not edit. -->",
+  "",
+  "| Method | Params (`?` optional) | Result |",
+  "| --- | --- | --- |",
+  ...registered.map(method => `| \`${method}\` | ${fields(bundle.methods[method].params)} | \`${typeName(bundle.methods[method].result.title)}\` |`),
+  "",
+  `Catalog operations (${catalog.length}), each taking its catalog input plus \`pageId\`: ${catalog.map(method => `\`${method}\``).join(", ")}.`,
+  docEnd,
+].join("\n");
+const doc = await readFile(docPath, "utf8");
+const [before, rest] = doc.split(docStart);
+if (rest === undefined || !rest.includes(docEnd)) throw new Error(`docs/protocol.md has no ${docStart} block`);
+artifacts.push(["../../docs/protocol.md", before + methodTable + rest.slice(rest.indexOf(docEnd) + docEnd.length)]);
+
 for (const [relative, content] of artifacts) {
   const path = resolve(packageRoot, relative);
   if (check) {

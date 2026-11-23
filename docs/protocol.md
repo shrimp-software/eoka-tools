@@ -186,19 +186,49 @@ message-size violations, overload and shutdown are explicit protocol errors.
 Core errors retain their established element, timeout and CDP classifications;
 structured action evidence must not be discarded into a message-only error.
 
-## Method families
+## Methods
 
-Use the generated schema bundle for exact fields, requiredness, bounds and
-method-specific results:
+The registry has two parts: the methods registered in the
+`define_sidecar_methods!` table in `eoka-protocol::sidecar`, and the catalog
+operations. The schema bundle has every method's exact fields, bounds and
+result:
 
 ```sh
 cargo run --quiet --locked -p eoka-protocol --bin export-sidecar-schema
 ```
 
-The registry has two parts. Methods registered in `eoka-protocol::sidecar`
-(`server.*`, `browser.*`, `page.*`, `recording.*` and the shared `actions.*`,
-`operations.*` and `agent.*` methods) keep their existing wire names and result
-shapes.
+<!-- generated:methods -->
+<!-- Generated from the schema bundle by clients/node/scripts/generate-protocol.mjs. Do not edit. -->
+
+| Method | Params (`?` optional) | Result |
+| --- | --- | --- |
+| `actions.perform` | `action`, `operation_id`, `options?`, `pageId` | `OperationRecord` |
+| `agent.observe` | `cursor?`, `max_controls?`, `name?`, `pageId`, `role?`, `timeout_ms?` | `AgentObservation` |
+| `agent.step` | `action`, `action_timeout_ms?`, `destination?`, `expect?`, `max_controls?`, `mode?`, `operation_id?`, `pageId`, `timeout_ms?` | `AgentStepResult` |
+| `browser.close` | none | `Empty` |
+| `browser.close_tab` | `pageId` | `CloseTabResult` |
+| `browser.connect` | `autoSolveCloudflare?`, `wsEndpoint` | `BrowserSessionResult` |
+| `browser.launch` | `aggressiveCdpEvasion?`, `autoSolveCloudflare?`, `deviceScaleFactor?`, `executablePath?`, `extraArgs?`, `geoAlign?`, `headless?`, `proxy?`, `runtimeDir?`, `sandbox?`, `timezone?`, `userAgent?`, `userDataDir?`, `viewportHeight?`, `viewportWidth?` | `BrowserSessionResult` |
+| `browser.new_page` | `url?` | `NewPageResult` |
+| `browser.tabs` | none | `TabsResult` |
+| `operations.cancel` | `id` | `OperationRecord` |
+| `operations.get` | `id` | `OperationRecord` |
+| `operations.list` | `before_ms?`, `limit?` | `OperationRecord[]` |
+| `operations.wait` | `id`, `timeout_ms?` | `OperationRecord` |
+| `page.capture_state` | `pageId` | `CaptureStateResult` |
+| `page.restore_state` | `pageId`, `state` | `Empty` |
+| `page.solve_captcha` | `apiDomain?`, `apiKey`, `callback?`, `captchaMode`, `captchaType`, `enterprisePayload?`, `pageId`, `websiteKey`, `websiteURL` | `SolveCaptchaResult` |
+| `recording.cancel` | `recordingId` | `RecordingRecord` |
+| `recording.get` | `recordingId` | `RecordingRecord` |
+| `recording.start` | `fps?`, `maxHeight?`, `maxWidth?`, `pageId`, `path`, `recordingId` | `RecordingRecord` |
+| `recording.stop` | `recordingId` | `RecordingRecord` |
+| `server.hello` | `protocol` | `HelloResult` |
+| `server.shutdown` | none | `Empty` |
+
+Catalog operations (83), each taking its catalog input plus `pageId`: `back`, `captcha.datadome`, `captcha.detect`, `captcha.inject`, `captcha.turnstile`, `clear_cookies`, `click`, `click_shadow`, `clone_from`, `console`, `content`, `cookies`, `delete_cookie`, `dialog.accept`, `dialog.dismiss`, `double_click`, `download.cancel`, `download.get`, `download.list`, `download.start`, `download.wait`, `dump_storage`, `emulate`, `errors`, `eval`, `exec`, `exists`, `fake_camera`, `fetch`, `fill`, `find`, `forward`, `frame_eval`, `frames`, `get_attribute`, `get_text`, `headers`, `hover`, `info`, `intercept.add`, `intercept.list`, `intercept.log`, `intercept.remove`, `js.allow`, `js.block`, `js.list`, `js.mode`, `js.remove`, `key`, `key.down`, `key.up`, `load_state`, `mouse.down`, `mouse.move`, `mouse.up`, `network.clear`, `network.export`, `network.log`, `network.record.start`, `network.record.status`, `network.record.stop`, `network.show`, `network.wait`, `observe`, `open`, `release_all_inputs`, `reload`, `save_state`, `screenshot`, `scroll`, `select`, `set_cookie`, `set_storage`, `snapshot`, `spa.info`, `spa.navigate`, `storage`, `text`, `wait`, `wasm.find`, `wasm.info`, `wasm.read`, `wasm.write`.
+<!-- /generated:methods -->
+
+The sections below describe behavior the schemas can't express.
 
 ### Catalog operations
 
@@ -270,11 +300,6 @@ instead of naming the dialog.
 
 ### Server lifecycle
 
-| Method | Parameters | Result |
-| --- | --- | --- |
-| `server.hello` | `{protocol: {major, minor}}` | Version/capability/limit metadata |
-| `server.shutdown` | `{}` | `{}` after bounded cleanup, then process exit |
-
 Shutdown works before browser launch, after failed launch and while an ordinary
 request or operation waiter is pending. The server stops admitting normal work,
 settles/cancels pending requests, stops owned operations, releases held inputs
@@ -291,18 +316,7 @@ does not abandon the shared background teardown or immediately kill the sidecar.
 
 ### Browser
 
-| Method | Parameters | Result |
-| --- | --- | --- |
-| `browser.launch` | Headless flag; optional executable/runtime paths, user agent, timezone, paired CSS viewport dimensions, DPR, user-data directory, sandbox policy and proxy | `{ownership, browserVersion}` |
-| `browser.connect` | `{wsEndpoint}` (browser DevTools WebSocket endpoint) | `{ownership: "borrowed", browserVersion}` |
-| `browser.new_page` | Optional `url` | `{pageId}` |
-| `browser.tabs` | `{}` | `{tabs: [{id, title, url}]}` |
-| `browser.close_tab` | `{pageId}` | `{}` or `{cleanupError}` after a tab closed but input cleanup failed |
-| `browser.close` | `{}` | Browser cleanup response, then process exit |
-
-Launch uses camelCase fields: `headless`, `userAgent`, `timezone`,
-`viewportWidth`, `viewportHeight`, `deviceScaleFactor`, `executablePath`,
-`runtimeDir`, `sandbox`, `userDataDir`, and `proxy`. Width and height must be
+Launch fields are camelCase. `viewportWidth` and `viewportHeight` must be
 supplied together, positive and no greater than 2,147,483,647 CSS pixels.
 `deviceScaleFactor` must be finite and positive; it defaults to 1 and can be
 supplied without dimensions to scale the default viewport. Explicit executable,
@@ -467,13 +481,6 @@ an interrupted correction can leave an incomplete retained partial, never a
 completed artifact. The subsequent flush/fsync/close and publication contract is
 unchanged.
 
-| Method | Parameters | Result |
-| --- | --- | --- |
-| `recording.start` | `{pageId,recordingId,path,maxWidth?,maxHeight?,fps?}` | Recording record |
-| `recording.get` | `{recordingId}` | Recording record |
-| `recording.stop` | `{recordingId}` | Terminal recording record |
-| `recording.cancel` | `{recordingId}` | Terminal recording record |
-
 IDs are caller-known UUIDs, allocated before dispatch. Dimensions are positive
 integers through 2,147,483,647; `fps` is an integer from 1 through 120, a native
 frame-rate ceiling rather than a deterministic playback rate. Capture requires a
@@ -535,13 +542,6 @@ cleanup never terminates a borrowed browser.
 `operation_id`, a canonical `action`, and `options`. It returns an admitted
 operation record, not an unconditional success receipt.
 
-| Method | Parameters | Result |
-| --- | --- | --- |
-| `operations.get` | `{id}` | Operation record |
-| `operations.list` | Optional `before_ms`, `limit` | Array of operation records |
-| `operations.wait` | `{id, timeout_ms?}` | Latest operation record; may still be running at timeout |
-| `operations.cancel` | `{id}` | Cancellation request result/operation record; inspect subsequent state |
-
 Clicks, typing and key actions require explicit completion expectations where
 the core action contract requires them. Fill/select/navigation retain intrinsic
 verification. Check `outcome == "verified_complete"` before treating an action
@@ -592,28 +592,19 @@ preserve the same durable operation and outcome evidence as the other adapters.
 
 ## Type generation and clients
 
-The Rust schema exporter drives the generated TypeScript contracts under
-`clients/node`. The unpublished Node SDK builds compiled ESM/declarations and
-uses one private sidecar. Managed installation resolves a verified optional server
-package and pinned Chrome before sending the existing explicit-path launch
-request; installation policy is local to the SDK, not a new wire capability.
-Explicit paths and borrowed attachment remain available. Generated request/result
-maps include dynamic JSON and operation arrays; consumers must not flatten every
-method into an object-only result contract.
+`clients/node/scripts/generate-protocol.mjs` turns the schema bundle into the
+Node SDK's TypeScript types (`clients/node/src/generated`), the Go catalog
+constants and the method table above; CI fails when any of them is stale.
 
-Node import/install starts no process and writes no browser cache. Launch defaults
-to sandboxing; borrowed connections preserve external Chrome. Local abort/deadline
-does not roll back dispatched work. Durable operation IDs are allocated before
-dispatch; strict action conveniences require verified receipts. Close is shared,
-bounded and uncanceled by abandoned request waiters. If both work and cleanup
-fail, AggregateError retains the primary error as `cause`, including operation
-identity for recovery. See [the Node SDK README](../clients/node/README.md).
-
-Go errors preserve structured server data and caller-known operation IDs.
-Go launch negotiates compatibility before opening Chrome, and close requests
-`server.shutdown`. A previously downloaded server without the new handshake is
-rejected with compatible-binary guidance; do not assume an unreleased server
-artifact exists simply because client source changed.
+- **Node** (`@cbxss/eoka`) runs one private `eoka-server` from its platform
+  package. Local aborts and deadlines don't roll back dispatched work, and
+  strict action helpers require verified receipts. When both work and cleanup
+  fail, the `AggregateError` keeps the primary error, with its operation
+  identity, as `cause`. See [the Node SDK README](../clients/node/README.md).
+- **Go** downloads the matching `eoka-server` from the GitHub release and checks
+  it against `SHA256SUMS`. It negotiates `server.hello` before launching
+  Chrome, closes with `server.shutdown`, and keeps structured server errors and
+  caller-known operation IDs.
 
 ## Session socket
 

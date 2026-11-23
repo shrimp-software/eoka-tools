@@ -1,13 +1,12 @@
+mod support;
+
 use serde_json::{json, Value};
-use std::process::Command;
+use support::Session;
 
 #[test]
 #[ignore = "requires Chrome; cancellation while browser handler waits"]
 fn cancellation_and_status_remain_responsive_during_fill_and_step() {
-    let session = Session {
-        name: format!("cancel-cli-{}", uuid::Uuid::new_v4()),
-        directory: tempfile::tempdir().unwrap(),
-    };
+    let session = Session::agent("cancel-cli");
     session.run(&["open", "about:blank"]);
     for step in [false, true] {
         session.run(&[
@@ -29,11 +28,7 @@ fn cancellation_and_status_remain_responsive_during_fill_and_step() {
             .unwrap();
         let start = std::time::Instant::now();
         loop {
-            let output = session
-                .command(&["operations", "get", &id])
-                .output()
-                .unwrap();
-            let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+            let (_, response, _) = session.output(&["operations", "get", &id]);
             if response["data"]["dispatch_intent"] == true {
                 break;
             }
@@ -64,10 +59,7 @@ fn cancellation_and_status_remain_responsive_during_fill_and_step() {
 #[test]
 #[ignore = "requires Chrome; popup recovery after selected tab changes"]
 fn popup_step_recovers_without_replaying_after_destination_selection() {
-    let session = Session {
-        name: format!("popup-recovery-{}", uuid::Uuid::new_v4()),
-        directory: tempfile::tempdir().unwrap(),
-    };
+    let session = Session::agent("popup-recovery");
     session.run(&["open", "about:blank"]);
     session.run(&["exec", "()=>{window.hits=0;document.body.innerHTML='<button id=go>Go</button>';go.onclick=()=>{hits++;const child=window.open('about:blank');child.document.body.innerHTML='<button id=ready>Ready</button>'}}"]);
     let target = session.run(&["view"])["controls"][0]["target"].clone();
@@ -84,11 +76,7 @@ fn popup_step_recovers_without_replaying_after_destination_selection() {
         second["observation"]["tabs"].as_array().unwrap().len()
     );
     request["expect"]["target"]["query"]["selector"] = json!("#different");
-    let output = session
-        .command(&["step", &request.to_string()])
-        .output()
-        .unwrap();
-    let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let (_, response, _) = session.output(&["step", &request.to_string()]);
     assert!(response["error"]
         .as_str()
         .unwrap()
@@ -104,10 +92,7 @@ fn popup_step_recovers_without_replaying_after_destination_selection() {
 #[test]
 #[ignore = "requires Chrome; shared JSON result validation"]
 fn cli_rejects_lossy_function_results() {
-    let session = Session {
-        name: format!("json-cli-{}", uuid::Uuid::new_v4()),
-        directory: tempfile::tempdir().unwrap(),
-    };
+    let session = Session::agent("json-cli");
     session.run(&["open", "about:blank"]);
     for code in [
         "()=>({missing:undefined})",
@@ -116,70 +101,17 @@ fn cli_rejects_lossy_function_results() {
         "()=>new Date(0)",
         "()=> 'é'.repeat(524288)",
     ] {
-        let output = session.command(&["eval", code]).output().unwrap();
-        let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let (output, response, _) = session.output(&["eval", code]);
         assert!(!output.status.success(), "{code}: {response}");
         assert_eq!(response["ok"], false);
     }
     session.run(&["exec", "()=>{const v={};v.self=v;return v}"]);
 }
 
-struct Session {
-    name: String,
-    directory: tempfile::TempDir,
-}
-
-impl Session {
-    fn command(&self, args: &[&str]) -> Command {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_eoka"));
-        command
-            .args(["--agent", "--session", &self.name])
-            .args(args)
-            .env("EOKA_STATE_DIR", self.directory.path())
-            .env("EOKA_IDLE_TIMEOUT", "60000");
-        if args.contains(&"open") {
-            command.arg("--no-geo-align");
-        }
-        for name in [
-            "EOKA_CDP",
-            "EOKA_AUTO_CONNECT",
-            "EOKA_FROM_PROFILE",
-            "EOKA_PROXY",
-            "EOKA_PROXY_FILE",
-            "EOKA_PERSIST",
-        ] {
-            command.env_remove(name);
-        }
-        command
-    }
-
-    fn run(&self, args: &[&str]) -> Value {
-        let output = self.command(args).output().unwrap();
-        assert!(
-            output.status.success(),
-            "{args:?}: {} {}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let result: Value = serde_json::from_slice(&output.stdout).unwrap();
-        assert_eq!(result["ok"], true, "{result}");
-        result["data"].clone()
-    }
-}
-
-impl Drop for Session {
-    fn drop(&mut self) {
-        let _ = self.command(&["close"]).output();
-    }
-}
-
 #[test]
 #[ignore = "requires Chrome; CLI agent loop through SDK and daemon"]
 fn view_step_and_recovery_work_through_the_actual_cli() {
-    let session = Session {
-        name: format!("agent-cli-{}", uuid::Uuid::new_v4()),
-        directory: tempfile::tempdir().unwrap(),
-    };
+    let session = Session::agent("agent-cli");
     session.run(&["open", "about:blank"]);
     session.run(&["exec", "--raw", "document.body.innerHTML='<button id=go>Save</button><p id=status>Ready</p>';window.hits=0;document.querySelector('#go').onclick=()=>{window.hits++;document.querySelector('#status').textContent='Saved'}"]);
     let view = session.run(&["view"]);
@@ -215,18 +147,14 @@ fn view_step_and_recovery_work_through_the_actual_cli() {
 #[test]
 #[ignore = "requires headed Chrome and DISPLAY; session and completion contracts"]
 fn headed_session_is_reused_and_failed_actions_are_not_successful() {
-    let session = Session {
-        name: format!("identity-{}", uuid::Uuid::new_v4()),
-        directory: tempfile::tempdir().unwrap(),
-    };
+    let session = Session::agent("identity");
     session.run(&["--headed", "open", "about:blank"]);
     session.run(&["exec", "()=>{window.marker=42;window.hits=0;document.body.innerHTML='<button onclick=hits++>Go</button>'}"]);
     assert_eq!(session.run(&["eval", "()=>window.marker"]), 42);
     let doctor = session.run(&["doctor"]);
     assert_eq!(doctor["daemon"]["mode"], "headed");
     assert_eq!(doctor["session"], session.name);
-    let output = session.command(&["--headless", "info"]).output().unwrap();
-    let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let (_, result, _) = session.output(&["--headless", "info"]);
     assert_eq!(result["error_detail"]["code"], "session_mode_conflict");
     assert_eq!(session.run(&["eval", "()=>window.marker"]), 42);
     let view = session.run(&["view"]);
@@ -234,22 +162,17 @@ fn headed_session_is_reused_and_failed_actions_are_not_successful() {
     session.run(&["snapshot"]);
     session.run(&["hover", target.as_str().unwrap()]);
     let request = json!({"action":{"kind":"click","target":target}}).to_string();
-    let output = session.command(&["step", &request]).output().unwrap();
-    let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let (output, result, _) = session.output(&["step", &request]);
     assert_eq!(output.status.code(), Some(1));
     assert_eq!(result["data"]["status"], "not_dispatched");
     assert_eq!(session.run(&["eval", "()=>window.hits"]), 0);
     let request = json!({"action":{"kind":"click","target":target},"mode":"explore"}).to_string();
-    let output = session.command(&["step", &request]).output().unwrap();
-    let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let (output, result, _) = session.output(&["step", &request]);
     assert_eq!(output.status.code(), Some(4));
     assert_eq!(result["data"]["status"], "outcome_unknown");
     assert_eq!(session.run(&["eval", "()=>window.hits"]), 1);
-    let output = session
-        .command(&["exec", "async()=>{throw new Error('exception-marker')}"])
-        .output()
-        .unwrap();
-    let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let (output, result, _) =
+        session.output(&["exec", "async()=>{throw new Error('exception-marker')}"]);
     assert_eq!(output.status.code(), Some(1));
     assert!(result["error"]
         .as_str()

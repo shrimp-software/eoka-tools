@@ -15,6 +15,7 @@ dto!(LaunchParams {
     #[serde(default)] aggressive_cdp_evasion: bool,
     #[serde(default)] geo_align: bool,
     #[serde(default)] extra_args: Vec<String>,
+    #[serde(default)]
     #[schemars(schema_with = "optional_positive_scale_schema")]
     device_scale_factor: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

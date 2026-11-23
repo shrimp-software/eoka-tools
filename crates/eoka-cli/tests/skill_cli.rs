@@ -1,6 +1,8 @@
+mod support;
+
 use serde_json::Value;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 
 const STALE_GUIDE: &str = "---\nname: eoka\ndescription: \"old\"\n---\n\n# old guide\n";
 
@@ -21,26 +23,18 @@ impl Home {
     }
 
     fn eoka(&self, arguments: &[&str]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_eoka"))
+        support::eoka()
             .args(arguments)
             .env("HOME", self.path())
             .env("XDG_RUNTIME_DIR", self.directory.path().join("runtime"))
             .env_remove("CODEX_HOME")
             .env_remove("CLAUDE_CONFIG_DIR")
-            .env_remove("EOKA_CDP")
             .output()
             .unwrap()
     }
 
     fn json(&self, arguments: &[&str]) -> Value {
-        let output = self.eoka(arguments);
-        serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
-            panic!(
-                "{error}: stdout={} stderr={}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            )
-        })
+        support::parse(arguments, &self.eoka(arguments))
     }
 }
 
