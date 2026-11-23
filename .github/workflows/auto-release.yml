@@ -1,0 +1,98 @@
+name: Auto release
+
+# Cuts a patch release for Dependabot updates that change something shipped
+# (anything outside .github/): it opens or refreshes one release PR that bumps
+# the patch version and merges it once CI OK passes; publish.yml then
+# releases it. A release already in flight finishes first. The daily run
+# catches anything a cancelled run left behind.
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# The newest run rebuilds the release PR from the newest main.
+concurrency:
+  group: auto-release
+  cancel-in-progress: true
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_TOKEN }}
+
+      - name: Find Dependabot updates not yet released
+        id: state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          unreleased() {
+            git log --oneline --author='dependabot\[bot\]' "$1..origin/main" -- . ':!.github'
+          }
+          last=$(git describe --tags --abbrev=0 --match 'v[0-9]*' origin/main)
+          if [ -z "$(unreleased "$last")" ]; then
+            echo "Nothing from Dependabot to release since $last"
+            echo "pending=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # A release in flight: let it finish, so releases run one at a time
+          # and in order, then release what it did not include.
+          for attempt in $(seq 1 100); do
+            if git rev-parse -q --verify "refs/tags/v$version" >/dev/null \
+              && gh release view "v$version" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+              && [ "$(curl -sS -o /dev/null -w '%{http_code}' "https://registry.npmjs.org/@cbxss/eoka/$version")" = 200 ]; then
+              break
+            fi
+            if [ "$attempt" = 100 ]; then
+              echo "v$version is not fully released yet; the next run retries"
+              echo "pending=true" >> "$GITHUB_OUTPUT"; exit 0
+            fi
+            sleep 60
+            git fetch -q --tags origin
+          done
+          if [ -z "$(unreleased "v$version")" ]; then
+            echo "v$version included every Dependabot update"
+            echo "pending=true" >> "$GITHUB_OUTPUT"
+          else
+            unreleased "v$version"
+          fi
+
+      - if: steps.state.outputs.pending != 'true'
+        uses: shrimp-software/eoka/.github/actions/rust@e6662c5f7faf03b5f6c2979903367003c426b5d4
+
+      - name: Open or refresh the release PR
+        if: steps.state.outputs.pending != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          VERSION: ${{ steps.state.outputs.version }}
+        run: |
+          set -euo pipefail
+          IFS=. read -r major minor patch <<< "$VERSION"
+          next="$major.$minor.$((patch + 1))"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B auto-release origin/main
+          node scripts/bump-release.mjs "$next"
+          # Only the workspace crates' own entries; no dependency moves.
+          cargo update --workspace
+          if git diff -U0 Cargo.lock | grep -E '^[-+][^-+]' | grep -vE '^[-+]version = "'; then
+            echo "Cargo.lock changed more than workspace versions"; exit 1
+          fi
+          git commit -qam "release: $next" -m "Patch release for Dependabot updates since v$VERSION."
+          git push -f origin auto-release
+          if ! gh pr view auto-release --json state --jq .state 2>/dev/null | grep -q OPEN; then
+            gh pr create --head auto-release --base main --title "release: $next" \
+              --body "Patch release for the Dependabot updates merged since v$VERSION. Merges itself once CI OK passes."
+          fi
+          gh pr merge auto-release --auto --squash

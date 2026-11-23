@@ -76,9 +76,18 @@ node scripts/bump-release.mjs 0.19.0
 Merge that to `main`. Publish puts every crate on crates.io, tags `v0.19.0`
 and starts `release.yml`. That one run builds `eoka` and `eoka-mcp` for each
 CLI target, qualifies the `eoka-server` binaries and publishes them all in the
-GitHub release `v0.19.0` with one `SHA256SUMS`. Its npm job waits for approval
-of the `npm-prerelease` deployment. A merge without a version bump publishes nothing. CI runs
+GitHub release `v0.19.0` with one `SHA256SUMS`, then publishes npm. A merge
+without a version bump publishes nothing. CI runs
 `node scripts/bump-release.mjs --check` to catch files that drifted.
+
+Dependabot releases itself. It only proposes versions published at least a
+day ago. `dependabot-merge.yml` approves and auto-merges its minor and patch
+updates once CI OK passes; major updates wait for review. `auto-release.yml`
+then opens a `release: x.y.(z+1)` PR for updates outside `.github/` and
+merges it the same way, after any release in flight has finished. Both act
+through `RELEASE_TOKEN`, a fine-grained token of the repository owner stored
+as an Actions and a Dependabot secret, because merges made with
+`GITHUB_TOKEN` start no workflows.
 
 ## Browser regression tests
 
