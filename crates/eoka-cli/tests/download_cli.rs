@@ -751,7 +751,7 @@ async fn bounded_fetch_limits_binary_and_endless_responses() {
 #[ignore = "requires Chrome; validates client disconnection, idle suppression, and large native transfer"]
 async fn disconnected_clients_do_not_cancel_and_large_files_stay_out_of_daemon_memory() {
     let fixture = Fixture::new().await;
-    let cli = session().env("EOKA_IDLE_TIMEOUT", 2500);
+    let cli = session().env(eoka_protocol::env::IDLE_TIMEOUT, 2500);
     cli.open(&fixture).await;
     let pid = std::fs::read_to_string(eoka_sdk::session::pid_path(&cli.name)).unwrap();
     let socket = eoka_sdk::session::socket_path(&cli.name);

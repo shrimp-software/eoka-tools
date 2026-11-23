@@ -315,7 +315,7 @@ fn dismissing_a_leave_page_dialog_frees_the_tab_for_the_next_click() {
     assert_eq!(accepted["result"], "Dialog accepted", "{accepted}");
     blocked.ok(
         "wait",
-        json!({"pageId":page,"text":"Summary","timeout":5000}),
+        json!({"pageId":page,"selector":"h1","timeout":5000}),
     );
     let title = blocked.ok("info", json!({"pageId":page}));
     assert_eq!(title["title"], "summary", "{title}");

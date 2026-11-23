@@ -119,7 +119,7 @@ A build without a plugin leaves its operations out of `server.hello`, the MCP to
 
 - [Agent browsing](docs/agent-browsing.md): the `view` / `step` loop, references and blocked tabs
 - [Durable operations](docs/operations.md): operation IDs, expectations and recovery
-- [CLI guide](docs/cli.md): frames, held input, DataDome, page evidence and safety defaults
+- [CLI guide](docs/cli.md): frames, held input, DataDome, page evidence, safety defaults and environment variables
 - [Downloads and fetch](docs/downloads.md)
 - [Sidecar protocol](docs/protocol.md)
 - [Development](docs/development.md)

@@ -9,27 +9,14 @@ use std::process::{Command, Output};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-const INHERITED: [&str; 10] = [
-    "EOKA_CDP",
-    "EOKA_AUTO_CONNECT",
-    "EOKA_FROM_PROFILE",
-    "EOKA_PROXY",
-    "EOKA_PROXY_FILE",
-    "EOKA_PERSIST",
-    "EOKA_NO_JS",
-    "EOKA_NO_STEALTH",
-    "EOKA_IDLE_TIMEOUT",
-    "EOKA_REPLY_TIMEOUT_MS",
-];
-
 pub fn eoka() -> Command {
     isolated(OsStr::new(env!("CARGO_BIN_EXE_eoka")))
 }
 
 fn isolated(binary: &OsStr) -> Command {
     let mut command = Command::new(binary);
-    for name in INHERITED {
-        command.env_remove(name);
+    for variable in eoka_protocol::env::ALL {
+        command.env_remove(variable.name);
     }
     command
 }
@@ -56,7 +43,7 @@ impl Session {
     pub fn agent(prefix: &str) -> Self {
         Self::new(prefix)
             .flags(&["--agent"])
-            .env("EOKA_IDLE_TIMEOUT", 60000)
+            .env(eoka_protocol::env::IDLE_TIMEOUT, 60000)
     }
 
     pub fn binary(mut self, binary: OsString) -> Self {
@@ -81,7 +68,7 @@ impl Session {
     fn launch(&self, flags: &[String], args: &[&str]) -> Command {
         let mut command = isolated(&self.binary);
         command
-            .env("EOKA_STATE_DIR", self.state_dir())
+            .env(eoka_protocol::env::STATE_DIR, self.state_dir())
             .envs(self.env.iter().map(|(name, value)| (name, value)))
             .current_dir(self.directory.path())
             .args(flags)

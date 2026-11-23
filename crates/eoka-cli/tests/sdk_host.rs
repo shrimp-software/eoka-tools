@@ -4,8 +4,8 @@ use eoka_sdk::{kill_daemon, EokaClient, LaunchSpec, OpenArgs};
 #[ignore = "requires Chrome; a program that is not the eoka CLI starts a daemon through the SDK"]
 async fn a_program_other_than_the_cli_starts_the_daemon() {
     let scratch = tempfile::tempdir().unwrap();
-    std::env::set_var("EOKA_BIN", env!("CARGO_BIN_EXE_eoka"));
-    std::env::set_var("EOKA_STATE_DIR", scratch.path().join("state"));
+    std::env::set_var(eoka_protocol::env::BIN, env!("CARGO_BIN_EXE_eoka"));
+    std::env::set_var(eoka_protocol::env::STATE_DIR, scratch.path().join("state"));
     let session = format!("sdk-host-{}", uuid::Uuid::new_v4());
     let client = EokaClient::new(
         session.clone(),

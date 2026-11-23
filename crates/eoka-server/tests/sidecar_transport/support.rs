@@ -26,7 +26,7 @@ impl Sidecar {
     pub(crate) fn start_with_temp(state: &Path, scratch: &Path, temp: &Path) -> Self {
         std::fs::create_dir_all(scratch).unwrap();
         let mut child = Command::new(env!("CARGO_BIN_EXE_eoka-server"))
-            .env("EOKA_STATE_DIR", state)
+            .env(eoka_protocol::env::STATE_DIR, state)
             .env("TMPDIR", temp)
             .env("TMP", temp)
             .env("TEMP", temp)

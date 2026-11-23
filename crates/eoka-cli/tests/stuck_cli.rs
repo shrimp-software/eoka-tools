@@ -22,7 +22,7 @@ fn route(path: &str) -> Option<Reply> {
 }
 
 fn session(prefix: &str) -> Session {
-    Session::agent(prefix).env("EOKA_QUEUE_WAIT_MS", 1000)
+    Session::agent(prefix).env(eoka_protocol::env::QUEUE_WAIT_MS, 1000)
 }
 
 impl Session {

@@ -13,7 +13,7 @@ fn keep_state_out_of_the_home_directory() {
         std::fs::create_dir_all(&directory).expect("a scratch state directory");
         directory
     });
-    std::env::set_var("EOKA_STATE_DIR", directory);
+    std::env::set_var(eoka_protocol::env::STATE_DIR, directory);
 }
 
 pub(super) async fn connect(server: EokaServer) -> Client {
@@ -194,6 +194,17 @@ fn without_identifiers(text: &str) -> String {
         if is_uuid(&window) {
             out.push_str("<uuid>");
             index += 36;
+            // An element ref is `@<observation>:<backend node id>`; Chrome numbers
+            // DOM nodes differently from run to run.
+            let digits = characters[index..]
+                .iter()
+                .skip(1)
+                .take_while(|character| character.is_ascii_digit())
+                .count();
+            if out.ends_with("@<uuid>") && characters.get(index) == Some(&':') && digits > 0 {
+                out.push_str(":<node>");
+                index += 1 + digits;
+            }
             continue;
         }
         let hex: String = characters[index..]

@@ -11,7 +11,7 @@ pub(crate) fn ensure_action_urls_allowed(arguments: &serde_json::Value) -> Resul
 }
 
 pub(crate) fn parse_proxy_env() -> eoka_server::eoka::Result<Option<String>> {
-    if let Ok(path) = std::env::var("EOKA_PROXY_FILE") {
+    if let Ok(path) = std::env::var(eoka_protocol::env::PROXY_FILE) {
         let contents = std::fs::read_to_string(path)?;
         let lines: Vec<&str> = contents
             .lines()
@@ -30,7 +30,7 @@ pub(crate) fn parse_proxy_env() -> eoka_server::eoka::Result<Option<String>> {
             .unwrap_or(0);
         Ok(Some(lines[index].to_owned()))
     } else {
-        Ok(std::env::var("EOKA_PROXY").ok())
+        Ok(std::env::var(eoka_protocol::env::PROXY).ok())
     }
 }
 

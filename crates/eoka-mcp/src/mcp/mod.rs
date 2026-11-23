@@ -40,14 +40,14 @@ pub struct EokaServer {
 
 impl EokaServer {
     pub fn new() -> Self {
-        let include_opt_in = std::env::var("EOKA_MCP_ALL_TOOLS")
+        let include_opt_in = std::env::var(eoka_protocol::env::MCP_ALL_TOOLS)
             .map(|v| v != "false" && v != "0")
             .unwrap_or(false);
         Self::listing(include_opt_in)
     }
 
     fn listing(include_opt_in: bool) -> Self {
-        let headless = std::env::var("EOKA_HEADLESS")
+        let headless = std::env::var(eoka_protocol::env::HEADLESS)
             .map(|v| v != "false" && v != "0")
             .unwrap_or(true);
         eoka_server::engine::blockers::set_surface(eoka_server::engine::blockers::Surface::Mcp);
@@ -319,7 +319,7 @@ fn launch_spec(headless: bool, proxy: Option<String>) -> eoka_protocol::launch_s
         js_block: Vec::new(),
         persist: false,
         geo_align: false,
-        auto_solve_cloudflare: std::env::var("EOKA_AUTO_SOLVE_CLOUDFLARE")
+        auto_solve_cloudflare: std::env::var(eoka_protocol::env::AUTO_SOLVE_CLOUDFLARE)
             .is_ok_and(|value| value == "1" || value == "true"),
         sandbox: true,
     }

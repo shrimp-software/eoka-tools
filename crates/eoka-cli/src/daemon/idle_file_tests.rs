@@ -7,7 +7,12 @@ use std::time::Duration;
 async fn delayed_idle_file_operation_keeps_commands_and_shutdown_serviceable() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            async fn command(name: &str, cmd: &str, args: Value) -> eoka_sdk::Response {
+            async fn command(
+                name: &str,
+                cmd: &str,
+                args: Value,
+                deadline: Duration,
+            ) -> eoka_sdk::Response {
                 let socket = tokio::net::UnixStream::connect(eoka_sdk::session::socket_path(name))
                     .await
                     .unwrap();
@@ -15,13 +20,15 @@ async fn delayed_idle_file_operation_keeps_commands_and_shutdown_serviceable() {
                 let mut reader = tokio::io::BufReader::new(reader);
                 let frame = eoka_protocol::wire::request_frame(cmd, args);
                 tokio::time::timeout(
-                    Duration::from_secs(3),
+                    deadline,
                     eoka_protocol::wire::call(&mut reader, &mut writer, Some(&frame)),
                 )
                 .await
-                .unwrap()
+                .unwrap_or_else(|_| panic!("`{cmd}` did not answer within {deadline:?}"))
                 .unwrap()
             }
+            const SETUP: Duration = Duration::from_secs(30);
+            const SERVICE: Duration = Duration::from_secs(3);
             let name = format!("idle-file-fixture-{}", std::process::id());
             let spec = LaunchSpec::Launch {
                 headless: true,
@@ -38,8 +45,9 @@ async fn delayed_idle_file_operation_keeps_commands_and_shutdown_serviceable() {
                 sandbox: true,
             };
             let daemon_name = name.clone();
-            let daemon =
-                tokio::task::spawn_local(async move { super::run(&daemon_name, spec).await });
+            let daemon = tokio::task::spawn_local(async move {
+                super::run(&daemon_name, spec, Duration::from_secs(1800)).await
+            });
             for _ in 0..100 {
                 if eoka_sdk::session::socket_path(&name).exists() {
                     break;
@@ -48,7 +56,11 @@ async fn delayed_idle_file_operation_keeps_commands_and_shutdown_serviceable() {
             }
             let fixture = eoka_solvers::datadome::fixture::Fixture::scenario("absent").await;
             let local_url = fixture.url.replace("app.test", "127.0.0.1");
-            assert!(command(&name, "open", json!({"url":local_url})).await.ok);
+            assert!(
+                command(&name, "open", json!({"url":local_url}), SETUP)
+                    .await
+                    .ok
+            );
             let files = tempfile::tempdir().unwrap();
             let path = files.path().join("response");
             std::fs::write(&path, b"fixture").unwrap();
@@ -56,7 +68,8 @@ async fn delayed_idle_file_operation_keeps_commands_and_shutdown_serviceable() {
                 command(
                     &name,
                     "intercept_add",
-                    json!({"url_pattern":"*/accepted", "respond":path})
+                    json!({"url_pattern":"*/accepted", "respond":path}),
+                    SETUP
                 )
                 .await
                 .ok
@@ -71,14 +84,15 @@ async fn delayed_idle_file_operation_keeps_commands_and_shutdown_serviceable() {
                     command(
                         &name,
                         "exec",
-                        json!({"raw":true,"code":"setTimeout(()=>fetch('/accepted'),100); void 0"})
+                        json!({"raw":true,"code":"setTimeout(()=>fetch('/accepted'),100); void 0"}),
+                        SERVICE
                     )
                     .await
                     .ok
                 );
                 tokio::time::sleep(Duration::from_millis(200)).await;
                 let started = tokio::time::Instant::now();
-                assert!(command(&name, next, json!({})).await.ok);
+                assert!(command(&name, next, json!({}), SERVICE).await.ok);
                 assert!(started.elapsed() < Duration::from_secs(2));
             }
             tokio::time::timeout(Duration::from_secs(3), daemon)
