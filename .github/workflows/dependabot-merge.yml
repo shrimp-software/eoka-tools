@@ -42,8 +42,13 @@ jobs:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
           set -euo pipefail
-          gh pr list --repo "$GITHUB_REPOSITORY" --author 'app/dependabot' --json number,autoMergeRequest,mergeStateStatus \
-            --jq '.[] | select(.autoMergeRequest != null and .mergeStateStatus == "BEHIND") | .number' |
-          while read -r pr; do
-            gh pr comment "$pr" --repo "$GITHUB_REPOSITORY" --body '@dependabot rebase'
+          # mergeStateStatus reads UNKNOWN for a while after a merge, so ask
+          # git whether each queued PR lacks commits from main.
+          gh pr list --repo "$GITHUB_REPOSITORY" --author 'app/dependabot' --json number,headRefOid,autoMergeRequest \
+            --jq '.[] | select(.autoMergeRequest != null) | "\(.number) \(.headRefOid)"' |
+          while read -r pr head; do
+            behind=$(gh api "repos/$GITHUB_REPOSITORY/compare/$GITHUB_SHA...$head" --jq .behind_by)
+            if [ "$behind" -gt 0 ]; then
+              gh pr comment "$pr" --repo "$GITHUB_REPOSITORY" --body '@dependabot rebase'
+            fi
           done
