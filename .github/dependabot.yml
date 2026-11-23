@@ -4,31 +4,43 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Only versions published at least a day ago.
+    cooldown:
+      default-days: 1
     commit-message:
       prefix: "deps"
     groups:
       rust-deps:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    # Only versions published at least a day ago.
+    cooldown:
+      default-days: 1
     commit-message:
       prefix: "ci"
     groups:
       actions:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
 
   - package-ecosystem: npm
     directory: /clients/node
     schedule:
       interval: weekly
+    # Only versions published at least a day ago.
+    cooldown:
+      default-days: 1
     commit-message:
       prefix: "deps"
     groups:
       node-deps:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
     ignore:
       # TypeScript 7 has no compiler API yet; scripts/typecheck.mjs needs it.
       - dependency-name: typescript
@@ -41,8 +53,12 @@ updates:
     directory: /clients/go
     schedule:
       interval: weekly
+    # Only versions published at least a day ago.
+    cooldown:
+      default-days: 1
     commit-message:
       prefix: "deps"
     groups:
       go-deps:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
