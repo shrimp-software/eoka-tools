@@ -38,6 +38,14 @@ EOKA_UPDATE_LOCKS=1 cargo test -p eoka-mcp every_mcp_tool_answers -- --ignored
 EOKA_UPDATE_LOCKS=1 cargo test -p eoka-cli the_tool_manifest_agents_read_is_locked
 ```
 
+The environment variable table in `docs/cli.md` is generated from
+`crates/eoka-protocol/src/env.rs`. Register a new `EOKA_*` variable there, read
+it through its constant, and regenerate the table:
+
+```bash
+EOKA_UPDATE_LOCKS=1 cargo test -p eoka-protocol env::
+```
+
 ## Pull requests
 
 Keep changes focused and update the relevant crate README when user-facing

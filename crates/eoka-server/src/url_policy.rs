@@ -21,7 +21,8 @@ fn is_local_file_url(url: &str) -> bool {
 }
 
 fn file_urls_allowed() -> bool {
-    std::env::var("EOKA_ALLOW_FILE_URLS").is_ok_and(|value| value == "1" || value == "true")
+    std::env::var(eoka_protocol::env::ALLOW_FILE_URLS)
+        .is_ok_and(|value| value == "1" || value == "true")
 }
 
 fn contains_local_file_url(value: &Value) -> bool {

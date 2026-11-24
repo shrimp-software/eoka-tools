@@ -46,7 +46,7 @@ async fn main() {
                 std::process::exit(1);
             }
         };
-        if let Err(e) = daemon::run(&cli.session, spec).await {
+        if let Err(e) = daemon::run(&cli.session, spec, daemon::idle_timeout()).await {
             eprintln!("[eoka] daemon error: {}", e);
             std::process::exit(1);
         }

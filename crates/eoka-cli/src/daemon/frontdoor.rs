@@ -80,7 +80,7 @@ fn locked<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 fn queue_wait() -> Duration {
     Duration::from_millis(
-        std::env::var("EOKA_QUEUE_WAIT_MS")
+        std::env::var(eoka_protocol::env::QUEUE_WAIT_MS)
             .ok()
             .and_then(|value| value.parse().ok())
             .unwrap_or(5_000),

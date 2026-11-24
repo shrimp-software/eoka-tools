@@ -304,7 +304,13 @@ async fn wait(page: &Page, args: &WaitArgs) -> Result<Response, ServerError> {
         return Ok(Response::ok_text("Readiness condition satisfied"));
     }
     if let Some(text) = args.text.as_deref() {
-        page.wait_for_text(text, timeout).await?;
+        across_navigations(
+            timeout,
+            || format!("Element with text '{text}' not found within {timeout}ms"),
+            || request_new_document(page),
+            |left| page.wait_for_text(text, left),
+        )
+        .await?;
         return Ok(Response::ok_text(format!("Text \"{text}\" appeared")));
     }
     if let Some(url) = args.url.as_deref() {
@@ -314,15 +320,33 @@ async fn wait(page: &Page, args: &WaitArgs) -> Result<Response, ServerError> {
     if let Some(selector) = args.selector.as_deref() {
         let outcome = match args.state.unwrap_or_default() {
             WaitSelectorState::Attached => {
-                page.wait_for(selector, timeout).await?;
+                across_navigations(
+                    timeout,
+                    || format!("Element '{selector}' not found within {timeout}ms"),
+                    || request_new_document(page),
+                    |left| page.wait_for(selector, left),
+                )
+                .await?;
                 "attached"
             }
             WaitSelectorState::Visible => {
-                page.wait_for_visible(selector, timeout).await?;
+                across_navigations(
+                    timeout,
+                    || format!("Element '{selector}' not visible within {timeout}ms"),
+                    || request_new_document(page),
+                    |left| page.wait_for_visible(selector, left),
+                )
+                .await?;
                 "visible"
             }
             WaitSelectorState::Hidden => {
-                page.wait_for_hidden(selector, timeout).await?;
+                across_navigations(
+                    timeout,
+                    || format!("Element '{selector}' still visible after {timeout}ms"),
+                    || request_new_document(page),
+                    |left| page.wait_for_hidden(selector, left),
+                )
+                .await?;
                 "hidden"
             }
         };
@@ -336,6 +360,52 @@ async fn wait(page: &Page, args: &WaitArgs) -> Result<Response, ServerError> {
     Err(ServerError::invalid_params(
         "Provide ms, --text, --url, --selector, or --load",
     ))
+}
+
+const NAVIGATION_RETRY: Duration = Duration::from_millis(100);
+
+async fn across_navigations<T, Fut, Recovered>(
+    timeout: u64,
+    missed: impl FnOnce() -> String,
+    recover: impl Fn() -> Recovered,
+    wait: impl Fn(u64) -> Fut,
+) -> eoka::Result<T>
+where
+    Fut: Future<Output = eoka::Result<T>>,
+    Recovered: Future<Output = ()>,
+{
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout);
+    loop {
+        let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if left.is_zero() {
+            return Err(eoka::Error::Timeout(missed()));
+        }
+        match wait(left.as_millis() as u64).await {
+            Err(error) if navigated(&error) => {
+                tokio::time::sleep(NAVIGATION_RETRY).await;
+                recover().await;
+            }
+            Err(eoka::Error::Timeout(_)) => return Err(eoka::Error::Timeout(missed())),
+            result => return result,
+        }
+    }
+}
+
+async fn request_new_document(page: &Page) {
+    let _ = page
+        .session()
+        .send::<_, Value>("DOM.getDocument", &json!({ "depth": 0 }))
+        .await;
+}
+
+fn navigated(error: &eoka::Error) -> bool {
+    matches!(error, eoka::Error::Cdp { message, .. } if [
+        "Cannot find context with specified id",
+        "Execution context was destroyed",
+        "Inspected target navigated or closed",
+    ]
+    .iter()
+    .any(|text| message.contains(text)))
 }
 
 #[cfg(test)]
@@ -357,6 +427,63 @@ mod tests {
             .decode(value.data_base64)
             .unwrap();
         assert_eq!(decoded.len(), eoka_protocol::sidecar::MAX_SCREENSHOT_BYTES);
+    }
+
+    #[tokio::test]
+    async fn a_dom_wait_retries_a_poll_the_navigation_raced_until_its_deadline() {
+        let raced = || eoka::Error::Cdp {
+            method: Some("DOM.requestNode".into()),
+            code: Some(-32000),
+            message: "Cannot find context with specified id".into(),
+        };
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let recovered = std::sync::atomic::AtomicUsize::new(0);
+        let found = across_navigations(
+            5000,
+            || "missed".into(),
+            || async {
+                recovered.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            },
+            |_| {
+                let call = calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                async move {
+                    match call {
+                        0 => Err(raced()),
+                        _ => Ok(call),
+                    }
+                }
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(found, 1);
+        assert_eq!(recovered.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+        let started = std::time::Instant::now();
+        let error = across_navigations(
+            300,
+            || "Element 'h1' not found within 300ms".into(),
+            || async {},
+            |_| async { Err::<(), _>(raced()) },
+        )
+        .await
+        .unwrap_err();
+        assert!(started.elapsed() >= Duration::from_millis(300));
+        assert!(
+            matches!(&error, eoka::Error::Timeout(message) if message == "Element 'h1' not found within 300ms"),
+            "{error}"
+        );
+
+        let error = across_navigations(
+            5000,
+            || "missed".into(),
+            || async {},
+            |_| async { Err::<(), _>(eoka::Error::cdp_msg("SyntaxError: bad selector")) },
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(error, eoka::Error::Cdp { .. }), "{error}");
+        assert!(!navigated(&eoka::Error::ElementNotFound("h1".into())));
     }
 
     #[test]

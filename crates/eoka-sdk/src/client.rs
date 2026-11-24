@@ -293,7 +293,7 @@ async fn exchange(
 }
 
 fn configured_reply_ms() -> Option<u64> {
-    std::env::var("EOKA_REPLY_TIMEOUT_MS")
+    std::env::var(eoka_protocol::env::REPLY_TIMEOUT_MS)
         .ok()
         .and_then(|value| value.parse().ok())
         .filter(|limit| *limit > 0)
@@ -698,7 +698,10 @@ fn daemon_program(
 fn launch_daemon(session_name: &str, spec: &LaunchSpec) -> anyhow::Result<()> {
     session::ensure_runtime_dir()?;
 
-    let program = daemon_program(DAEMON_PROGRAM.get(), std::env::var_os("EOKA_BIN"));
+    let program = daemon_program(
+        DAEMON_PROGRAM.get(),
+        std::env::var_os(eoka_protocol::env::BIN),
+    );
     let mut cmd = StdCommand::new(&program);
     cmd.arg("--daemon").arg("--session").arg(session_name);
     let mut proxy_for_stdin = None;

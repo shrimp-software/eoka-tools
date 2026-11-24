@@ -1,66 +1,39 @@
+mod support;
+
 use eoka_solvers::datadome::fixture::Fixture;
 use serde_json::Value;
 use std::{path::PathBuf, time::Duration};
-use tokio::process::Command;
+use support::Session;
 
-struct Cli {
-    name: String,
-    port: Option<u16>,
-}
-
-impl Cli {
-    fn new(label: &str, port: Option<u16>) -> Self {
-        Self {
-            name: format!("dd-cli-{label}-{}", std::process::id()),
-            port,
-        }
-    }
-
-    fn effective_name(&self) -> String {
-        self.name.clone()
-    }
-
-    fn command(&self, args: &[&str]) -> Command {
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_eoka"));
-        for name in [
-            "EOKA_CDP",
-            "EOKA_AUTO_CONNECT",
-            "EOKA_FROM_PROFILE",
-            "EOKA_PROXY",
-            "EOKA_PROXY_FILE",
-            "EOKA_PERSIST",
-            "EOKA_NO_JS",
-            "EOKA_NO_STEALTH",
-        ] {
-            cmd.env_remove(name);
-        }
-        cmd.env(
-            "EOKA_CHROME_ARGS",
+fn session(label: &str, port: Option<u16>) -> Session {
+    let session = Session::new(&format!("dd-cli-{label}"))
+        .flags(&["--json", "--no-geo-align"])
+        .env(
+            eoka_protocol::env::CHROME_ARGS,
             "--host-resolver-rules=MAP * 127.0.0.1:--no-proxy-server:--site-per-process",
         );
-        cmd.args(["--session", &self.name, "--json", "--no-geo-align"]);
-        if let Some(port) = self.port {
-            cmd.args(["--cdp", &port.to_string()]);
-        }
-        cmd.args(args);
+    match port {
+        Some(port) => session.flags(&["--cdp", &port.to_string()]),
+        None => session,
+    }
+}
+
+impl Session {
+    fn async_command(&self, args: &[&str]) -> tokio::process::Command {
+        let mut command = self.tokio_command(args);
         if matches!(args.first(), Some(&"eval" | &"exec")) {
-            cmd.arg("--raw");
+            command.arg("--raw");
         }
-        cmd.kill_on_drop(true);
-        cmd
+        command
     }
 
-    async fn run(&self, args: &[&str]) -> Value {
-        let output = tokio::time::timeout(Duration::from_secs(35), self.command(args).output())
-            .await
-            .expect("CLI deadline")
-            .unwrap();
-        let response: Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|_| {
-            panic!(
-                "non-JSON CLI response: {}",
-                String::from_utf8_lossy(&output.stderr)
-            )
-        });
+    async fn call(&self, args: &[&str]) -> Value {
+        let output =
+            tokio::time::timeout(Duration::from_secs(35), self.async_command(args).output())
+                .await
+                .expect("CLI deadline")
+                .unwrap();
+        let response = support::parse(args, &output);
         assert_eq!(
             output.status.success(),
             response["ok"] == true,
@@ -70,12 +43,12 @@ impl Cli {
     }
 
     async fn ok(&self, args: &[&str]) -> Value {
-        let response = self.run(args).await;
+        let response = self.call(args).await;
         assert_eq!(response["ok"], true, "{response}");
         let mut data = response["data"].clone();
         if data["action"].is_string() && data["state"] == "running" {
             let finished = self
-                .run(&["operations", "wait", data["id"].as_str().unwrap()])
+                .call(&["operations", "wait", data["id"].as_str().unwrap()])
                 .await;
             assert_eq!(finished["ok"], true, "{finished}");
             data = finished["data"].clone();
@@ -112,14 +85,7 @@ impl Cli {
     }
 
     fn pid_path(&self) -> PathBuf {
-        eoka_sdk::session::pid_path(&self.effective_name())
-    }
-}
-
-impl Drop for Cli {
-    fn drop(&mut self) {
-        let mut command = self.command(&["kill"]);
-        let _ = command.as_std_mut().output();
+        eoka_sdk::session::pid_path(&self.name)
     }
 }
 
@@ -127,7 +93,7 @@ impl Drop for Cli {
 #[ignore = "local keyboard fixture; no live authentication"]
 async fn key_types_native_text_into_top_level_and_focused_frame_inputs() {
     let fixture = Fixture::scenario("simple").await;
-    let cli = Cli::new("key-text", None);
+    let cli = session("key-text", None);
     cli.ok(&["open", &fixture.url]).await;
     let pid = std::fs::read_to_string(cli.pid_path()).unwrap();
     cli.eval("(() => {const input=document.createElement('input');input.id='key-fixture';input.type='search';document.body.appendChild(input);window.keyEvents=[];for(const type of ['keydown','keypress','beforeinput','input','keyup'])input.addEventListener(type,event=>keyEvents.push({type,trusted:event.isTrusted}));input.focus();return true})()").await;
@@ -225,7 +191,7 @@ async fn frame_eval_preserves_the_embedded_context_and_selected_tab() {
     let page = browser.new_page(&fixture.url).await.unwrap();
     let other = browser.new_page("about:blank").await.unwrap();
     other.execute_sync("window.untouched='yes'").await.unwrap();
-    let cli = Cli::new("frame-eval", Some(port));
+    let cli = session("frame-eval", Some(port));
     cli.ok(&["tab", "attach", page.target_id()]).await;
     let pid = std::fs::read_to_string(cli.pid_path()).unwrap();
     let count = browser.tabs().await.unwrap().len();
@@ -295,7 +261,7 @@ async fn frame_eval_preserves_the_embedded_context_and_selected_tab() {
         &fixture.url,
     ] {
         assert_eq!(
-            cli.run(&["frame-eval", invalid, "window.untouched='changed'"])
+            cli.call(&["frame-eval", invalid, "window.untouched='changed'"])
                 .await["ok"],
             false
         );
@@ -314,7 +280,7 @@ async fn frame_eval_preserves_the_embedded_context_and_selected_tab() {
         .await
         .unwrap();
     assert_eq!(
-        cli.run(&["frame-eval", &child_id, "1+1"]).await["ok"],
+        cli.call(&["frame-eval", &child_id, "1+1"]).await["ok"],
         false
     );
     assert_eq!(cli.ok(&["info"]).await["url"], fixture.url);
@@ -326,8 +292,8 @@ async fn frame_eval_preserves_the_embedded_context_and_selected_tab() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "local Chrome CLI/daemon fixture, not live DataDome acceptance"]
 async fn datadome_cli_preserves_owned_session_and_reports_outcomes() {
-    let cli = Cli::new("owned", None);
-    let missing = cli.run(&["captcha", "datadome"]).await;
+    let cli = session("owned", None);
+    let missing = cli.call(&["captcha", "datadome"]).await;
     assert_eq!(missing["error_detail"]["code"], "session_unavailable");
     assert!(!cli.pid_path().exists());
     let mut pid = String::new();
@@ -358,7 +324,7 @@ async fn datadome_cli_preserves_owned_session_and_reports_outcomes() {
         }
         let before = cli.eval("({marker:window.fixtureMarker,local:localStorage.getItem('fixture'),session:sessionStorage.getItem('fixture')})").await;
         let response = cli
-            .run(&[
+            .call(&[
                 "captcha",
                 "datadome",
                 "--timeout-ms",
@@ -426,7 +392,7 @@ async fn interception_preserves_binary_responses_and_bounds_worker_logs() {
     let bytes: Vec<u8> = (0..=255).collect();
     std::fs::write(&response_path, &bytes).unwrap();
     let fixture = Fixture::scenario("absent").await;
-    let cli = Cli::new("interception", None);
+    let cli = session("interception", None);
     cli.ok(&["open", &fixture.url]).await;
     cli.ok(&[
         "network",
@@ -492,11 +458,11 @@ async fn interception_preserves_binary_responses_and_bounds_worker_logs() {
 #[ignore = "local Chrome client-disconnect fixture"]
 async fn accepted_request_finishes_after_cli_disconnect_without_replay() {
     let fixture = Fixture::scenario("simple").await;
-    let cli = Cli::new("disconnect", None);
+    let cli = session("disconnect", None);
     cli.ok(&["open", &fixture.url]).await;
     let pid = std::fs::read_to_string(cli.pid_path()).unwrap();
     let mut child = cli
-        .command(&["captcha", "datadome", "--timeout-ms", "20000"])
+        .async_command(&["captcha", "datadome", "--timeout-ms", "20000"])
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
@@ -527,7 +493,7 @@ async fn accepted_request_finishes_after_cli_disconnect_without_replay() {
     child.wait().await.unwrap();
     let waited = std::time::Instant::now();
     loop {
-        let response = cli.run(&["snapshot"]).await;
+        let response = cli.call(&["snapshot"]).await;
         if response["ok"] == true {
             break;
         }
@@ -580,7 +546,7 @@ async fn datadome_cli_preserves_borrowed_browser_other_tab_and_missing_target() 
     let page = browser.new_page(&fixture.url).await.unwrap();
     let other = browser.new_page("about:blank").await.unwrap();
     other.execute_sync("window.untouched='yes'").await.unwrap();
-    let cli = Cli::new("borrowed", Some(port));
+    let cli = session("borrowed", Some(port));
     cli.ok(&["tab", "attach", page.target_id()]).await;
     let data = cli
         .ok(&["captcha", "datadome", "--timeout-ms", "20000"])
@@ -596,7 +562,7 @@ async fn datadome_cli_preserves_borrowed_browser_other_tab_and_missing_target() 
     );
     browser.close_tab(page.target_id()).await.unwrap();
     let response = cli
-        .run(&["captcha", "datadome", "--timeout-ms", "5000"])
+        .call(&["captcha", "datadome", "--timeout-ms", "5000"])
         .await;
     assert_eq!(response["ok"], false);
     assert_eq!(
@@ -617,7 +583,7 @@ async fn failed_interception_files_suppress_clearance_and_idle_special_files_do_
     let files = tempfile::tempdir().unwrap();
     for option in ["--capture", "--respond"] {
         let fixture = Fixture::scenario("simple").await;
-        let cli = Cli::new(
+        let cli = session(
             if option == "--capture" {
                 "bad-capture"
             } else {
@@ -636,7 +602,7 @@ async fn failed_interception_files_suppress_clearance_and_idle_special_files_do_
             missing.to_str().unwrap(),
         ])
         .await;
-        let response = cli.run(&["captcha", "datadome"]).await;
+        let response = cli.call(&["captcha", "datadome"]).await;
         assert_eq!(
             response["error_detail"]["code"], "datadome_cleanup_failed",
             "{response}"
@@ -658,7 +624,7 @@ async fn failed_interception_files_suppress_clearance_and_idle_special_files_do_
         .unwrap()
         .success());
     let fixture = Fixture::scenario("absent").await;
-    let cli = Cli::new("idle-special", None);
+    let cli = session("idle-special", None);
     cli.ok(&["open", &fixture.url]).await;
     for path in [fifo.to_str().unwrap(), "/dev/zero"] {
         cli.ok(&["network", "intercept", "remove", "all"]).await;
@@ -677,10 +643,9 @@ async fn failed_interception_files_suppress_clearance_and_idle_special_files_do_
             .await
             .unwrap();
     }
-    let socket =
-        tokio::net::UnixStream::connect(eoka_sdk::session::socket_path(&cli.effective_name()))
-            .await
-            .unwrap();
+    let socket = tokio::net::UnixStream::connect(eoka_sdk::session::socket_path(&cli.name))
+        .await
+        .unwrap();
     let (reader, mut writer) = socket.into_split();
     let mut reader = tokio::io::BufReader::new(reader);
     let frame = eoka_protocol::wire::request_frame("shutdown", serde_json::json!({}));

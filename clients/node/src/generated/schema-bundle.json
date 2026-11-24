@@ -3929,6 +3929,7 @@
             ]
           },
           "deviceScaleFactor": {
+            "default": null,
             "exclusiveMinimum": 0,
             "type": [
               "number",
@@ -4013,9 +4014,6 @@
             ]
           }
         },
-        "required": [
-          "deviceScaleFactor"
-        ],
         "title": "LaunchParams",
         "type": "object"
       },

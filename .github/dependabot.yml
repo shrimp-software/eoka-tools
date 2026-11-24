@@ -13,6 +13,10 @@ updates:
       rust-deps:
         patterns: ["*"]
         update-types: ["minor", "patch"]
+    ignore:
+      # Stay on tokio's parking_lot so one copy is built.
+      - dependency-name: parking_lot
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /

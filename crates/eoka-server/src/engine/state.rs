@@ -60,7 +60,7 @@ impl BrowserState {
             patch_binary,
         } = flags;
         let patch_binary = patch_binary.unwrap_or_else(|| {
-            std::env::var("EOKA_PATCH_BINARY")
+            std::env::var(eoka_protocol::env::PATCH_BINARY)
                 .map(|v| v == "true" || v == "1")
                 .unwrap_or(false)
         });
@@ -89,7 +89,7 @@ impl BrowserState {
 
         let cdp_timeout = if proxy.is_some() { 90 } else { 30 };
 
-        let extra_args: Vec<String> = std::env::var("EOKA_CHROME_ARGS")
+        let extra_args: Vec<String> = std::env::var(eoka_protocol::env::CHROME_ARGS)
             .unwrap_or_default()
             .split(':')
             .filter(|s| !s.is_empty())

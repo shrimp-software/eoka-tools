@@ -1,12 +1,13 @@
+mod support;
+
 use serde_json::{json, Value};
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc,
 };
 use std::time::Duration;
+use support::Session;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-static NEXT: AtomicU64 = AtomicU64::new(0);
 
 struct Fixture {
     url: String,
@@ -125,76 +126,25 @@ impl Drop for Fixture {
     }
 }
 
-struct Cli {
-    session: String,
-    directory: tempfile::TempDir,
-    port: Option<u16>,
-    idle_ms: Option<u64>,
+fn session() -> Session {
+    let binary = std::env::var_os("EOKA_DOWNLOAD_TEST_BINARY")
+        .unwrap_or_else(|| env!("CARGO_BIN_EXE_eoka").into());
+    let mut session = Session::new("download-test")
+        .binary(binary)
+        .flags(&["--no-geo-align"]);
+    if std::env::var_os("EOKA_DOWNLOAD_TEST_HEADED").is_some() {
+        session = session.flags(&["--headed"]);
+    }
+    if std::env::var_os("EOKA_DOWNLOAD_TEST_LIVE").is_some() {
+        session = session.flags(&["--no-stealth"]);
+    }
+    session
 }
 
-impl Cli {
-    fn new() -> Self {
-        Self {
-            session: format!(
-                "download-test-{}-{}",
-                std::process::id(),
-                NEXT.fetch_add(1, Ordering::Relaxed)
-            ),
-            directory: tempfile::tempdir().unwrap(),
-            port: None,
-            idle_ms: None,
-        }
-    }
-
-    fn effective_name(&self) -> String {
-        self.session.clone()
-    }
-
-    fn binary() -> std::ffi::OsString {
-        std::env::var_os("EOKA_DOWNLOAD_TEST_BINARY")
-            .unwrap_or_else(|| env!("CARGO_BIN_EXE_eoka").into())
-    }
-
-    fn command(&self, args: &[&str]) -> tokio::process::Command {
-        self.command_mode(args, true)
-    }
-
+impl Session {
     fn command_mode(&self, args: &[&str], json: bool) -> tokio::process::Command {
-        let mut command = tokio::process::Command::new(Self::binary());
-        for name in [
-            "EOKA_CDP",
-            "EOKA_AUTO_CONNECT",
-            "EOKA_FROM_PROFILE",
-            "EOKA_PROXY",
-            "EOKA_PROXY_FILE",
-            "EOKA_PERSIST",
-            "EOKA_NO_JS",
-            "EOKA_NO_STEALTH",
-            "EOKA_IDLE_TIMEOUT",
-        ] {
-            command.env_remove(name);
-        }
-        if let Some(port) = self.port {
-            command.args(["--cdp", &port.to_string()]);
-        }
-        if let Some(ms) = self.idle_ms {
-            command.env("EOKA_IDLE_TIMEOUT", ms.to_string());
-        }
-        command.env("EOKA_STATE_DIR", self.directory.path().join("state"));
-        command.args(["--session", &self.session, "--no-geo-align"]);
-        if json {
-            command.arg("--json");
-        }
-        if std::env::var_os("EOKA_DOWNLOAD_TEST_HEADED").is_some() {
-            command.arg("--headed");
-        }
-        if std::env::var_os("EOKA_DOWNLOAD_TEST_LIVE").is_some() {
-            command.arg("--no-stealth");
-        }
-        command
-            .args(args)
-            .current_dir(self.directory.path())
-            .kill_on_drop(true);
+        let mode: &[&str] = if json { &["--json"] } else { &[] };
+        let mut command = self.tokio_command(&[mode, args].concat());
         if matches!(args.first(), Some(&"eval" | &"exec")) {
             command.arg("--raw");
         }
@@ -202,17 +152,14 @@ impl Cli {
     }
 
     async fn call(&self, args: &[&str]) -> Value {
-        let output = tokio::time::timeout(Duration::from_secs(45), self.command(args).output())
-            .await
-            .unwrap()
-            .unwrap();
-        serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
-            panic!(
-                "{args:?}: {error}: stdout={} stderr={}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            )
-        })
+        let output = tokio::time::timeout(
+            Duration::from_secs(45),
+            self.command_mode(args, true).output(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        support::parse(args, &output)
     }
 
     async fn ok(&self, args: &[&str]) -> Value {
@@ -227,19 +174,11 @@ impl Cli {
     }
 }
 
-impl Drop for Cli {
-    fn drop(&mut self) {
-        let _ = std::process::Command::new(Self::binary())
-            .args(["--session", &self.effective_name(), "kill"])
-            .output();
-    }
-}
-
 #[tokio::test]
 #[ignore = "requires Chrome; page evidence and preflight dispatch guards"]
 async fn unavailable_page_and_targets_report_evidence_without_clicking() {
     let fixture = Fixture::new().await;
-    let cli = Cli::new();
+    let cli = session();
     cli.open(&fixture).await;
     cli.ok(&["exec", r#"document.title='Transfer fixture';document.body.innerHTML='<nav><button>Features</button><button>Get started</button></nav><main><h1>Unavailable transfer</h1><p role="alert">This transfer was deleted</p><input value="INPUT_SECRET"><textarea>TEXTAREA_SECRET</textarea><div hidden>HIDDEN_SECRET</div><button id="disabled" disabled>Disabled</button><button id="hidden" style="display:none">Hidden</button><button id="old">Old target</button></main>';globalThis.clicks=0;document.addEventListener('click',()=>++globalThis.clicks);history.replaceState(null,'','/?secret=TOKEN')"#]).await;
     let observed = cli.ok(&["observe", "--structured"]).await;
@@ -352,7 +291,7 @@ async fn unavailable_page_and_targets_report_evidence_without_clicking() {
 #[ignore = "requires Chrome; bounded context and application readiness"]
 async fn observation_bounds_context_and_preserves_element_targeting() {
     let fixture = Fixture::new().await;
-    let cli = Cli::new();
+    let cli = session();
     cli.open(&fixture).await;
     let before = cli.ok(&["observe", "--structured"]).await;
     cli.ok(&["exec", "const main=document.createElement('main');main.innerHTML=Array.from({length:8},(_,i)=>'<h1>Heading '+i+'</h1>').join('')+Array.from({length:8},(_,i)=>'<p role=alert>Message '+i+'</p>').join('')+'<p>'+ '🙂word '.repeat(1000)+'</p>';document.body.append(main)"]).await;
@@ -396,7 +335,7 @@ async fn observation_bounds_context_and_preserves_element_targeting() {
 #[ignore = "requires Chrome; diagnosis failure preserves the operation result"]
 async fn unavailable_context_does_not_mask_observation_or_download_errors() {
     let fixture = Fixture::new().await;
-    let cli = Cli::new();
+    let cli = session();
     cli.open(&fixture).await;
     cli.ok(&[
         "exec",
@@ -421,7 +360,7 @@ async fn unavailable_context_does_not_mask_observation_or_download_errors() {
 #[ignore = "requires Chrome; temporary page context and resumed waiting"]
 async fn html_attachment_diagnostics_and_wait_timeout_keep_job_identity() {
     let fixture = Fixture::new().await;
-    let cli = Cli::new();
+    let cli = session();
     cli.open(&fixture).await;
     let before = cli.ok(&["info"]).await;
     let html = cli
@@ -486,7 +425,7 @@ async fn html_attachment_diagnostics_and_wait_timeout_keep_job_identity() {
 #[ignore = "requires Chrome; local authenticated attachment fixture"]
 async fn native_download_click_url_blob_and_file_guards() {
     let fixture = Fixture::new().await;
-    let cli = Cli::new();
+    let cli = session();
     cli.open(&fixture).await;
     let job = cli
         .ok(&[
@@ -608,7 +547,7 @@ async fn native_download_click_url_blob_and_file_guards() {
 #[ignore = "requires Chrome; verifies separate clients and nonblocking waiting"]
 async fn background_wait_cancel_and_destination_race() {
     let fixture = Fixture::new().await;
-    let cli = Cli::new();
+    let cli = session();
     cli.open(&fixture).await;
     let job = cli
         .ok(&["download", "--click", "css:#slow", "--out", "slow.bin"])
@@ -625,7 +564,7 @@ async fn background_wait_cancel_and_destination_race() {
         "download_wait_timeout"
     );
     let mut waiter = cli
-        .command(&["download", "wait", id])
+        .command_mode(&["download", "wait", id], true)
         .stdout(std::process::Stdio::piped())
         .spawn()
         .unwrap();
@@ -667,7 +606,7 @@ async fn background_wait_cancel_and_destination_race() {
 #[ignore = "requires Chrome; verifies pending trigger timeout and cancellation"]
 async fn pending_click_is_not_replayed_and_releases_download_ownership() {
     let fixture = Fixture::new().await;
-    let cli = Cli::new();
+    let cli = session();
     cli.open(&fixture).await;
     cli.ok(&[
         "eval",
@@ -748,7 +687,7 @@ async fn pending_click_is_not_replayed_and_releases_download_ownership() {
 #[ignore = "requires Chrome; verifies bounded browser text reads"]
 async fn bounded_fetch_limits_binary_and_endless_responses() {
     let fixture = Fixture::new().await;
-    let cli = Cli::new();
+    let cli = session();
     cli.open(&fixture).await;
     let text = cli.ok(&["fetch", &format!("{}/text", fixture.url)]).await;
     assert_eq!(text["bytesRead"], 8192);
@@ -812,11 +751,10 @@ async fn bounded_fetch_limits_binary_and_endless_responses() {
 #[ignore = "requires Chrome; validates client disconnection, idle suppression, and large native transfer"]
 async fn disconnected_clients_do_not_cancel_and_large_files_stay_out_of_daemon_memory() {
     let fixture = Fixture::new().await;
-    let mut cli = Cli::new();
-    cli.idle_ms = Some(2500);
+    let cli = session().env(eoka_protocol::env::IDLE_TIMEOUT, 2500);
     cli.open(&fixture).await;
-    let pid = std::fs::read_to_string(eoka_sdk::session::pid_path(&cli.effective_name())).unwrap();
-    let socket = eoka_sdk::session::socket_path(&cli.effective_name());
+    let pid = std::fs::read_to_string(eoka_sdk::session::pid_path(&cli.name)).unwrap();
+    let socket = eoka_sdk::session::socket_path(&cli.name);
     let stream = tokio::net::UnixStream::connect(&socket).await.unwrap();
     send_and_leave(
         stream,
@@ -843,11 +781,14 @@ async fn disconnected_clients_do_not_cancel_and_large_files_stay_out_of_daemon_m
     let jobs = cli.ok(&["download", "list"]).await;
     assert_eq!(jobs.as_array().unwrap().len(), 1);
     assert_eq!(
-        std::fs::read_to_string(eoka_sdk::session::pid_path(&cli.effective_name())).unwrap(),
+        std::fs::read_to_string(eoka_sdk::session::pid_path(&cli.name)).unwrap(),
         pid
     );
     let id = jobs[0]["id"].as_str().unwrap();
-    let mut waiter = cli.command(&["download", "wait", id]).spawn().unwrap();
+    let mut waiter = cli
+        .command_mode(&["download", "wait", id], true)
+        .spawn()
+        .unwrap();
     tokio::time::sleep(Duration::from_millis(50)).await;
     waiter.kill().await.unwrap();
     cli.ok(&["download", "wait", id]).await;
@@ -915,8 +856,7 @@ async fn borrowed_browser_download_is_rejected_without_clicking() {
     page.execute("window.clicks=0;document.addEventListener('click',()=>window.clicks++)")
         .await
         .unwrap();
-    let mut cli = Cli::new();
-    cli.port = Some(port);
+    let cli = session().flags(&["--cdp", &port.to_string()]);
     cli.ok(&["tab", "attach", page.target_id()]).await;
     let response = cli
         .call(&[
@@ -946,7 +886,7 @@ async fn borrowed_browser_download_is_rejected_without_clicking() {
 async fn durable_actions_survive_client_disconnect_and_completed_downloads_survive_restart() {
     use tokio::net::UnixStream;
     let fixture = Fixture::new().await;
-    let cli = Cli::new();
+    let cli = session();
     cli.open(&fixture).await;
     cli.ok(&["eval", "document.body.insertAdjacentHTML('beforeend','<button id=operation>Run</button><p id=operation-result>pending</p>');window.operationHits=0;document.getElementById('operation').onclick=()=>{window.operationHits++;setTimeout(()=>document.getElementById('operation-result').textContent='done',300)};true"]).await;
     let id = "6d098ba0-d7d5-4d08-940a-438a0d6a5375";
@@ -955,7 +895,7 @@ async fn durable_actions_survive_client_disconnect_and_completed_downloads_survi
         "action_command",
         serde_json::json!({"operation_id":id,"command":"click","arguments":{"target":"css:#operation","expect":serde_json::from_str::<Value>(&expect).unwrap()}}),
     );
-    let stream = UnixStream::connect(eoka_sdk::session::socket_path(&cli.session))
+    let stream = UnixStream::connect(eoka_sdk::session::socket_path(&cli.name))
         .await
         .unwrap();
     send_and_leave(stream, request).await;
