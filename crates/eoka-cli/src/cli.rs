@@ -49,14 +49,14 @@ pub struct Cli {
         long,
         value_name = "PORT|URL",
         global = true,
-        env = "EOKA_CDP",
+        env = eoka_protocol::env::CDP,
         help = "Connect to Chrome by DevTools port or WebSocket URL"
     )]
     pub cdp: Option<String>,
     #[arg(
         long,
         global = true,
-        env = "EOKA_AUTO_CONNECT",
+        env = eoka_protocol::env::AUTO_CONNECT,
         help = "Auto-discover a running Chrome on ports 9222-9229"
     )]
     pub auto_connect: bool,
@@ -71,42 +71,42 @@ pub struct Cli {
         long,
         value_name = "auto|PATH",
         global = true,
-        env = "EOKA_FROM_PROFILE",
+        env = eoka_protocol::env::FROM_PROFILE,
         help = "Launch with a copy of an existing Chrome profile directory"
     )]
     pub from_profile: Option<String>,
     #[arg(
         long,
         global = true,
-        env = "EOKA_NO_STEALTH",
+        env = eoka_protocol::env::NO_STEALTH,
         help = "Disable stealth CDP filtering and evasion script injection"
     )]
     pub no_stealth: bool,
     #[arg(
         long,
         global = true,
-        env = "EOKA_PERSIST",
+        env = eoka_protocol::env::PERSIST,
         help = "Keep a durable Chrome profile for this session across restarts"
     )]
     pub persist: bool,
     #[arg(
         long,
         global = true,
-        env = "EOKA_NO_GEO_ALIGN",
+        env = eoka_protocol::env::NO_GEO_ALIGN,
         help = "Disable IP-geolocation timezone/language alignment (on by default)"
     )]
     pub no_geo_align: bool,
     #[arg(
         long,
         global = true,
-        env = "EOKA_NO_SANDBOX",
+        env = eoka_protocol::env::NO_SANDBOX,
         help = "Disable Chrome's sandbox (only for containers/CI that cannot run it)"
     )]
     pub no_sandbox: bool,
     #[arg(
         long,
         global = true,
-        env = "EOKA_AUTO_SOLVE_CLOUDFLARE",
+        env = eoka_protocol::env::AUTO_SOLVE_CLOUDFLARE,
         help = "Solve full-page Cloudflare challenges in every tab automatically"
     )]
     pub auto_solve_cloudflare: bool,
@@ -114,7 +114,7 @@ pub struct Cli {
         long,
         global = true,
         value_name = "URL",
-        env = "EOKA_PROXY",
+        env = eoka_protocol::env::PROXY,
         conflicts_with = "proxy_file",
         help = "Proxy URL for launched browser"
     )]
@@ -125,7 +125,7 @@ pub struct Cli {
         long,
         global = true,
         value_name = "FILE",
-        env = "EOKA_PROXY_FILE",
+        env = eoka_protocol::env::PROXY_FILE,
         conflicts_with = "proxy",
         help = "Read proxy URL from a file"
     )]
@@ -133,7 +133,7 @@ pub struct Cli {
     #[arg(
         long,
         global = true,
-        env = "EOKA_NO_JS",
+        env = eoka_protocol::env::NO_JS,
         help = "Start with JavaScript blocked by default"
     )]
     pub no_js: bool,

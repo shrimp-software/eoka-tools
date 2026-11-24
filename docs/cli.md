@@ -145,3 +145,39 @@ These apply to the CLI and MCP server:
 - Saved storage is only restored on its saved origin. Otherwise it is skipped with a warning.
 - The CLI runtime directory is `$XDG_RUNTIME_DIR/eoka`, or `$TMPDIR/eoka-<uid>` (default `/tmp/eoka-<uid>`) as a fallback. It is owner-only, and a directory owned by another user is refused.
 - On Linux, the local forwarder for authenticated HTTP proxies refuses connections from other users. Other processes run by the same user can still use it, and other platforms do not check the caller.
+
+## Environment variables
+
+Every `EOKA_*` variable the Rust crates read, generated from
+[`eoka-protocol`'s registry](../crates/eoka-protocol/src/env.rs). The Node SDK
+and Go client document their own (`EOKA_SERVER_BIN`, `EOKA_CHROME_PATH`, ...)
+in their READMEs. A flag given on the command line overrides its variable.
+
+<!-- generated:env -->
+<!-- Generated from crates/eoka-protocol/src/env.rs; update with EOKA_UPDATE_LOCKS=1 cargo test -p eoka-protocol env::. Do not edit. -->
+
+| Variable | Read by | Purpose |
+| --- | --- | --- |
+| `EOKA_CDP` | eoka-cli | Connect to Chrome by DevTools port or WebSocket URL (`--cdp`) |
+| `EOKA_AUTO_CONNECT` | eoka-cli | Auto-discover a running Chrome on ports 9222-9229 (`--auto-connect`) |
+| `EOKA_FROM_PROFILE` | eoka-cli | Launch with a copy of an existing Chrome profile directory, `auto` or a path (`--from-profile`) |
+| `EOKA_NO_STEALTH` | eoka-cli | Disable stealth CDP filtering and evasion script injection (`--no-stealth`) |
+| `EOKA_PERSIST` | eoka-cli | Keep a durable Chrome profile for the session across restarts (`--persist`) |
+| `EOKA_NO_GEO_ALIGN` | eoka-cli | Disable IP-geolocation timezone and language alignment (`--no-geo-align`) |
+| `EOKA_NO_SANDBOX` | eoka-cli | Disable Chrome's sandbox, only for containers and CI that cannot run it (`--no-sandbox`) |
+| `EOKA_NO_JS` | eoka-cli | Start with JavaScript blocked by default (`--no-js`) |
+| `EOKA_AUTO_SOLVE_CLOUDFLARE` | eoka-cli, eoka-mcp | Solve full-page Cloudflare challenges in every tab (`--auto-solve-cloudflare`; the MCP server takes `1` or `true`) |
+| `EOKA_PROXY` | eoka-cli, eoka-mcp | Proxy URL for a launched browser (`--proxy`) |
+| `EOKA_PROXY_FILE` | eoka-cli, eoka-mcp | File of proxy URLs; each launch picks one of its non-empty, non-`#` lines (`--proxy-file`). The MCP server prefers it over `EOKA_PROXY` |
+| `EOKA_IDLE_TIMEOUT` | eoka-cli | Milliseconds a session daemon with no clients stays up (default 1800000) |
+| `EOKA_QUEUE_WAIT_MS` | eoka-cli | Milliseconds a command waits for a busy session before `daemon_busy` (default 5000; read when the daemon starts) |
+| `EOKA_REPLY_TIMEOUT_MS` | eoka-sdk | Reply deadline in milliseconds for daemon commands without their own timeout (CLI and Rust SDK) |
+| `EOKA_BIN` | eoka-sdk | `eoka` binary the Rust SDK starts as the session daemon when the host program is not the CLI (default `eoka` on `PATH`) |
+| `EOKA_MCP_ALL_TOOLS` | eoka-mcp | List the catalog's opt-in tools too (any value but `0` or `false`) |
+| `EOKA_HEADLESS` | eoka-mcp | Launch the MCP browser headless (default); `0` or `false` launches it headed |
+| `EOKA_PROFILE_DIR` | eoka-protocol | Base directory for `--persist` profiles (default `$XDG_STATE_HOME/eoka/profiles`) |
+| `EOKA_STATE_DIR` | eoka-server | Directory for operation and download history (default `$XDG_STATE_HOME/eoka` or the platform's user state directory) |
+| `EOKA_ALLOW_FILE_URLS` | eoka-server | Allow `file:` URLs (`1` or `true`); the CLI session daemon reads it when it starts |
+| `EOKA_PATCH_BINARY` | eoka-server | Patch the Chrome binary when the launch does not decide (`1` or `true`; default off) |
+| `EOKA_CHROME_ARGS` | eoka-server | Extra Chrome command-line arguments, separated by `:` |
+<!-- /generated:env -->

@@ -12,15 +12,15 @@ use crate::protocol::{Request, Response};
 use crate::session;
 use eoka_server::engine::Engine;
 
-fn idle_timeout() -> Duration {
-    let ms = std::env::var("EOKA_IDLE_TIMEOUT")
+pub fn idle_timeout() -> Duration {
+    let ms = std::env::var(eoka_protocol::env::IDLE_TIMEOUT)
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
         .unwrap_or(30 * 60 * 1000);
     Duration::from_millis(ms)
 }
 
-pub async fn run(session_name: &str, spec: LaunchSpec) -> anyhow::Result<()> {
+pub async fn run(session_name: &str, spec: LaunchSpec, timeout: Duration) -> anyhow::Result<()> {
     let _session_lock = session::acquire_daemon_lock(session_name)?;
 
     let sock_path = session::trusted_socket_path(session_name)?;
@@ -50,7 +50,6 @@ pub async fn run(session_name: &str, spec: LaunchSpec) -> anyhow::Result<()> {
     let mut handler = Engine::new(session_name, spec);
     let mut last_activity = Instant::now();
     let mut waiters = tokio::task::JoinSet::new();
-    let timeout = idle_timeout();
 
     let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
     tokio::spawn(async move {
@@ -233,9 +232,6 @@ mod tests {
     use super::*;
     #[tokio::test]
     async fn idle_timeout_shuts_daemon_down_with_no_clients() {
-        unsafe {
-            std::env::set_var("EOKA_IDLE_TIMEOUT", "50");
-        }
         let session_name = format!("eoka-idle-test-{}", std::process::id());
         let spec = LaunchSpec::Launch {
             headless: true,
@@ -252,11 +248,11 @@ mod tests {
             sandbox: true,
         };
 
-        let result = tokio::time::timeout(Duration::from_secs(15), run(&session_name, spec)).await;
-
-        unsafe {
-            std::env::remove_var("EOKA_IDLE_TIMEOUT");
-        }
+        let result = tokio::time::timeout(
+            Duration::from_secs(15),
+            run(&session_name, spec, Duration::from_millis(50)),
+        )
+        .await;
 
         assert!(
             result.is_ok(),

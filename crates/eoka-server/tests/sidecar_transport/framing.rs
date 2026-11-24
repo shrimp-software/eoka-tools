@@ -238,7 +238,7 @@ fn closed_stdout_triggers_cleanup_even_with_stdin_still_open() {
     let (_root, state, scratch) = directories();
     std::fs::create_dir_all(&scratch).unwrap();
     let mut child = Command::new(env!("CARGO_BIN_EXE_eoka-server"))
-        .env("EOKA_STATE_DIR", state)
+        .env(eoka_protocol::env::STATE_DIR, state)
         .env("TMPDIR", scratch)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

@@ -242,9 +242,18 @@ impl DataDomeSolver {
                 if detect::classify_url(&frame.url) == Detection::IpBanned {
                     return Ok(Some(SolveOutcome::IpBanned));
                 }
-                let text: String = page
+                let text: String = match page
                     .evaluate_in_frame_id(&frame.id, "document.body?.innerText || ''")
-                    .await?;
+                    .await
+                {
+                    Ok(text) => text,
+                    Err(error) => {
+                        if page.frames().await?.iter().any(|f| f.id == frame.id) {
+                            return Err(error.into());
+                        }
+                        continue;
+                    }
+                };
                 if is_block_notice(&text) {
                     return Ok(Some(SolveOutcome::Blocked));
                 }

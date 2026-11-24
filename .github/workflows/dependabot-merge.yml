@@ -1,27 +1,26 @@
 name: Dependabot merge
 
-# Approves and auto-merges Dependabot's minor and patch updates once CI OK
-# passes. Major updates stay open for review. RELEASE_TOKEN is a fine-grained
-# token of the repository owner (Actions and Dependabot secret): its merges
-# start the push workflows, which GITHUB_TOKEN merges would not.
+# Approves Dependabot's minor and patch updates and adds them to the merge
+# queue, which merges each once CI OK passes on top of main. Major updates
+# stay open for review. RELEASE_TOKEN is a fine-grained token of the
+# repository owner (Actions and Dependabot secret): its merges start the push
+# workflows, which GITHUB_TOKEN merges would not.
 on:
   pull_request:
     types: [opened, reopened, synchronize]
-  push:
-    branches: [main]
 
 permissions:
   contents: read
 
 jobs:
   merge:
-    if: github.event_name == 'pull_request' && github.event.pull_request.user.login == 'dependabot[bot]'
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
       - id: meta
         uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
 
-      - name: Approve and enable auto-merge
+      - name: Approve and queue
         if: steps.meta.outputs.update-type != 'version-update:semver-major'
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
@@ -30,25 +29,3 @@ jobs:
           set -euo pipefail
           gh pr review --approve "$PR_URL"
           gh pr merge --auto --squash "$PR_URL"
-
-  # main requires branches to be up to date, so after each merge the other
-  # queued Dependabot PRs need a rebase before they can merge.
-  rebase-queued:
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Ask Dependabot to rebase queued PRs that fell behind
-        env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-        run: |
-          set -euo pipefail
-          # mergeStateStatus reads UNKNOWN for a while after a merge, so ask
-          # git whether each queued PR lacks commits from main.
-          gh pr list --repo "$GITHUB_REPOSITORY" --author 'app/dependabot' --json number,headRefOid,autoMergeRequest \
-            --jq '.[] | select(.autoMergeRequest != null) | "\(.number) \(.headRefOid)"' |
-          while read -r pr head; do
-            behind=$(gh api "repos/$GITHUB_REPOSITORY/compare/$GITHUB_SHA...$head" --jq .behind_by)
-            if [ "$behind" -gt 0 ]; then
-              gh pr comment "$pr" --repo "$GITHUB_REPOSITORY" --body '@dependabot rebase'
-            fi
-          done

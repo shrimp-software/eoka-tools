@@ -9,7 +9,7 @@ fn session(label: &str, port: Option<u16>) -> Session {
     let session = Session::new(&format!("dd-cli-{label}"))
         .flags(&["--json", "--no-geo-align"])
         .env(
-            "EOKA_CHROME_ARGS",
+            eoka_protocol::env::CHROME_ARGS,
             "--host-resolver-rules=MAP * 127.0.0.1:--no-proxy-server:--site-per-process",
         );
     match port {

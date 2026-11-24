@@ -124,7 +124,7 @@ pub fn auto_connect() -> Result<(u16, String), String> {
 }
 
 pub fn profile_dir(session: &str) -> PathBuf {
-    if let Ok(base) = std::env::var("EOKA_PROFILE_DIR") {
+    if let Ok(base) = std::env::var(crate::env::PROFILE_DIR) {
         return PathBuf::from(base).join(session);
     }
     let base = std::env::var("XDG_STATE_HOME")

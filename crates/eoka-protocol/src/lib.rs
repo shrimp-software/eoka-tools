@@ -7,6 +7,7 @@ mod catalog;
 mod context;
 mod datadome;
 mod download;
+pub mod env;
 pub mod launch_spec;
 mod metadata;
 mod network;

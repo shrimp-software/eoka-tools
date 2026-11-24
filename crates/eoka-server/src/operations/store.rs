@@ -27,7 +27,7 @@ pub fn timestamp() -> u64 {
 }
 
 pub fn state_directory() -> Result<PathBuf> {
-    if let Some(path) = std::env::var_os("EOKA_STATE_DIR") {
+    if let Some(path) = std::env::var_os(eoka_protocol::env::STATE_DIR) {
         return Ok(path.into());
     }
     if let Some(path) = std::env::var_os("XDG_STATE_HOME") {
