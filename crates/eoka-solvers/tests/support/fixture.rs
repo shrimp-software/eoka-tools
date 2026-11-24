@@ -1,3 +1,4 @@
+use std::hash::{BuildHasher, RandomState};
 use std::io::Cursor;
 
 use base64::Engine;
@@ -103,6 +104,7 @@ impl Fixture {
         let timeout = mode == "timeout";
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
+        let nonce = RandomState::new().hash_one(port);
         let (mut bg, piece) = images();
         if many_images {
             bg = image_data(RgbaImage::from_pixel(1024, 512, Rgba([80, 90, 100, 255])));
@@ -183,7 +185,7 @@ impl Fixture {
                             <script>window.fixtureMarker={port};sessionStorage.setItem('fixture','retained');localStorage.setItem('fixture','retained');document.cookie='other=retained; path=/';
                             onmessage=e=>{{document.body.dataset.message=e.data;if(e.origin!=='http://auth.test:{port}')return;if(e.data==='fixture-pressed'){{document.body.dataset.pressed='true';fetch('/accepted').then(()=>document.body.dataset.fetched='true');}}if(e.data==='fixture-released')document.body.dataset.released='true';if(e.data==='fixture-solved'){{
                                 if(document.body.dataset.fetched!=='true')return;
-                                document.cookie='datadome=fixture-only-{port}; path=/';
+                                document.cookie='datadome=fixture-only-{nonce:x}; path=/';
                                 if (!{auth_block}) document.querySelector('iframe').remove();
                                 if ({top_block}) document.body.insertAdjacentHTML('beforeend','<h1>You have been blocked</h1>');
                                 document.body.dataset.restored='true';
