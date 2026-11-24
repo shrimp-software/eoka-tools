@@ -97,8 +97,12 @@ jobs:
           fi
           # The PR is the token owner's own, so it can't be approved and
           # auto-merge would wait for a review forever. Wait for the required
-          # checks, then merge with the owner's review bypass. CI OK is
-          # still enforced for admins.
-          sleep 30
+          # check, then merge with the owner's review bypass. CI OK is
+          # still enforced for admins. GitHub lists CI OK only once the jobs
+          # it needs have finished, so wait for it to appear first.
+          until gh pr view auto-release --json statusCheckRollup \
+            --jq '.statusCheckRollup[].name' | grep -qx 'CI OK'; do
+            sleep 30
+          done
           gh pr checks auto-release --required --watch --fail-fast --interval 30
           gh pr merge auto-release --squash --admin
