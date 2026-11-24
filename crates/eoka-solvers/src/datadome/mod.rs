@@ -81,7 +81,7 @@ impl Default for DataDomeSolver {
             poll_interval: Duration::from_millis(500),
             widget_settle: Duration::from_millis(800),
             completion_settle: Duration::from_secs(2),
-            poll_timeout: Duration::from_secs(1),
+            poll_timeout: Duration::from_secs(2),
         }
     }
 }
