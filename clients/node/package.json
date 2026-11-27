@@ -47,13 +47,13 @@
     "example:capture": "node examples/capture.mjs"
   },
   "dependencies": {
-    "@puppeteer/browsers": "3.2.7",
+    "@puppeteer/browsers": "3.3.0",
     "ajv": "8.20.0",
     "proxy-agent": "8.0.3",
     "yauzl": "3.4.0"
   },
   "devDependencies": {
-    "@types/node": "24.19.2",
+    "@types/node": "24.19.4",
     "typescript": "6.0.3"
   },
   "overrides": {
