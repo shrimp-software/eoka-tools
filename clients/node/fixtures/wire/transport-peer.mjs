@@ -7,7 +7,6 @@ import { methodNames, protocolVersion } from '../../dist/generated/protocol.js';
 const mode = process.env.EOKA_TRANSPORT_TEST_MODE ?? 'normal';
 const maxInFlight = Number(process.env.EOKA_TRANSPORT_TEST_IN_FLIGHT ?? 128);
 const maxMessageBytes = Number(process.env.EOKA_TRANSPORT_TEST_MESSAGE_BYTES ?? 33554432);
-const capacity = Number(process.env.EOKA_TRANSPORT_TEST_CAPACITY ?? Infinity);
 const replyDelayMs = Number(process.env.EOKA_TRANSPORT_TEST_REPLY_DELAY_MS ?? 2);
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
 let evaluations = 0;
@@ -131,10 +130,6 @@ input.on('line', async line => {
     return;
   }
   if (mode === 'concurrency') {
-    if (outstanding >= capacity) {
-      process.stdout.write(`${JSON.stringify({ id: request.id, error: { code: 'ServerBusy', message: 'maxInFlight pending requests exceeded' } })}\n`);
-      return;
-    }
     outstanding++;
     peak = Math.max(peak, outstanding);
     setTimeout(() => {

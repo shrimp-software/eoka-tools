@@ -10,9 +10,9 @@ and `{id, result}` or `{id, error}` replies, has two transports:
   (`$XDG_RUNTIME_DIR/eoka/eoka-<session>.sock`). The CLI and `eoka-sdk` use
   it. See [Session socket](#session-socket).
 
-The canonical sidecar envelopes, method parameters, results and schemas live in
-`eoka-protocol::sidecar`. Server handlers and generated TypeScript definitions
-consume those contracts. The Go client implements the same wire protocol.
+The canonical envelopes, method parameters, results and schemas live in
+`eoka-protocol::sidecar`. Server handlers and the generated client types
+consume those contracts.
 
 ## Transport
 
@@ -31,6 +31,8 @@ consume those contracts. The Go client implements the same wire protocol.
 - Request IDs are positive integers through 9,007,199,254,740,991, unique among
   in-flight requests. Responses echo the ID. A malformed message without a
   recoverable valid ID may receive an error with `id: null`.
+- `pageId` is an opaque target ID returned by the server. Element handles do
+  not cross this wire.
 - Requests are dispatched per page. Requests that name the same `pageId`,
   including action admission, catalog operations and `browser.close_tab`, run
   one at a time in the order received. Requests for different pages run
@@ -39,25 +41,22 @@ consume those contracts. The Go client implements the same wire protocol.
   page and are never queued behind one. `browser.launch`, `browser.connect` and
   `browser.close` are barriers: each waits for every request received before it
   and holds back every request received after it until it finishes.
-- Requests that clear a blocked page do not wait for that page's queue:
-  `dialog.accept` and `dialog.dismiss` always start at once, and
-  `browser.close_tab` starts at once while the page has an open dialog or a
-  pending navigation. Requests received after them for the same page still
-  wait for them.
+- Requests that clear a blocked page skip its queue: `dialog.accept` and
+  `dialog.dismiss` always, and `browser.close_tab` while the page has an open
+  dialog or a pending navigation. Later requests for the page still wait for them.
 - Catalog operations that act on one page alone run on that page: the reads
   and waits, held input, `click_shadow`, `captcha.turnstile`, `eval`, `exec`,
   `fetch`, `screenshot` without `annotate`, and `emulate` with `desktop` or
   `reset`. The other catalog operations share one engine and run one at a time
   across pages, so a slow one delays only those operations on other pages.
   `agent.observe` and `agent.step` likewise share one agent session.
-- Operation waiters and list snapshots run independently. Get/cancel for an
-  already-admitted operation also bypass a blocked page; an unknown ID waits
-  only for an earlier queued request carrying the same operation ID. List
-  returns the current admitted snapshot, not a barrier for queued mutations.
-  Controls still consume the advertised in-flight budget; shutdown retains its
-  separate admission. Responses can arrive out of order. Always correlate by ID.
-- Local request timeout or connection loss does not prove a browser action was
-  cancelled. Durable operation IDs remain the recovery mechanism.
+- `operations.wait` and `operations.list` run outside the page queues, and so do
+  `operations.get` and `operations.cancel` for an admitted ID; an unknown ID
+  waits only for an earlier queued request carrying it. They still count toward
+  `maxInFlight`; `server.shutdown` has its own admission. Responses can arrive
+  out of order, so always correlate by ID.
+- A local timeout or connection loss does not prove a browser action was
+  cancelled. Durable operation IDs are the recovery mechanism.
 
 ## Negotiation
 
@@ -67,55 +66,34 @@ Before launching Chrome, clients send:
 {"id":1,"method":"server.hello","params":{"protocol":{"major":4,"minor":0}}}
 ```
 
-The result contains:
+The result (`HelloResult`) names the server's protocol version, build, the
+methods and capabilities it implements, and its transport limits. A hello
+naming another major, or a minor newer than the server's, returns
+`ProtocolMismatch` without launching a browser. There is no fallback: the Node
+and Go SDKs ship pinned to the matching server.
 
-| Field | Meaning |
-| --- | --- |
-| `protocol` | Supported `{major, minor}` wire version |
-| `serverVersion` | Version of the running server build |
-| `coreVersion` | Core Eoka dependency resolved for that build |
-| `methods` | Actually implemented sidecar method names |
-| `capabilities` | Implemented sidecar capabilities, not inferred Chrome capabilities |
-| `limits.maxMessageBytes` | Maximum serialized message size |
-| `limits.maxInFlight` | Maximum in-flight requests |
+Capabilities describe this server, not the attached Chrome, and none implies
+managed Chrome installation:
 
-The server speaks protocol 4.0. A hello naming another major, or a minor newer
-than the server's, returns `ProtocolMismatch` without launching a browser. There
-is no negotiation and no fallback: the Node and Go SDKs ship pinned to the
-matching server and send exactly `{major: 4, minor: 0}`. Protocol 4.0 removed
-the `page.*` methods that duplicated catalog operations; their callers use the
-catalog operations described below.
-
-`durableActions`, `operationCancellation` and `gracefulShutdown` describe server
-behavior. `explicitExecutablePath`, `browserAttachment`, `runtimeIsolation`,
-`sandboxControl` and `viewportEmulation` advertise the managed session methods
-below. `boundedFetch` advertises streaming response-body inspection with a
-sidecar-enforced byte budget. `screenshotOptions`, `screenshotFile` and
-`nativeRecording` advertise the capture methods below, not a guarantee that an
-attached Chrome build supports a format or its native encoder. `cloudflareAutoSolve`
-advertises the `autoSolveCloudflare` option on `browser.launch` and
-`browser.connect`: `{intervalMs?, timeoutMs?}` (defaults 500 and 30000) starts a
-server-side watcher that solves full-page Cloudflare challenges in every tab until
-the browser is closed. Browser support
-is checked at runtime; no capability implies managed Chrome installation.
+- `durableActions`, `operationCancellation` and `gracefulShutdown`: server
+  behavior.
+- `explicitExecutablePath`, `browserAttachment`, `runtimeIsolation`,
+  `sandboxControl` and `viewportEmulation`: the managed session methods.
+- `boundedFetch`: streaming response-body inspection under a byte budget.
+- `screenshotOptions`, `screenshotFile` and `nativeRecording`: the capture
+  methods, not that a Chrome build supports a format or has the encoder.
+- `cloudflareAutoSolve`: the `autoSolveCloudflare` option on `browser.launch`
+  and `browser.connect`, a watcher that solves full-page Cloudflare challenges
+  in every tab until the browser closes.
+- `operationCatalog` and `pageBlockers`: described below.
 
 ## Message shapes
 
-Request:
+A request, a success and an error:
 
 ```json
 {"id":2,"method":"info","params":{"pageId":"ABCD1234"}}
-```
-
-Success:
-
-```json
 {"id":2,"result":{"url":"https://example.com/","title":"Example"}}
-```
-
-Error:
-
-```json
 {"id":2,"error":{"code":"InvalidPage","message":"unknown pageId"}}
 ```
 
@@ -123,12 +101,16 @@ Exactly one of `result` or `error` is present. A successful null result is still
 `"result": null`; it must not disappear during serialization. Result types are
 method-specific: `operations.list`, for example, returns an array directly.
 
-Errors retain stable `code` and human-readable `message`. Optional `data`
-contains structured evidence such as an operation ID, action receipt, original
-protocol error or canonical error detail. A failed catalog operation always
-carries its canonical detail in `data.detail`, including the `hint` naming
-the next step. Branch on codes and fields, not text.
-An absent receipt is not proof that nothing was dispatched.
+Errors have a stable `code` and a human-readable `message`. Optional `data`
+holds structured evidence such as an operation ID, an action receipt or the
+canonical `ErrorDetail` in `data.detail`, which every failed catalog operation
+carries with a `hint` naming the next step. Branch on codes and fields, not
+text. An absent receipt is not proof that nothing was dispatched.
+
+Invalid envelopes or parameters, unknown methods, incompatible protocols,
+message-size violations, overload and shutdown are explicit protocol errors.
+Core errors keep their element, timeout and CDP classifications; structured
+action evidence is never reduced to a message-only error.
 
 ### Blocked pages
 
@@ -144,19 +126,16 @@ command deadline. The request fails with:
 | `NavigationPending` | The main frame has waited for a navigation response | `{kind:"navigation", url?, elapsedMs}` |
 | `PageUnresponsive` | The page answers nothing and neither state above is known | absent |
 
-`data.detail` carries the catalog `ErrorDetail` with code `dialog_open`,
-`navigation_pending` or `page_unresponsive`, the same message, a `hint` naming
-the remedy and, for a request that was not started, `context.action_status`.
-`elapsedMs` is how long the dialog has been open or the navigation has waited.
-
-Registered page methods and catalog operations report these states the same
-way:
+`data.detail` carries the `ErrorDetail` (`dialog_open`, `navigation_pending` or
+`page_unresponsive`) with a `hint` and, for a request that was not started,
+`context.action_status`. `elapsedMs` is how long the dialog has been open or
+the navigation has waited. Registered methods and catalog operations behave
+the same:
 
 - A request for a page with an open dialog is refused before it starts. So is
   a request for a page whose navigation has waited five seconds, except waits
   and captures, which run, and navigations, which first stop the pending load
-  and then proceed; that is how a fresh navigate action recovers
-  a stalled tab.
+  and then proceed; that is how a fresh navigate action recovers a stalled tab.
 - A request already in flight ends as soon as a dialog opens, or once a
   navigation that started under it has waited five seconds. Its message says it
   returned without a result; a script or input may already have taken effect.
@@ -168,30 +147,26 @@ way:
   `PageUnresponsive`. Other methods that reach the command deadline are checked
   the same way before their timeout is reported.
 - `dialog.accept` and `dialog.dismiss` answer the dialog directly and work
-  while any other request is blocked. `release_all_inputs`,
-  `emulate`, `page.restore_state`,
-  `captcha.turnstile`, `recording.*` and tab close are never refused.
-- An operation that is running when a dialog opens on its page ends: its record
-  is `finished` with `error_code` `dialog_open`, `outcome` `outcome_unknown`
-  when input had been dispatched (`not_dispatched` otherwise) and a receipt
-  whose `dispatch` is `may_have_been_sent` or `not_sent`. Nothing is replayed.
-  Input the interrupted action still held is released before the next action
-  on that page.
-- A dialog that was already open before the server attached to the page is not
-  known to it; such a page reports `PageUnresponsive`, and `dialog.dismiss`
-  clears it.
-
-Invalid request envelopes/parameters, unknown methods, incompatible protocols,
-message-size violations, overload and shutdown are explicit protocol errors.
-Core errors retain their established element, timeout and CDP classifications;
-structured action evidence must not be discarded into a message-only error.
+  while any other request is blocked. `release_all_inputs`, `emulate`,
+  `page.restore_state`, `captcha.turnstile`, `recording.*` and tab close are
+  never refused.
+- An operation running when a dialog opens on its page finishes with
+  `error_code` `dialog_open` and `outcome_unknown` if input had been dispatched
+  (`not_dispatched` otherwise). Nothing is replayed, and input it still held is
+  released before the page's next action.
+- A dialog is known from the event Chrome sends when it opens, and Chrome does
+  not send that event again to a session that attaches later. Attaching to a
+  tab whose dialog is already open does not answer until the dialog closes, so
+  `browser.connect` to a browser with such a tab, or `browser.tabs` picking up
+  a popup that alerted before it was attached, fails with a CDP timeout after
+  30 seconds. The tab gets no `pageId`; close the dialog in Chrome first.
 
 ## Methods
 
 The registry has two parts: the methods registered in the
 `define_sidecar_methods!` table in `eoka-protocol::sidecar`, and the catalog
-operations. The schema bundle has every method's exact fields, bounds and
-result:
+operations. The schema bundle has every method's exact fields, bounds, defaults
+and result:
 
 ```sh
 cargo run --quiet --locked -p eoka-protocol --bin export-sidecar-schema
@@ -234,20 +209,22 @@ The sections below describe behavior the schemas can't express.
 
 Servers advertising the `operationCatalog` capability also serve the operation
 catalog used by the CLI daemon, MCP and Tack. Each catalog operation is a method
-named by its catalog path (`console`, `cookies`, `network.record.start`,
-`intercept.add`, `download.start`, ...), executed by the same engine as the CLI
-daemon. The schema bundle lists them under `catalogMethods`.
+named by its catalog path (`console`, `cookies`, `network.record.start`, ...),
+executed by the same engine as the CLI daemon. The schema bundle lists them
+under `catalogMethods`.
+
+```json
+{"id":7,"method":"console","params":{"pageId":"<id>","clear":false}}
+```
 
 - Params are the operation's catalog input plus a required string `pageId`.
   Catalog fields are snake_case. An unknown field is `InvalidParams`, not ignored.
-- The result is the operation's `data` value. Every operation declares its result
-  type in the schema bundle. Only `eval` is untyped, because its result is the
-  value the page's JavaScript returned. Some results take more than one shape:
-  `emulate`, `observe`, `scroll`, `screenshot`, `storage` and `fetch` are
-  unions, and action results are the operation record plus its `status`.
-- Page reads, waits, held input, `click_shadow` and `captcha.turnstile` run on
-  their page alone: a slow request on one page never delays them on another.
+- The result is the operation's `data` value, typed in the schema bundle. Only
+  `eval` is untyped, because its result is the value the page's JavaScript
+  returned. Action results are the operation record plus its `status`.
 - Failures return an `Operation` error carrying the catalog `ErrorDetail`.
+  Errors raised by the core library keep their kind: a catalog operation that
+  times out returns `Timeout`, a missing element returns `ElementNotFound`.
 - Actions (`click`, `double_click`, `fill`, `select`, `hover`, `key`, `scroll`,
   `back`, `forward`, `reload`) are durable operations. `operation_id` is
   optional and generated when omitted. An admitted action returns its operation
@@ -255,19 +232,20 @@ daemon. The schema bundle lists them under `catalogMethods`.
   `actions.perform`; read `outcome` and `error` on the record.
 - Target references from `agent.observe` resolve in catalog actions.
 - `open` navigates the addressed page, on launched and connected browsers.
-- Session lifecycle and tab management are not projected: use `server.shutdown`,
+- Session lifecycle and tabs are not projected: use `server.shutdown`,
   `browser.close`, `browser.new_page`, `browser.tabs` and `browser.close_tab`.
 - A catalog path that already names a registered method keeps that method's
-  contract.
-- Errors raised by the core library keep their kind: a catalog operation that
-  times out returns `Timeout`, a missing element returns `ElementNotFound`, the
-  same codes a registered method returns.
+  contract. Every registered method declares its role in
+  `define_sidecar_methods!`: lifecycle, shared with the catalog operation of the
+  same name, or distinct from the catalog for a stated reason.
 
 Some catalog state belongs to the browser session rather than one page: the
 network recorder and its log, the download slot, and the JavaScript policy
-(`js.*`, which applies to navigations made through catalog `open` and `reload`). Interception
-rules are re-applied to whichever page a catalog call addresses. Catalog actions
-reach a page behind another tab the same way `actions.perform` does (see
+(`js.*`). The policy applies to navigations made by catalog `open` and
+`reload`, not to `back`, `forward` or a link that leaves the host, because
+their destination is not known before the navigation starts. Interception rules
+are re-applied to whichever page a catalog call addresses. Catalog actions reach
+a page behind another tab the same way `actions.perform` does (see
 [Durable actions](#durable-actions-and-operation-queries)).
 
 The catalog includes operations that read or write local files chosen by the
@@ -277,27 +255,6 @@ caller (`save_state`, `load_state`, `network.export`, `intercept.add` with
 Chrome. A sidecar client has the same local reach as the `eoka` CLI. Do not pass
 untrusted input through as method names or file paths.
 
-Every registered method declares a role in the `define_sidecar_methods!` table in
-`eoka-protocol::sidecar`:
-lifecycle, shared with a catalog operation of the same name, or distinct from
-the catalog for a stated reason. No registered method duplicates a catalog
-operation.
-
-The JavaScript policy is applied by catalog `open`, `reload` and `tab.new`. It is
-not applied to `back`, `forward` or a link that leaves the host, because the
-destination is not known before the navigation starts.
-
-A JavaScript dialog is reported from the event Chrome sends when it opens.
-Chrome does not send that event again to a session that attaches afterwards,
-and `Page.enable` on such a tab does not answer until the dialog closes. So
-attaching to a tab whose dialog is already open (a browser reached with
-`connect`, or a popup that alerted before anyone switched to it) times out
-instead of naming the dialog.
-
-```json
-{"id":7,"method":"console","params":{"pageId":"<id>","clear":false}}
-```
-
 ### Server lifecycle
 
 Shutdown works before browser launch, after failed launch and while an ordinary
@@ -306,283 +263,163 @@ settles/cancels pending requests, stops owned operations, releases held inputs
 and closes owned browser resources. A cancelled waiter does not establish a
 verified action outcome; inspect the durable record.
 
-EOF on stdin follows the same cleanup path. Successful cleanup exits zero;
-cleanup failure is not reported as success. Shutdown is bounded, including
-response flushing. During Chrome launch or attachment, allow up to 35 seconds
-for startup/admission and its child guard, then up to 5 seconds of browser cleanup and
-2 seconds of output flushing. The Go client's hard teardown grace is 45 seconds.
-Ordinary shutdown does not spend the launch grace. Cancelling a Go close waiter
-does not abandon the shared background teardown or immediately kill the sidecar.
+EOF on stdin follows the same path. Successful cleanup exits zero; failed
+cleanup is not reported as success. Shutdown is bounded: during Chrome launch or
+attachment allow up to 35 seconds for startup, then 5 seconds of browser cleanup
+and 2 seconds of output flushing. Ordinary shutdown skips the launch grace.
 
 ### Browser
 
-Launch fields are camelCase. `viewportWidth` and `viewportHeight` must be
-supplied together, positive and no greater than 2,147,483,647 CSS pixels.
-`deviceScaleFactor` must be finite and positive; it defaults to 1 and can be
-supplied without dimensions to scale the default viewport. Explicit executable,
-runtime and user-data paths must be absolute. Missing, unreadable or
-non-executable explicit Chrome paths fail without discovering a substitute.
-`browserVersion` is the actual CDP `Browser.getVersion` product, not a spoofed
-user-agent string. `ownership` is `"owned"` only when the handle owns Chrome;
-legacy reuse of a running profile reports `"borrowed"` instead.
+`viewportWidth` and `viewportHeight` go together; `deviceScaleFactor` alone
+scales the default viewport. Explicit executable, runtime and user-data paths
+must be absolute. Missing,
+unreadable or non-executable explicit Chrome paths fail without discovering a
+substitute. `browserVersion` is the actual CDP `Browser.getVersion` product,
+not a spoofed user-agent string. `ownership` is `"owned"` only when the handle
+owns Chrome; reuse of a running profile reports `"borrowed"`.
 
-`runtimeDir` selects a writable root for a private per-browser child containing
-owned temporary profiles, patch artifacts and Chrome temporary files. It is
-independent of the installed-browser cache and durable operation store. Chrome
-receives child-local `TMPDIR`, `TMP` and `TEMP`; the sidecar's global environment
-is unchanged. Only the owned child is removed, never the caller's root or an
-explicit user profile. Source browser executables and their dependency files are
-not modified.
+`runtimeDir` selects a writable root for a private per-browser child holding
+owned temporary profiles, patch artifacts and Chrome temporary files; Chrome
+gets child-local `TMPDIR`, `TMP` and `TEMP`. Only that child is removed, never
+the caller's root or an explicit user profile.
 
-The sidecar, Go SDK, Node SDK and CLI all default `sandbox` to true; pass
-false (`--no-sandbox` / `EOKA_NO_SANDBOX` in the CLI) only where the environment
-cannot provide one. A requested sandbox failure is an error, not an automatic
-unsandboxed retry. Explicit executable/runtime policy cannot silently reuse a
-running profile, and a sandboxed launch reuses one only when that process is
-verifiably running without sandbox-disabling switches.
+`sandbox` defaults to true everywhere; turn it off only where the environment
+cannot provide one. A sandbox failure is an error, never an unsandboxed retry.
+Explicit executable or runtime paths never reuse a running profile, and a
+sandboxed launch reuses one only when it verifiably runs with the sandbox on.
 
 `browser.connect` accepts only `ws://host[:port]/devtools/browser/<id>` without
-credentials, query, fragment or trailing path components. HTTP discovery URLs,
-page endpoints and `wss://` are rejected with `InvalidParams`; this build does
-not enable WebSocket TLS. Attachment is borrowed and leaves existing page
-metrics untouched. Existing page target IDs can be used immediately;
-`browser.tabs` reconciles handles for later-created or externally closed tabs.
-Closing the session, failed initialization, EOF and startup shutdown disconnect
-without closing borrowed Chrome or its tabs. An explicit `browser.close_tab`
-still intentionally closes the requested tab.
+credentials, query, fragment or trailing path; HTTP discovery URLs, page
+endpoints and `wss://` are `InvalidParams`. Attachment is borrowed and leaves
+page metrics untouched. Existing tabs are usable at once by target ID;
+`browser.tabs` reconciles later-created or externally closed tabs. Closing,
+failed initialization and EOF disconnect without closing borrowed Chrome or its
+tabs; only an explicit `browser.close_tab` closes one. Proxy credentials go in
+`username` and `password`, never in the server endpoint.
 
-Proxy fields are `server`, optional `username` and `password`. Do not put
-credentials in the server endpoint field.
-
-`server.shutdown` is the process-lifecycle operation, including when no browser
-was successfully launched. `browser.close` retains its browser-specific meaning.
-A close-time input cleanup error must not cause a client to assume the tab is
-still open or repeat the action that preceded closing it.
-
-Held inputs are released on either owned close or borrowed disconnect. Cleanup
-errors retain structured failure evidence; transport loss does not prove that a
-dispatched action failed. Normal close and parent EOF permit owned process and
-runtime cleanup. Forced sidecar termination cannot run Rust destructors:
-OS-specific process death guarantees do not promise portable deletion of
-runtime files after SIGKILL. Caller-owned profiles are never cleanup targets.
+Held inputs are released on owned close and on borrowed disconnect. A
+close-time input cleanup error does not mean the tab is still open; don't repeat
+the action that preceded closing it. Forced sidecar termination cannot run Rust
+destructors, so runtime files may survive a SIGKILL. Caller-owned profiles are
+never cleanup targets.
 
 ### Page reads and primitives
 
-All page methods carry `pageId`, an opaque target ID returned by the server.
-Element handles do not cross this wire.
-
-- Reads and waits are catalog operations: `text`, `content`, `info`, `get_text`,
-  `get_attribute`, `exists`, `frames` and `wait` (selector `state`, text, URL,
-  load or a fixed `ms`).
-- Evaluation: `eval` returns the JSON value itself and `exec` discards it.
-  With `function: true`, `code` is function source called once with the JSON
-  `arguments`, without expression or statement wrapping. Without it, `code` is
-  an expression, a function or a statement body, as in the CLI. `raw: true` with
-  `json: true` evaluates `code` as a raw expression and returns its strict JSON
-  value; `raw` alone returns the CLI's text rendering. `function` conflicts with
-  `raw`, and `json` requires it. Script failures keep the `Cdp` code and
-  `data.cdp`. These are JavaScript primitives, not action-receipt-producing
-  operations and not closure serialization.
-- Fetch: `fetch` performs browser-context fetch with page credentials. It
-  accepts `url`, `method`, `headers`, `body`, `redirect` and `max_body`
-  (default 8192, maximum 16,777,216 raw body bytes). It streams through core
-  bounded fetch, cancels at the retention limit, skips binary MIME bodies, and
-  treats zero as headers-only. Results include `url`, `status`, `statusText`,
-  `type`, `redirected`, `headers`, `body`, `truncated`, `bytesRead`, and
-  nullable `bodyOmitted` (`binary`, `headers_only`, or `opaque`). Incomplete
-  trailing UTF-8 is omitted; `bytesRead` counts retained raw bytes, not encoded
-  output length. Reaching the limit before observing EOF sets `truncated`, even
-  if the body ends there. `file:` URLs are refused unless
-  `EOKA_ALLOW_FILE_URLS=1`.
+- Evaluation: `eval` returns the JSON value and `exec` discards it, so `exec`
+  suits effects that return undefined. With `function: true`, `code` is
+  function source called once with the JSON `arguments`; otherwise it is an
+  expression, function or statement body, as in the CLI. `raw: true` with
+  `json: true` returns a raw expression's strict JSON value; `raw` alone returns
+  the CLI's text rendering; `function` conflicts with `raw`, and `json` requires
+  `raw`. Script failures keep the `Cdp` code and `data.cdp`.
+  These primitives produce no action receipt.
+- Fetch: `fetch` runs in the page with its credentials. It streams the body
+  under a byte budget, cancels at the limit, skips binary MIME bodies and treats
+  a zero budget as headers-only. `bytesRead` counts retained raw bytes, not
+  encoded output; incomplete trailing UTF-8 is omitted. Reaching the limit
+  before EOF sets `truncated`, even if the body ends there. `file:` URLs are
+  refused unless `EOKA_ALLOW_FILE_URLS=1`.
 - State: `page.capture_state` and `page.restore_state` carry cookies, storage,
   URL and user-agent state. Treat this data as private authentication material.
-- Screenshots: `screenshot` defaults to PNG and accepts `format`, `quality`,
-  `clip` and `full_page`. Formats are `png`, `jpeg` and `webp`; quality is an
-  integer from 0 through 100 for JPEG/WebP only. Clip `{x,y,width,height}` uses
-  finite CSS pixels, nonnegative origins and positive sizes. Clip and full-page
-  capture are mutually exclusive. Viewport DPR is the sole render-scale control.
-  Full-page capture uses CSS layout dimensions and remains subject to Chrome
-  image-size limits; dynamic layout can change between captures. `inline: true`
-  returns `{dataBase64}`, capped at 16 MiB of image bytes; a larger capture fails
-  with `ScreenshotTooLarge`. Otherwise the image is published to `output`, an
-  absolute path on the sidecar, or to a new temporary file, and the result is
-  `{path,size,mimeType,bytes}`. `inline` conflicts with `output` and
-  `annotate`. A page behind another tab is captured in place: Chrome paints no
-  frames for a hidden tab, so the server holds a throwaway screencast on a second
-  session of that page for the duration of the capture. The page is not brought
-  to the front, no page's `visibilityState` changes, and pages can be captured
-  concurrently.
-- Viewport: `emulate` with `desktop: true` takes `width`, `height` and `dpr`
-  (defaults 390, 844 and 2) with positive CSS dimensions up to 2,147,483,647 and
-  finite positive DPR, and returns `{width,height,dpr,mobile:false}`.
-  `emulate` with `reset: true` clears the override, restoring native window
-  content dimensions and DPR rather than the configured launch viewport. Without
-  either flag it emulates a touch device. A 640×360 CSS viewport at DPR 2
-  captures a 1280×720 PNG. Explicit changes also work on borrowed tabs and remain
-  in effect until reset; disconnect does not silently alter page metrics.
-  Fractional host display scaling can quantize native CSS dimensions and DPR;
-  measured DOM layout remains authoritative. Eoka coordinates viewport changes
-  and captures across handles for the same browser endpoint within this process,
-  not independent CDP clients or other processes. Set the desired viewport
-  explicitly before capturing externally emulated tabs. A local timeout is not
-  native command cancellation: subsequent viewport work waits for the outstanding
-  native response or transport/session teardown, subject to its own deadline.
-  Native capture/reset can refresh Chrome's hidden-tab `outerWidth`/`outerHeight`
-  readings without resizing the browser window; Eoka does not mask those values.
-- Held input: the catalog operations `mouse.down`, `mouse.move`, `mouse.up`,
-  `key.down`, `key.up` and `release_all_inputs` are primitives, distinct from
-  verified high-level actions.
-- Cloudflare: `captcha.turnstile` (`{pageId, timeout_ms?}`, default 30000, at
-  most 120000) clicks the Turnstile checkbox through its closed shadow root until
-  the page leaves the challenge and returns `{tab_id, clicks, elapsed_ms}`; a
-  normal page returns zero clicks. It holds that page's request queue for up to
-  `timeout_ms`.
-- Other implemented methods include `page.solve_captcha`. Close a page with
-  `browser.close_tab`.
+- Screenshots: viewport DPR is the only render-scale control, and full-page
+  capture is subject to Chrome's image-size limits. `clip` and `full_page` are
+  exclusive, and `inline` conflicts with `output` and `annotate`. An inline
+  capture over 16 MiB fails with `ScreenshotTooLarge`; otherwise the image is
+  published to `output` or a new temporary file. A page behind another tab is captured in
+  place through a throwaway screencast on a second session, without bringing it
+  to the front or changing any page's `visibilityState`.
+- Viewport: `emulate` with `desktop: true` sets a desktop viewport, `reset: true`
+  restores the native window dimensions and DPR (not the launch viewport), and
+  neither emulates a touch device. A 640×360 CSS viewport at DPR 2 captures a
+  1280×720 PNG. Changes also work on borrowed tabs and last until reset.
+  Viewport changes and captures are coordinated per browser endpoint within one
+  process, not across other CDP clients, so set the viewport explicitly before
+  capturing a tab someone else emulated. A local timeout does not cancel the
+  native command; later viewport work waits for its response.
+- Held input: `mouse.down`, `mouse.move`, `mouse.up`, `key.down`, `key.up` and
+  `release_all_inputs` are primitives, distinct from verified high-level actions.
+- Cloudflare: `captcha.turnstile` clicks the Turnstile checkbox through its
+  closed shadow root until the page leaves the challenge; a normal page returns
+  zero clicks. It holds that page's request queue for up to `timeout_ms`.
 
-JSON results are dynamic data, not statically known application types. Type
-consumers must narrow them before use. Evaluation awaits promises and accepts
-null, booleans, strings, finite numbers, arrays and plain objects. Integer-valued
-numbers must be exactly representable in JavaScript. Undefined, BigInt,
-functions, symbols, cycles, array holes and non-JSON object types are rejected
-instead of silently fabricated or dropped. `exec` discards its return
-value and is the appropriate primitive for effects returning undefined.
-A function or expression result is limited to 1 MiB of JSON. A strict-JSON raw
-result is limited to 16,773,120 UTF-8 bytes (16 MiB minus 4 KiB), leaving room for the CDP response envelope below
-the core transport's frame limit. Evaluation checks this before returning
-the value over CDP and reports `MessageTooLarge` without disconnecting Chrome.
-This per-method ceiling is lower than the sidecar's 32 MiB message ceiling.
+JSON results are dynamic data; narrow them before use. Evaluation awaits
+promises and accepts null, booleans, strings, finite numbers, arrays and plain
+objects. Integer-valued numbers must be exactly representable in JavaScript.
+Undefined, BigInt, functions, symbols, cycles, array holes and non-JSON object
+types are rejected, never silently fabricated or dropped. A function or
+expression result is limited to 1 MiB of JSON, and a strict-JSON raw result to
+16,773,120 UTF-8 bytes (16 MiB minus 4 KiB, leaving room for the CDP envelope).
+Evaluation checks this before returning the value over CDP and reports
+`MessageTooLarge` without disconnecting Chrome.
 
 ### File artifacts and native recording
 
-`screenshot` file output and recordings share non-overwrite file publication.
-The server receives absolute paths resolved once by the caller, stages into an
-exclusive private file in the destination directory, flushes and closes it, then
-atomically publishes without replacing an existing destination. An artifact is
-`{path,bytes,mimeType,container?}`; `bytes` is JavaScript-safe. Screenshot
-artifacts omit `container`; recording artifacts use `container:"mp4"` and
-`mimeType:"video/mp4"`. Codec is Chrome-selected and is not fabricated as H.264.
-No audio, FFmpeg runtime dependency, whole-video Buffer or video base64 response
-is promised.
+`screenshot` file output and recordings share non-overwrite publication: the
+server stages an exclusive private file in the destination directory, flushes
+and closes it, then publishes it atomically without replacing an existing file.
+Paths are absolute, resolved once by the caller. Recordings are silent MP4 with
+a Chrome-selected codec. [operations.md](operations.md#sidecar-capture-and-recording)
+covers recovery by ID, stop, cancel and shutdown.
 
-Before sealing a recording, the server validates its fragmented MP4 timing on
-the original staging descriptor. For supported native AV1 zero-duration runs,
-`k` explicit zeros within one fragment become `k` one-tick durations, borrowing
-those ticks from the following duration only if it remains positive. Each run's
-endpoint and later timestamps stay unchanged. A duplicate terminal sample in a
-new fragment advances by one tick, reducing its duration and correcting the
-matching fragment/index times.
-Encoded packets, sample count, file length and the final presentation endpoint
-are preserved. Already-valid native recordings remain byte-identical; this is
-container metadata repair, not re-encoding or a raw-byte identity guarantee.
-Unsupported/malformed containers, insufficient donor duration or unresolved
-cross-fragment collisions fail without publication. Validation/repair has a five-second deadline;
-an interrupted correction can leave an incomplete retained partial, never a
-completed artifact. The subsequent flush/fsync/close and publication contract is
-unchanged.
+Before sealing a recording, the server validates its fragmented MP4 timing and
+repairs the zero-duration runs and duplicate terminal samples of Chrome's native
+AV1 encoder by borrowing ticks from following samples. Packets, sample count,
+file length and the final presentation endpoint are preserved, and valid
+recordings stay byte-identical; this is metadata repair, not re-encoding.
+Anything it can't repair within its five-second deadline fails without
+publication, leaving at most a retained partial. `frames` and `durationMs` on a
+completed record come from the validated timeline.
 
-IDs are caller-known UUIDs, allocated before dispatch. Dimensions are positive
-integers through 2,147,483,647; `fps` is an integer from 1 through 120, a native
-frame-rate ceiling rather than a deterministic playback rate. Capture requires a
-ready active page and allows one recorder per target. Unsupported native
-commands or encoders return `RecordingUnsupported`, never another recorder.
+Recording IDs are caller-known UUIDs. `fps` is a native frame-rate ceiling, not
+a playback rate. One recorder runs per target; unsupported native commands or
+encoders return `RecordingUnsupported`, never another recorder. A same-ID start
+with equivalent parameters returns the existing record; a mismatch returns
+`RecordingConflict`.
 
-Every record contains `{recordingId,pageId,state,path,artifact?,failure?,frames?,durationMs?}`.
-`frames` and `durationMs` appear only on completed records and come from the
-validated MP4 timeline: the sample count and the span from the first decode
-timestamp to the end of the last sample, in whole milliseconds. States are `running`, `finalizing`, `completed`, `cancelled` and `failed`.
-Successful start is returned only after native start; failed native admission
-retains a failed record. Same-ID retries return the existing record only for
-equivalent start parameters; a mismatch returns `RecordingConflict` without
-restarting. Unknown IDs return `RecordingNotFound`. Recovery by `recording.get`
-is session-scoped, not persistent crash recovery or automatic restart.
+One sidecar admits at most 1,024 recording IDs and 16 MiB of cumulative
+`recordingId`, `pageId` and `path` bytes. Finished records keep their capacity
+and nothing is evicted; a new sidecar starts fresh. Admission checks both limits
+before reserving anything and refuses with `ServerBusy`; existing-ID recovery
+and `RecordingConflict` take precedence.
 
-One sidecar admits at most 1,024 distinct recording IDs and 16 MiB of cumulative
-UTF-8 bytes across admitted `recordingId`, `pageId`, and `path` values. This is a
-retained-parameter budget, not an exact process-memory ceiling. Completed,
-cancelled, and failed entries remain recoverable and keep their capacity.
-Admission atomically checks both limits before reserving a new ID, starting a
-worker, or staging a file; rejection returns `ServerBusy` with no new record.
-Invalid parameters and capacity rejections consume no history capacity. Existing-ID recovery and
-`RecordingConflict` take precedence over either limit. Nothing is evicted or
-recycled; a new sidecar session provides fresh capacity.
-
-Stop shares one background finalization across requests and waits for a terminal
-record while get/cancel/shutdown remain responsive. `completed` requires the
-published destination MP4 artifact and no failure; other states cannot contain
-an artifact. Only completed stop is successful in the Node API. A lost response
-is recovered by querying the same ID. Aborting or timing out a waiter does not
-cancel the recorder or finalizer. Explicit cancel stops/releases owned resources.
-Cancellation and publication are linearized at a short publication claim. Cancel
-before the claim prevents publication; cancel after the claim waits for the
-commit outcome and returns completed only if publication succeeds. Filesystem
-commit runs outside the status/control lock. Cancel otherwise returns truthful
-cancelled/failed evidence without a success-named partial file.
-
-Failures contain `{stage,code,message,partialPath?,cleanupUncertain?}`. Stages are
-`start`, `stop`, `read`, `write`, `flush`, `close`, `publish`, `cancel` and
-`disconnect`. Failed records require failure evidence. Retained partial paths
-are absolute private staging paths, never the destination success path. Disk
-space/quota, stream, close and publication failures do not report success.
-If bounded shutdown expires during an already-claimed commit, the record remains
-failed at `publish` with `cleanupUncertain:true`: destination output may still
-appear. A late commit does not upgrade that reported failure to success or attach
-an artifact; retained path/message evidence reports the uncertain commit outcome.
-Errors preserve optional `data.recordingId`, `data.recording`, `data.path` and
-`data.partialPath`; `RecordingFailed`, `RecordingUnsupported`,
-`RecordingAlreadyActive`, `RecordingInvalidState`, `RecordingConflict`,
-`RecordingNotFound`, `ServerBusy`, `FileOutput` and `ScreenshotTooLarge` are stable codes.
-Page/browser close cancels unfinished recordings by default; disconnect and
-target loss retain honest failure and uncertain-cleanup evidence. Owned recording
-cleanup never terminates a borrowed browser.
+`completed` requires the published artifact and no failure; no other state has
+an artifact. Failed records carry their stage and any retained partial, an
+absolute staging path, never the destination. If shutdown expires during a
+claimed commit, the record stays failed at `publish` with
+`cleanupUncertain:true`: the destination may still appear, and a late commit
+does not turn the failure into success.
 
 ### Durable actions and operation queries
 
-`actions.perform` takes `pageId`, a caller-known canonical UUID in
-`operation_id`, a canonical `action`, and `options`. It returns an admitted
-operation record, not an unconditional success receipt.
+`actions.perform` returns an admitted operation record, not a success receipt.
+Clicks, typing and key actions need explicit completion expectations where the
+core action contract requires them; fill, select and navigation verify
+themselves. Treat an action as complete only at `outcome == "verified_complete"`.
+No uncertain action is replayed. See [operations.md](operations.md) for
+deduplication and recovery.
 
-Clicks, typing and key actions require explicit completion expectations where
-the core action contract requires them. Fill/select/navigation retain intrinsic
-verification. Check `outcome == "verified_complete"` before treating an action
-as complete. A record can instead report `not_dispatched` or `outcome_unknown`.
-
-No uncertain action is automatically replayed. Local waiter cancellation,
-transport loss and shutdown remain separate from the site's business outcome.
-See [operations.md](operations.md) for deduplication and durable recovery.
-
-Chrome answers no page-level request (`info`, evaluation,
-element reads) for a page whose main-frame navigation is still waiting for the
-site's response; such a request waits until the navigation commits, fails or is
-stopped, or until its own command deadline (30 seconds, 90 behind a proxy). To keep that from
-outliving the operation, a navigation operation that ends while its navigation
-command is still unanswered (its deadline passes, or it is cancelled after
-dispatch) stops the pending load. The page stays on its current document, the
-record keeps `outcome_unknown`, and requests queued for the page then answer.
-A navigation that committed before its deadline is left to finish loading.
-`browser.new_page` with a `url` creates the page, then navigates it; when that
-navigation command gets no answer the load is stopped the same way and the
-error is returned.
-
-`browser.close_tab` cancels the running operations of that page
-only. Operations on other pages keep running.
+While a page's main-frame navigation waits for the site's response, Chrome
+answers no other request for that page until the navigation ends or the
+request's own command deadline (30 seconds, 90 behind a proxy) passes. So a
+navigation operation that ends while its navigation command is unanswered (its
+deadline passes, or it is cancelled after dispatch) stops the pending load, and
+the page's queued requests answer again.
+The page stays on its current document and the record keeps `outcome_unknown`.
+A navigation that committed in time is left to finish loading. `browser.new_page`
+with a `url` stops an unanswered load the same way and returns the error.
+`browser.close_tab` cancels the running operations of that page only.
 
 An action on a page behind another tab runs in place. Chrome produces no frames
-for a hidden tab, while a click, hover, drag or scroll into view waits two
-animation frames to confirm its target has stopped moving, and Chrome delivers
-pointer movement with a frame. For as long as an action is in flight on a hidden
-page, the server therefore keeps one screenshot request open on a second session
-of that page, which makes Chrome produce frames for it, and completes that
-request when the action ends. The page is not brought to the front, and no
-page's `visibilityState` changes or receives `visibilitychange`. The hidden
-page's animation frames, and whatever its scripts and styles drive from them,
-run for the duration of the action and stop within about a second of its end; a
-page can observe that. A visible page is only asked for its visibility. The
-typed action methods, `agent.step`, catalog actions, `mouse.move`,
-`click_shadow` and `captcha.turnstile` behave the same, and a page that
-becomes hidden while its action waits is covered from then on. When a click,
-hover, drag or scroll into view times out in preparation on a page that ran no
-animation frame, `error.message` says so and says whether the tab was hidden.
+for a hidden tab, but a click, hover, drag or scroll into view waits two
+animation frames for its target to settle, and pointer movement is delivered
+with a frame. While an action is in flight on a hidden page, the server keeps a
+screenshot request open on a second session of it, which makes Chrome produce
+frames, and ends it with the action. The page is not brought to the front and
+sees no `visibilitychange`, but its animation frames run for the action and
+stop about a second after; a page can observe that. Typed actions, `agent.step`,
+catalog actions, `mouse.move`, `click_shadow` and `captcha.turnstile` all do
+this. A click, hover, drag or scroll that times out in preparation on a page
+that ran no animation frame says so, and whether the tab was hidden.
 
 ### Agent operations
 
@@ -594,17 +431,9 @@ preserve the same durable operation and outcome evidence as the other adapters.
 
 `clients/node/scripts/generate-protocol.mjs` turns the schema bundle into the
 Node SDK's TypeScript types (`clients/node/src/generated`), the Go catalog
-constants and the method table above; CI fails when any of them is stale.
-
-- **Node** (`@cbxss/eoka`) runs one private `eoka-server` from its platform
-  package. Local aborts and deadlines don't roll back dispatched work, and
-  strict action helpers require verified receipts. When both work and cleanup
-  fail, the `AggregateError` keeps the primary error, with its operation
-  identity, as `cause`. See [the Node SDK README](../clients/node/README.md).
-- **Go** downloads the matching `eoka-server` from the GitHub release and checks
-  it against `SHA256SUMS`. It negotiates `server.hello` before launching
-  Chrome, closes with `server.shutdown`, and keeps structured server errors and
-  caller-known operation IDs.
+constants and the method table above; CI fails when any of them is stale. For
+client behavior see the [Node](../clients/node/README.md) and
+[Go](../clients/go/README.md) READMEs.
 
 ## Session socket
 
@@ -627,9 +456,9 @@ with these differences:
 - **Errors** keep the CLI's full detail: `error.data.detail` is the
   `ErrorDetail` (code, message, hint, retryable, context), and
   `error.data.result` carries any partial result, such as an operation record.
-- **Admission.** One command runs at a time. Another waits up to
-  `EOKA_QUEUE_WAIT_MS` (default 5000) and is then refused with `daemon_busy`;
-  `dialog.accept` and `dialog.dismiss` skip the queue while a dialog blocks
-  the tab.
+- **Admission.** One command runs at a time; a queued one is refused with
+  `daemon_busy` after a bounded wait (see
+  [the CLI guide](cli.md#blocked-and-busy-sessions)). `dialog.accept` and
+  `dialog.dismiss` skip the queue while a dialog blocks the tab.
 
 `crates/eoka-protocol/tests/locks/session-wire.jsonl` locks the frames.

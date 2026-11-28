@@ -1,14 +1,16 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { TextDecoder } from 'node:util';
-import { join } from 'node:path';
 import { Ajv2020 } from 'ajv/dist/2020.js';
 import type { ValidateFunction } from 'ajv';
 import bundle from './generated/schema-bundle.json' with { type: 'json' };
+import { serverWaits } from './generated/waits.js';
 import { protocolVersion, type ActionReceipt, type MethodName, type MethodParams, type MethodResults, type OperationRecord, type ServerError } from './generated/protocol.js';
 import { traced } from './call-site.js';
 import type { CallOptions, InvokeClient } from './client.js';
 import { duration, maximumTimer, serverGraceMs } from './duration.js';
 import { ConfigurationError, EokaError, ProtocolError, ServerOperationError, TransportError, type ErrorDetails } from './errors.js';
+import { processTree } from './platform.js';
+import { object } from './release.js';
 
 export interface SidecarStartOptions {
   serverPath: string;
@@ -21,11 +23,6 @@ export interface SidecarStartOptions {
   onTransport?: (transport: SidecarTransport) => void;
 }
 
-export interface TrackedInvocation<M extends MethodName> {
-  result: Promise<MethodResults[M]>;
-  completion: Promise<MethodResults[M]>;
-}
-
 type Completion = { resolve: (value: unknown) => void; reject: (error: unknown) => void };
 
 type Pending = {
@@ -34,7 +31,6 @@ type Pending = {
   operationId: string | undefined;
   sent: boolean;
   frame: Buffer | undefined;
-  resend?: Buffer | undefined;
   resolve: ((value: unknown) => void) | undefined;
   reject: ((error: EokaError) => void) | undefined;
   completion?: Completion | undefined;
@@ -43,46 +39,23 @@ type Pending = {
   timer: NodeJS.Timeout | undefined;
 };
 
-type Schema = { $ref?: string; $defs?: Record<string, Schema>; anyOf?: Schema[]; properties?: Record<string, Schema | boolean>; default?: unknown };
-type Contract = { params: Schema; result: { title?: string } };
-type WaitField = { path: readonly string[]; fallback: number };
+type Contract = { params: object; result: { title?: string } };
 const contracts = bundle.methods as Record<MethodName, Contract>;
 let ajv: Ajv2020 | undefined;
 const validators = new Map<string, ValidateFunction>();
-const waitFields = new Map<MethodName, WaitField[]>();
-const waitName = /^(?:ms|timeout|settle_ms|\w*timeout_?ms)$/i;
 const localMessageLimit = 32 * 1024 * 1024;
 const localPendingLimit = 128;
 const responseWriteReserve = 1;
-const resendFrameLimit = 1024 * 1024;
-const intakeBusyMessage = 'maxInFlight pending requests exceeded';
 const stderrLimit = 16 * 1024;
 const groupExitGraceMs = 5_000;
 const groupExitPollMs = 10;
 export const defaultCallTimeoutMs = 120_000;
 
-function collectWaitFields(root: Schema, schema: Schema, path: readonly string[], fields: WaitField[]): void {
-  const candidate = schema.anyOf?.find(item => item.$ref !== undefined || item.properties !== undefined) ?? schema;
-  const definition = candidate.$ref === undefined ? candidate : root.$defs?.[candidate.$ref.replace('#/$defs/', '')] ?? candidate;
-  for (const [name, property] of Object.entries(definition.properties ?? {})) {
-    if (typeof property === 'boolean') continue;
-    if (waitName.test(name)) fields.push({ path: [...path, name], fallback: typeof property.default === 'number' ? property.default : 0 });
-    else if (path.length === 0) collectWaitFields(root, property, [name], fields);
-  }
-}
-
 function requestedServerWait(method: MethodName, params: unknown): number {
-  let fields = waitFields.get(method);
-  if (!fields) {
-    fields = [];
-    if (Object.hasOwn(contracts, method)) collectWaitFields(contracts[method].params, contracts[method].params, [], fields);
-    waitFields.set(method, fields);
-  }
   let total = 0;
-  for (const field of fields) {
-    let value: unknown = params;
-    for (const key of field.path) value = object(value) ? value[key] : undefined;
-    total += typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : field.fallback;
+  for (const [path, fallback] of Object.entries(Object.hasOwn(serverWaits, method) ? serverWaits[method]! : {})) {
+    const value = path.split('.').reduce<unknown>((parent, key) => object(parent) ? parent[key] : undefined, params);
+    total += typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : fallback;
   }
   return total;
 }
@@ -117,10 +90,6 @@ function redactLine(line: string, secrets: RegExp | undefined): string {
   return result.replace(/(\B--(?:password|passwd|token|api[-_]?key)\s+).*/gi, '$1[REDACTED]');
 }
 
-function object(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
 function receiptEvidence(receipt: ActionReceipt): void {
   if (receipt.outcome === 'verified_complete' && (!receipt.verification || (receipt.dispatch !== 'acknowledged' && !receipt.already_satisfied))) {
     throw new ProtocolError('Verified receipt is missing completion or dispatch evidence');
@@ -147,9 +116,6 @@ function operationEvidence(record: OperationRecord, expectedId?: string): void {
 }
 
 export class SidecarTransport implements InvokeClient {
-  private readonly child: ChildProcessWithoutNullStreams;
-  private readonly shutdownTimeoutMs: number;
-  private readonly defaultTimeoutMs: number | undefined;
   private readonly pending = new Map<number, Pending>();
   private readonly decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
   private greeting: MethodResults['server.hello'] | undefined;
@@ -158,7 +124,7 @@ export class SidecarTransport implements InvokeClient {
   private messageLimit = localMessageLimit;
   private pendingLimit = localPendingLimit;
   private inFlight = 0;
-  private frame = Buffer.alloc(0);
+  private frameChunks: Buffer[] = [];
   private frameLength = 0;
   private queuedBytes = 0;
   private blocked = false;
@@ -169,7 +135,6 @@ export class SidecarTransport implements InvokeClient {
   private stderrBytes = Buffer.alloc(0);
   private stderrClipped = false;
   private finalStderr: string | undefined;
-  private readonly secrets: RegExp | undefined;
   private escalating = false;
   private failure: EokaError | undefined;
   private cleanupError: EokaError | undefined;
@@ -183,22 +148,28 @@ export class SidecarTransport implements InvokeClient {
   private childClosed = false;
   private windowsTreeTerminated = false;
 
-  private constructor(child: ChildProcessWithoutNullStreams, shutdownTimeoutMs: number, defaultTimeoutMs: number | undefined, secrets: RegExp | undefined) {
+  private constructor(
+    private readonly child: ChildProcessWithoutNullStreams,
+    private readonly shutdownTimeoutMs: number,
+    private readonly defaultTimeoutMs: number | undefined,
+    private readonly secrets: RegExp | undefined,
+  ) {
     void this.closed.promise.catch(() => {});
-    this.child = child;
-    this.shutdownTimeoutMs = shutdownTimeoutMs;
-    this.defaultTimeoutMs = defaultTimeoutMs;
-    this.secrets = secrets;
-    child.stdout.on('data', this.onData);
-    child.stdout.on('end', this.onEnd);
-    child.stdout.on('error', this.onStreamError);
-    child.stderr.on('data', this.onStderr);
-    child.stderr.on('error', this.onStreamError);
-    child.stdin.on('error', this.onStreamError);
-    child.stdin.on('drain', this.onDrain);
-    child.on('error', this.onProcessError);
-    child.on('exit', this.onExit);
-    child.on('close', this.onClose);
+    this.listen(true);
+  }
+
+  private listen(attach: boolean): void {
+    const { stdout, stderr, stdin } = this.child;
+    const listeners: [NodeJS.EventEmitter, string, (...args: any[]) => void][] = [
+      [stdout, 'data', this.onData], [stdout, 'end', this.onEnd], [stdout, 'error', this.onStreamError],
+      [stderr, 'data', this.onStderr], [stderr, 'error', this.onStreamError],
+      [stdin, 'error', this.onStreamError], [stdin, 'drain', this.onDrain],
+      [this.child, 'error', this.onProcessError], [this.child, 'exit', this.onExit], [this.child, 'close', this.onClose],
+    ];
+    for (const [emitter, event, listener] of listeners) {
+      if (attach) emitter.on(event, listener);
+      else emitter.off(event, listener);
+    }
   }
 
   static async start(options: SidecarStartOptions): Promise<SidecarTransport> {
@@ -220,7 +191,6 @@ export class SidecarTransport implements InvokeClient {
       options.onTransport?.(transport);
       const hello = await transport.request('server.hello', { protocol: protocolVersion }, { timeoutMs, ...(options.signal === undefined ? {} : { signal: options.signal }) });
       if (transport.failure) throw transport.failure;
-      if (transport.closing || transport.finished) throw new TransportError('Closed', 'Sidecar closed during handshake');
       if (hello.protocol.major !== protocolVersion.major || hello.protocol.minor < protocolVersion.minor) {
         throw new ProtocolError('Sidecar protocol is incompatible with this SDK');
       }
@@ -232,7 +202,6 @@ export class SidecarTransport implements InvokeClient {
       transport.supported = new Set(hello.methods);
       transport.messageLimit = Math.min(localMessageLimit, hello.limits.maxMessageBytes);
       transport.pendingLimit = Math.max(1, Math.min(localPendingLimit, hello.limits.maxInFlight) - responseWriteReserve);
-      if (transport.frameLength > transport.messageLimit) throw new ProtocolError('Buffered peer frame exceeds negotiated limit');
       return transport;
     } catch (error) {
       if (error instanceof EokaError) transport.failure ??= error;
@@ -250,9 +219,6 @@ export class SidecarTransport implements InvokeClient {
     return this.greeting;
   }
 
-  get pid(): number | undefined {
-    return this.child.pid;
-  }
   private get stderr(): string {
     if (this.finalStderr !== undefined) return this.finalStderr;
     const text = this.stderrBytes.toString('utf8');
@@ -283,7 +249,7 @@ export class SidecarTransport implements InvokeClient {
     return this.request(method, params, options);
   }
 
-  invokeTracked<M extends MethodName>(method: M, params: MethodParams[M], options: CallOptions = {}): TrackedInvocation<M> {
+  invokeTracked<M extends MethodName>(method: M, params: MethodParams[M], options: CallOptions = {}): { result: Promise<MethodResults[M]>; completion: Promise<MethodResults[M]> } {
     const { promise: completion, resolve, reject } = Promise.withResolvers<MethodResults[M]>();
     const callbacks: Completion = { resolve: value => resolve(value as MethodResults[M]), reject };
     void completion.catch(() => {});
@@ -316,7 +282,7 @@ export class SidecarTransport implements InvokeClient {
     let operationId: string | undefined;
     try {
       const data: unknown = params;
-      operationId = options.operationId ?? (object(data) && typeof data.operation_id === 'string' ? data.operation_id : typeof method === 'string' && method.startsWith('operations.') && object(data) && typeof data.id === 'string' ? data.id : undefined);
+      operationId = options.operationId ?? (object(data) && typeof data.operation_id === 'string' ? data.operation_id : method.startsWith('operations.') && object(data) && typeof data.id === 'string' ? data.id : undefined);
       const timeoutMs = options.timeoutMs === undefined ? this.fallbackTimeout(method, params, cleanup) : duration(options.timeoutMs, 0, 'timeoutMs');
       const deadline = timeoutMs === undefined ? undefined : performance.now() + timeoutMs;
       const details: ErrorDetails = { operationId, requestState: 'not_sent' };
@@ -357,8 +323,11 @@ export class SidecarTransport implements InvokeClient {
         if (remaining <= 0) this.cancel(current, 'DeadlineExceeded', expired);
         else current.timer = setTimeout(() => this.cancel(current, 'DeadlineExceeded', expired), remaining);
       }
-      if (this.pending.has(current.id) && (method === 'server.shutdown' || method === 'browser.close')) void this.beginClose(current).catch(() => {});
-      else this.flush();
+      if (!this.pending.has(current.id) || (method !== 'server.shutdown' && method !== 'browser.close')) this.flush();
+      else {
+        this.shutdownId = current.id;
+        void this.close().catch(() => {});
+      }
       return promise;
     } catch (error) {
       if (entry) this.remove(entry);
@@ -394,7 +363,6 @@ export class SidecarTransport implements InvokeClient {
     this.detach(entry);
     if (entry.frame) this.queuedBytes -= entry.frame.length;
     entry.frame = undefined;
-    entry.resend = undefined;
     if (this.pending.delete(entry.id) && entry.sent) this.inFlight--;
   }
 
@@ -404,7 +372,6 @@ export class SidecarTransport implements InvokeClient {
     this.detach(entry);
     entry.reject = undefined;
     entry.resolve = undefined;
-    entry.resend = undefined;
     const error = new TransportError(code, entry.sent ? `${reason} after possible dispatch; the action was not rolled back` : `${reason} before dispatch`, { ...this.details(entry), cause });
     reject(error);
     if (!entry.sent) {
@@ -421,7 +388,6 @@ export class SidecarTransport implements InvokeClient {
       const frame = entry.frame;
       this.queuedBytes -= frame.length;
       entry.frame = undefined;
-      entry.resend = frame.length <= resendFrameLimit ? frame : undefined;
       entry.sent = true;
       this.inFlight++;
       try {
@@ -458,33 +424,19 @@ export class SidecarTransport implements InvokeClient {
       while (offset < chunk.length) {
         const newline = chunk.indexOf(10, offset);
         const end = newline < 0 ? chunk.length : newline;
-        const length = end - offset;
-        if (this.frameLength + length > this.messageLimit + 1) throw new ProtocolError('Peer frame exceeds negotiated message limit');
-        let frame: Buffer;
-        if (this.frameLength === 0 && newline >= 0) {
-          frame = chunk.subarray(offset, end);
-          this.frameLength = length;
-        } else {
-          const needed = this.frameLength + length;
-          if (needed > this.frame.length) {
-            const capacity = Math.min(this.messageLimit + 1, Math.max(needed, this.frame.length * 2, 4096));
-            const next = Buffer.allocUnsafe(capacity);
-            this.frame.copy(next, 0, 0, this.frameLength);
-            this.frame = next;
-          }
-          chunk.copy(this.frame, this.frameLength, offset, end);
-          this.frameLength = needed;
-          if (newline < 0) return;
-          frame = this.frame.subarray(0, this.frameLength);
-        }
-        let frameEnd = frame.length;
-        if (frameEnd > 0 && frame[frameEnd - 1] === 13) frameEnd--;
-        if (frameEnd > this.messageLimit) throw new ProtocolError('Peer frame exceeds negotiated message limit');
-        if (frameEnd === 0) throw new ProtocolError('Peer emitted an empty NDJSON frame');
-        const text = this.decoder.decode(frameEnd === frame.length ? frame : frame.subarray(0, frameEnd));
+        this.frameLength += end - offset;
+        if (this.frameLength > this.messageLimit + 1) throw new ProtocolError('Peer frame exceeds negotiated message limit');
+        this.frameChunks.push(chunk.subarray(offset, end));
+        if (newline < 0) return;
+        offset = newline + 1;
+        const frame = Buffer.concat(this.frameChunks, this.frameLength);
+        this.frameChunks = [];
+        const length = frame.at(-1) === 13 ? frame.length - 1 : frame.length;
+        if (length > this.messageLimit) throw new ProtocolError('Peer frame exceeds negotiated message limit');
+        if (length === 0) throw new ProtocolError('Peer emitted an empty NDJSON frame');
+        const text = this.decoder.decode(frame.subarray(0, length));
         this.frameLength = 0;
         this.response(JSON.parse(text));
-        offset = newline + 1;
       }
     } catch (cause) {
       this.fail(cause instanceof ProtocolError ? cause : new ProtocolError('Peer emitted malformed JSON or UTF-8', { cause }));
@@ -507,14 +459,6 @@ export class SidecarTransport implements InvokeClient {
       const wireError = value.error as ServerError;
       if (wireError.data?.receipt) receiptEvidence(wireError.data.receipt);
       if (entry.operationId && wireError.data?.operation_id && entry.operationId !== wireError.data.operation_id) throw new ProtocolError('Server error has a different operation ID');
-      if (wireError.code === 'ServerBusy' && wireError.message === intakeBusyMessage && entry.resend && entry.reject && this.inFlight > 1 && !this.closing) {
-        this.inFlight--;
-        this.pendingLimit = this.inFlight;
-        this.queuedBytes += entry.resend.length;
-        entry.frame = entry.resend;
-        entry.sent = false;
-        return;
-      }
       const error = new ServerOperationError(wireError, details);
       if (entry.id === this.shutdownId) this.cleanupError = error;
       entry.reject?.(error);
@@ -551,7 +495,6 @@ export class SidecarTransport implements InvokeClient {
       }
       entry.reject = undefined;
       entry.resolve = undefined;
-      entry.resend = undefined;
       this.detach(entry);
       if (!entry.sent) this.remove(entry);
     }
@@ -612,10 +555,6 @@ export class SidecarTransport implements InvokeClient {
     else this.teardownTimer = setTimeout(() => this.awaitGroupExit(deadline), groupExitPollMs);
   }
 
-  close(): Promise<void> {
-    return this.beginClose();
-  }
-
   whenClosed(): Promise<void> {
     return this.closed.promise;
   }
@@ -624,11 +563,11 @@ export class SidecarTransport implements InvokeClient {
     return this.terminationConfirmed;
   }
 
-  private beginClose(terminal?: Pending): Promise<void> {
+  close(): Promise<void> {
     if (this.closeCompletion) return this.closeCompletion.promise;
     this.closeCompletion = Promise.withResolvers<void>();
     this.closing = true;
-    if (terminal) this.shutdownId = terminal.id;
+    const terminal = this.shutdownId === undefined ? undefined : this.pending.get(this.shutdownId);
     this.rejectPending(new TransportError('Closed', 'Sidecar transport is closing'));
     if (this.finished) return this.closeCompletion.promise;
     try {
@@ -656,51 +595,11 @@ export class SidecarTransport implements InvokeClient {
   }
 
   private ownedGroupAlive(): boolean {
-    if (this.child.pid === undefined) return false;
-    try {
-      process.kill(-this.child.pid, 0);
-      return true;
-    } catch (cause) {
-      return !object(cause) || cause.code !== 'ESRCH';
-    }
+    return this.child.pid !== undefined && processTree.exists(-this.child.pid);
   }
 
   private async signalOwnedTree(force: boolean): Promise<boolean> {
-    const pid = this.child.pid;
-    if (pid === undefined) return false;
-    if (process.platform !== 'win32') {
-      try {
-        process.kill(-pid, force ? 'SIGKILL' : 'SIGTERM');
-        return true;
-      } catch (cause) {
-        if (object(cause) && cause.code === 'ESRCH') return false;
-        throw cause;
-      }
-    }
-    const root = process.env.SystemRoot ?? process.env.WINDIR;
-    if (!root) throw new Error('Windows SystemRoot is required for owned-process-tree termination');
-    const executable = join(root, 'System32', 'taskkill.exe');
-    return new Promise<boolean>((resolve, reject) => {
-      const killer = spawn(executable, ['/PID', String(pid), '/T', '/F'], { shell: false, stdio: 'ignore', windowsHide: true });
-      const timer = setTimeout(() => {
-        try {
-          killer.kill('SIGKILL');
-        } catch (cause) {
-          reject(cause);
-          return;
-        }
-        reject(new Error('Owned-process-tree termination command exceeded its deadline'));
-      }, 1000);
-      killer.once('error', cause => {
-        clearTimeout(timer);
-        reject(cause);
-      });
-      killer.once('close', code => {
-        clearTimeout(timer);
-        if (code === 0) resolve(true);
-        else reject(new Error(`Owned-process-tree termination command exited with code ${code}`));
-      });
-    });
+    return this.child.pid !== undefined && processTree.signal(this.child.pid, force);
   }
 
   private async terminate(): Promise<void> {
@@ -749,18 +648,9 @@ export class SidecarTransport implements InvokeClient {
       entry.completion?.reject(error);
       this.remove(entry);
     }
-    this.frame = Buffer.alloc(0);
+    this.frameChunks = [];
     this.frameLength = 0;
-    this.child.stdout.off('data', this.onData);
-    this.child.stdout.off('end', this.onEnd);
-    this.child.stdout.off('error', this.onStreamError);
-    this.child.stderr.off('data', this.onStderr);
-    this.child.stderr.off('error', this.onStreamError);
-    this.child.stdin.off('error', this.onStreamError);
-    this.child.stdin.off('drain', this.onDrain);
-    this.child.off('error', this.onProcessError);
-    this.child.off('exit', this.onExit);
-    this.child.off('close', this.onClose);
+    this.listen(false);
     this.child.stdin.destroy();
     this.child.stdout.destroy();
     this.child.stderr.destroy();

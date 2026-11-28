@@ -49,9 +49,13 @@ const mappings = {
   'win32-x64': ['x86_64-pc-windows-msvc', 'eoka-server-windows-amd64.exe', 'win64', 'win64'],
 } as const;
 
-function object(value: unknown): Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('Expected release metadata object');
-  return value as Record<string, unknown>;
+export function object(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function metadata(value: unknown): Record<string, unknown> {
+  if (!object(value)) throw new Error('Expected release metadata object');
+  return value;
 }
 
 const digestPattern = /^[a-f0-9]{64}$/;
@@ -65,16 +69,16 @@ function exactNpmVersion(value: unknown): value is string {
 
 export function validateReleaseManifest(value: unknown): ReleaseManifest {
   try {
-    const manifest = object(value);
-    const server = object(manifest.server);
-    const chrome = object(manifest.chrome);
-    const servers = object(server.platforms);
-    const browsers = object(chrome.platforms);
+    const manifest = metadata(value);
+    const server = metadata(manifest.server);
+    const chrome = metadata(manifest.chrome);
+    const servers = metadata(server.platforms);
+    const browsers = metadata(chrome.platforms);
     if (manifest.schemaVersion !== 1 || !exactNpmVersion(manifest.sdkVersion) || manifest.installerVersion !== '3.2.4' || !exactNpmVersion(server.version) || server.protocolVersion !== `${protocolVersion.major}.${protocolVersion.minor}` || typeof chrome.buildId !== 'string' || !/^\d+\.\d+\.\d+\.\d+$/.test(chrome.buildId)) throw new Error('Incompatible release versions');
     if (Object.keys(servers).length !== platformIds.length || Object.keys(browsers).length !== platformIds.length) throw new Error('Incomplete platform mapping');
     for (const id of platformIds) {
-      const pin = object(servers[id]);
-      const browser = object(browsers[id]);
+      const pin = metadata(servers[id]);
+      const browser = metadata(browsers[id]);
       const [target, asset, installerPlatform, chromePlatform] = mappings[id];
       if (pin.packageName !== `@cbxss/eoka-server-${id}` || pin.packageVersion !== manifest.sdkVersion || pin.target !== target || pin.asset !== asset || pin.executablePath !== (id === 'win32-x64' ? 'bin/eoka-server.exe' : 'bin/eoka-server')) throw new Error(`Invalid server mapping: ${id}`);
       if (!((pin.sha256 === null && pin.size === null) || (typeof pin.sha256 === 'string' && digestPattern.test(pin.sha256) && Number.isSafeInteger(pin.size) && (pin.size as number) > 0))) throw new Error(`Invalid server integrity pin: ${id}`);

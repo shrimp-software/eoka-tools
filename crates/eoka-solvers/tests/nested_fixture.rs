@@ -41,7 +41,7 @@ async fn nested_local_slider_and_block_notice() {
         }
         let solver = DataDomeSolver {
             max_attempts: 1,
-            cookie_timeout: Duration::from_secs(3),
+            cookie_timeout: Duration::from_secs(5),
             ..DataDomeSolver::new()
         };
         if simple && !reblock {

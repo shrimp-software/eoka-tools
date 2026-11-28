@@ -1,3 +1,5 @@
+import { spawn } from 'node:child_process';
+import { join } from 'node:path';
 import { InstallationError } from './install-errors.js';
 
 export const platformIds = ['linux-x64-gnu', 'linux-arm64-gnu', 'darwin-x64', 'darwin-arm64', 'win32-x64'] as const;
@@ -26,3 +28,54 @@ export function detectPlatform(): PlatformId {
   const report = process.platform === 'linux' ? process.report.getReport() as { header: { glibcVersionRuntime?: string } } : undefined;
   return selectPlatform(process.platform, process.arch, report?.header.glibcVersionRuntime);
 }
+
+function missing(cause: unknown): boolean {
+  return (cause as NodeJS.ErrnoException | undefined)?.code === 'ESRCH';
+}
+
+function taskkill(pid: number): Promise<boolean> {
+  const root = process.env.SystemRoot ?? process.env.WINDIR;
+  if (!root) return Promise.reject(new Error('Windows SystemRoot is required for owned-process-tree termination'));
+  return new Promise<boolean>((resolve, reject) => {
+    const killer = spawn(join(root, 'System32', 'taskkill.exe'), ['/PID', String(pid), '/T', '/F'], { shell: false, stdio: 'ignore', windowsHide: true });
+    const timer = setTimeout(() => {
+      try {
+        killer.kill('SIGKILL');
+      } catch (cause) {
+        reject(cause);
+        return;
+      }
+      reject(new Error('Owned-process-tree termination command exceeded its deadline'));
+    }, 1000);
+    killer.once('error', cause => {
+      clearTimeout(timer);
+      reject(cause);
+    });
+    killer.once('close', code => {
+      clearTimeout(timer);
+      if (code === 0) resolve(true);
+      else reject(new Error(`Owned-process-tree termination command exited with code ${code}`));
+    });
+  });
+}
+
+export const processTree = {
+  exists(pid: number): boolean {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (cause) {
+      return !missing(cause);
+    }
+  },
+  async signal(pid: number, force: boolean): Promise<boolean> {
+    if (process.platform === 'win32') return taskkill(pid);
+    try {
+      process.kill(-pid, force ? 'SIGKILL' : 'SIGTERM');
+      return true;
+    } catch (cause) {
+      if (missing(cause)) return false;
+      throw cause;
+    }
+  },
+};

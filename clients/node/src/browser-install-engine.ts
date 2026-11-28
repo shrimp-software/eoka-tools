@@ -1,4 +1,4 @@
-import { fork, spawn, type ChildProcess } from 'node:child_process';
+import { fork, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { hostname, homedir } from 'node:os';
 import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
@@ -6,7 +6,7 @@ import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { InstallationError } from './install-errors.js';
 import type { ChromePlatformRelease } from './release.js';
-import type { PlatformId } from './platform.js';
+import { processTree, type PlatformId } from './platform.js';
 import type { BrowserInstallation, InstallBrowserOptions } from './browser-install.js';
 import type { WorkerMessage, WorkerRequest } from './browser-install-worker.js';
 import { sanitizeInstallationDiagnostic } from './browser-install-diagnostics.js';
@@ -47,7 +47,7 @@ async function processStart(pid: number): Promise<string | null> {
 }
 
 async function alive(pid: number, start: string | null): Promise<boolean> {
-  try { process.kill(pid, 0); } catch (error) { return (error as NodeJS.ErrnoException).code !== 'ESRCH'; }
+  if (!processTree.exists(pid)) return false;
   if (process.platform !== 'linux') return true;
   try {
     const stat = await readFile(`/proc/${pid}/stat`, 'utf8');
@@ -59,18 +59,12 @@ async function alive(pid: number, start: string | null): Promise<boolean> {
 }
 
 async function stopWorker(child: ChildProcess): Promise<void> {
-  if (!child.pid) return;
-  if (process.platform === 'win32' && (child.exitCode !== null || child.signalCode !== null)) return;
-  if (process.platform === 'win32') {
-    await new Promise<void>((resolve, reject) => {
-      const killer = spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
-      killer.once('error', reject);
-      killer.once('close', code => code === 0 || child.exitCode !== null ? resolve() : reject(new Error(`taskkill failed with code ${code}`)));
-    });
-  } else {
-    try { process.kill(-child.pid, 'SIGKILL'); } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
-    }
+  const windows = process.platform === 'win32';
+  if (!child.pid || (windows && (child.exitCode !== null || child.signalCode !== null))) return;
+  try {
+    await processTree.signal(child.pid, true);
+  } catch (error) {
+    if (!windows || child.exitCode === null) throw error;
   }
 }
 

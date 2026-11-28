@@ -5,7 +5,6 @@ import { dirname, join, relative } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
 import { Browser, ConfigurationError, OperationError, ProtocolError } from '../dist/index.js';
-import { SidecarTransport } from '../dist/transport.js';
 
 const supported = process.platform !== 'win32';
 const endpoint = 'ws://127.0.0.1:9222/devtools/browser/lifecycle-fixture';
@@ -502,8 +501,10 @@ test('unconfirmed process termination retains owned runtime and reports its path
   for (const mode of ['failed-session-stubborn', 'stubborn-cleanup']) {
     await t.test(mode, async child => {
       const f = await fixture(child, mode);
-      child.mock.method(SidecarTransport.prototype, 'signalOwnedTree', async () => {
-        throw Object.assign(new Error('simulated process termination permission denial'), { code: 'EPERM' });
+      const kill = process.kill;
+      const denied = child.mock.method(process, 'kill', (pid, signal) => {
+        if (signal === 'SIGTERM' || signal === 'SIGKILL') throw Object.assign(new Error('simulated process termination permission denial'), { code: 'EPERM' });
+        return kill.call(process, pid, signal);
       });
       let owned;
       let pid;
@@ -526,6 +527,7 @@ test('unconfirmed process termination retains owned runtime and reports its path
         assert.equal(await readFile(join(owned, 'core-owned', 'scratch'), 'utf8'), 'owned scratch');
         assert.doesNotThrow(() => process.kill(pid, 0));
       } finally {
+        denied.mock.restore();
         if (pid === undefined) pid = (await f.events()).find(event => event.event === 'spawn')?.pid;
         if (pid !== undefined) {
           try { process.kill(-pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }

@@ -29,9 +29,6 @@ else {
 }
 const bundle = JSON.parse(input);
 
-// Catalog operations: one entry per operation the server projects from the
-// operation catalog. Both clients get named access to all of them from here,
-// so a new catalog operation reaches Node and Go without hand-written code.
 const catalog = [...bundle.catalogMethods].sort();
 const pascal = method => method.split(/[._]/).map(part => part[0].toUpperCase() + part.slice(1)).join("");
 const camel = method => pascal(method).replace(/^./, first => first.toLowerCase());
@@ -66,7 +63,6 @@ ${catalog.map(method => `    ${camel(method)}: (input: CatalogInput<${JSON.strin
 export type CatalogOperations = ReturnType<typeof catalogOperations>;
 `;
 
-// gofmt aligns the `=` of a const block on the longest name.
 const goWidth = Math.max(...catalog.map(method => pascal(method).length)) + 2;
 const goCatalog = `${header}
 
@@ -81,14 +77,31 @@ ${catalog.map(method => `\tOp${pascal(method)},`).join("\n")}
 }
 `;
 
+const waitName = /^(?:ms|timeout|settle_ms|\w*timeout_?ms)$/i;
+const waitFields = (root, schema, path = []) => {
+  const candidate = schema.anyOf?.find(item => item.$ref !== undefined || item.properties !== undefined) ?? schema;
+  const definition = candidate.$ref === undefined ? candidate : root.$defs?.[candidate.$ref.replace("#/$defs/", "")] ?? candidate;
+  return Object.entries(definition.properties ?? {}).filter(([, property]) => typeof property !== "boolean").flatMap(([name, property]) => {
+    if (waitName.test(name)) return [[[...path, name].join("."), typeof property.default === "number" ? property.default : 0]];
+    return path.length === 0 ? waitFields(root, property, [name]) : [];
+  });
+};
+const serverWaits = Object.fromEntries(Object.keys(bundle.methods).sort()
+  .map(method => [method, Object.fromEntries(waitFields(bundle.methods[method].params, bundle.methods[method].params))])
+  .filter(([, fields]) => Object.keys(fields).length > 0));
+const nodeWaits = `${header.replace("operation catalog", "schema bundle")}
+import type { MethodName } from "./protocol.js";
+
+export const serverWaits: { readonly [M in MethodName]?: Readonly<Record<string, number>> } = ${JSON.stringify(serverWaits, null, 2)};
+`;
+
 const artifacts = [
   ["src/generated/protocol.ts", generateProtocol(bundle)],
   ["src/generated/schema-bundle.json", `${JSON.stringify(stableJson(bundle), null, 2)}\n`],
   ["src/generated/catalog.ts", nodeCatalog],
+  ["src/generated/waits.ts", nodeWaits],
   ["../go/catalog_generated.go", goCatalog],
 ];
-// The method reference in docs/protocol.md: every registered method with its
-// params and result type, and the catalog operation names.
 const docPath = resolve(repositoryRoot, "docs/protocol.md");
 const [docStart, docEnd] = ["<!-- generated:methods -->", "<!-- /generated:methods -->"];
 const fields = schema => Object.keys(schema.properties ?? {}).sort()

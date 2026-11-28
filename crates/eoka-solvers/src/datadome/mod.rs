@@ -70,6 +70,7 @@ pub struct DataDomeSolver {
     pub poll_interval: Duration,
     pub widget_settle: Duration,
     pub completion_settle: Duration,
+    pub poll_timeout: Duration,
 }
 
 impl Default for DataDomeSolver {
@@ -80,6 +81,7 @@ impl Default for DataDomeSolver {
             poll_interval: Duration::from_millis(500),
             widget_settle: Duration::from_millis(800),
             completion_settle: Duration::from_secs(2),
+            poll_timeout: Duration::from_secs(2),
         }
     }
 }
@@ -93,6 +95,11 @@ fn is_block_notice(text: &str) -> bool {
 }
 
 type CookieKey = (String, String, String, String);
+
+enum Observation {
+    Settled(SolveOutcome),
+    Pending { cleared: bool },
+}
 
 fn cookie_key(cookie: &SessionCookie) -> CookieKey {
     (
@@ -223,49 +230,21 @@ impl DataDomeSolver {
         let deadline = tokio::time::Instant::now() + self.cookie_timeout;
         let mut clear_since = None;
         loop {
-            let cookies = page.cookies().await?;
-            let changed = cookies
-                .iter()
-                .filter(|cookie| cookie.name == "datadome")
-                .any(|c| is_new_datadome_cookie(&cookie_key(c), baseline));
-            let frames = page.frames().await?;
-            let challenge_present = frames
-                .iter()
-                .any(|f| detect::classify_url(&f.url) != Detection::NotPresent);
-            let top_text: String = page.evaluate_sync("document.body?.innerText || ''").await?;
-            if is_block_notice(&top_text) {
-                return Ok(Some(SolveOutcome::Blocked));
-            }
-            for frame in frames.iter().filter(|f| {
-                lineage.contains(&f.id) || detect::classify_url(&f.url) != Detection::NotPresent
-            }) {
-                if detect::classify_url(&frame.url) == Detection::IpBanned {
-                    return Ok(Some(SolveOutcome::IpBanned));
-                }
-                let text: String = match page
-                    .evaluate_in_frame_id(&frame.id, "document.body?.innerText || ''")
-                    .await
-                {
-                    Ok(text) => text,
-                    Err(error) => {
-                        if page.frames().await?.iter().any(|f| f.id == frame.id) {
-                            return Err(error.into());
-                        }
-                        continue;
-                    }
-                };
-                if is_block_notice(&text) {
-                    return Ok(Some(SolveOutcome::Blocked));
-                }
-            }
+            let observation =
+                tokio::time::timeout(self.poll_timeout, observe(page, baseline, lineage)).await;
             let now = tokio::time::Instant::now();
-            if changed && !challenge_present {
-                let since = *clear_since.get_or_insert(now);
-                if now.duration_since(since) >= self.completion_settle {
-                    return Ok(Some(SolveOutcome::ChallengeCleared));
-                }
-            } else {
-                clear_since = None;
+            match observation {
+                Ok(observation) => match observation? {
+                    Observation::Settled(outcome) => return Ok(Some(outcome)),
+                    Observation::Pending { cleared: true } => {
+                        let since = *clear_since.get_or_insert(now);
+                        if now.duration_since(since) >= self.completion_settle {
+                            return Ok(Some(SolveOutcome::ChallengeCleared));
+                        }
+                    }
+                    Observation::Pending { cleared: false } => clear_since = None,
+                },
+                Err(_) => tracing::debug!("datadome: completion poll stalled"),
             }
             if now >= deadline {
                 return Ok(None);
@@ -278,6 +257,52 @@ impl DataDomeSolver {
             .await;
         }
     }
+}
+
+async fn observe(
+    page: &Page,
+    baseline: &HashSet<CookieKey>,
+    lineage: &[String],
+) -> Result<Observation, SolveError> {
+    let changed = page
+        .cookies()
+        .await?
+        .iter()
+        .filter(|cookie| cookie.name == "datadome")
+        .any(|c| is_new_datadome_cookie(&cookie_key(c), baseline));
+    let frames = page.frames().await?;
+    let challenge_present = frames
+        .iter()
+        .any(|f| detect::classify_url(&f.url) != Detection::NotPresent);
+    let top_text: String = page.evaluate_sync("document.body?.innerText || ''").await?;
+    if is_block_notice(&top_text) {
+        return Ok(Observation::Settled(SolveOutcome::Blocked));
+    }
+    for frame in frames.iter().filter(|f| {
+        lineage.contains(&f.id) || detect::classify_url(&f.url) != Detection::NotPresent
+    }) {
+        if detect::classify_url(&frame.url) == Detection::IpBanned {
+            return Ok(Observation::Settled(SolveOutcome::IpBanned));
+        }
+        let text: String = match page
+            .evaluate_in_frame_id(&frame.id, "document.body?.innerText || ''")
+            .await
+        {
+            Ok(text) => text,
+            Err(error) => {
+                if page.frames().await?.iter().any(|f| f.id == frame.id) {
+                    return Err(error.into());
+                }
+                continue;
+            }
+        };
+        if is_block_notice(&text) {
+            return Ok(Observation::Settled(SolveOutcome::Blocked));
+        }
+    }
+    Ok(Observation::Pending {
+        cleared: changed && !challenge_present,
+    })
 }
 
 #[cfg(test)]
